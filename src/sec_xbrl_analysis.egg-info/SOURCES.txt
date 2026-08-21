@@ -1,0 +1,17 @@
+README.md
+pyproject.toml
+src/sec_xbrl/__init__.py
+src/sec_xbrl/analytics/__init__.py
+src/sec_xbrl/disclosure/__init__.py
+src/sec_xbrl/facts/__init__.py
+src/sec_xbrl/filing/__init__.py
+src/sec_xbrl/filing/contracts.py
+src/sec_xbrl/normalization/__init__.py
+src/sec_xbrl/relationships/__init__.py
+src/sec_xbrl/taxonomy/__init__.py
+src/sec_xbrl/traversal/__init__.py
+src/sec_xbrl_analysis.egg-info/PKG-INFO
+src/sec_xbrl_analysis.egg-info/SOURCES.txt
+src/sec_xbrl_analysis.egg-info/dependency_links.txt
+src/sec_xbrl_analysis.egg-info/requires.txt
+src/sec_xbrl_analysis.egg-info/top_level.txt

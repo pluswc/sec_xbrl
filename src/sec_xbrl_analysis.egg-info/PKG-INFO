@@ -1,0 +1,13 @@
+Metadata-Version: 2.4
+Name: sec-xbrl-analysis
+Version: 0.1.0
+Requires-Python: >=3.12
+Requires-Dist: arelle-release
+Requires-Dist: httpx
+Requires-Dist: polars
+Requires-Dist: pydantic>=2
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: pytest-cov; extra == "dev"
+Requires-Dist: ruff; extra == "dev"
+Requires-Dist: mypy; extra == "dev"

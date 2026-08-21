@@ -1,0 +1,24 @@
+[project]
+name = "sec-xbrl-analysis"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "arelle-release",
+  "httpx",
+  "polars",
+  "pydantic>=2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "pytest-cov",
+  "ruff",
+  "mypy",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100

@@ -1,0 +1,10 @@
+arelle-release
+httpx
+polars
+pydantic>=2
+
+[dev]
+pytest
+pytest-cov
+ruff
+mypy
