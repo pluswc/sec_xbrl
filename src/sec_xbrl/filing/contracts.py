@@ -16,7 +16,7 @@ class FilingRef:
     primary_document: str | None = None
     is_xbrl: bool | None = None
     is_inline_xbrl: bool | None = None
-    source: str = "existing_accession_collector"
+    source: str = "sec_submissions"
 
 
 class AccessionProvider(Protocol):
