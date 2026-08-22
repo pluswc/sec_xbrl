@@ -2,18 +2,21 @@
 
 Read `AGENTS.md` and all files under `docs/architecture/` and `docs/implementation/` that are relevant to M0.
 
-Goal: integrate the existing SEC accession collection process without rewriting it.
+Goal: implement the current project's company-scoped SEC submissions discovery
+without modifying `XbrlDataLoad`. The prior project is reference-only for SEC
+request/download behavior.
 
 Do not implement XBRL parsing yet.
 
 Tasks:
-1. Inspect the existing accession collector code/output in this repository/workspace.
-2. Summarize its current output schema, storage format, idempotency logic, and supported forms.
-3. Compare it with `docs/implementation/accession-contract.md`.
-4. Implement the smallest adapter that exposes `AccessionProvider.iter_filings()` and yields `FilingRef`.
-5. Preserve the collector implementation. If a field is missing but can be enriched later from SEC filing metadata, do not modify the collector merely to add it.
-6. Add unit tests based on a small real output sample.
-7. Run tests and report:
+1. Define company targets and canonicalize CIKs to 10 digits.
+2. Cache each SEC submissions response immutably by content hash; keep mutable
+   discovery state separate.
+3. Read current and referenced historical submissions files, then normalize them
+   through `AccessionProvider.iter_filings()` into `FilingRef`.
+4. Preserve directly supplied optional metadata; leave absent metadata `None`.
+5. Add unit tests using compact local SEC submissions samples.
+6. Run tests and report:
    - files changed
    - contract fields mapped
    - fields deferred to downstream enrichment
@@ -25,5 +28,7 @@ Acceptance criteria:
 - 10-K, 10-Q, 10-K/A, 10-Q/A can be represented when present.
 - `cik`, `accession`, `form`, `filed_date` are preserved.
 - repeated adapter reads are deterministic.
-- no new SEC discovery request logic is introduced.
-- existing collector internals are not modified unless an incompatibility is first documented.
+- no daily-index discovery, ZIP download, package resolution, Arelle load, or
+  Layer 1 parsing is introduced.
+- `XbrlDataLoad` is not modified.
+- no ZIP download, package resolution, Arelle load, or Layer 1 parsing is added.

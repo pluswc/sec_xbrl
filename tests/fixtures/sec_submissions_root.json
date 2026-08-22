@@ -1,0 +1,15 @@
+{
+  "cik": "320193",
+  "filings": {
+    "recent": {
+      "accessionNumber": ["0000320193-25-000079", "0000320193-25-000008", "0000320193-24-000123"],
+      "form": ["10-K", "10-Q/A", "8-K"],
+      "filingDate": ["20251031", "2025-02-03", "2024-01-05"],
+      "reportDate": ["20250927", "2024-12-28", ""],
+      "primaryDocument": ["aapl-20250927.htm", "aapl-20241228.htm", "current.htm"],
+      "isXBRL": [1, true, 0],
+      "isInlineXBRL": [1, false, 0]
+    },
+    "files": [{"name": "CIK0000320193-submissions-001.json"}]
+  }
+}

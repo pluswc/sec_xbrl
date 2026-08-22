@@ -1,9 +1,11 @@
 # Acceptance Test Plan
 
 ## M0 — Accession adapter
-- Existing collector output can be consumed without changing collector internals.
+- Company submissions payloads can be consumed without changing `XbrlDataLoad`.
 - 10-K/10-Q(/A) accessions map to canonical `FilingRef`.
 - malformed or unsupported records fail with explicit adapter errors.
+- repeated reads are ordered by `(filed_date, accession)` and deterministic.
+- raw submissions payloads are immutable; mutable discovery state is separate.
 
 ## M1 — Filing package + Arelle load
 - Given a cached accession fixture, resolve required SEC filing files.
