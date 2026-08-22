@@ -19,6 +19,15 @@
   validation and is never treated as a valid package.
 - download is published atomically only after all artifacts validate.
 
+### M1B — Legacy package adoption
+- The read-only legacy `data/{index_date}/{accession}` layout is consumed only
+  through its index metadata and files; no legacy source code or files change.
+- Only packages with matching CIK/accession/form, both required artifacts, a
+  valid ZIP, and calculated SHA-256 values are adopted.
+- Adopted manifests identify `legacy_xbrl_data_load` as their source.
+- Missing, corrupt, ambiguous, or mismatched packages produce explicit
+  accession-level rejection codes and leave no published destination package.
+
 ## M2 — Layer 1 extraction
 - Concepts preserve QName/namespace/local name and standard/custom status.
 - Facts preserve context/unit/value/source.
