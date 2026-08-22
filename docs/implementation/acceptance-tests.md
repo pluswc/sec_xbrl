@@ -12,6 +12,13 @@
 - Arelle loads without network access in golden tests.
 - filing/accession provenance is preserved.
 
+### M1A — Package cache
+- ZIP and index-header artifacts are cached under the filing CIK/accession.
+- every artifact has URL, byte size, and SHA-256 in an immutable manifest.
+- a valid manifest is a network-free cache hit; partial or corrupt content fails
+  validation and is never treated as a valid package.
+- download is published atomically only after all artifacts validate.
+
 ## M2 — Layer 1 extraction
 - Concepts preserve QName/namespace/local name and standard/custom status.
 - Facts preserve context/unit/value/source.
