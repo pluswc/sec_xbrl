@@ -3,8 +3,10 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.omx/
 .env
 *.log
+*:Zone.Identifier
 *.zip
 *.parquet
 *.duckdb
