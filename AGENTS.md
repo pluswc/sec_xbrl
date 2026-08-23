@@ -53,7 +53,7 @@ If the existing output schema differs, implement an adapter; do not couple XBRL 
 
 ## Development workflow
 Before coding:
-1. Read the relevant docs.
+1. Read and follow `docs/implementation/delivery-workflow.md`, then read the relevant docs.
 2. State the milestone and acceptance criteria being implemented.
 3. Identify assumptions and unresolved XBRL cases.
 4. Implement the smallest vertical slice.
