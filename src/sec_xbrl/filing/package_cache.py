@@ -9,7 +9,7 @@ import re
 import shutil
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Protocol
@@ -44,6 +44,7 @@ class PackageManifest:
     cik: str
     accession: str
     form: str
+    source: str
     artifacts: tuple[PackageArtifact, ...]
 
     def to_json(self) -> str:
@@ -59,6 +60,7 @@ class PackageManifest:
                 cik=raw["cik"],
                 accession=raw["accession"],
                 form=raw["form"],
+                source=raw["source"],
                 artifacts=artifacts,
             )
         except (KeyError, TypeError, json.JSONDecodeError) as exc:
@@ -112,7 +114,7 @@ class SECArchiveClient:
 class AccessionPackageCache:
     """Cache immutable ZIP and index-header artifacts for one filing accession."""
 
-    schema_version = 1
+    schema_version = 2
     archive_base_url = "https://www.sec.gov/Archives/edgar/data"
 
     def __init__(self, root: Path) -> None:
@@ -151,7 +153,60 @@ class AccessionPackageCache:
                 cik=canonicalize_cik(filing.cik),
                 accession=filing.accession,
                 form=filing.form,
+                source="sec_archive",
                 artifacts=tuple(artifacts),
+            )
+            (temporary / "manifest.json").write_text(manifest.to_json(), encoding="utf-8")
+            self._validate(manifest, temporary, filing)
+            os.replace(temporary, package_dir)
+            return manifest
+        except Exception:
+            shutil.rmtree(temporary, ignore_errors=True)
+            raise
+
+    def adopt(
+        self,
+        filing: FilingRef,
+        *,
+        source: str,
+        artifact_paths: Mapping[str, Path],
+    ) -> PackageManifest:
+        """Atomically publish verified local artifacts without changing their source."""
+        package_dir = self.package_dir(filing)
+        manifest_path = package_dir / "manifest.json"
+        if manifest_path.exists():
+            manifest = PackageManifest.from_path(manifest_path)
+            self._validate(manifest, package_dir, filing)
+            return manifest
+        if package_dir.exists():
+            raise PackageIntegrityError(f"unpublished or partial package directory: {package_dir}")
+        if not source:
+            raise PackageIntegrityError("package source is required")
+
+        expected_urls = dict(self._artifact_urls(filing))
+        if set(artifact_paths) != set(expected_urls):
+            raise PackageIntegrityError("adopted artifact set mismatch")
+        package_dir.parent.mkdir(parents=True, exist_ok=True)
+        temporary = Path(
+            tempfile.mkdtemp(prefix=f".{filing.accession.replace('-', '')}.partial-", dir=package_dir.parent)
+        )
+        try:
+            artifacts = tuple(
+                self._copy_artifact(
+                    filename=filename,
+                    source_path=artifact_paths[filename],
+                    destination_dir=temporary,
+                    source_url=expected_urls[filename],
+                )
+                for filename in expected_urls
+            )
+            manifest = PackageManifest(
+                schema_version=self.schema_version,
+                cik=canonicalize_cik(filing.cik),
+                accession=filing.accession,
+                form=filing.form,
+                source=source,
+                artifacts=artifacts,
             )
             (temporary / "manifest.json").write_text(manifest.to_json(), encoding="utf-8")
             self._validate(manifest, temporary, filing)
@@ -177,6 +232,35 @@ class AccessionPackageCache:
         if not _ACCESSION_RE.fullmatch(filing.accession):
             raise PackageIntegrityError(f"invalid accession: {filing.accession!r}")
         return filing.accession.replace("-", "")
+
+    def _copy_artifact(
+        self, *, filename: str, source_path: Path, destination_dir: Path, source_url: str
+    ) -> PackageArtifact:
+        if not source_path.is_file():
+            raise PackageIntegrityError(f"missing adopted artifact: {filename}")
+        before = source_path.stat()
+        digest = hashlib.sha256()
+        byte_size = 0
+        destination = destination_dir / filename
+        with source_path.open("rb") as source_file, destination.open("xb") as destination_file:
+            while chunk := source_file.read(1024 * 1024):
+                destination_file.write(chunk)
+                digest.update(chunk)
+                byte_size += len(chunk)
+        after = source_path.stat()
+        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+        ):
+            raise PackageIntegrityError(f"adopted artifact changed while reading: {filename}")
+        return PackageArtifact(
+            filename=filename,
+            source_url=source_url,
+            sha256=digest.hexdigest(),
+            byte_size=byte_size,
+        )
 
     def _validate(self, manifest: PackageManifest, package_dir: Path, filing: FilingRef) -> None:
         if manifest.schema_version != self.schema_version:

@@ -53,7 +53,7 @@ If the existing output schema differs, implement an adapter; do not couple XBRL 
 
 ## Development workflow
 Before coding:
-1. Read the relevant docs.
+1. Read and follow `docs/implementation/delivery-workflow.md`, then read the relevant docs.
 2. State the milestone and acceptance criteria being implemented.
 3. Identify assumptions and unresolved XBRL cases.
 4. Implement the smallest vertical slice.
@@ -66,3 +66,6 @@ Before coding:
 - Prefer milestone-level PRs over very small PRs.
 - Keep architecture/rule changes and the corresponding tests in the same PR.
 - Never commit bulk SEC archives, generated Parquet stores, caches, secrets or `.env` files.
+- When creating or updating a PR body through the GitHub CLI, use real newline characters
+  (for example, a body file or shell ANSI-C quoting). Never pass literal `\n` sequences,
+  because GitHub will render them as text instead of line breaks.

@@ -36,6 +36,7 @@ def test_package_cache_downloads_validates_and_reuses_without_network(tmp_path: 
     manifest = cache.ensure(_filing(), client)
     assert len(calls) == 2
     assert manifest.cik == "0000320193"
+    assert manifest.source == "sec_archive"
     assert [artifact.byte_size for artifact in manifest.artifacts] == [3, 7]
     assert cache.ensure(_filing(), client) == manifest
     assert len(calls) == 2
