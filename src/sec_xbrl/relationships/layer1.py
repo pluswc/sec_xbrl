@@ -15,7 +15,6 @@ from sec_xbrl.facts.layer1 import Layer1ExtractionError, _qname_parts, _stable_i
 from sec_xbrl.filing.company_discovery import canonicalize_cik
 from sec_xbrl.filing.contracts import FilingRef
 
-
 _PRESENTATION_ARCROLE = "http://www.xbrl.org/2003/arcrole/parent-child"
 _CALCULATION_ARCROLE = "http://www.xbrl.org/2003/arcrole/summation-item"
 
