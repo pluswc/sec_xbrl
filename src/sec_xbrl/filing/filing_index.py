@@ -15,7 +15,11 @@ from typing import Any, Protocol
 
 from sec_xbrl.filing.company_discovery import canonicalize_cik
 from sec_xbrl.filing.contracts import FilingRef
-from sec_xbrl.filing.package_cache import AccessionPackageCache, ArchiveFetcher, PackageIntegrityError
+from sec_xbrl.filing.package_cache import (
+    AccessionPackageCache,
+    ArchiveFetcher,
+    PackageIntegrityError,
+)
 
 
 class FilingIndexError(RuntimeError):
