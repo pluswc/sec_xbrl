@@ -2,6 +2,15 @@
 
 Layer 1 is immutable, as-filed, and provenance-first. The exact physical store can begin as Parquet and later be materialized into a database.
 
+## M2 materialization boundary
+
+`sec_xbrl.facts.layer1.Layer1Extractor` is the M2 boundary from an already
+loaded Arelle model to six independently materialized Parquet tables:
+`filing`, `concept`, `context`, `unit`, `fact`, and `dimension_fact`. It only
+emits `REPORTED` facts. `period_class` and `comparative_type` remain null until
+M6, so this extraction does not apply filing-level period assumptions. Typed
+dimensions are stored in `dimension_fact.typed_member`, never discarded.
+
 ## 1. `filing`
 - `filing_id`
 - `cik`

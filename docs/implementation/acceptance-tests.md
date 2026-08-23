@@ -33,6 +33,8 @@
 - Facts preserve context/unit/value/source.
 - dimensions preserve explicit Axis/Member identity.
 - typed dimensions are not silently dropped.
+- materialized raw tables remain separate Parquet files for filing, concept,
+  context, unit, fact, and dimension_fact.
 
 ## M3 — relationships
 - PRE/CAL/DEF remain separate.
