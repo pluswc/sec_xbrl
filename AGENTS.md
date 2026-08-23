@@ -10,6 +10,7 @@ Build a SEC XBRL analytical pipeline that preserves as-filed meaning and support
 
 ## Source of truth
 Read these before implementing related code:
+- `docs/implementation/delivery-workflow.md` — follow its all-milestone role separation, branch-freeze, independent verification, and PR/CI decision process.
 - `docs/architecture/overview.md`
 - `docs/architecture/layer-model.md`
 - `docs/implementation/accession-contract.md`
