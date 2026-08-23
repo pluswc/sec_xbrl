@@ -11,6 +11,16 @@ emits `REPORTED` facts. `period_class` and `comparative_type` remain null until
 M6, so this extraction does not apply filing-level period assumptions. Typed
 dimensions are stored in `dimension_fact.typed_member`, never discarded.
 
+## M3 relationship materialization boundary
+
+`sec_xbrl.relationships.layer1.RelationshipExtractor` is the M3 boundary from
+the same already-loaded Arelle model to two additional independently
+materialized Parquet tables: `role` and `relationship`.  It records PRE, CAL,
+and DEF networks separately and preserves relationship attributes, including
+`targetRole`.  It does not traverse, merge, or otherwise interpret networks;
+M4 owns traversal.  Relationship concept identifiers use the same filing- and
+QName-scoped raw identity formula as M2 concepts.
+
 ## 1. `filing`
 - `filing_id`
 - `cik`
