@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sec_xbrl.facts.layer1 import Layer1ExtractionError, _qname_parts, _stable_id
+from sec_xbrl.facts.layer1 import _qname_parts, _stable_id, Layer1ExtractionError
 from sec_xbrl.filing.company_discovery import canonicalize_cik
 from sec_xbrl.filing.contracts import FilingRef
 
@@ -229,8 +229,8 @@ def _network_type(arcrole: str) -> str | None:
         return "PRE"
     if arcrole == _CALCULATION_ARCROLE:
         return "CAL"
-    if arcrole.startswith("http://xbrl.org/int/dim/arcrole/") or arcrole.startswith(
-        "http://www.xbrl.org/2003/arcrole/"
+    if arcrole.startswith(
+        ("http://xbrl.org/int/dim/arcrole/", "http://www.xbrl.org/2003/arcrole/")
     ):
         return "DEF"
     return None

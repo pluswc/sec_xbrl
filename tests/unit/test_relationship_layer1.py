@@ -3,11 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
-from sec_xbrl.relationships.layer1 import RelationshipExtractor
 from sec_xbrl.filing.contracts import FilingRef
+from sec_xbrl.relationships.layer1 import RelationshipExtractor
 
 
 @dataclass(frozen=True)
@@ -47,12 +48,12 @@ class _Model:
     definition = "http://xbrl.org/int/dim/arcrole/all"
     statement_role = "http://example.com/role/StatementOfIncome"
     disclosure_role = "http://example.com/role/RevenueDisclosure"
-    baseSets = {
+    baseSets: ClassVar[dict[tuple[str, str, str, str], object]] = {
         (presentation, statement_role, "presentationLink", "presentationArc"): object(),
         (calculation, statement_role, "calculationLink", "calculationArc"): object(),
         (definition, disclosure_role, "definitionLink", "definitionArc"): object(),
     }
-    roleTypes = {
+    roleTypes: ClassVar[dict[str, list[_RoleType]]] = {
         statement_role: [_RoleType("Consolidated Statements of Income")],
         disclosure_role: [_RoleType("Revenue Disclosure (Tables)")],
     }
