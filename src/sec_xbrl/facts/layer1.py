@@ -40,16 +40,65 @@ class Layer1Tables:
             import polars as pl
         except ImportError as exc:  # pragma: no cover - project dependency.
             raise Layer1ExtractionError("polars is required to materialize Layer 1 Parquet") from exc
-        destination.mkdir(parents=True, exist_ok=True)
-        for name, rows in (
+        tables = (
             ("filing", self.filing),
             ("concept", self.concepts),
             ("context", self.contexts),
             ("unit", self.units),
             ("fact", self.facts),
             ("dimension_fact", self.dimension_facts),
-        ):
-            pl.DataFrame(list(rows)).write_parquet(destination / f"{name}.parquet")
+        )
+        paths = tuple(destination / f"{name}.parquet" for name, _ in tables)
+        if any(path.exists() for path in paths):
+            raise Layer1ExtractionError(f"Layer 1 snapshot already exists: {destination}")
+        destination.mkdir(parents=True, exist_ok=True)
+        for name, rows in tables:
+            pl.DataFrame(list(rows), schema=_polars_schema(pl, name), strict=False).write_parquet(
+                destination / f"{name}.parquet"
+            )
+
+
+_PARQUET_SCHEMAS: dict[str, dict[str, Any]] = {
+    "filing": {
+        "filing_id": "string", "cik": "string", "accession": "string", "accession_nodash": "string",
+        "form": "string", "filed_date": "string", "report_date": "string", "primary_document": "string",
+        "document_fiscal_year_focus": "string", "document_fiscal_period_focus": "string",
+        "fiscal_year_end": "string", "is_amendment": "bool", "amends_accession": "string",
+        "source_url": "string", "package_hash": "string", "parser_version": "string",
+    },
+    "concept": {
+        "raw_concept_id": "string", "filing_id": "string", "qname": "string", "namespace_uri": "string",
+        "namespace_prefix": "string", "local_name": "string", "taxonomy_family": "string",
+        "taxonomy_version": "string", "is_standard": "bool", "is_custom": "bool", "data_type": "string",
+        "period_type": "string", "balance": "string", "abstract": "bool", "nillable": "bool",
+        "label": "string", "documentation": "string",
+    },
+    "context": {
+        "context_id": "string", "filing_id": "string", "entity_identifier": "string", "period_kind": "string",
+        "start_date": "string", "end_date": "string", "instant_date": "string", "duration_days": "int64",
+        "dimension_count": "int64", "context_xml": "string", "context_hash": "string",
+    },
+    "unit": {
+        "unit_id": "string", "filing_id": "string", "numerator_measures": "string",
+        "denominator_measures": "string", "raw_representation": "string",
+    },
+    "fact": {
+        "fact_id": "string", "filing_id": "string", "raw_concept_id": "string", "context_id": "string",
+        "unit_id": "string", "value_numeric": "string", "value_text": "string", "decimals": "string",
+        "precision": "string", "is_nil": "bool", "source_document": "string", "source_locator": "string",
+        "reported_or_derived": "string", "period_class": "string", "comparative_type": "string", "raw_value": "string",
+    },
+    "dimension_fact": {
+        "fact_id": "string", "axis_raw_concept_id": "string", "member_raw_concept_id": "string",
+        "typed_member": "string", "dimension_type": "string", "is_default_member": "bool",
+    },
+}
+
+
+def _polars_schema(pl: Any, table: str) -> dict[str, Any]:
+    """Translate the contract's explicit primitive types to Polars dtypes."""
+    dtypes = {"string": pl.String, "bool": pl.Boolean, "int64": pl.Int64}
+    return {column: dtypes[dtype] for column, dtype in _PARQUET_SCHEMAS[table].items()}
 
 
 class Layer1Extractor:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from sec_xbrl.facts.layer1 import Layer1Extractor
+from sec_xbrl.facts.layer1 import Layer1ExtractionError, Layer1Extractor
 from sec_xbrl.filing.contracts import FilingRef
 
 
@@ -133,3 +133,26 @@ def test_write_parquet_materializes_separate_raw_tables(tmp_path: Path) -> None:
     }
     fact = pl.read_parquet(tmp_path / "fact.parquet").row(0, named=True)
     assert fact["reported_or_derived"] == "REPORTED"
+
+
+def test_write_parquet_keeps_contract_schema_for_empty_dimensions_and_rejects_overwrite(
+    tmp_path: Path,
+) -> None:
+    pl = pytest.importorskip("polars")
+    model = type("NoDimensionsModel", (), {"factsInInstance": (_Fact(),)})()
+    model.factsInInstance[0].context.qnameDims = {}
+    tables = Layer1Extractor().extract(model, _filing())
+
+    tables.write_parquet(tmp_path)
+
+    schema = pl.read_parquet_schema(tmp_path / "dimension_fact.parquet")
+    assert schema == {
+        "fact_id": pl.String,
+        "axis_raw_concept_id": pl.String,
+        "member_raw_concept_id": pl.String,
+        "typed_member": pl.String,
+        "dimension_type": pl.String,
+        "is_default_member": pl.Boolean,
+    }
+    with pytest.raises(Layer1ExtractionError, match="snapshot already exists"):
+        tables.write_parquet(tmp_path)
