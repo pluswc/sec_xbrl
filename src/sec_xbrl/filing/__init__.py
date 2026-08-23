@@ -1,1 +1,1 @@
-"""Filing discovery, package caching, and legacy-package adoption."""
+"""Filing discovery, package resolution, and Arelle loading."""
