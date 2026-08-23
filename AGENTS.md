@@ -66,3 +66,6 @@ Before coding:
 - Prefer milestone-level PRs over very small PRs.
 - Keep architecture/rule changes and the corresponding tests in the same PR.
 - Never commit bulk SEC archives, generated Parquet stores, caches, secrets or `.env` files.
+- When creating or updating a PR body through the GitHub CLI, use real newline characters
+  (for example, a body file or shell ANSI-C quoting). Never pass literal `\n` sequences,
+  because GitHub will render them as text instead of line breaks.
