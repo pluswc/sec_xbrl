@@ -1,7 +1,8 @@
 # M1A/M1B Package Cache Contract
 
 Input is one `FilingRef`. M1A downloads only the accession XBRL ZIP and SEC
-index-headers HTML; SEC filing `index.json` resolution and Arelle are M1C work.
+index-headers HTML; M1C adds a separate immutable cache for SEC filing
+`index.json` resolution and an offline Arelle load.
 
 ## Layout
 
@@ -11,6 +12,31 @@ data/raw/sec/packages/{cik}/{accession_nodash}/
   {accession}-index-headers.html
   manifest.json
 ```
+
+## M1C — Filing index and Arelle entry point
+
+The filing directory response is stored separately from the immutable M1A
+package, so adding index metadata never mutates a published package:
+
+```text
+data/raw/sec/filing-indexes/{cik}/{accession_nodash}/
+  index.json
+  manifest.json
+```
+
+The index manifest records the filing identity, SEC source URL, SHA-256, and
+byte size. A partial, corrupt, or identity-mismatched index cache is never a
+cache hit.
+
+`directory.item` is parsed as untrusted SEC metadata. Filenames must be safe
+relative paths. The resolver selects `FilingRef.primary_document` when it is
+present in both the index and ZIP; otherwise it selects the unique
+`EX-101.INS` file, or a single remaining HTML/XML candidate. Ambiguity is an
+accession-level resolution error, rather than a guess.
+
+The Arelle loader extracts the already validated ZIP to a caller-owned working
+directory and passes Arelle only the local selected file. Its web cache is set
+offline; M1C does not download or modify SEC source files during loading.
 
 `manifest.json` records schema version, CIK, accession, form, package `source`,
 and for every artifact its SEC source URL, SHA-256, and byte size. New packages
