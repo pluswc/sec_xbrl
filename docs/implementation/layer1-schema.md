@@ -21,6 +21,16 @@ and DEF networks separately and preserves relationship attributes, including
 M4 owns traversal.  Relationship concept identifiers use the same filing- and
 QName-scoped raw identity formula as M2 concepts.
 
+## M4 anchor traversal boundary
+
+`sec_xbrl.traversal.anchor.AnchorTraversal` consumes the immutable M2/M3
+records, rather than a live Arelle model.  It materializes `anchor` and
+`traversal_evidence` as separate Parquet tables.  `anchor` is derived solely
+from PRE placement in recognised major-statement roles; PRE never expands a
+traversal.  `traversal_evidence` keeps every direct dimension, DEF/CAL edge,
+and explicit `targetRole` transition with a typed evidence record.  It does
+not perform Disclosure Safety Net discovery (M5) or canonicalize raw IDs.
+
 ## 1. `filing`
 - `filing_id`
 - `cik`
@@ -137,6 +147,16 @@ One row per fact-axis-member assignment.
 - `priority` (`P0`, `P1`, `P2`, `UNCLASSIFIED`)
 - signal flags from role title/concepts/text blocks/facts
 - `deep_scan_required`
+
+## 10a. `traversal_evidence`
+- `evidence_id`
+- `filing_id`
+- `anchor_raw_concept_id`, `statement_type`, `role_id`
+- `network_type`, `arcrole`, `from_raw_concept_id`, `to_raw_concept_id`
+- `fact_id`, `axis_raw_concept_id`, `member_raw_concept_id` nullable
+- `evidence_type` (`DIRECT_DIMENSION`, `DEFINITION_MEMBER`,
+  `CALCULATION_CHILD`, `ROLE_EXPANSION`, `STRUCTURAL_ONLY`)
+- `source_relationship_id`, `target_role_uri`, `discovery_order`
 
 ## 11. Raw identity rule
 Never identify a concept/member only by local name. Raw identity must include QName/namespace context. SEC bulk DIM strings are not sufficient as the final long-term identity source.
