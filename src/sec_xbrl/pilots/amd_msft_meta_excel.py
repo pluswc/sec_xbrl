@@ -16,7 +16,7 @@ from pathlib import Path
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, Reference
 from openpyxl.formatting.rule import CellIsRule
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
@@ -55,6 +55,7 @@ _REPORTED_VALUE_RE = re.compile(
     r"^(?P<number>[+-]?(?:\d+(?:\.\d*)?|\.\d+))(?:\s*(?:×|x)\s*10\^(?P<scale>[+-]?\d+))?$"
 )
 _NUMERIC_FORMAT = "#,##0.##########;[Red]-#,##0.##########"
+_CARD_BORDER = Border(*(Side(style="thin", color="5B9BD5") for _ in range(4)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -342,20 +343,49 @@ def _revenue_dashboard(sheet: object, review: P3PeerReview) -> None:
     sheet["A1"].font = Font(bold=True, size=14)
     sheet["A2"].fill = _WARNING_FILL
     rows = [row for row in review.comparisons if row.metric == "REPORTED_TOTAL_REVENUE" and row.period_class == "QTD_3M"]
+    _write_dashboard_cards(sheet, rows)
     headers = ["Ticker", "Numeric value", "As-filed display", "Unit", "Period class", "Relation"]
     values = [(row.ticker, *_reported_cells(row.value, row.unit)[:3], row.period_class, row.mapping_relation) for row in rows]
-    _write_table(sheet, 5, headers, values, "RevenueDashboard")
+    _write_table(sheet, 12, headers, values, "RevenueDashboard")
     _format_numeric_column(sheet, "B")
     _highlight_mapping_relations(sheet, "F")
     if rows:
         chart = BarChart()
         chart.title = "Current QTD_3M reported total revenue (not a ranking)"
         chart.y_axis.title = "Reported numeric value (USD)"
-        chart.add_data(Reference(sheet, min_col=2, min_row=5, max_row=5 + len(rows)), titles_from_data=True)
-        chart.set_categories(Reference(sheet, min_col=1, min_row=6, max_row=5 + len(rows)))
+        chart.add_data(Reference(sheet, min_col=2, min_row=12, max_row=12 + len(rows)), titles_from_data=True)
+        chart.set_categories(Reference(sheet, min_col=1, min_row=13, max_row=12 + len(rows)))
         chart.height = 7
         chart.width = 15
-        sheet.add_chart(chart, "H5")
+        sheet.add_chart(chart, "H12")
+
+
+def _write_dashboard_cards(sheet: object, rows: list[PeerComparisonRow]) -> None:
+    """Create a clearly distinct KPI card for every current-QTD issuer."""
+    starts = (1, 5, 9)
+    for row, start in zip(rows, starts):
+        end = start + 2
+        reported = parse_reported_value(row.value)
+        sheet.merge_cells(start_row=5, start_column=start, end_row=5, end_column=end)
+        sheet.cell(5, start).value = f"{row.ticker} — QTD_3M reported total revenue"
+        sheet.cell(5, start).fill = _HEADER_FILL
+        sheet.cell(5, start).font = _HEADER_FONT
+        for line, label, value in (
+            (6, "Numeric value", reported.numeric_value),
+            (7, "As-filed display", reported.as_filed_display),
+            (8, "Unit / period", f"{row.unit or 'NOT_AVAILABLE'} / {row.period_class}"),
+            (9, "Status", f"{row.mapping_relation} — not equivalent"),
+        ):
+            sheet.cell(line, start).value = label
+            sheet.merge_cells(start_row=line, start_column=start + 1, end_row=line, end_column=end)
+            value_cell = sheet.cell(line, start + 1)
+            value_cell.value = value
+            for column in range(start, end + 1):
+                cell = sheet.cell(line, column)
+                cell.border = _CARD_BORDER
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+        sheet.cell(6, start + 1).number_format = _NUMERIC_FORMAT
+        sheet.cell(9, start + 1).fill = _WARNING_FILL
 
 
 def _revenue_structure(sheet: object, review: P3PeerReview, relationship_status: str) -> None:
