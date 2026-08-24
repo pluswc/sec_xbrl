@@ -31,6 +31,19 @@ traversal.  `traversal_evidence` keeps every direct dimension, DEF/CAL edge,
 and explicit `targetRole` transition with a typed evidence record.  It does
 not perform Disclosure Safety Net discovery (M5) or canonicalize raw IDs.
 
+## M5 disclosure safety-net boundary
+
+`sec_xbrl.disclosure.safety_net.DisclosureSafetyNet` consumes the immutable
+M2/M3 records and inventories every role without requiring an M4 anchor
+connection.  It materializes `role_inventory`, `disclosure_index`, and
+`disclosure_evidence` as separate Parquet tables.  A role-title match is only
+a review signal: a P0/P1/P2 classification requires corroborating raw
+concept, reported-fact, or text-block evidence.  Text-block, table, and detail
+evidence retain role, fact, source-document, and locator provenance.  M5 does
+not merge role networks or canonicalize concepts.  P0/P1 topics use the
+controlled vocabulary in the traversal contract; P2 is a raw-evidence-backed
+`OTHER_MATERIAL_DISCLOSURE` review record when no controlled topic matches.
+
 ## 1. `filing`
 - `filing_id`
 - `cik`
@@ -148,7 +161,22 @@ One row per fact-axis-member assignment.
 - signal flags from role title/concepts/text blocks/facts
 - `deep_scan_required`
 
-## 10a. `traversal_evidence`
+## 10a. `role_inventory`
+- `filing_id`, `role_id`, `role_uri`, `role_definition`, `role_category`
+- relationship, concept, reported-fact, and text-block counts
+- table/detail evidence flags
+
+## 10b. `disclosure_evidence`
+- `evidence_id`, `filing_id`, `role_id`, `critical_topic`, `signal_type`
+- raw concept and fact IDs nullable
+- source document and locator nullable
+- source role URI and definition
+
+`signal_type` is one of `ROLE_TITLE`, `CONCEPT`, `FACT`, `TEXT_BLOCK`,
+`TABLE_ROLE`, or `DETAIL_ROLE`.  It preserves discovery evidence; it does not
+turn a role title alone into a critical-disclosure classification.
+
+## 10c. `traversal_evidence`
 - `evidence_id`
 - `filing_id`
 - `anchor_raw_concept_id`, `statement_type`, `role_id`
