@@ -70,3 +70,13 @@ For Critical Disclosures:
 
 ## PR-012 — Fiscal calendars
 Use DEI fiscal-year/period fields + actual Context periods. Support 52/53-week years and fiscal-year changes with comparability flags.
+
+## M6 analytical output boundary
+M6 copies raw fact rows into an analytical period result and fills `period_class`
+and `comparative_type`; it does not mutate the M2 Parquet snapshot.  Duration
+classification uses the Context's actual start/end days, with FY accepting
+350–378 days to cover 52/53-week fiscal years.  Q4 derivation requires an
+explicit `canonical_concept_id`, `is_additive=true`, equal dimensional context,
+units, fiscal year, and structural/recast/comparability metadata.  A derived
+record adds `formula`, `source_fact_ids`, and `derivation_rule_version` and is
+always distinct from its reported sources.
