@@ -271,7 +271,7 @@ class SeriesBuilder:
             if series_type == "ANNUAL":
                 if not form.startswith("10-K") or period_class != "FY":
                     continue
-            elif not (form.startswith("10-K") or form.startswith("10-Q")):
+            elif not form.startswith(("10-K", "10-Q")):
                 continue
             dimension_key, dim_review = _dimension_key(
                 dimensions_by_fact[str(fact.get("fact_id"))], axes, members
@@ -415,7 +415,7 @@ def _well_supported_namespace_change(
 def _role_axis_signature(
     row: Mapping[str, Any], relationships: Mapping[str, tuple[dict[str, Any], ...]]
 ) -> tuple[str, ...]:
-    values: set[str] = set(str(value) for value in row.get("axis_domain_role", ()) if value)
+    values: set[str] = {str(value) for value in row.get("axis_domain_role", ()) if value}
     for edge in relationships.get(_raw_id(row), ()):
         if edge.get("role_uri"):
             values.add("role:" + str(edge["role_uri"]))
