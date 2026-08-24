@@ -166,8 +166,6 @@ class AnalyticalRepository:
             for key in ("cik", "company_canonical_id"):
                 if row.get(key) is None and company.get(key) is not None:
                     row[key] = deepcopy(company[key])
-        if "reported_or_derived" not in row:
-            row["reported_or_derived"] = "DERIVED" if _is_derived(row) else "REPORTED"
         return row
 
 
@@ -248,6 +246,3 @@ def _period_range(value: str | tuple[str | None, str | None] | None) -> tuple[st
 def _sort_rows(rows: Iterable[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
     return sorted(rows, key=lambda row: (_period_value(row) or "", str(row.get("fact_id") or "")))
 
-
-def _is_derived(row: Mapping[str, Any]) -> bool:
-    return bool(row.get("source_fact_ids") or row.get("derivation_formula") or row.get("formula"))

@@ -91,6 +91,15 @@ def test_trace_fact_distinguishes_reported_and_derived_provenance() -> None:
         repository.trace_fact("unknown")
 
 
+def test_trace_fact_does_not_invent_missing_reported_or_derived_status() -> None:
+    repository = AnalyticalRepository(
+        companies=({"cik": "0000320193", "ticker": "AAPL"},),
+        facts=({"fact_id": "status-unknown", "raw_concept_id": "aapl:revenue"},),
+    )
+
+    assert "reported_or_derived" not in repository.trace_fact("status-unknown")
+
+
 def test_repository_never_mutates_inputs_or_returned_records() -> None:
     companies = [{"cik": "0000320193", "ticker": "AAPL", "company_canonical_id": "company:aapl"}]
     facts = [{"fact_id": "f", "filing_id": "a", "raw_concept_id": "r"}]
