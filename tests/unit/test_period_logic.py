@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from sec_xbrl.periods.logic import DisclosureState, DisclosureStateTracker, PeriodClassifier, derive_q4_facts
+from sec_xbrl.periods.logic import (
+    DisclosureState,
+    DisclosureStateTracker,
+    PeriodClassifier,
+    derive_q4_facts,
+)
 
 
 def _context(context_id: str, start: str | None, end: str | None, *, instant: str | None = None) -> dict[str, object]:
