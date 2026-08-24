@@ -144,17 +144,64 @@ def test_inventory_and_evidence_preserve_table_detail_and_text_fact_provenance()
 
 def test_unclassified_and_p1_p2_priority_are_explicit() -> None:
     records = _records()
-    records["roles"] = (*records["roles"], _role("role_leases", "Leases", "DISCLOSURE"), _role("role_policy", "Accounting policies", "POLICY"))
-    records["relationships"] = (*records["relationships"], _edge("role_leases", "lease_root", "lease_concept"), _edge("role_policy", "policy_root", "policy_concept"))
-    records["concepts"] = (*records["concepts"], _concept("lease_root", "Lease liabilities"), _concept("lease_concept", "Lease"), _concept("policy_root", "Accounting policy"), _concept("policy_concept", "Critical accounting estimates"))
+    records["roles"] = (
+        *records["roles"],
+        _role("role_leases", "Leases", "DISCLOSURE"),
+        _role("role_policy", "Accounting policies", "POLICY"),
+        _role("role_generic", "Other disclosure", "DISCLOSURE"),
+    )
+    records["relationships"] = (
+        *records["relationships"],
+        _edge("role_leases", "lease_root", "lease_concept"),
+        _edge("role_policy", "policy_root", "policy_concept"),
+        _edge("role_generic", "generic_root", "generic_concept"),
+    )
+    records["concepts"] = (
+        *records["concepts"],
+        _concept("lease_root", "Lease liabilities"),
+        _concept("lease_concept", "Lease"),
+        _concept("policy_root", "Accounting policy"),
+        _concept("policy_concept", "Critical accounting estimates"),
+        _concept("generic_root", "Generic disclosure"),
+        _concept("generic_concept", "Generic material narrative"),
+    )
+    records["facts"] = (*records["facts"], _fact("generic_concept", value_text="Raw narrative."))
 
     result = DisclosureSafetyNet().build(**records)
 
     priority_by_role = {row["role_id"]: row["priority"] for row in result.disclosure_index}
     assert priority_by_role[UNRELATED] == "UNCLASSIFIED"
     assert priority_by_role["role_leases"] == "P1"
-    assert priority_by_role["role_policy"] == "P2"
-    assert next(row for row in result.disclosure_index if row["role_id"] == "role_policy")["deep_scan_required"] is False
+    assert priority_by_role["role_policy"] == "P1"
+    assert priority_by_role["role_generic"] == "P2"
+    assert next(row for row in result.disclosure_index if row["role_id"] == "role_policy")["deep_scan_required"] is True
+
+
+@pytest.mark.parametrize(
+    ("role_id", "title", "concept_id", "label", "topic"),
+    (
+        ("plain_revenue", "Other note", "revenue_concept", "Revenue", "REVENUE_RECOGNITION"),
+        ("restructuring", "Other note", "restructuring_concept", "Restructuring charges", "RESTRUCTURING"),
+        ("supplier_finance", "Other note", "supplier_concept", "Supplier finance obligations", "SUPPLIER_FINANCE"),
+        ("capital_returns", "Other note", "returns_concept", "Share repurchase program", "CAPITAL_RETURNS"),
+    ),
+)
+def test_contract_vocabulary_discovers_plain_revenue_and_p1_candidates(
+    role_id: str, title: str, concept_id: str, label: str, topic: str
+) -> None:
+    records = {
+        "roles": (_role(role_id, title, "DISCLOSURE"),),
+        "relationships": (_edge(role_id, "root", concept_id),),
+        "concepts": (_concept("root", "Root"), _concept(concept_id, label)),
+        "facts": (_fact(concept_id),),
+    }
+
+    result = DisclosureSafetyNet().build(**records)
+
+    row = next(row for row in result.disclosure_index if row["critical_topic"] == topic)
+    assert row["has_role_title_signal"] is False
+    assert row["has_concept_signal"] is True
+    assert row["priority"] == ("P0" if topic == "REVENUE_RECOGNITION" else "P1")
 
 
 def test_materialization_is_separate_and_immutable(tmp_path: Path) -> None:

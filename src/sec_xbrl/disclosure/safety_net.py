@@ -28,7 +28,7 @@ class _Topic:
 # The controlled vocabulary is intentionally transparent and conservative.
 # Matching is a discovery signal, not a claim of accounting equivalence.
 _TOPICS = (
-    _Topic("REVENUE_RECOGNITION", "P0", ("revenue recognition", "disaggregation", "contract revenue")),
+    _Topic("REVENUE_RECOGNITION", "P0", ("revenue", "disaggregation", "contract revenue")),
     _Topic("SEGMENT_GEOGRAPHY_PRODUCT", "P0", ("segment", "geograph", "product", "service")),
     _Topic("CUSTOMER_CONCENTRATION", "P0", ("customer concentration", "major customer")),
     _Topic("DEBT_BORROWING", "P0", ("debt", "borrowing", "credit facility", "maturit", "covenant")),
@@ -43,12 +43,14 @@ _TOPICS = (
     _Topic("FAIR_VALUE", "P1", ("fair value",)),
     _Topic("DERIVATIVES_HEDGING", "P1", ("derivative", "hedging")),
     _Topic("STOCK_COMPENSATION", "P1", ("stock compensation", "share-based compensation")),
+    _Topic("RESTRUCTURING", "P1", ("restructuring", "reorganization", "severance")),
     _Topic("RELATED_PARTIES", "P1", ("related party",)),
+    _Topic("SUPPLIER_FINANCE", "P1", ("supplier finance", "supply chain finance")),
     _Topic("INVENTORY", "P1", ("inventory", "write-down")),
     _Topic("RECEIVABLES_CREDIT_LOSSES", "P1", ("receivable", "credit loss", "allowance")),
     _Topic("PENSION", "P1", ("pension", "retirement benefit")),
-    _Topic("ACCOUNTING_POLICY_ESTIMATES", "P2", ("accounting polic", "critical estimate", "significant estimate")),
-    _Topic("CAPITAL_RETURNS", "P2", ("share repurchase", "stock repurchase", "dividend")),
+    _Topic("ACCOUNTING_POLICY_ESTIMATES", "P1", ("accounting polic", "critical estimate", "significant estimate")),
+    _Topic("CAPITAL_RETURNS", "P1", ("share repurchase", "stock repurchase", "dividend")),
 )
 
 _PARQUET_SCHEMAS: dict[str, dict[str, str]] = {
@@ -161,7 +163,29 @@ class DisclosureSafetyNet:
                 filing_id, role, role_concepts, role_facts, text_facts, concept_rows, table_evidence, detail_evidence
             )
             if not classifications:
-                index.append(_index_row(filing_id, role_id, None, "UNCLASSIFIED", False, False, False, False, table_evidence, detail_evidence))
+                has_unconfirmed_title_topic = any(_matches(_role_text(role), topic) for topic in _TOPICS)
+                priority = "P2" if (role_facts or text_facts) and not has_unconfirmed_title_topic else "UNCLASSIFIED"
+                topic = "OTHER_MATERIAL_DISCLOSURE" if priority == "P2" else None
+                index.append(
+                    _index_row(
+                        filing_id,
+                        role_id,
+                        topic,
+                        priority,
+                        False,
+                        False,
+                        bool(role_facts),
+                        bool(text_facts),
+                        table_evidence,
+                        detail_evidence,
+                    )
+                )
+                if topic is not None:
+                    evidence.extend(
+                        _fallback_evidence(
+                            filing_id, role, topic, role_facts, text_facts, table_evidence, detail_evidence
+                        )
+                    )
             else:
                 for topic, signals in classifications:
                     title, concept, fact, text = signals
@@ -242,6 +266,53 @@ def _topic_evidence(
     return result
 
 
+def _fallback_evidence(
+    filing_id: str,
+    role: Mapping[str, Any],
+    topic: str,
+    facts: Iterable[Mapping[str, Any]],
+    text_facts: Iterable[Mapping[str, Any]],
+    table: bool,
+    detail: bool,
+) -> list[dict[str, Any]]:
+    """Keep raw provenance when an otherwise material role is only P2."""
+    role_id = str(role["role_id"])
+    text_fact_ids = {str(fact["fact_id"]) for fact in text_facts}
+    result: list[dict[str, Any]] = []
+    for fact in facts:
+        row = {
+            "filing_id": filing_id,
+            "role_id": role_id,
+            "critical_topic": topic,
+            "signal_type": "TEXT_BLOCK" if str(fact["fact_id"]) in text_fact_ids else "FACT",
+            "raw_concept_id": _text(fact.get("raw_concept_id")),
+            "fact_id": _text(fact.get("fact_id")),
+            "source_document": _text(fact.get("source_document")),
+            "source_locator": _text(fact.get("source_locator")),
+            "source_role_uri": _text(role.get("role_uri")),
+            "source_role_definition": _text(role.get("role_definition")),
+        }
+        row["evidence_id"] = _stable_id("disclosure-evidence", *row.values())
+        result.append(row)
+    for signal_type, present in (("TABLE_ROLE", table), ("DETAIL_ROLE", detail)):
+        if present:
+            row = {
+                "filing_id": filing_id,
+                "role_id": role_id,
+                "critical_topic": topic,
+                "signal_type": signal_type,
+                "raw_concept_id": None,
+                "fact_id": None,
+                "source_document": None,
+                "source_locator": None,
+                "source_role_uri": _text(role.get("role_uri")),
+                "source_role_definition": _text(role.get("role_definition")),
+            }
+            row["evidence_id"] = _stable_id("disclosure-evidence", *row.values())
+            result.append(row)
+    return result
+
+
 def _single_filing_id(*row_sets: Iterable[Mapping[str, Any]]) -> str:
     filing_ids = {str(row["filing_id"]) for rows in row_sets for row in rows if row.get("filing_id") is not None}
     if len(filing_ids) != 1:
@@ -255,7 +326,10 @@ def _matches(value: str, topic: _Topic) -> bool:
 
 
 def _role_text(role: Mapping[str, Any]) -> str:
-    return " ".join(str(role.get(field) or "") for field in ("role_definition", "role_uri"))
+    # role_uri is immutable provenance, but is not a human role title and may
+    # contain a company-specific slug.  Classification title signals use the
+    # as-filed definition only.
+    return str(role.get("role_definition") or "")
 
 
 def _concept_text(concept: Mapping[str, Any]) -> str:

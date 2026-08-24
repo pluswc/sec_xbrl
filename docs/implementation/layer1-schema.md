@@ -40,7 +40,9 @@ connection.  It materializes `role_inventory`, `disclosure_index`, and
 a review signal: a P0/P1/P2 classification requires corroborating raw
 concept, reported-fact, or text-block evidence.  Text-block, table, and detail
 evidence retain role, fact, source-document, and locator provenance.  M5 does
-not merge role networks or canonicalize concepts.
+not merge role networks or canonicalize concepts.  P0/P1 topics use the
+controlled vocabulary in the traversal contract; P2 is a raw-evidence-backed
+`OTHER_MATERIAL_DISCLOSURE` review record when no controlled topic matches.
 
 ## 1. `filing`
 - `filing_id`
