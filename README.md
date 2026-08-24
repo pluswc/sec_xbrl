@@ -79,3 +79,9 @@ available, replace `--cache-root ...` with:
 
 That review-summary mode does not re-extract facts; it makes the committed,
 reviewed P2/P3 evidence directly viewable in Excel.
+
+The workbook also includes `Revenue_Dashboard` (current `QTD_3M` reported
+total-revenue display only) and `Revenue_Structure` (reported totals plus the
+existing selected breakdowns). See
+[the dashboard scope](docs/pilots/amd-msft-meta-revenue-dashboard.md) for the
+depth semantics and relationship-evidence limitations.

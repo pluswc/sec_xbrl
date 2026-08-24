@@ -105,6 +105,19 @@ def test_exported_workbook_is_filterable_and_preserves_p2_p3_provenance(tmp_path
 
     disclosures = workbook["Disclosure_Status"]
     assert disclosures.cell(2, 3).value == "NOT_REPORTED_THIS_QUARTER"
+    dashboard = workbook["Revenue_Dashboard"]
+    assert dashboard["A2"].value.startswith("WARNING")
+    assert dashboard["A5"].value == "AMD — QTD_3M reported total revenue"
+    assert dashboard["B6"].value == 10_253_000_000
+    assert dashboard["B7"].value == "10253 × 10^6"
+    assert dashboard["B8"].value == "iso4217:USD / QTD_3M"
+    assert dashboard["B9"].value == "UNRESOLVED — not equivalent"
+    assert dashboard["E13"].value == "QTD_3M"
+    assert len(dashboard._charts) == 1
+    structure = workbook["Revenue_Structure"]
+    assert structure["C6"].value == 0
+    assert structure["D7"].value == 1
+    assert structure["M6"].value == "NOT_EVIDENCED"
 
 
 def test_committed_p2_p3_review_summaries_export_the_full_pilot_without_network(tmp_path: Path) -> None:
@@ -123,6 +136,18 @@ def test_committed_p2_p3_review_summaries_export_the_full_pilot_without_network(
     assert workbook["Source_Trace"]["U2"].hyperlink.target.endswith("amd-20251227.htm")
     assert workbook["Peer_Comparison"]["C2"].value == 34_639_000_000
     assert workbook["Peer_Comparison"]["D2"].value == "34639 × 10^6"
+    dashboard = workbook["Revenue_Dashboard"]
+    assert [dashboard[cell].value for cell in ("A5", "E5", "I5")] == [
+        "AMD — QTD_3M reported total revenue",
+        "META — QTD_3M reported total revenue",
+        "MSFT — QTD_3M reported total revenue",
+    ]
+    assert all("UNRESOLVED" in dashboard[cell].value for cell in ("B9", "F9", "J9"))
+    structure = workbook["Revenue_Structure"]
+    headers = [cell.value for cell in structure[5]]
+    assert structure.cell(6, headers.index("Relationship provenance") + 1).value == "DOCUMENTED_SUMMARY_ONLY"
+    assert structure.cell(6, headers.index("Presentation evidence") + 1).value == "NOT_AVAILABLE"
+    assert any(cell.value == 2 for column in structure.iter_cols() for cell in column)
 
 
 def test_reported_value_parser_preserves_scale_and_returns_calculable_decimal() -> None:
