@@ -9,6 +9,8 @@ from __future__ import annotations
 import argparse
 import re
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from openpyxl import Workbook
@@ -46,6 +48,38 @@ _TAB_COLORS = {
     "Disclosure_Status": "70AD47", "Peer_Comparison": "ED7D31", "Source_Trace": "A5A5A5",
     "Backlog": "FFC000",
 }
+_REPORTED_VALUE_RE = re.compile(
+    r"^(?P<number>[+-]?(?:\d+(?:\.\d*)?|\.\d+))(?:\s*(?:×|x)\s*10\^(?P<scale>[+-]?\d+))?$"
+)
+_NUMERIC_FORMAT = "#,##0.##########;[Red]-#,##0.##########"
+
+
+@dataclass(frozen=True, slots=True)
+class ReportedValue:
+    """As-filed display and its Excel-calculable numeric representation."""
+
+    numeric_value: Decimal
+    as_filed_display: str
+    scale: int | None
+
+
+def parse_reported_value(value: str) -> ReportedValue:
+    """Convert a P2/P3 reported display without discarding its lexical scale.
+
+    A missing scale remains ``None`` while an explicit ``10^0`` remains ``0``.
+    This distinction makes the raw display auditable even though both calculate
+    to the same numeric value.
+    """
+    display = value.strip()
+    match = _REPORTED_VALUE_RE.fullmatch(display)
+    if not match:
+        raise ValueError(f"unsupported reported value display: {value!r}")
+    try:
+        scale = int(match.group("scale")) if match.group("scale") is not None else None
+        numeric_value = Decimal(match.group("number")) * (Decimal(10) ** (scale or 0))
+    except (InvalidOperation, ValueError) as exc:
+        raise ValueError(f"unsupported reported value display: {value!r}") from exc
+    return ReportedValue(numeric_value=numeric_value, as_filed_display=display, scale=scale)
 
 
 def export_workbook(
@@ -212,17 +246,21 @@ def _company_status(sheet: object, dossiers: Iterable[CompanyDossier], filing_ur
 
 
 def _revenue_breakdowns(sheet: object, review: P3PeerReview, filing_urls: Mapping[str, str]) -> None:
-    headers = ["Ticker", "Metric", "Reported value", "Period class", "Source period", "Dimensions", "Relation", "Confidence", "Scope warning", "SEC filing"]
+    headers = [
+        "Ticker", "Metric", "Numeric value", "As-filed display", "Unit", "Scale", "Period class",
+        "Source period", "Dimensions", "Relation", "Confidence", "Scope warning", "SEC filing",
+    ]
     comparisons = [row for row in review.comparisons if row.dimensions]
     rows = [
-        (row.ticker, row.metric, row.value, row.period_class, row.source_period, _dimensions(row.dimensions),
-         row.mapping_relation, row.mapping_confidence, row.scope_warning, "Open SEC filing")
+        (row.ticker, row.metric, *_reported_cells(row.value, row.unit), row.period_class, row.source_period,
+         _dimensions(row.dimensions), row.mapping_relation, row.mapping_confidence, row.scope_warning, "Open SEC filing")
         for row in comparisons
     ]
     _write_table(sheet, 1, headers, rows, "RevenueBreakdowns")
     for row_number, row in enumerate(comparisons, start=2):
-        _set_link(sheet.cell(row_number, 10), _document_url(filing_urls, row.accession, row.source_document))
-    _highlight_mapping_relations(sheet, "G")
+        _set_link(sheet.cell(row_number, 13), _document_url(filing_urls, row.accession, row.source_document))
+    _format_numeric_column(sheet, "C")
+    _highlight_mapping_relations(sheet, "J")
 
 
 def _disclosure_status(sheet: object, dossiers: Iterable[CompanyDossier], filing_urls: Mapping[str, str]) -> None:
@@ -241,35 +279,40 @@ def _disclosure_status(sheet: object, dossiers: Iterable[CompanyDossier], filing
 
 
 def _peer_comparison(sheet: object, review: P3PeerReview, filing_urls: Mapping[str, str]) -> None:
-    headers = ["Ticker", "Metric", "Reported value", "Period class", "Source period", "Relation", "Confidence", "Mapping version", "Scope warning", "SEC filing"]
+    headers = [
+        "Ticker", "Metric", "Numeric value", "As-filed display", "Unit", "Scale", "Period class",
+        "Source period", "Relation", "Confidence", "Mapping version", "Scope warning", "SEC filing",
+    ]
     rows = [
-        (row.ticker, row.metric, row.value, row.period_class, row.source_period, row.mapping_relation,
-         row.mapping_confidence, row.mapping_version, row.scope_warning, "Open SEC filing")
+        (row.ticker, row.metric, *_reported_cells(row.value, row.unit), row.period_class, row.source_period,
+         row.mapping_relation, row.mapping_confidence, row.mapping_version, row.scope_warning, "Open SEC filing")
         for row in review.comparisons
     ]
     _write_table(sheet, 1, headers, rows, "PeerComparison")
     for row_number, row in enumerate(review.comparisons, start=2):
-        _set_link(sheet.cell(row_number, 10), _document_url(filing_urls, row.accession, row.source_document))
-    _highlight_mapping_relations(sheet, "F")
+        _set_link(sheet.cell(row_number, 13), _document_url(filing_urls, row.accession, row.source_document))
+    _format_numeric_column(sheet, "C")
+    _highlight_mapping_relations(sheet, "I")
 
 
 def _source_trace(sheet: object, review: P3PeerReview, filing_urls: Mapping[str, str]) -> None:
     headers = [
-        "Ticker", "Metric", "Reported value", "Period class", "Source period", "Dimensions", "Raw fact ID",
-        "Company canonical ID", "Analytical ID", "Mapping relation", "Mapping confidence", "Mapping version",
-        "Mapping evidence", "Accession", "Source document", "Source locator", "QName", "Unit", "SEC filing",
+        "Ticker", "Metric", "Numeric value", "As-filed display", "Unit", "Scale", "Period class", "Source period",
+        "Dimensions", "Raw fact ID", "Company canonical ID", "Analytical ID", "Mapping relation", "Mapping confidence",
+        "Mapping version", "Mapping evidence", "Accession", "Source document", "Source locator", "QName", "SEC filing",
     ]
     rows = [
-        (row.ticker, row.metric, row.value, row.period_class, row.source_period, _dimensions(row.dimensions),
-         row.source_raw_id, row.company_canonical_id, row.analytical_id or "none", row.mapping_relation,
-         row.mapping_confidence, row.mapping_version, row.mapping_evidence, row.accession, row.source_document or "",
-         row.source_locator or "", row.qname or "", row.unit or "", "Open SEC filing")
+        (row.ticker, row.metric, *_reported_cells(row.value, row.unit), row.period_class, row.source_period,
+         _dimensions(row.dimensions), row.source_raw_id, row.company_canonical_id, row.analytical_id or "none",
+         row.mapping_relation, row.mapping_confidence, row.mapping_version, row.mapping_evidence, row.accession,
+         row.source_document or "", row.source_locator or "", row.qname or "", "Open SEC filing")
         for row in review.comparisons
     ]
     _write_table(sheet, 1, headers, rows, "SourceTrace")
     for row_number, row in enumerate(review.comparisons, start=2):
-        _set_link(sheet.cell(row_number, 19), _document_url(filing_urls, row.accession, row.source_document))
-    _highlight_mapping_relations(sheet, "J")
+        _set_link(sheet.cell(row_number, 21), _document_url(filing_urls, row.accession, row.source_document))
+    _format_numeric_column(sheet, "C")
+    _highlight_mapping_relations(sheet, "M")
 
 
 def _backlog(sheet: object, review: P3PeerReview) -> None:
@@ -337,6 +380,16 @@ def _document_url(filing_urls: Mapping[str, str], accession: str, document: str 
 
 def _dimensions(dimensions: tuple[str, ...]) -> str:
     return "; ".join(dimensions) if dimensions else "none"
+
+
+def _reported_cells(value: str, unit: str | None) -> tuple[Decimal, str, str, int | None]:
+    reported = parse_reported_value(value)
+    return reported.numeric_value, reported.as_filed_display, unit or "", reported.scale
+
+
+def _format_numeric_column(sheet: object, column: str) -> None:
+    for row in range(2, sheet.max_row + 1):
+        sheet[f"{column}{row}"].number_format = _NUMERIC_FORMAT
 
 
 def _highlight_mapping_relations(sheet: object, column: str) -> None:

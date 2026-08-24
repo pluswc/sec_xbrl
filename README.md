@@ -56,6 +56,13 @@ the raw fact ID, company canonical ID, analytical ID, mapping relation,
 confidence/version, period, dimensions, and as-filed source locator. SEC
 filing links are clickable; workbook generation performs no download.
 
+The three reported-value sheets (`Revenue_Breakdowns`, `Peer_Comparison`, and
+`Source_Trace`) provide a calculable Excel `Numeric value` together with the
+unaltered `As-filed display`, `Unit`, and `Scale`. For example, `3605 × 10^6`
+is stored as numeric `3,605,000,000` while its original display and scale `6`
+remain visible. A missing scale is distinct from an explicitly reported scale
+of `0`; neither representation changes a mapping, scope, or period class.
+
 The source cache is intentionally required and must already have passed P1.
 The generated `.xlsx` is ignored, and neither it nor raw SEC packages should
 be committed. See [the P2 dossier review](docs/pilots/amd-msft-meta-p2-dossiers.md)
