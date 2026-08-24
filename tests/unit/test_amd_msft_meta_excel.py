@@ -1,3 +1,4 @@
+from decimal import Decimal
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -6,6 +7,7 @@ from sec_xbrl.pilots.amd_msft_meta_excel import (
     SHEET_NAMES,
     export_documented_review_workbook,
     export_workbook,
+    parse_reported_value,
 )
 from sec_xbrl.pilots.amd_msft_meta_p2 import CompanyDossier, DossierEvidence
 from sec_xbrl.pilots.amd_msft_meta_p3 import build_peer_review
@@ -78,9 +80,13 @@ def test_exported_workbook_is_filterable_and_preserves_p2_p3_provenance(tmp_path
     trace_headers = [cell.value for cell in trace[1]]
     for required in (
         "Raw fact ID", "Company canonical ID", "Mapping relation", "Mapping confidence",
-        "Mapping version", "Source period", "Dimensions", "QName", "SEC filing",
+        "Mapping version", "Source period", "Dimensions", "QName", "SEC filing", "Numeric value",
+        "As-filed display", "Unit", "Scale",
     ):
         assert required in trace_headers
+    assert trace.cell(2, trace_headers.index("Numeric value") + 1).value == 10_253_000_000
+    assert trace.cell(2, trace_headers.index("As-filed display") + 1).value == "10253 × 10^6"
+    assert trace.cell(2, trace_headers.index("Scale") + 1).value == 6
     assert "QTD_3M" in [cell.value for cell in trace[2]]
     assert "YTD_9M" in [cell.value for cell in trace[4]]
     assert trace.cell(2, trace_headers.index("SEC filing") + 1).hyperlink.target.endswith("/amd/amd.htm")
@@ -89,11 +95,13 @@ def test_exported_workbook_is_filterable_and_preserves_p2_p3_provenance(tmp_path
     peer_headers = [cell.value for cell in peer[1]]
     relation_column = peer_headers.index("Relation") + 1
     assert peer.cell(2, relation_column).value == "UNRESOLVED"
+    assert peer.cell(2, peer_headers.index("Numeric value") + 1).value == 10_253_000_000
+    assert peer.cell(2, peer_headers.index("Numeric value") + 1).number_format == "#,##0.##########;[Red]-#,##0.##########"
     assert peer.conditional_formatting
 
     breakdowns = workbook["Revenue_Breakdowns"]
-    assert breakdowns.cell(2, 7).value == "NOT_COMPARABLE"
-    assert breakdowns.cell(2, 10).hyperlink.target.endswith("/amd/amd.htm")
+    assert breakdowns.cell(2, 10).value == "NOT_COMPARABLE"
+    assert breakdowns.cell(2, 13).hyperlink.target.endswith("/amd/amd.htm")
 
     disclosures = workbook["Disclosure_Status"]
     assert disclosures.cell(2, 3).value == "NOT_REPORTED_THIS_QUARTER"
@@ -112,4 +120,17 @@ def test_committed_p2_p3_review_summaries_export_the_full_pilot_without_network(
     workbook = load_workbook(output)
     assert workbook["Peer_Comparison"].max_row == 16  # header + 15 documented P3 rows
     assert workbook["Disclosure_Status"].max_row == 39  # header + 38 documented P2 states
-    assert workbook["Source_Trace"]["S2"].hyperlink.target.endswith("amd-20251227.htm")
+    assert workbook["Source_Trace"]["U2"].hyperlink.target.endswith("amd-20251227.htm")
+    assert workbook["Peer_Comparison"]["C2"].value == 34_639_000_000
+    assert workbook["Peer_Comparison"]["D2"].value == "34639 × 10^6"
+
+
+def test_reported_value_parser_preserves_scale_and_returns_calculable_decimal() -> None:
+    reported = parse_reported_value("3605 × 10^6")
+    assert reported.numeric_value == Decimal(3605000000)
+    assert reported.as_filed_display == "3605 × 10^6"
+    assert reported.scale == 6
+    assert parse_reported_value("155.1 × 10^9").numeric_value == Decimal(155100000000)
+    assert parse_reported_value("-1.25 × 10^3").numeric_value == Decimal(-1250)
+    assert parse_reported_value("42").scale is None
+    assert parse_reported_value("42 × 10^0").scale == 0
