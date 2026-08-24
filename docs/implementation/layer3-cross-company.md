@@ -59,3 +59,21 @@ Every comparison row must expose:
 
 ## Versioning
 Cross-company semantics will evolve. All mappings are versioned and analytical outputs record the mapping version used.
+
+## M8 materialization boundary
+
+`sec_xbrl.cross_company.CrossCompanyMapper` consumes explicit Layer 2 company
+canonical IDs and produces additive, independently materializable
+`cross_company_concept_map`, `cross_company_axis_map`, and
+`cross_company_member_map` rows.  Each row has the company canonical source
+ID, analytical ID (where applicable), controlled relation, confidence,
+evidence, method, review flag, and mapping version.  It does not use label or
+value similarity to manufacture a relation.
+
+`ComparisonPanelBuilder` consumes mapped Layer 2 observations and these rows.
+Every output retains `source_raw_id`, `company_canonical_id`, `analytical_id`,
+`mapping_relation`, `mapping_confidence`, `source_filing_id`, `source_period`,
+and `mapping_version`.  Missing mappings become visible `UNRESOLVED` rows;
+they are never discarded or upgraded.  `ANALYTICALLY_SIMILAR` remains that
+relation in the panel even when it shares an analytical category with an
+`EQUIVALENT` or `SUBCATEGORY_OF` row.
