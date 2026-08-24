@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
   "arelle-release",
   "httpx",
+  "openpyxl>=3.1",
   "polars",
   "pydantic>=2",
 ]

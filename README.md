@@ -31,3 +31,44 @@ This project assumes accession discovery already exists. The downstream pipeline
 - M9: analytical views + future MCP facade
 
 See `docs/roadmap.md`.
+
+## AMD · MSFT · META Excel review workbook
+
+The pilot's user-facing deliverable is a locally generated Excel workbook. It
+is a presentation of the P2 dossier and P3 peer-review evidence, not a new
+mapping or calculation layer. It keeps annual, quarter-to-date, and
+year-to-date observations in separate `Period class` rows and makes both
+`UNRESOLVED` and `NOT_COMPARABLE` mapping decisions visible.
+
+With the existing validated P1 cache, generate the ignored local artifact:
+
+```bash
+uv run python -m sec_xbrl.pilots.amd_msft_meta_excel \
+  --manifest docs/pilots/amd-msft-meta-filing-manifest.json \
+  --cache-root data/cache/pilots/amd-msft-meta \
+  --output artifacts/AMD_MSFT_META_pilot.xlsx
+```
+
+The workbook contains `Overview`, `Company_Status`, `Revenue_Breakdowns`,
+`Disclosure_Status`, `Peer_Comparison`, `Source_Trace`, and `Backlog` sheets.
+All tabular sheets have frozen headers and filters. `Source_Trace` preserves
+the raw fact ID, company canonical ID, analytical ID, mapping relation,
+confidence/version, period, dimensions, and as-filed source locator. SEC
+filing links are clickable; workbook generation performs no download.
+
+The source cache is intentionally required and must already have passed P1.
+The generated `.xlsx` is ignored, and neither it nor raw SEC packages should
+be committed. See [the P2 dossier review](docs/pilots/amd-msft-meta-p2-dossiers.md)
+and [the P3 peer review](docs/pilots/amd-msft-meta-p3-peer-review.md) for the
+evidence and limitations behind the workbook.
+
+To export the committed P2/P3 review result when the local raw cache is not
+available, replace `--cache-root ...` with:
+
+```bash
+--p2-summary docs/pilots/amd-msft-meta-p2-dossiers.md \
+--p3-summary docs/pilots/amd-msft-meta-p3-peer-review.md
+```
+
+That review-summary mode does not re-extract facts; it makes the committed,
+reviewed P2/P3 evidence directly viewable in Excel.
