@@ -14,6 +14,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from openpyxl import Workbook
+from openpyxl.chart import BarChart, Reference
 from openpyxl.formatting.rule import CellIsRule
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
@@ -36,6 +37,8 @@ SHEET_NAMES = (
     "Peer_Comparison",
     "Source_Trace",
     "Backlog",
+    "Revenue_Dashboard",
+    "Revenue_Structure",
 )
 
 _HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
@@ -46,7 +49,7 @@ _LINK_FONT = Font(color="0563C1", underline="single")
 _TAB_COLORS = {
     "Overview": "1F4E78", "Company_Status": "5B9BD5", "Revenue_Breakdowns": "70AD47",
     "Disclosure_Status": "70AD47", "Peer_Comparison": "ED7D31", "Source_Trace": "A5A5A5",
-    "Backlog": "FFC000",
+    "Backlog": "FFC000", "Revenue_Dashboard": "5B9BD5", "Revenue_Structure": "70AD47",
 }
 _REPORTED_VALUE_RE = re.compile(
     r"^(?P<number>[+-]?(?:\d+(?:\.\d*)?|\.\d+))(?:\s*(?:×|x)\s*10\^(?P<scale>[+-]?\d+))?$"
@@ -88,6 +91,7 @@ def export_workbook(
     review: P3PeerReview,
     filing_urls: Mapping[str, str],
     output: Path,
+    relationship_evidence_status: str = "NOT_EVIDENCED",
 ) -> Path:
     """Write a reviewable workbook from already-produced P2/P3 evidence.
 
@@ -110,6 +114,8 @@ def export_workbook(
     _peer_comparison(workbook["Peer_Comparison"], review, filing_urls)
     _source_trace(workbook["Source_Trace"], review, filing_urls)
     _backlog(workbook["Backlog"], review)
+    _revenue_dashboard(workbook["Revenue_Dashboard"], review)
+    _revenue_structure(workbook["Revenue_Structure"], review, relationship_evidence_status)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     workbook.save(output)
@@ -144,6 +150,7 @@ def export_documented_review_workbook(
         review=review,
         filing_urls={row.filing.accession: row.filing_url for row in filings},
         output=output,
+        relationship_evidence_status="DOCUMENTED_SUMMARY_ONLY",
     )
 
 
@@ -320,6 +327,69 @@ def _backlog(sheet: object, review: P3PeerReview) -> None:
     rows = [(item.priority, item.item_id, item.lane, item.owner_lane, item.evidence_gap, item.impact, item.decision_needed) for item in review.backlog]
     _write_table(sheet, 1, headers, rows, "Backlog")
     _highlight_exact(sheet, "A", "P0 — correctness blocker", _WARNING_FILL)
+
+
+def _revenue_dashboard(sheet: object, review: P3PeerReview) -> None:
+    """Show only same-class QTD total revenue; it is not a peer ranking."""
+    sheet["A1"] = "Revenue Dashboard — current QTD_3M reported total revenue"
+    sheet["A2"] = "WARNING: side-by-side display only; all current total-revenue relations are UNRESOLVED, not EQUIVALENT."
+    sheet["A3"] = "FY and YTD_9M are intentionally excluded from this chart and cards. No composition aggregate is calculated."
+    sheet.merge_cells("A1:F1")
+    sheet.merge_cells("A2:F2")
+    sheet.merge_cells("A3:F3")
+    for cell in (sheet["A1"], sheet["A2"], sheet["A3"]):
+        cell.alignment = Alignment(wrap_text=True)
+    sheet["A1"].font = Font(bold=True, size=14)
+    sheet["A2"].fill = _WARNING_FILL
+    rows = [row for row in review.comparisons if row.metric == "REPORTED_TOTAL_REVENUE" and row.period_class == "QTD_3M"]
+    headers = ["Ticker", "Numeric value", "As-filed display", "Unit", "Period class", "Relation"]
+    values = [(row.ticker, *_reported_cells(row.value, row.unit)[:3], row.period_class, row.mapping_relation) for row in rows]
+    _write_table(sheet, 5, headers, values, "RevenueDashboard")
+    _format_numeric_column(sheet, "B")
+    _highlight_mapping_relations(sheet, "F")
+    if rows:
+        chart = BarChart()
+        chart.title = "Current QTD_3M reported total revenue (not a ranking)"
+        chart.y_axis.title = "Reported numeric value (USD)"
+        chart.add_data(Reference(sheet, min_col=2, min_row=5, max_row=5 + len(rows)), titles_from_data=True)
+        chart.set_categories(Reference(sheet, min_col=1, min_row=6, max_row=5 + len(rows)))
+        chart.height = 7
+        chart.width = 15
+        sheet.add_chart(chart, "H5")
+
+
+def _revenue_structure(sheet: object, review: P3PeerReview, relationship_status: str) -> None:
+    """Render reported revenue rows without inferring a member hierarchy."""
+    sheet["A1"] = "Revenue Structure — reported rows, not a composition aggregate"
+    sheet["A2"] = "Display depth is a UI indentation only. Scope depth is the number of axis/member dimensions; it is not a parent/member or total relationship."
+    sheet["A3"] = "PRE is presentation/context only and never expands inference. DEF requires allowed arcs and explicit targetRole; absent row evidence remains NOT_EVIDENCED."
+    for row in (1, 2, 3):
+        sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=18)
+        sheet.cell(row, 1).alignment = Alignment(wrap_text=True)
+    sheet["A1"].font = Font(bold=True, size=14)
+    sheet["A2"].fill = _WARNING_FILL
+    headers = [
+        "Ticker", "Period class", "Display depth", "Scope depth", "As-filed label", "Metric", "Numeric value",
+        "As-filed display", "Unit", "Scale", "Dimensions", "Source locator", "Presentation evidence",
+        "Presentation role", "Presentation relationship", "Definition evidence", "Definition role", "Definition relationship",
+        "Relationship provenance",
+    ]
+    selected = [row for row in review.comparisons if row.metric == "REPORTED_TOTAL_REVENUE" or row.dimensions]
+    selected.sort(key=lambda row: (row.ticker, row.period_class, row.metric != "REPORTED_TOTAL_REVENUE", row.metric))
+    values = []
+    for row in selected:
+        depth = 0 if row.metric == "REPORTED_TOTAL_REVENUE" else 1
+        evidence = "NOT_EVIDENCED" if relationship_status != "DOCUMENTED_SUMMARY_ONLY" else "NOT_AVAILABLE"
+        values.append((
+            row.ticker, row.period_class, depth, len(row.dimensions), "NOT_AVAILABLE", row.metric,
+            *_reported_cells(row.value, row.unit), _dimensions(row.dimensions), row.source_locator or "",
+            evidence, "NOT_AVAILABLE", "NOT_AVAILABLE", evidence, "NOT_AVAILABLE", "NOT_AVAILABLE", relationship_status,
+        ))
+    _write_table(sheet, 5, headers, values, "RevenueStructure")
+    _format_numeric_column(sheet, "G")
+    for row in range(6, sheet.max_row + 1):
+        if sheet.cell(row, 3).value == 1:
+            sheet.cell(row, 6).alignment = Alignment(indent=1, vertical="top", wrap_text=True)
 
 
 def _write_key_values(sheet: object, rows: Iterable[tuple[str, str]]) -> None:
