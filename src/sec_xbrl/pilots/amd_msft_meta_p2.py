@@ -60,6 +60,7 @@ class CompanyDossier:
     update_breakdowns: tuple[DossierEvidence, ...]
     disclosure_states: tuple[tuple[str, str], ...]
     statement_qa: tuple[str, ...]
+    relationship_qa: tuple[str, ...]
     warnings: tuple[str, ...]
 
 
@@ -101,6 +102,10 @@ class PilotP2Runner:
             update_breakdowns=update_breakdowns,
             disclosure_states=states,
             statement_qa=_statement_qa(annual["relationships"].roles, update["relationships"].roles),
+            relationship_qa=(
+                _relationship_qa(p.filing.accession, annual["relationships"].roles, annual["relationships"].relationships),
+                _relationship_qa(by_role["CURRENT_UPDATE"].filing.accession, update["relationships"].roles, update["relationships"].relationships),
+            ),
             warnings=(
                 "All values are reported facts; this runner creates no derived Q4 or inferred metric.",
                 "A topic absent from the 10-Q is NOT_REPORTED_THIS_QUARTER, not resolved.",
@@ -273,9 +278,12 @@ def render_dossiers(dossiers: Iterable[CompanyDossier]) -> str:
             lines += _render_records(records) or ["No un-dimensioned revenue fact was selected; see scope warning.", ""]
         lines += ["### Reported revenue breakdowns", ""]
         lines += _render_records(dossier.annual_breakdowns + dossier.update_breakdowns) or ["No revenue fact with explicit dimensions was selected.", ""]
+        lines += ["### Current-series raw view (not a canonical mapping)", ""]
+        lines += _render_records(dossier.update_revenue + dossier.update_breakdowns) or ["No current-update revenue observations were selected.", ""]
         lines += ["### P0/P1 disclosure inventory state", ""]
         lines += [f"- `{topic}`: `{state}`" for topic, state in dossier.disclosure_states]
         lines += ["", "### Statement QA", ""] + [f"- {item}" for item in dossier.statement_qa]
+        lines += ["", "### Relationship QA", ""] + [f"- {item}" for item in dossier.relationship_qa]
         lines += ["", "### Scope warnings", ""] + [f"- {item}" for item in dossier.warnings] + [""]
     return "\n".join(lines) + "\n"
 
@@ -286,6 +294,19 @@ def _render_records(records: Iterable[DossierEvidence]) -> list[str]:
         dimensions = "; ".join(row.dimensions) if row.dimensions else "none"
         result += [f"- {row.label}: `{row.value}` ({row.period_class}, {row.period}; dimensions: {dimensions}).", f"  Evidence: accession `{row.accession}`; `{row.document}` {row.locator}; QName `{row.qname}`; unit `{row.unit}`.", ""]
     return result
+
+
+def _relationship_qa(
+    accession: str, roles: Iterable[Mapping[str, Any]], relationships: Iterable[Mapping[str, Any]]
+) -> str:
+    role_count = sum(1 for row in roles if row.get("role_category") == "STATEMENT")
+    counts: dict[str, int] = defaultdict(int)
+    for row in relationships:
+        counts[str(row.get("network_type"))] += 1
+    return (
+        f"Accession `{accession}`: {role_count} statement roles; "
+        f"PRE={counts['PRE']}, CAL={counts['CAL']}, DEF={counts['DEF']} as-filed relationships."
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
