@@ -1236,7 +1236,6 @@ source = { editable = "." }
 dependencies = [
     { name = "arelle-release" },
     { name = "httpx" },
-    { name = "openpyxl" },
     { name = "polars" },
     { name = "pydantic" },
 ]
@@ -1254,7 +1253,6 @@ requires-dist = [
     { name = "arelle-release" },
     { name = "httpx" },
     { name = "mypy", marker = "extra == 'dev'" },
-    { name = "openpyxl", specifier = ">=3.1" },
     { name = "polars" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pytest", marker = "extra == 'dev'" },
