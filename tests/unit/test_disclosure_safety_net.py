@@ -6,7 +6,6 @@ import pytest
 
 from sec_xbrl.disclosure.safety_net import DisclosureSafetyNet
 
-
 FILING = "filing_1"
 REVENUE_TABLE = "role_revenue_table"
 DEBT_DETAIL = "role_debt_detail"

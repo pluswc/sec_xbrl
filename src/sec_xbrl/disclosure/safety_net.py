@@ -211,9 +211,10 @@ class DisclosureSafetyNet:
             text_signal = any(_matches(str(fact.get("value_text") or ""), topic) for fact in text_facts)
             # A role title merely prioritizes review.  It cannot itself create a
             # critical result; a raw concept, fact, or text block must corroborate it.
-            if title_signal or concept_signal or fact_signal or text_signal:
-                if concept_signal or fact_signal or text_signal:
-                    result.append((topic, (title_signal, concept_signal, fact_signal, text_signal)))
+            if (title_signal or concept_signal or fact_signal or text_signal) and (
+                concept_signal or fact_signal or text_signal
+            ):
+                result.append((topic, (title_signal, concept_signal, fact_signal, text_signal)))
         return result
 
 
