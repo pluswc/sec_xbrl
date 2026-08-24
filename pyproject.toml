@@ -5,7 +5,6 @@ requires-python = ">=3.12"
 dependencies = [
   "arelle-release",
   "httpx",
-  "openpyxl>=3.1",
   "polars",
   "pydantic>=2",
 ]
@@ -27,9 +26,6 @@ packages = ["src/sec_xbrl"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = [
-  "integration: explicit cached-fixture integration test; never requires network access",
-]
 
 [tool.ruff]
 line-length = 100
