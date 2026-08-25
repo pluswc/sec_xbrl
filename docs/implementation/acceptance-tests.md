@@ -9,11 +9,15 @@
 
 ## M0 — Data-plane contract and release governance (current)
 
-The executable/inspection checklist is maintained in
+The durable model is `../architecture/analytical-data-model.md` and the
+executable/inspection checklist is maintained in
 `m0-data-contract.md#8-m0-acceptance-checklist`.  PR reviewers must confirm:
 
 - Raw, Analytical, Derived Metrics, and Display responsibilities are distinct;
   Display never parses a filing package or creates policy-bearing values.
+- the analytical data model defines logical grain/keys, source selection,
+  derived-metric lineage, full dimensions, consumer contract, and the direct-ZIP
+  prototype migration boundary.
 - Reported Fact, Dimensional Fact, Analytical Fact, and Derived Metric grain,
   identifiers, provenance, and full dimension signature are testable.
 - source-type, `as_of_date`, `basis_version`, raw-immutability, and

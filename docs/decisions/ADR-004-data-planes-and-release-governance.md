@@ -51,6 +51,7 @@ conform to.
 ## References
 
 - `docs/implementation/m0-data-contract.md`
+- `docs/architecture/analytical-data-model.md`
 - `docs/architecture/layer-model.md`
 - `docs/implementation/layer1-schema.md`
 - `docs/implementation/period-rules.md`

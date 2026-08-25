@@ -9,6 +9,7 @@ history or claim that prior branches are newly compliant.
 ## M0 — Data-plane contract and release governance (current)
 Deliverables:
 - `ADR-004` and `m0-data-contract.md`
+- `architecture/analytical-data-model.md`
 - explicit Raw / Analytical / Derived Metrics / Display ownership
 - minimum grain, lineage, status, as-of, and basis-version contracts
 - data-quality publication gates and milestone release/PR policy
@@ -42,8 +43,9 @@ Company canonical IDs, mapping evidence/versioning, Annual/Current Series.
 ## M8 — Layer 3 cross-company semantics
 Analytical taxonomy, mapping relations/confidence/versioning, peer-comparison panel.
 
-## M9 — Analytical API and future MCP
-Only after Layer 1-3 QA stabilizes.
+## M9 — Consumer APIs and governed views
+M9 migrates Excel/API/dashboard consumers to governed Analytical and Derived
+Metrics outputs after the necessary Layer 1–3 and analytical-data QA is stable.
 
 ## GitHub workflow
 Recommended milestone branches:

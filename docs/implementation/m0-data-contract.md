@@ -2,9 +2,12 @@
 
 ## 1. Purpose and scope
 
-This is the governing contract for the analysis-data buildout.  It supplements
-the existing Layer 1–3 contracts; it does not replace their detailed schemas
-or amend historical source-control milestones.
+This is the governing contract for the analysis-data buildout.  The durable
+logical entities, keys, selection, derivation, and consumption model is defined
+in `docs/architecture/analytical-data-model.md`; this document governs release,
+quality gates, and acceptance.  It supplements the existing Layer 1–3
+contracts and does not replace their detailed schemas or amend historical
+source-control milestones.
 
 The target flow is:
 
@@ -35,6 +38,9 @@ required by `layer-model.md`, `layer2-longitudinal.md`, and
 `layer3-cross-company.md`.
 
 ## 3. Minimum logical entities and grain
+
+The authoritative detail is `analytical-data-model.md#3-logical-entities-grain-and-keys`.
+The summary below is retained as the M0 acceptance boundary.
 
 Physical stores may vary, but every published record below must be uniquely
 addressable and traceable.

@@ -1,10 +1,16 @@
 # SEC XBRL Analysis — Agent Instructions
 
 ## Project goal
-Build a SEC XBRL analytical pipeline that preserves as-filed meaning and supports:
+Build a provenance-first SEC XBRL analysis-data platform.  It preserves
+as-filed meaning in Raw Layer 1, produces governed Analytical and Derived
+Metrics planes, and supports:
 1. Layer 1 — Raw / As-filed extraction and relationship reconstruction.
 2. Layer 2 — Longitudinal canonicalization within the same company.
 3. Layer 3 — Cross-company semantic comparison.
+
+Excel, API, and dashboard views are consumers of governed Analytical and
+Derived Metrics data.  They are not SEC parsers, recast-selection engines, or
+business-calculation policy engines.
 
 10-K is the annual baseline. 10-Q updates the current state. 10-K/A and 10-Q/A are preserved as amendments and never overwrite raw facts.
 
@@ -13,6 +19,8 @@ Read these before implementing related code:
 - `docs/implementation/delivery-workflow.md` — follow its all-milestone role separation, branch-freeze, independent verification, and PR/CI decision process.
 - `docs/architecture/overview.md`
 - `docs/architecture/layer-model.md`
+- `docs/architecture/analytical-data-model.md` — durable logical data model
+  between Raw extraction and consumer views
 - `docs/implementation/accession-contract.md`
 - `docs/implementation/layer1-schema.md`
 - `docs/implementation/traversal-rules.md`
@@ -38,6 +46,9 @@ If the existing output schema differs, implement an adapter; do not couple XBRL 
 - CAL traversal is parent -> child only for decomposition.
 - PRE is primarily contextual/validation evidence, not a free graph-expansion edge.
 - Reported and derived values are distinct. Never overwrite reported values.
+- Raw, Analytical, Derived Metrics, and Display plane boundaries follow
+  `docs/architecture/analytical-data-model.md`; release and quality-gate policy
+  follows `docs/implementation/m0-data-contract.md`.
 - Absence of a disclosure in a 10-Q does not imply resolution.
 - Canonical IDs are mappings on top of raw IDs; they never replace raw IDs.
 - Cross-company analytical similarity is not accounting equivalence.
