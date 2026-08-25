@@ -302,6 +302,12 @@ def _load_with_arelle(
         from arelle import Cntlr
     except ImportError as exc:  # pragma: no cover - exercised by the project dependency in CI.
         raise ArelleLoadError("arelle-release is required to load filing packages") from exc
+    # SEC-specific transforms are an Arelle runtime dependency, not a filing
+    # taxonomy import. Register them before parsing both bootstrap and offline
+    # loads so a valid SEC Inline filing is not rejected as incomplete.
+    from sec_xbrl.filing.sec_inline_transforms import register_sec_inline_transforms
+
+    register_sec_inline_transforms()
     controller = Cntlr.Cntlr(logFileName="logToBuffer")
     if taxonomy_cache is not None:
         taxonomy_cache.mkdir(parents=True, exist_ok=True)

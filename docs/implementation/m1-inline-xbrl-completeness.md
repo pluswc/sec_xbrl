@@ -72,6 +72,15 @@ The bootstrap is opt-in and must be followed by an offline reload and the
 same Layer 1 validation before a production snapshot is trusted. The project
 does not commit the resulting third-party taxonomy cache or SEC packages.
 
+### SEC Inline transformation runtime
+
+`arelle-release` supplies XBRL Transformation Registry versions 1–5 but does
+not register the SEC EFM `http://www.sec.gov/inlineXBRL/transformation/2015-08-31`
+namespace. `ArelleFilingLoader` therefore registers the supported SEC EFM
+transform functions before every bootstrap and offline load. This is a parser
+runtime dependency rather than a taxonomy-cache artifact. Unsupported SEC
+transform names still fail closed; registration does not suppress validation.
+
 ## Validation procedure
 
 Unit tests create an Inline-like model where `model.facts` has two reported
