@@ -49,6 +49,13 @@ traversal.  `traversal_evidence` keeps every direct dimension, DEF/CAL edge,
 and explicit `targetRole` transition with a typed evidence record.  It does
 not perform Disclosure Safety Net discovery (M5) or canonicalize raw IDs.
 
+M4 is an analytical output only: it never modifies Raw Facts, Contexts,
+Concepts, Roles, or Relationships. DEF traversal accepts the semantic path
+primary item → hypercube (`all`/`notAll`) → dimension → domain/default →
+member hierarchy; member-to-member depth is unbounded and guarded by M3
+relationship identity. CAL follows only parent → child. PRE supplies anchor
+placement and rank, not graph expansion.
+
 ## M5 disclosure safety-net boundary
 
 `sec_xbrl.disclosure.safety_net.DisclosureSafetyNet` consumes the immutable

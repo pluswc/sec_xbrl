@@ -91,7 +91,12 @@ executable/inspection checklist is maintained in
 - Major statements produce Anchor Concepts.
 - direct dimensional facts are found before heuristic expansion.
 - CAL only decomposes parent -> child.
-- DEF reaches member leaves without an arbitrary depth cutoff.
+- DEF follows the allowed primary → hypercube → dimension → domain/default →
+  member semantic direction, reaches member leaves without a fixed depth
+  cutoff, honors targetRole, and terminates cycles using relationship/network
+  identity.
+- PRE supplies statement placement only; every M4 output retains direct-fact
+  or source-relationship provenance and an evidence type without mutating Raw.
 
 ## M5 — Disclosure Safety Net
 - P0 disclosure can be discovered even without Anchor connection.

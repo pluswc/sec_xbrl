@@ -33,6 +33,14 @@ _DIMENSIONAL_ARCROLE_SUFFIXES = frozenset(
     }
 )
 
+_DEF_NEXT_STATES = {
+    "PRIMARY": {"all": "HYPERCUBE", "notAll": "HYPERCUBE"},
+    "HYPERCUBE": {"hypercube-dimension": "DIMENSION"},
+    "DIMENSION": {"dimension-domain": "DOMAIN", "dimension-default": "DEFAULT_MEMBER"},
+    "DOMAIN": {"domain-member": "MEMBER"},
+    "MEMBER": {"domain-member": "MEMBER"},
+}
+
 _PARQUET_SCHEMAS: dict[str, dict[str, str]] = {
     "anchor": {
         "filing_id": "string",
@@ -189,7 +197,9 @@ class AnchorTraversal:
                                 member_id=None,
                                 evidence_type="ROLE_EXPANSION",
                                 relationship_id=None,
-                                target_role_uri=role_by_id[role_id].get("role_uri"),
+                                # This is a TR-008 anchor-presence expansion,
+                                # not an explicit XBRL targetRole transition.
+                                target_role_uri=None,
                                 order=order,
                             )
                         )
@@ -225,23 +235,25 @@ class AnchorTraversal:
         order: int,
     ) -> int:
         """Walk outgoing edges iteratively, with network-aware cycle control."""
-        stack = [(start_role_id, start_concept_id)]
-        visited: set[tuple[str, str, str, str, str]] = set()
+        stack = [(start_role_id, start_concept_id, "PRIMARY" if network == _DEFINITION else None)]
+        visited: set[tuple[str, str, str, str]] = set()
         while stack:
-            role_id, from_id = stack.pop()
+            role_id, from_id, def_state = stack.pop()
             edges = edges_by_network_role.get((network, role_id), ())
             for edge in edges:
                 if str(edge["from_raw_concept_id"]) != from_id:
                     continue
-                if network == _DEFINITION and not _is_dimensional_arcrole(edge.get("arcrole")):
-                    continue
+                next_def_state = None
+                if network == _DEFINITION:
+                    next_def_state = _def_next_state(def_state, edge.get("arcrole"))
+                    if next_def_state is None:
+                        continue
                 to_id = str(edge["to_raw_concept_id"])
                 key = (
                     filing_id,
+                    network,
                     role_id,
-                    str(edge.get("arcrole") or ""),
-                    from_id,
-                    to_id,
+                    _relationship_identity(edge),
                 )
                 if key in visited:
                     continue
@@ -293,7 +305,7 @@ class AnchorTraversal:
                                 order=order,
                             )
                         )
-                stack.append((next_role_id, to_id))
+                stack.append((next_role_id, to_id, next_def_state))
         return order
 
 
@@ -379,8 +391,31 @@ def _roles_containing_anchor(
     return result
 
 
-def _is_dimensional_arcrole(arcrole: Any) -> bool:
-    return any(str(arcrole or "").endswith(suffix) for suffix in _DIMENSIONAL_ARCROLE_SUFFIXES)
+def _def_next_state(current_state: str | None, arcrole: Any) -> str | None:
+    """Return the allowed next DEF state for one semantic dimensional arc."""
+    text = str(arcrole or "")
+    for suffix in _DIMENSIONAL_ARCROLE_SUFFIXES:
+        if text.endswith(suffix):
+            kind = suffix.removeprefix("/")
+            return _DEF_NEXT_STATES.get(current_state or "", {}).get(kind)
+    return None
+
+
+def _relationship_identity(edge: Mapping[str, Any]) -> str:
+    """Use M3 relationship identity, including base-set provenance, for cycles."""
+    relationship_id = edge.get("relationship_id")
+    if relationship_id is not None:
+        return str(relationship_id)
+    return _stable_id(
+        "m4-edge",
+        edge.get("network_type"),
+        edge.get("role_id"),
+        edge.get("arcrole"),
+        edge.get("link_qname"),
+        edge.get("arc_qname"),
+        edge.get("from_raw_concept_id"),
+        edge.get("to_raw_concept_id"),
+    )
 
 
 def _edge_evidence_type(
