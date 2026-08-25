@@ -127,6 +127,9 @@ executable/inspection checklist is maintained in
 - analytical grouping preserves raw/company IDs.
 - analytical similarity is distinguished from equivalence.
 - low-confidence mapping is surfaced, not hidden.
+- exact compatible standard taxonomy identity across two or more companies can
+  produce `EQUIVALENT` only with recorded QName/type/period/filing evidence.
+- label-only or unreviewed company-extension concepts remain `UNRESOLVED`.
 
 ## Golden fixtures
 Start with one company that has rich product/geography/segment disclosures, then add:

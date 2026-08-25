@@ -77,3 +77,21 @@ and `mapping_version`.  Missing mappings become visible `UNRESOLVED` rows;
 they are never discarded or upgraded.  `ANALYTICALLY_SIMILAR` remains that
 relation in the panel even when it shares an analytical category with an
 `EQUIVALENT` or `SUBCATEGORY_OF` row.
+
+## Exact standard-taxonomy baseline
+
+`CrossCompanyMapper.standard_concept_mappings` can create an automatic
+`EQUIVALENT` map only for two or more companies that have the exact same
+standard QName and the same non-empty taxonomy family, data type, and period
+type. It records all supporting filing IDs in the mapping evidence and uses
+`EXACT_STANDARD_TAXONOMY_IDENTITY` as the method. This is a narrow identity
+rule, not label matching. Repeated filings for one company canonical concept
+produce one mapping row with consolidated company-specific filing and raw-ID
+evidence, rather than duplicate mapping rows.
+
+Company extension concepts, including cloud-like product or segment labels,
+receive no automatic map. They remain visible as `UNRESOLVED` until a reviewed
+mapping with scope evidence explicitly assigns `SUBCATEGORY_OF`,
+`SUPERSET_OF`, or `ANALYTICALLY_SIMILAR`. An explicit mapping also cannot
+silently override a generated standard mapping for the same company canonical
+entity; that collision fails validation.
