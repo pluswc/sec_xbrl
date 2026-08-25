@@ -1,14 +1,22 @@
 # Implementation Roadmap
 
-## M0 — Repository and contracts
-Deliverables:
-- AGENTS.md
-- docs contracts
-- private GitHub repository
-- CI skeleton
-- accession adapter stub + tests against existing collector sample output
+## Historical M0 — Repository and accession discovery contracts
+The original bootstrap work established repository contracts, CI skeleton, and
+the accession adapter.  Its discovery boundary remains governed by
+`ADR-003` and `accession-contract.md`; this roadmap does not rewrite its Git
+history or claim that prior branches are newly compliant.
 
-Exit: Codex can read contracts; one accession record flows through adapter.
+## M0 — Data-plane contract and release governance (current)
+Deliverables:
+- `ADR-004` and `m0-data-contract.md`
+- `architecture/analytical-data-model.md`
+- explicit Raw / Analytical / Derived Metrics / Display ownership
+- minimum grain, lineage, status, as-of, and basis-version contracts
+- data-quality publication gates and milestone release/PR policy
+- acceptance and migration policy for subsequent milestones
+
+Exit: a PR can test whether a proposed Layer/analysis/display change satisfies
+the agreed contract before it is merged to `main`.
 
 ## M1 — Filing package resolver
 Input: `FilingRef`
@@ -35,12 +43,13 @@ Company canonical IDs, mapping evidence/versioning, Annual/Current Series.
 ## M8 — Layer 3 cross-company semantics
 Analytical taxonomy, mapping relations/confidence/versioning, peer-comparison panel.
 
-## M9 — Analytical API and future MCP
-Only after Layer 1-3 QA stabilizes.
+## M9 — Consumer APIs and governed views
+M9 migrates Excel/API/dashboard consumers to governed Analytical and Derived
+Metrics outputs after the necessary Layer 1–3 and analytical-data QA is stable.
 
 ## GitHub workflow
 Recommended milestone branches:
-- `feature/m0-accession-adapter`
+- `feature/m0-data-contract`
 - `feature/m1-filing-package`
 - `feature/m2-layer1-core`
 - `feature/m3-relationships`
@@ -50,4 +59,7 @@ Recommended milestone branches:
 - `feature/m7-longitudinal`
 - `feature/m8-cross-company`
 
-Each PR should include tests and any contract changes required by the implementation.
+Each PR should include tests and any contract changes required by the
+implementation.  It must originate from latest passing `main` and merge only
+after its new acceptance checks, full regression, and artifact/impact comparison
+pass; see `docs/implementation/m0-data-contract.md`.

@@ -1,16 +1,44 @@
 # Acceptance Test Plan
 
-## M0 — Accession adapter
+## Historical M0 — Accession adapter
 - Company submissions payloads can be consumed without changing `XbrlDataLoad`.
 - 10-K/10-Q(/A) accessions map to canonical `FilingRef`.
 - malformed or unsupported records fail with explicit adapter errors.
 - repeated reads are ordered by `(filed_date, accession)` and deterministic.
 - raw submissions payloads are immutable; mutable discovery state is separate.
 
+## M0 — Data-plane contract and release governance (current)
+
+The durable model is `../architecture/analytical-data-model.md` and the
+executable/inspection checklist is maintained in
+`m0-data-contract.md#8-m0-acceptance-checklist`.  PR reviewers must confirm:
+
+- Raw, Analytical, Derived Metrics, and Display responsibilities are distinct;
+  Display never parses a filing package or creates policy-bearing values.
+- the analytical data model defines logical grain/keys, source selection,
+  derived-metric lineage, full dimensions, consumer contract, and the direct-ZIP
+  prototype migration boundary.
+- Reported Fact, Dimensional Fact, Analytical Fact, and Derived Metric grain,
+  identifiers, provenance, and full dimension signature are testable.
+- source-type, `as_of_date`, `basis_version`, raw-immutability, and
+  `UNAVAILABLE` semantics are specified.
+- all data-quality gates define expected/actual checks and publish/failure
+  behavior.
+- the PR policy requires frozen independent verification, full regression, and
+  evidence-backed intentional output changes.
+- unmerged M1 Inline XBRL work is not accepted until it aligns to M0 and proves
+  a real complete, cached-taxonomy success case.
+
 ## M1 — Filing package + Arelle load
 - Given a cached accession fixture, resolve required SEC filing files.
 - Arelle loads without network access in golden tests.
 - filing/accession provenance is preserved.
+- After M0, an Inline XBRL completeness change additionally proves at least one
+  successful cached-taxonomy extraction with complete reported **and**
+  dimensional facts.  A fail-closed validation result alone is not M1 success.
+- The filing-level expected/actual fact corpus reconciliation, taxonomy and
+  transformation resolution, and same-filing atomic fact/relationship snapshot
+  gates pass before the snapshot is published as `SUCCESS`.
 
 ### M1A — Package cache
 - ZIP and index-header artifacts are cached under the filing CIK/accession.
