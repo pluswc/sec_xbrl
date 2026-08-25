@@ -76,3 +76,30 @@ def test_selector_never_promotes_unbound_later_comparative_fact() -> None:
     assert {row["unavailable_reason"] for row in selected} == {
         "UNKNOWN_OR_UNSUPPORTED_BASIS_VERSION"
     }
+
+
+def test_builder_clears_unreviewed_caller_recast_metadata() -> None:
+    rows = list(_rows())
+    rows[-1] = {
+        **rows[-1],
+        "source_type": "RECAST_REPORTED",
+        "basis_version": "unreviewed-v2",
+        "recast_evidence_id": "invented",
+        "recast_evidence": {"not": "validated"},
+    }
+    observations = RecastObservationBuilder().build(rows)
+    row = next(item for item in observations if item["fact_id"] == "new-q2")
+    assert row["source_type"] == "REPORTED"
+    assert row["basis_version"] is None
+    assert row["recast_evidence_id"] is None
+    assert row["recast_evidence"] is None
+    selected = AsOfSeriesSelector().select(
+        observations, as_of_date="2025-11-02", view="LATEST_RECAST"
+    )
+    assert {item["status"] for item in selected} == {"N/A"}
+
+
+def test_builder_rejects_evidence_with_unknown_source_fact_id() -> None:
+    evidence = _evidence("not-a-fact", "FY25-Q1")
+    with pytest.raises(RecastObservationError, match="unknown source raw Fact"):
+        RecastObservationBuilder().build(_rows(), evidence=(evidence,))

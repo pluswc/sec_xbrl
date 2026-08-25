@@ -72,17 +72,20 @@ class RecastObservationBuilder:
             source_id = _raw_fact_id(row)
             item = bound.get(source_id)
             if item is None:
-                # No evidence means this is still visible in AS_FILED but has no
-                # guessed comparable basis and is ineligible for LATEST_RECAST.
+                # This is a trust boundary.  Do not accept a caller-supplied
+                # RECAST_REPORTED flag, basis, or evidence ID: an observation
+                # becomes comparable only through the validated binding above.
+                # It remains visible in AS_FILED but cannot enter
+                # LATEST_RECAST on a guessed or unreviewed basis.
                 result.append({
                     **row,
                     "source_raw_fact_id": source_id,
-                    "source_type": str(row.get("source_type") or "REPORTED"),
-                    "basis_version": row.get("basis_version"),
-                    "recast_evidence_id": row.get("recast_evidence_id"),
-                    "recast_evidence": row.get("recast_evidence"),
-                    "recast_event_id": row.get("recast_event_id"),
-                    "recast_prior_raw_fact_ids": tuple(row.get("recast_prior_raw_fact_ids") or ()),
+                    "source_type": "REPORTED",
+                    "basis_version": None,
+                    "recast_evidence_id": None,
+                    "recast_evidence": None,
+                    "recast_event_id": None,
+                    "recast_prior_raw_fact_ids": (),
                 })
                 continue
             prior_rows = _matching_priors(row, rows, item)
