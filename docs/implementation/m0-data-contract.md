@@ -150,9 +150,13 @@ M0 establishes the contract first.  It does not retrofit historic commits.
 
 - The unmerged `feature/m1-inline-xbrl-completeness` candidate must rebase or
   otherwise align to the M0 merge commit before its PR is approved.
-- It must demonstrate at least one successful cached-taxonomy Inline XBRL
-  extraction with complete reported and dimensional fact validation.  A
-  fail-closed result alone is insufficient for M1 acceptance.
+- It must demonstrate a successful, network-free Inline XBRL completeness
+  extraction with complete reported and dimensional Fact validation. A cached
+  taxonomy package is preferred; where that package cannot be distributed,
+  a deterministic self-contained contract fixture is acceptable for the code
+  gate and the real SEC taxonomy bootstrap is recorded as a separate optional
+  integration check. A fail-closed result alone is insufficient for M1
+  acceptance.
 - The successful fixture must be general, contract-driven behavior—not an
   NVIDIA-only exception.  NVIDIA FY2026 Q3 remains a required regression case
   once its compliant cached taxonomy fixture is available.

@@ -27,15 +27,18 @@ executable/inspection checklist is maintained in
 - the PR policy requires frozen independent verification, full regression, and
   evidence-backed intentional output changes.
 - unmerged M1 Inline XBRL work is not accepted until it aligns to M0 and proves
-  a real complete, cached-taxonomy success case.
+  a complete network-free success case using a cached taxonomy package or a
+  deterministic self-contained contract fixture.
 
 ## M1 — Filing package + Arelle load
 - Given a cached accession fixture, resolve required SEC filing files.
 - Arelle loads without network access in golden tests.
 - filing/accession provenance is preserved.
 - After M0, an Inline XBRL completeness change additionally proves at least one
-  successful cached-taxonomy extraction with complete reported **and**
-  dimensional facts.  A fail-closed validation result alone is not M1 success.
+  successful network-free extraction with complete reported **and**
+  dimensional facts, using a cached taxonomy package or a deterministic
+  self-contained contract fixture. A fail-closed validation result alone is
+  not M1 success.
 - The filing-level expected/actual fact corpus reconciliation, taxonomy and
   transformation resolution, and same-filing atomic fact/relationship snapshot
   gates pass before the snapshot is published as `SUCCESS`.

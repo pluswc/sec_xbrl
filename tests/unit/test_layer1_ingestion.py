@@ -64,6 +64,48 @@ class _Fact:
         self.concept = _Concept(self.qname)
 
 
+class _Dimension:
+    def __init__(self, axis: _QName, member: _QName) -> None:
+        self.dimensionQname = axis
+        self.memberQname = member
+        self.isExplicit = True
+        self.typedMember = None
+
+
+class _Relationship:
+    def __init__(self, source: _Concept, target: _Concept) -> None:
+        self.fromModelObject = source
+        self.toModelObject = target
+        self.arcrole = "http://xbrl.org/int/dim/arcrole/all"
+        self.order = "1"
+
+
+class _RelationshipSet:
+    def __init__(self, relationship: _Relationship) -> None:
+        self.modelRelationships = (relationship,)
+
+
+class _FullInlineModel:
+    role_uri = "http://example.com/role/RevenueGeography"
+    baseSets: ClassVar[dict[tuple[str, str, str, str], object]] = {
+        ("http://xbrl.org/int/dim/arcrole/all", role_uri, "definitionLink", "definitionArc"): object()
+    }
+    roleTypes: ClassVar[dict[str, tuple[object, ...]]] = {role_uri: ()}
+    errors = ()
+
+    def __init__(self) -> None:
+        fact = _Fact("revenue")
+        axis = _QName("http://xbrl.org/2005/xbrldt", "GeographyAxis", "srt")
+        member = _QName("http://example.com/company/2025", "UnitedStatesMember", "ex")
+        fact.context.qnameDims = {axis: _Dimension(axis, member)}
+        self.facts = (fact,)
+        self.factsInInstance = ()
+        self._relationship = _Relationship(fact.concept, _Concept(axis))
+
+    def relationshipSet(self, *_: object) -> _RelationshipSet:
+        return _RelationshipSet(self._relationship)
+
+
 class _Relationships:
     parser_version = "test-relationships"
 
@@ -108,12 +150,34 @@ def test_ingestion_materializes_complete_fact_corpus_and_success_manifest(tmp_pa
     assert (snapshot / "relationship.parquet").is_file()
     assert (snapshot / "layer1_manifest.json").is_file()
     states = list((tmp_path / "parse_state").rglob("*.json"))
-    assert len(states) == 1
-    state = json.loads(states[0].read_text())
-    assert state["outcome"] == "SUCCEEDED"
-    assert state["message"] is None
+    parsed_states = [json.loads(state.read_text()) for state in states]
+    assert {state["quality_gate"] for state in parsed_states} == {
+        "TAXONOMY_AND_TRANSFORM_RESOLUTION",
+        "RAW_CORPUS_COMPLETENESS",
+        "ATOMIC_FILING_SNAPSHOT",
+    }
+    raw_gate = next(state for state in parsed_states if state["quality_gate"] == "RAW_CORPUS_COMPLETENESS")
+    assert raw_gate["outcome"] == "SUCCEEDED"
+    assert raw_gate["expected_count"] == raw_gate["actual_count"] == 2
+    assert raw_gate["validation_rule_version"]
+    assert raw_gate["recorded_at"]
+    assert raw_gate["message"] is None
     with pytest.raises(Layer1IngestionError, match="already exists"):
         ingestor.ingest(_resolved(tmp_path), model)
+
+
+def test_complete_inline_fixture_publishes_dimensional_fact_and_definition_relationship(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("polars")
+    ingestor = Layer1Ingestor(tmp_path / "snapshots")
+
+    manifest = ingestor.ingest(_resolved(tmp_path), _FullInlineModel())
+
+    assert manifest.materialized_fact_count == 1
+    assert manifest.dimension_fact_count == 1
+    assert manifest.role_count == 1
+    assert manifest.relationship_count == 1
 
 
 @pytest.mark.parametrize("error", ["IOerror: taxonomy unavailable", "invalidTransformation: ixt missing"])

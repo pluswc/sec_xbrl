@@ -15,6 +15,7 @@ import shutil
 import tempfile
 import uuid
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -70,8 +71,14 @@ class Layer1ParseState:
     accession: str
     parser_version: str
     stage: str
+    quality_gate: str
     outcome: str
     retryable: bool
+    expected_count: int | None
+    actual_count: int | None
+    validation_rule_version: str
+    input_identifiers: tuple[str, ...]
+    recorded_at: str
     message: str | None
 
     def to_json(self) -> str:
@@ -82,6 +89,17 @@ class Layer1Ingestor:
     """Create one complete, immutable Layer 1 snapshot per resolved filing."""
 
     manifest_name = "layer1_manifest.json"
+    validation_rule_version = "m1-inline-xbrl-completeness-v1"
+    required_table_names = (
+        "filing",
+        "concept",
+        "context",
+        "unit",
+        "fact",
+        "dimension_fact",
+        "role",
+        "relationship",
+    )
 
     def __init__(
         self,
@@ -109,12 +127,24 @@ class Layer1Ingestor:
         try:
             self._validate_model(model)
         except Layer1IngestionError as exc:
-            self._write_parse_state(resolved, stage="VALIDATION", outcome="FAILED", message=str(exc))
+            self._write_parse_state(
+                resolved,
+                stage="VALIDATION",
+                quality_gate=_quality_gate_for_validation_failure(str(exc)),
+                outcome="FAILED",
+                message=str(exc),
+            )
             raise
         destination = self.snapshot_dir(resolved)
         if destination.exists():
             exc = Layer1IngestionError(f"Layer 1 snapshot already exists: {destination}")
-            self._write_parse_state(resolved, stage="LAYER1_EXTRACT", outcome="FAILED", message=str(exc))
+            self._write_parse_state(
+                resolved,
+                stage="LAYER1_EXTRACT",
+                quality_gate="ATOMIC_FILING_SNAPSHOT",
+                outcome="FAILED",
+                message=str(exc),
+            )
             raise exc
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = Path(tempfile.mkdtemp(prefix=f".{resolved.filing.accession.replace('-', '')}.partial-", dir=destination.parent))
@@ -137,12 +167,24 @@ class Layer1Ingestor:
                 relationships = self.relationship_extractor.extract(model, resolved.filing)
             except Exception as exc:
                 self._write_parse_state(
-                    resolved, stage="LAYER1_EXTRACT", outcome="FAILED", message=str(exc)
+                    resolved,
+                    stage="LAYER1_EXTRACT",
+                    quality_gate="RAW_CORPUS_COMPLETENESS",
+                    outcome="FAILED",
+                    expected_count=corpus.source_count,
+                    actual_count=len(facts.facts) if "facts" in locals() else None,
+                    message=str(exc),
                 )
                 state_recorded = True
                 raise
             facts.write_parquet(temporary)
             relationships.write_parquet(temporary)
+            table_count = sum((temporary / f"{name}.parquet").is_file() for name in self.required_table_names)
+            if table_count != len(self.required_table_names):
+                raise Layer1IngestionError(
+                    "Layer 1 snapshot is missing required tables: "
+                    f"expected={len(self.required_table_names)}, actual={table_count}"
+                )
             manifest = Layer1SnapshotManifest(
                 schema_version=1,
                 cik=canonicalize_cik(resolved.filing.cik),
@@ -164,12 +206,40 @@ class Layer1Ingestor:
             )
             (temporary / self.manifest_name).write_text(manifest.to_json(), encoding="utf-8")
             os.replace(temporary, destination)
-            self._write_parse_state(resolved, stage="LAYER1_EXTRACT", outcome="SUCCEEDED", message=None)
+            self._write_parse_state(
+                resolved,
+                stage="VALIDATION",
+                quality_gate="TAXONOMY_AND_TRANSFORM_RESOLUTION",
+                outcome="SUCCEEDED",
+                message=None,
+            )
+            self._write_parse_state(
+                resolved,
+                stage="VALIDATION",
+                quality_gate="RAW_CORPUS_COMPLETENESS",
+                outcome="SUCCEEDED",
+                expected_count=corpus.source_count,
+                actual_count=len(facts.facts),
+                message=None,
+            )
+            self._write_parse_state(
+                resolved,
+                stage="LAYER1_EXTRACT",
+                quality_gate="ATOMIC_FILING_SNAPSHOT",
+                outcome="SUCCEEDED",
+                expected_count=len(self.required_table_names),
+                actual_count=table_count,
+                message=None,
+            )
             return manifest
         except Exception as exc:
             if not state_recorded:
                 self._write_parse_state(
-                    resolved, stage="LAYER1_EXTRACT", outcome="FAILED", message=str(exc)
+                    resolved,
+                    stage="LAYER1_EXTRACT",
+                    quality_gate="ATOMIC_FILING_SNAPSHOT",
+                    outcome="FAILED",
+                    message=str(exc),
                 )
             shutil.rmtree(temporary, ignore_errors=True)
             raise
@@ -181,7 +251,13 @@ class Layer1Ingestor:
         try:
             model = loader.load(resolved, extraction_dir)
         except Exception as exc:
-            self._write_parse_state(resolved, stage="ARELLE_LOAD", outcome="FAILED", message=str(exc))
+            self._write_parse_state(
+                resolved,
+                stage="ARELLE_LOAD",
+                quality_gate="TAXONOMY_AND_TRANSFORM_RESOLUTION",
+                outcome="FAILED",
+                message=str(exc),
+            )
             raise
         return self.ingest(resolved, model)
 
@@ -190,7 +266,10 @@ class Layer1Ingestor:
         resolved: ResolvedFiling,
         *,
         stage: str,
+        quality_gate: str,
         outcome: str,
+        expected_count: int | None = None,
+        actual_count: int | None = None,
         message: str | None,
     ) -> Path:
         """Append an immutable, retryable parse-state event outside the snapshot."""
@@ -210,8 +289,14 @@ class Layer1Ingestor:
             accession=filing.accession,
             parser_version=parser_version,
             stage=stage,
+            quality_gate=quality_gate,
             outcome=outcome,
             retryable=outcome == "FAILED",
+            expected_count=expected_count,
+            actual_count=actual_count,
+            validation_rule_version=self.validation_rule_version,
+            input_identifiers=(resolved.index.source_url, str(resolved.zip_path)),
+            recorded_at=datetime.now(UTC).isoformat(),
             message=message,
         )
         path = destination / f"{uuid.uuid4().hex}.json"
@@ -254,6 +339,13 @@ def _is_resolution_or_transform_error(error: str) -> bool:
         "schemaref",
     )
     return any(marker in normalized for marker in markers)
+
+
+def _quality_gate_for_validation_failure(message: str) -> str:
+    normalized = message.lower()
+    if "taxonomy" in normalized or "transform" in normalized or "unresolved concepts" in normalized:
+        return "TAXONOMY_AND_TRANSFORM_RESOLUTION"
+    return "RAW_CORPUS_COMPLETENESS"
 
 
 def _sha256_file(path: Path) -> str:

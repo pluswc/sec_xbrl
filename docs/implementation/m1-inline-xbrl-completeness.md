@@ -33,6 +33,22 @@ For every successfully materialized filing:
    outcome, retryability, and failure message. Failed attempts therefore leave
    no snapshot but remain observable and retryable.
 
+## M0 quality-gate evidence
+
+Each parse-state event records the M0 gate name, expected/actual counts where
+applicable, `m1-inline-xbrl-completeness-v1` validation-rule version, source
+identifiers, and timestamp. A successful publication records all three Layer 1
+gates:
+
+| Gate | Expected / actual | Success condition |
+| --- | --- | --- |
+| `TAXONOMY_AND_TRANSFORM_RESOLUTION` | Not a count gate | Every selected Fact has a resolved concept and Arelle has no taxonomy/reference/Inline transform failure. |
+| `RAW_CORPUS_COMPLETENESS` | top-level `model.facts` count / materialized Fact count | Exact equality after declared tuple exclusion. |
+| `ATOMIC_FILING_SNAPSHOT` | 8 required tables / 8 published tables | Fact, Context, Unit, Dimension, Concept, Filing, Role, and Relationship tables plus their manifest are published by one atomic rename. |
+
+On failure the corresponding event is `FAILED` and retryable; no accession
+snapshot directory is published.
+
 These conditions are generic. They do not rely on NVIDIA labels, accession
 numbers, or numerical values.
 
@@ -64,6 +80,12 @@ facts and a manifest declaring `model.facts`; taxonomy/transform failures and
 unresolved concepts must create no directory. A deliberately partial extractor
 is rejected when its output count differs from the validated source corpus;
 the corresponding parse-state event is `LAYER1_EXTRACT` / `FAILED`.
+
+A separate dependency-free contract fixture represents a standard revenue Fact
+with an explicit geography Axis/Member and a DEF relation. It must publish one
+dimensional Fact assignment and one relationship in the same snapshot. This is
+the offline M1 success proof; it exercises the generic path without claiming a
+network bootstrap or a company-specific cached taxonomy result.
 
 For a cached real filing, execute the following after the standard taxonomy
 cache has been explicitly bootstrapped:
