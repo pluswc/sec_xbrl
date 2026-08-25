@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sec_xbrl.facts.layer1 import Layer1ExtractionError, _qname_parts, _stable_id
+from sec_xbrl.facts.layer1 import Layer1ExtractionError, _qname_parts, _qname_text, _stable_id
 from sec_xbrl.filing.company_discovery import canonicalize_cik
 from sec_xbrl.filing.contracts import FilingRef
 
@@ -32,6 +32,8 @@ _PARQUET_SCHEMAS: dict[str, dict[str, str]] = {
         "network_type": "string",
         "role_id": "string",
         "arcrole": "string",
+        "link_qname": "string",
+        "arc_qname": "string",
         "from_raw_concept_id": "string",
         "to_raw_concept_id": "string",
         "order": "string",
@@ -115,6 +117,11 @@ class RelationshipExtractor:
                     "network_type": network_type,
                     "role_id": role_row["role_id"],
                     "arcrole": str(getattr(relationship, "arcrole", None) or arcrole),
+                    # Arelle base-set identity includes link/arc QNames.  Keep
+                    # them so matching endpoint arcs do not merge across
+                    # distinct extended-link networks.
+                    "link_qname": _network_qname(linkqname),
+                    "arc_qname": _network_qname(arcqname),
                     "from_raw_concept_id": from_id,
                     "to_raw_concept_id": to_id,
                     "order": _text(_attribute(relationship, "order")),
@@ -135,6 +142,8 @@ class RelationshipExtractor:
                     row["network_type"],
                     role_uri,
                     row["arcrole"],
+                    row["link_qname"],
+                    row["arc_qname"],
                     row["from_raw_concept_id"],
                     row["to_raw_concept_id"],
                     row["order"],
@@ -241,6 +250,16 @@ def _raw_concept_id(filing_id: str, model_object: Any) -> str | None:
         return None
     namespace_uri, _, local_name = _qname_parts(qname)
     return _stable_id("concept", filing_id, namespace_uri, local_name)
+
+
+def _network_qname(value: Any) -> str | None:
+    """Render a base-set QName without assuming fixture objects are QNames."""
+    if value is None:
+        return None
+    try:
+        return _qname_text(value)
+    except Layer1ExtractionError:
+        return _text(value)
 
 
 def _attribute(relationship: Any, *names: str) -> Any:

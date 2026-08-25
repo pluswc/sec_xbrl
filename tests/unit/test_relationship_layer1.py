@@ -50,6 +50,7 @@ class _Model:
     disclosure_role = "http://example.com/role/RevenueDisclosure"
     baseSets: ClassVar[dict[tuple[str, str, str, str], object]] = {
         (presentation, statement_role, "presentationLink", "presentationArc"): object(),
+        (presentation, statement_role, "alternatePresentationLink", "alternatePresentationArc"): object(),
         (calculation, statement_role, "calculationLink", "calculationArc"): object(),
         (definition, disclosure_role, "definitionLink", "definitionArc"): object(),
     }
@@ -109,7 +110,7 @@ def test_extract_keeps_pre_cal_def_separate_and_preserves_target_role_metadata()
     tables = RelationshipExtractor().extract(_Model(), _filing())
 
     assert {row["network_type"] for row in tables.relationships} == {"PRE", "CAL", "DEF"}
-    assert len(tables.relationships) == 3
+    assert len(tables.relationships) == 4
     assert {row["role_category"] for row in tables.roles} == {"STATEMENT", "TABLE"}
     definition = next(row for row in tables.relationships if row["network_type"] == "DEF")
     assert definition["target_role_uri"] == "http://example.com/role/RegionMembers"
@@ -121,6 +122,16 @@ def test_extract_keeps_pre_cal_def_separate_and_preserves_target_role_metadata()
     calculation = next(row for row in tables.relationships if row["network_type"] == "CAL")
     assert presentation["role_id"] == calculation["role_id"]
     assert presentation["relationship_id"] != calculation["relationship_id"]
+    presentations = [row for row in tables.relationships if row["network_type"] == "PRE"]
+    assert {row["link_qname"] for row in presentations} == {
+        "alternatePresentationLink",
+        "presentationLink",
+    }
+    assert {row["arc_qname"] for row in presentations} == {
+        "alternatePresentationArc",
+        "presentationArc",
+    }
+    assert len({row["relationship_id"] for row in presentations}) == 2
 
 
 def test_write_parquet_keeps_role_and_relationship_contract_schemas(tmp_path: Path) -> None:
@@ -132,5 +143,7 @@ def test_write_parquet_keeps_role_and_relationship_contract_schemas(tmp_path: Pa
     assert {path.stem for path in tmp_path.glob("*.parquet")} == {"role", "relationship"}
     relationship = pl.read_parquet(tmp_path / "relationship.parquet").row(0, named=True)
     assert relationship["network_type"] in {"PRE", "CAL", "DEF"}
+    assert "link_qname" in relationship
+    assert "arc_qname" in relationship
     with pytest.raises(Exception, match="snapshot already exists"):
         tables.write_parquet(tmp_path)

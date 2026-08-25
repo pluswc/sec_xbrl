@@ -79,7 +79,10 @@ executable/inspection checklist is maintained in
 ## M3 — relationships
 - PRE/CAL/DEF remain separate.
 - role URI/definition preserved.
-- targetRole preserved and traversable.
+- base-set link/arc QName provenance remains separate, so identical endpoint
+  arcs from different extended-link networks are not implicitly merged.
+- targetRole and arc attributes (order, weight, preferred label, usable,
+  closed, context element) are preserved and traversable.
 - no role network is implicitly merged.
 
 ## M4 — Anchor traversal

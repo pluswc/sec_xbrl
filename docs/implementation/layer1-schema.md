@@ -154,6 +154,8 @@ One row per fact-axis-member assignment.
 - `network_type` (`PRE`, `CAL`, `DEF`)
 - `role_id`
 - `arcrole`
+- `link_qname` / `arc_qname` (Arelle base-set identity; distinct extended-link
+  networks must not be merged merely because their role URI and endpoints match)
 - `from_raw_concept_id`
 - `to_raw_concept_id`
 - `order`
