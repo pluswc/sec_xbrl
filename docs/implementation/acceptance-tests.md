@@ -81,6 +81,8 @@ executable/inspection checklist is maintained in
 - role URI/definition preserved.
 - base-set link/arc QName provenance remains separate, so identical endpoint
   arcs from different extended-link networks are not implicitly merged.
+- Arelle wildcard base-set aliases do not duplicate a fully specified network;
+  a recognized network without a fully specified link/arc QName fails closed.
 - targetRole and arc attributes (order, weight, preferred label, usable,
   closed, context element) are preserved and traversable.
 - no role network is implicitly merged.

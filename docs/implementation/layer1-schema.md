@@ -166,6 +166,13 @@ One row per fact-axis-member assignment.
 - `closed` nullable
 - `context_element` nullable
 
+When Arelle exposes wildcard aliases and a fully specified base-set key for
+the same `(arcrole, role URI)`, only the fully specified `(link_qname,
+arc_qname)` key is materialized. This prevents alias-driven duplicate arcs
+while retaining the actual extended-link network provenance. A recognized
+network with no fully specified key fails extraction rather than publishing a
+relationship with missing network provenance.
+
 ## 9. `anchor`
 - `filing_id`
 - `statement_type` (`BS`, `IS`, `CF`, `EQ`, optional `CI`)
