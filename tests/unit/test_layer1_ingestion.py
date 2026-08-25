@@ -121,6 +121,13 @@ class _PartialFacts:
         return replace(tables, facts=tables.facts[:1])
 
 
+class _EarlyFailingFacts:
+    parser_version = "test-early-failing-facts"
+
+    def extract(self, model: object, filing: FilingRef, **_: object) -> Layer1Tables:
+        raise RuntimeError("fixture extractor stopped early")
+
+
 class _FailingLoader:
     def load(self, resolved: ResolvedFiling, destination: Path) -> object:
         raise RuntimeError("Arelle fixture load failed")
@@ -225,6 +232,28 @@ def test_ingestion_refuses_partial_extractor_output_and_records_retryable_state(
     assert state["stage"] == "LAYER1_EXTRACT"
     assert state["outcome"] == "FAILED"
     assert state["retryable"] is True
+
+
+def test_early_extractor_failure_preserves_error_and_records_raw_completeness_gate(
+    tmp_path: Path,
+) -> None:
+    model = type("InlineModel", (), {"facts": (_Fact("one"),), "errors": ()})()
+    ingestor = Layer1Ingestor(
+        tmp_path / "snapshots",
+        fact_extractor=_EarlyFailingFacts(),
+        relationship_extractor=_Relationships(),
+    )
+
+    with pytest.raises(RuntimeError, match="fixture extractor stopped early"):
+        ingestor.ingest(_resolved(tmp_path), model)
+
+    assert not (tmp_path / "snapshots" / "0000000001" / "000000000125000001").exists()
+    state = json.loads(next((tmp_path / "parse_state").rglob("*.json")).read_text())
+    assert state["quality_gate"] == "RAW_CORPUS_COMPLETENESS"
+    assert state["outcome"] == "FAILED"
+    assert state["expected_count"] == 1
+    assert state["actual_count"] is None
+    assert state["message"] == "fixture extractor stopped early"
 
 
 def test_load_failure_is_recorded_as_retryable_arelle_load_state(tmp_path: Path) -> None:

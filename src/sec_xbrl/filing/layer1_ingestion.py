@@ -19,7 +19,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sec_xbrl.facts.layer1 import Layer1ExtractionError, Layer1Extractor, select_fact_corpus
+from sec_xbrl.facts.layer1 import (
+    Layer1ExtractionError,
+    Layer1Extractor,
+    Layer1Tables,
+    select_fact_corpus,
+)
 from sec_xbrl.filing.company_discovery import canonicalize_cik
 from sec_xbrl.filing.filing_index import ArelleFilingLoader, ResolvedFiling
 from sec_xbrl.relationships.layer1 import RelationshipExtractor
@@ -151,6 +156,11 @@ class Layer1Ingestor:
         state_recorded = False
         try:
             package_sha256 = _sha256_file(resolved.zip_path)
+            # Validation has already established this corpus; capture its count
+            # before calling a pluggable extractor so an early extractor error
+            # cannot erase the expected side of the completeness gate.
+            corpus = select_fact_corpus(model)
+            facts: Layer1Tables | None = None
             try:
                 facts = self.fact_extractor.extract(
                     model,
@@ -158,7 +168,6 @@ class Layer1Ingestor:
                     source_url=resolved.index.source_url,
                     package_hash=package_sha256,
                 )
-                corpus = select_fact_corpus(model)
                 if len(facts.facts) != corpus.source_count:
                     raise Layer1IngestionError(
                         "Layer 1 Fact count does not match validated source corpus: "
@@ -172,7 +181,7 @@ class Layer1Ingestor:
                     quality_gate="RAW_CORPUS_COMPLETENESS",
                     outcome="FAILED",
                     expected_count=corpus.source_count,
-                    actual_count=len(facts.facts) if "facts" in locals() else None,
+                    actual_count=len(facts.facts) if facts is not None else None,
                     message=str(exc),
                 )
                 state_recorded = True

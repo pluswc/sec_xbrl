@@ -87,6 +87,23 @@ dimensional Fact assignment and one relationship in the same snapshot. This is
 the offline M1 success proof; it exercises the generic path without claiming a
 network bootstrap or a company-specific cached taxonomy result.
 
+## Evidence classes
+
+The deterministic unit fixture is a code-contract check only: it proves the
+complete corpus, dimensional Fact, relationship, atomic-snapshot, and
+fail-closed paths without network access. It is not evidence that a real SEC
+taxonomy package resolved.
+
+Real-ticker integration evidence is kept outside Git and records, for NVDA,
+AAPL, and AMZN, one selected accession, package hash, taxonomy-cache identity,
+`model.facts` and materialized Fact counts, quality-gate outcomes, and whether
+a snapshot was published. Each ticker therefore has a deterministic observed
+outcome: complete `SUCCESS` or a retryable, provenance-preserving
+fail-closed state. M1 release evidence requires at least one real SEC filing
+to reach complete `SUCCESS`; a restricted environment that cannot bootstrap a
+taxonomy cache records its limitation rather than turning a partial corpus into
+a success claim.
+
 For a cached real filing, execute the following after the standard taxonomy
 cache has been explicitly bootstrapped:
 
