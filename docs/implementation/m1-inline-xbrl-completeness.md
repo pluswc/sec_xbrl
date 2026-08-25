@@ -21,10 +21,17 @@ For every successfully materialized filing:
    `relationship`, generated from the same validated Arelle model.
 3. `layer1_manifest.json` records source package SHA-256, Fact corpus source
    and count, materialized counts, and parser versions.
+   The validated top-level source Fact count must equal the materialized Fact
+   count; any extractor omission fails rather than producing a partial view.
 4. A taxonomy-resolution, schema-reference, or Inline transformation error,
    or a Fact without a resolved concept, prevents all Snapshot output.
 5. A published snapshot is never overwritten. A retry must use a new parser
    version/output location or leave the existing immutable snapshot untouched.
+6. Every load, validation, or materialization result produces an append-only
+   parse-state JSON event outside the snapshot, keyed by CIK/accession/parser
+   version. It records `ARELLE_LOAD`, `VALIDATION`, or `LAYER1_EXTRACT`, its
+   outcome, retryability, and failure message. Failed attempts therefore leave
+   no snapshot but remain observable and retryable.
 
 These conditions are generic. They do not rely on NVIDIA labels, accession
 numbers, or numerical values.
@@ -54,7 +61,9 @@ does not commit the resulting third-party taxonomy cache or SEC packages.
 Unit tests create an Inline-like model where `model.facts` has two reported
 facts while `factsInInstance` has one. A successful snapshot must contain two
 facts and a manifest declaring `model.facts`; taxonomy/transform failures and
-unresolved concepts must create no directory.
+unresolved concepts must create no directory. A deliberately partial extractor
+is rejected when its output count differs from the validated source corpus;
+the corresponding parse-state event is `LAYER1_EXTRACT` / `FAILED`.
 
 For a cached real filing, execute the following after the standard taxonomy
 cache has been explicitly bootstrapped:

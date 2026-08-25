@@ -13,6 +13,7 @@ import json
 import os
 import shutil
 import tempfile
+import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -60,6 +61,23 @@ class Layer1SnapshotManifest:
             raise Layer1IngestionError(f"invalid Layer 1 snapshot manifest: {path}") from exc
 
 
+@dataclass(frozen=True, slots=True)
+class Layer1ParseState:
+    """Append-only outcome record for one accession/parser-version attempt."""
+
+    schema_version: int
+    cik: str
+    accession: str
+    parser_version: str
+    stage: str
+    outcome: str
+    retryable: bool
+    message: str | None
+
+    def to_json(self) -> str:
+        return json.dumps(asdict(self), indent=2, sort_keys=True) + "\n"
+
+
 class Layer1Ingestor:
     """Create one complete, immutable Layer 1 snapshot per resolved filing."""
 
@@ -71,10 +89,12 @@ class Layer1Ingestor:
         *,
         fact_extractor: Layer1Extractor | None = None,
         relationship_extractor: RelationshipExtractor | None = None,
+        parse_state_root: Path | None = None,
     ) -> None:
         self.destination_root = destination_root
         self.fact_extractor = fact_extractor or Layer1Extractor()
         self.relationship_extractor = relationship_extractor or RelationshipExtractor()
+        self.parse_state_root = parse_state_root or destination_root.parent / "parse_state"
 
     def snapshot_dir(self, resolved: ResolvedFiling) -> Path:
         filing = resolved.filing
@@ -86,24 +106,43 @@ class Layer1Ingestor:
         ``model`` is injected so callers can manage Arelle controller lifetime.
         Use :meth:`load_and_ingest` for the normal resolved-package path.
         """
-        self._validate_model(model)
+        try:
+            self._validate_model(model)
+        except Layer1IngestionError as exc:
+            self._write_parse_state(resolved, stage="VALIDATION", outcome="FAILED", message=str(exc))
+            raise
         destination = self.snapshot_dir(resolved)
         if destination.exists():
-            raise Layer1IngestionError(f"Layer 1 snapshot already exists: {destination}")
+            exc = Layer1IngestionError(f"Layer 1 snapshot already exists: {destination}")
+            self._write_parse_state(resolved, stage="LAYER1_EXTRACT", outcome="FAILED", message=str(exc))
+            raise exc
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = Path(tempfile.mkdtemp(prefix=f".{resolved.filing.accession.replace('-', '')}.partial-", dir=destination.parent))
+        state_recorded = False
         try:
             package_sha256 = _sha256_file(resolved.zip_path)
-            facts = self.fact_extractor.extract(
-                model,
-                resolved.filing,
-                source_url=resolved.index.source_url,
-                package_hash=package_sha256,
-            )
-            relationships = self.relationship_extractor.extract(model, resolved.filing)
+            try:
+                facts = self.fact_extractor.extract(
+                    model,
+                    resolved.filing,
+                    source_url=resolved.index.source_url,
+                    package_hash=package_sha256,
+                )
+                corpus = select_fact_corpus(model)
+                if len(facts.facts) != corpus.source_count:
+                    raise Layer1IngestionError(
+                        "Layer 1 Fact count does not match validated source corpus: "
+                        f"source={corpus.source_count}, materialized={len(facts.facts)}"
+                    )
+                relationships = self.relationship_extractor.extract(model, resolved.filing)
+            except Exception as exc:
+                self._write_parse_state(
+                    resolved, stage="LAYER1_EXTRACT", outcome="FAILED", message=str(exc)
+                )
+                state_recorded = True
+                raise
             facts.write_parquet(temporary)
             relationships.write_parquet(temporary)
-            corpus = select_fact_corpus(model)
             manifest = Layer1SnapshotManifest(
                 schema_version=1,
                 cik=canonicalize_cik(resolved.filing.cik),
@@ -125,8 +164,13 @@ class Layer1Ingestor:
             )
             (temporary / self.manifest_name).write_text(manifest.to_json(), encoding="utf-8")
             os.replace(temporary, destination)
+            self._write_parse_state(resolved, stage="LAYER1_EXTRACT", outcome="SUCCEEDED", message=None)
             return manifest
-        except Exception:
+        except Exception as exc:
+            if not state_recorded:
+                self._write_parse_state(
+                    resolved, stage="LAYER1_EXTRACT", outcome="FAILED", message=str(exc)
+                )
             shutil.rmtree(temporary, ignore_errors=True)
             raise
 
@@ -134,8 +178,45 @@ class Layer1Ingestor:
         self, resolved: ResolvedFiling, loader: ArelleFilingLoader, extraction_dir: Path
     ) -> Layer1SnapshotManifest:
         """Load a resolved package then materialize a snapshot from that same model."""
-        model = loader.load(resolved, extraction_dir)
+        try:
+            model = loader.load(resolved, extraction_dir)
+        except Exception as exc:
+            self._write_parse_state(resolved, stage="ARELLE_LOAD", outcome="FAILED", message=str(exc))
+            raise
         return self.ingest(resolved, model)
+
+    def _write_parse_state(
+        self,
+        resolved: ResolvedFiling,
+        *,
+        stage: str,
+        outcome: str,
+        message: str | None,
+    ) -> Path:
+        """Append an immutable, retryable parse-state event outside the snapshot."""
+        parser_version = self.fact_extractor.parser_version
+        filing = resolved.filing
+        version_id = hashlib.sha256(parser_version.encode("utf-8")).hexdigest()[:16]
+        destination = (
+            self.parse_state_root
+            / canonicalize_cik(filing.cik)
+            / filing.accession.replace("-", "")
+            / version_id
+        )
+        destination.mkdir(parents=True, exist_ok=True)
+        state = Layer1ParseState(
+            schema_version=1,
+            cik=canonicalize_cik(filing.cik),
+            accession=filing.accession,
+            parser_version=parser_version,
+            stage=stage,
+            outcome=outcome,
+            retryable=outcome == "FAILED",
+            message=message,
+        )
+        path = destination / f"{uuid.uuid4().hex}.json"
+        path.write_text(state.to_json(), encoding="utf-8")
+        return path
 
     def _validate_model(self, model: Any) -> None:
         """Reject unresolved taxonomies/Inline transforms before any data is written."""
