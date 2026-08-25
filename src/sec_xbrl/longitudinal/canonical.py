@@ -288,12 +288,26 @@ class SeriesBuilder:
             result.append(
                 {
                     **fact,
+                    # These are analytical copies.  The raw Fact remains the
+                    # source of truth, while a later selector can explain the
+                    # exact filing/version it chose.
+                    "source_raw_fact_id": str(fact.get("fact_id") or ""),
+                    "source_filing_id": str(fact.get("filing_id") or ""),
+                    "filed_date": filing.get("filed_date"),
+                    "period_key": _period_key(fact),
+                    "basis_version": fact.get("basis_version"),
+                    "source_type": _source_type(fact),
+                    "recast_evidence_id": fact.get("recast_evidence_id"),
+                    "recast_evidence": fact.get("recast_evidence"),
+                    "source_fact_ids": fact.get("source_fact_ids"),
+                    "derivation_rule_version": fact.get("derivation_rule_version"),
                     "series_type": series_type,
                     "company_canonical_concept_id": canonical_id,
                     "company_canonical_dimension_key": dimension_key,
                     "series_key": series_key,
                     "mapping_version": mapping["mapping_version"],
                     "mapping_confidence": mapping["confidence"],
+                    "mapping_evidence": dict(mapping["evidence"]),
                     "mapping_review_required": bool(mapping["review_required"] or dim_review),
                     "continuity_break": bool(mapping["continuity_break"]),
                 }
@@ -303,6 +317,220 @@ class SeriesBuilder:
 
 AnnualSeries = SeriesBuilder
 CurrentSeries = SeriesBuilder
+
+
+class AsOfSeriesSelector:
+    """Select governed ``AS_FILED`` or ``LATEST_RECAST`` observations.
+
+    This is deliberately a selector, rather than a mutating canonicalizer.
+    ``basis_version`` and recast evidence must be supplied by the analytical
+    ingestion/review process; a changed number alone never establishes a
+    recast.  Latest-recast selection chooses one basis for the whole period
+    family and publishes an unavailable row for any period absent from it.
+    """
+
+    RULE_VERSION = "m7-as-of-selection-v1"
+    _SOURCE_TYPES = frozenset({"REPORTED", "RECAST_REPORTED", "DERIVED_RECAST"})
+
+    def select(
+        self, observations: Iterable[Mapping[str, Any]], *, as_of_date: str, view: str
+    ) -> tuple[dict[str, Any], ...]:
+        if view not in {"AS_FILED", "LATEST_RECAST"}:
+            raise ValueError("view must be AS_FILED or LATEST_RECAST")
+        eligible = [
+            dict(row)
+            for row in observations
+            if row.get("filed_date") and str(row["filed_date"]) <= as_of_date
+        ]
+        families: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+        for row in eligible:
+            families[_family_key(row)].append(row)
+
+        result: list[dict[str, Any]] = []
+        for family_key in sorted(families, key=repr):
+            rows = families[family_key]
+            if view == "AS_FILED":
+                result.extend(self._select_as_filed(rows, as_of_date))
+            else:
+                result.extend(self._select_latest_recast(rows, as_of_date))
+        return tuple(sorted(result, key=_selection_sort_key))
+
+    def _select_as_filed(
+        self, rows: list[dict[str, Any]], as_of_date: str
+    ) -> list[dict[str, Any]]:
+        """Keep the first source-filed observation for each period unchanged."""
+        result: list[dict[str, Any]] = []
+        for period_key, candidates in _by_period(rows).items():
+            # Original direct reporting is preferred.  If a period only first
+            # appears as a later comparative/recast, retain that as-filed fact
+            # rather than silently manufacturing an unavailable historical row.
+            direct = [row for row in candidates if _source_type(row) == "REPORTED"]
+            chosen = min(direct or candidates, key=_observation_order)
+            result.append(_available(chosen, as_of_date, "AS_FILED"))
+        return result
+
+    def _select_latest_recast(
+        self, rows: list[dict[str, Any]], as_of_date: str
+    ) -> list[dict[str, Any]]:
+        """Select one evidence-backed basis and never mix it across periods."""
+        period_rows = _by_period(rows)
+        valid = [row for row in rows if self._eligible_comparable(row)]
+        if not valid:
+            return [
+                _unavailable(rows_for_period, as_of_date, "UNKNOWN_OR_UNSUPPORTED_BASIS_VERSION")
+                for rows_for_period in period_rows.values()
+            ]
+
+        # A basis becomes selectable when its latest observation becomes
+        # available.  This deterministic rule avoids looking into future
+        # filings and chooses a later recast basis over an older baseline.
+        by_basis: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in valid:
+            by_basis[str(row["basis_version"])].append(row)
+        selected_basis = max(
+            by_basis,
+            key=lambda basis: (
+                max(_observation_order(row) for row in by_basis[basis]),
+                basis,
+            ),
+        )
+        result: list[dict[str, Any]] = []
+        for candidates in period_rows.values():
+            same_basis = [
+                row for row in candidates if str(row.get("basis_version")) == selected_basis
+                and self._eligible_comparable(row)
+            ]
+            if not same_basis:
+                result.append(
+                    _unavailable(
+                        candidates,
+                        as_of_date,
+                        "PERIOD_NOT_AVAILABLE_IN_SELECTED_BASIS",
+                        basis_version=selected_basis,
+                    )
+                )
+                continue
+            chosen = max(same_basis, key=_observation_order)
+            result.append(_available(chosen, as_of_date, "LATEST_RECAST"))
+        return result
+
+    def _eligible_comparable(self, row: Mapping[str, Any]) -> bool:
+        source_type = _source_type(row)
+        if source_type not in self._SOURCE_TYPES or not row.get("basis_version"):
+            return False
+        if source_type == "RECAST_REPORTED":
+            return bool(row.get("recast_evidence_id") or row.get("recast_evidence"))
+        if source_type == "DERIVED_RECAST":
+            return bool(row.get("source_fact_ids") and row.get("derivation_rule_version"))
+        return True
+
+
+def _period_key(row: Mapping[str, Any]) -> str:
+    """Return a durable target-period key without assuming calendar quarters."""
+    explicit = row.get("period_key")
+    if explicit:
+        return str(explicit)
+    for key in ("report_period", "period_end", "end_date", "instant_date"):
+        if row.get(key):
+            return str(row[key])
+    return "fact:" + str(row.get("fact_id") or "")
+
+
+def _family_key(row: Mapping[str, Any]) -> tuple[Any, ...]:
+    """Key a comparable period family, excluding its individual period."""
+    return (
+        row.get("cik"),
+        row.get("company_canonical_concept_id") or row.get("company_canonical_id"),
+        _freeze(row.get("company_canonical_dimension_key")),
+        row.get("unit_id"),
+        row.get("period_class"),
+        row.get("fiscal_year"),
+        row.get("series_type"),
+    )
+
+
+def _freeze(value: Any) -> Any:
+    if isinstance(value, list):
+        return tuple(_freeze(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_freeze(item) for item in value)
+    if isinstance(value, dict):
+        return tuple(sorted((key, _freeze(item)) for key, item in value.items()))
+    return value
+
+
+def _by_period(rows: Iterable[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        grouped[_period_key(row)].append(row)
+    return dict(sorted(grouped.items()))
+
+
+def _source_type(row: Mapping[str, Any]) -> str:
+    return str(row.get("source_type") or row.get("reported_or_derived") or "REPORTED")
+
+
+def _observation_order(row: Mapping[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(row.get("filed_date") or ""),
+        str(row.get("source_filing_id") or row.get("filing_id") or ""),
+        str(row.get("source_raw_fact_id") or row.get("fact_id") or ""),
+    )
+
+
+def _available(row: Mapping[str, Any], as_of_date: str, view: str) -> dict[str, Any]:
+    selected_fact_id = str(row.get("source_raw_fact_id") or row.get("fact_id") or "")
+    return {
+        **dict(row),
+        "period_key": _period_key(row),
+        "source_type": _source_type(row),
+        "as_of_date": as_of_date,
+        "view": view,
+        "selection_rule_version": AsOfSeriesSelector.RULE_VERSION,
+        "status": "AVAILABLE",
+        "unavailable_reason": None,
+        "selected_raw_fact_id": selected_fact_id,
+    }
+
+
+def _unavailable(
+    candidates: Iterable[Mapping[str, Any]],
+    as_of_date: str,
+    reason: str,
+    *,
+    basis_version: str | None = None,
+) -> dict[str, Any]:
+    representative = min(candidates, key=_observation_order)
+    return {
+        "series_key": representative.get("series_key"),
+        "series_type": representative.get("series_type"),
+        "cik": representative.get("cik"),
+        "company_canonical_concept_id": representative.get("company_canonical_concept_id"),
+        "company_canonical_dimension_key": representative.get("company_canonical_dimension_key"),
+        "unit_id": representative.get("unit_id"),
+        "period_class": representative.get("period_class"),
+        "fiscal_year": representative.get("fiscal_year"),
+        "period_key": _period_key(representative),
+        "as_of_date": as_of_date,
+        "view": "LATEST_RECAST",
+        "selection_rule_version": AsOfSeriesSelector.RULE_VERSION,
+        "basis_version": basis_version,
+        "source_type": "UNAVAILABLE",
+        "status": "N/A",
+        "unavailable_reason": reason,
+        "selected_raw_fact_id": None,
+        "mapping_version": representative.get("mapping_version"),
+        "mapping_evidence": representative.get("mapping_evidence"),
+    }
+
+
+def _selection_sort_key(row: Mapping[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        repr(row.get("series_key")),
+        str(row.get("fiscal_year") or ""),
+        str(row.get("period_key") or ""),
+        str(row.get("selected_raw_fact_id") or ""),
+    )
 
 
 def _best_candidate(

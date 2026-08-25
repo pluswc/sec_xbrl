@@ -115,6 +115,13 @@ executable/inspection checklist is maintained in
 - same-company mappings are additive to Raw.
 - namespace changes do not break a well-supported canonical series.
 - segment recast can create a new mapping/version rather than corrupt old history.
+- `AS_FILED` preserves the first directly reported version available at an
+  `as_of_date`; later comparative/recast observations do not overwrite it.
+- `LATEST_RECAST` selects a single evidence-backed basis version across a
+  comparable period family.  A missing period in that basis is `N/A` with an
+  explicit reason, never an earlier-basis value.
+- selected or unavailable outputs preserve period, source Fact/filing,
+  canonical/mapping lineage, basis/source type, rule version, and `as_of_date`.
 
 ## M8 — Layer 3
 - analytical grouping preserves raw/company IDs.

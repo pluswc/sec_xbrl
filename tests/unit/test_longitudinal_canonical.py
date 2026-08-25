@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from sec_xbrl.longitudinal import CompanyCanonicalizer, MappingRelation, SeriesBuilder
+from sec_xbrl.longitudinal import AsOfSeriesSelector, CompanyCanonicalizer, MappingRelation, SeriesBuilder
 
 
 def _filings() -> tuple[dict[str, object], ...]:
@@ -223,7 +223,95 @@ def test_annual_and_current_series_keep_period_classes_distinct_and_surface_revi
     ytd = next(row for row in current if row["fact_id"] == "ytd")
     assert qtd["company_canonical_concept_id"] == ytd["company_canonical_concept_id"]
     assert qtd["series_key"] != ytd["series_key"]
+    assert qtd["source_raw_fact_id"] == "qtd"
+    assert qtd["source_filing_id"] == "q25"
+    assert qtd["filed_date"] == "2025-05-01"
+    assert qtd["source_type"] == "REPORTED"
+    assert qtd["basis_version"] is None
+    assert qtd["mapping_evidence"]
     assert (
         next(row for row in annual if row["fact_id"] == "uncertain")["mapping_review_required"]
         is True
     )
+
+
+def _nvidia_style_observations(*, include_recast_q2: bool = True) -> tuple[dict[str, object], ...]:
+    common = {
+        "cik": "0001045810",
+        "company_canonical_concept_id": "company:0001045810:concept:geographic-revenue",
+        "company_canonical_dimension_key": (("axis:geography", "member:us", None),),
+        "series_key": ("0001045810", "company:0001045810:concept:geographic-revenue", "us", "usd", "QTD_3M"),
+        "series_type": "CURRENT",
+        "unit_id": "usd",
+        "period_class": "QTD_3M",
+        "fiscal_year": 2026,
+        "mapping_version": "m7-company-canonical-v1",
+        "mapping_evidence": {"method": "reviewed"},
+    }
+    rows = [
+        {**common, "fact_id": "q1-original", "source_raw_fact_id": "q1-original", "filing_id": "q1-10q", "filed_date": "2025-05-28", "period_key": "FY26-Q1", "value_numeric": "20739", "basis_version": "geography-billing-address-v1", "source_type": "REPORTED"},
+        {**common, "fact_id": "q2-original", "source_raw_fact_id": "q2-original", "filing_id": "q2-10q", "filed_date": "2025-08-27", "period_key": "FY26-Q2", "value_numeric": "23470", "basis_version": "geography-billing-address-v1", "source_type": "REPORTED"},
+        {**common, "fact_id": "q1-recast", "source_raw_fact_id": "q1-recast", "filing_id": "q3-10q", "filed_date": "2025-11-19", "period_key": "FY26-Q1", "value_numeric": "25685", "basis_version": "geography-customer-hq-v2", "source_type": "RECAST_REPORTED", "recast_evidence_id": "note-geography-basis-change"},
+    ]
+    if include_recast_q2:
+        rows.append(
+            {**common, "fact_id": "q2-recast", "source_raw_fact_id": "q2-recast", "filing_id": "q3-10q", "filed_date": "2025-11-19", "period_key": "FY26-Q2", "value_numeric": "32897", "basis_version": "geography-customer-hq-v2", "source_type": "RECAST_REPORTED", "recast_evidence_id": "note-geography-basis-change"}
+        )
+    return tuple(rows)
+
+
+def test_as_of_selector_preserves_originals_then_selects_one_documented_recast_basis() -> None:
+    selector = AsOfSeriesSelector()
+    before = selector.select(
+        _nvidia_style_observations(), as_of_date="2025-10-01", view="LATEST_RECAST"
+    )
+    assert {row["period_key"]: row["value_numeric"] for row in before} == {
+        "FY26-Q1": "20739",
+        "FY26-Q2": "23470",
+    }
+    assert {row["basis_version"] for row in before} == {"geography-billing-address-v1"}
+
+    after = selector.select(
+        _nvidia_style_observations(), as_of_date="2025-11-20", view="LATEST_RECAST"
+    )
+    assert {row["period_key"]: row["value_numeric"] for row in after} == {
+        "FY26-Q1": "25685",
+        "FY26-Q2": "32897",
+    }
+    assert {row["basis_version"] for row in after} == {"geography-customer-hq-v2"}
+    assert {row["source_type"] for row in after} == {"RECAST_REPORTED"}
+    assert all(row["selected_raw_fact_id"] for row in after)
+
+    as_filed = selector.select(
+        _nvidia_style_observations(), as_of_date="2025-11-20", view="AS_FILED"
+    )
+    assert {row["period_key"]: row["value_numeric"] for row in as_filed} == {
+        "FY26-Q1": "20739",
+        "FY26-Q2": "23470",
+    }
+    assert {row["view"] for row in as_filed} == {"AS_FILED"}
+
+
+def test_latest_recast_never_mixes_an_incomplete_new_basis() -> None:
+    selected = AsOfSeriesSelector().select(
+        _nvidia_style_observations(include_recast_q2=False),
+        as_of_date="2025-11-20",
+        view="LATEST_RECAST",
+    )
+    by_period = {row["period_key"]: row for row in selected}
+    assert by_period["FY26-Q1"]["value_numeric"] == "25685"
+    assert by_period["FY26-Q1"]["basis_version"] == "geography-customer-hq-v2"
+    assert by_period["FY26-Q2"]["status"] == "N/A"
+    assert by_period["FY26-Q2"]["source_type"] == "UNAVAILABLE"
+    assert by_period["FY26-Q2"]["unavailable_reason"] == "PERIOD_NOT_AVAILABLE_IN_SELECTED_BASIS"
+
+
+def test_latest_recast_requires_explicit_basis_and_recast_evidence() -> None:
+    observations = list(_nvidia_style_observations())
+    observations[2].pop("recast_evidence_id")
+    observations[3]["basis_version"] = None
+    selected = AsOfSeriesSelector().select(
+        observations, as_of_date="2025-11-20", view="LATEST_RECAST"
+    )
+    assert {row["basis_version"] for row in selected} == {"geography-billing-address-v1"}
+    assert {row["value_numeric"] for row in selected} == {"20739", "23470"}

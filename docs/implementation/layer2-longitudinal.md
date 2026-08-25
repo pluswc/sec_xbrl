@@ -46,6 +46,40 @@ Detect and persist:
 ## Current Series
 10-K baseline + subsequent 10-Q updates. Period class is part of the series key; QTD/YTD/Instant are never mixed.
 
+## As-of governed selection
+
+Layer 2 keeps all observations and exposes two deterministic selection views;
+neither view changes a Layer 1 Fact.
+
+- `AS_FILED`: for each target period, retain the first directly reported
+  observation available on or before the requested `as_of_date`.  A later
+  comparative value never overwrites that historical result.
+- `LATEST_RECAST`: select the latest eligible `basis_version` available on or
+  before `as_of_date` for a complete comparable period family.  Every selected
+  quarter in that family must use that same basis.  A target period that is
+  absent from the chosen basis is emitted as `N/A` / `UNAVAILABLE` with
+  `PERIOD_NOT_AVAILABLE_IN_SELECTED_BASIS`; the selector must not fill it from
+  an earlier basis.
+
+An observed series row carries `source_raw_fact_id`, `source_filing_id`,
+`filed_date`, `period_key`, `period_class`, company canonical concept and full
+dimension key, `basis_version`, `source_type`, mapping version/evidence, and
+the original Fact lineage.  `source_type` is one of `REPORTED`,
+`RECAST_REPORTED`, or `DERIVED_RECAST` before selection.  A selected unavailable
+row has `source_type=UNAVAILABLE`, no selected raw Fact ID, and an explicit
+reason.
+
+`RECAST_REPORTED` is eligible only with a bound recast evidence ID/payload.
+`DERIVED_RECAST` is eligible only with all source Fact IDs and a derivation-rule
+version.  Numeric changes, labels, or filing sequence alone do not prove a
+recast or make a basis comparable.  Unknown/unsupported basis metadata is
+unavailable in `LATEST_RECAST` rather than being guessed.
+
+The selector records `as_of_date`, `view`,
+`selection_rule_version=m7-as-of-selection-v1`, selected raw Fact ID, source
+type, basis version, and unavailable reason.  It is generic across companies;
+company-specific recasts require supplied filing/table/text/review evidence.
+
 ## Mapping QA
 Every automatic mapping above a materiality threshold must be explainable by stored evidence. Low-confidence mappings remain separate until reviewed or corroborated.
 
