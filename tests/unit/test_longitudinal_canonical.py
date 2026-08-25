@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from sec_xbrl.longitudinal import AsOfSeriesSelector, CompanyCanonicalizer, MappingRelation, SeriesBuilder
+from sec_xbrl.longitudinal import (
+    AsOfSeriesSelector,
+    CompanyCanonicalizer,
+    MappingRelation,
+    SeriesBuilder,
+)
 
 
 def _filings() -> tuple[dict[str, object], ...]:

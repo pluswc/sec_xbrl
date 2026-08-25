@@ -1,22 +1,22 @@
 """Layer 2 same-company longitudinal canonicalization."""
 
 from sec_xbrl.longitudinal.canonical import (
-    MAPPING_VERSION,
     AsOfSeriesSelector,
     AnnualSeries,
     CompanyCanonicalizer,
     CurrentSeries,
+    MAPPING_VERSION,
     MappingRelation,
     MappingTables,
     SeriesBuilder,
 )
 
 __all__ = [
-    "MAPPING_VERSION",
     "AsOfSeriesSelector",
     "AnnualSeries",
     "CompanyCanonicalizer",
     "CurrentSeries",
+    "MAPPING_VERSION",
     "MappingRelation",
     "MappingTables",
     "SeriesBuilder",

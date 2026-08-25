@@ -360,7 +360,7 @@ class AsOfSeriesSelector:
     ) -> list[dict[str, Any]]:
         """Keep the first source-filed observation for each period unchanged."""
         result: list[dict[str, Any]] = []
-        for period_key, candidates in _by_period(rows).items():
+        for candidates in _by_period(rows).values():
             # Original direct reporting is preferred.  If a period only first
             # appears as a later comparative/recast, retain that as-filed fact
             # rather than silently manufacturing an unavailable historical row.
