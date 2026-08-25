@@ -90,14 +90,17 @@ def select_trailing_fiscal_filings(
     """
     if fiscal_years < 1:
         raise TrailingCorpusError("fiscal_years must be at least one")
-    all_rows = tuple(sorted(set(filings), key=_filing_order))
+    # ``report_date`` controls fiscal coverage only.  It must not control
+    # ingestion order: an amendment for an older report period can be filed
+    # after a newer normal quarterly filing.
+    all_rows = tuple(sorted(set(filings), key=_coverage_order))
     annuals = [row for row in all_rows if row.form == "10-K" and row.report_date is not None]
     by_period: dict[object, FilingRef] = {}
     for row in annuals:
         # Later filed duplicate annual records are deterministic but never
         # replace the baseline 10-K with an amendment.
         by_period.setdefault(row.report_date, row)
-    baselines = tuple(sorted(by_period.values(), key=_filing_order)[-fiscal_years:])
+    baselines = tuple(sorted(by_period.values(), key=_coverage_order)[-fiscal_years:])
     if len(baselines) != fiscal_years:
         raise TrailingCorpusError(
             f"requires {fiscal_years} annual 10-K baselines with report_date; found {len(baselines)}"
@@ -105,7 +108,7 @@ def select_trailing_fiscal_filings(
     earliest = baselines[0]
     predecessor = max(
         (row for row in by_period.values() if row.report_date < earliest.report_date),
-        key=_filing_order,
+        key=_coverage_order,
         default=None,
     )
     boundary = predecessor.report_date if predecessor else None
@@ -115,7 +118,7 @@ def select_trailing_fiscal_filings(
         if row.form in FORMS
         and (boundary is None or row.report_date is None or row.report_date > boundary)
     )
-    return tuple(sorted(selected, key=_filing_order)), baselines, predecessor
+    return tuple(sorted(selected, key=_processing_order)), baselines, predecessor
 
 
 class TrailingFilingCorpus:
@@ -274,8 +277,13 @@ def _read_snapshot_tables(
     return result
 
 
-def _filing_order(row: FilingRef) -> tuple[object, object, object]:
+def _coverage_order(row: FilingRef) -> tuple[object, object, object]:
     return (row.report_date or row.filed_date, row.filed_date, row.accession)
+
+
+def _processing_order(row: FilingRef) -> tuple[object, object]:
+    """Order processing by public availability, never by covered period."""
+    return (row.filed_date, row.accession)
 
 
 def _success_status(

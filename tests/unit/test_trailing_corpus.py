@@ -36,6 +36,22 @@ def test_selection_uses_annual_boundaries_not_calendar_years_and_keeps_amendment
     assert [row.accession for row in selected] == [row.accession for row in rows[1:]]
 
 
+def test_delayed_amendment_is_processed_after_an_earlier_filed_normal_quarter() -> None:
+    rows = (
+        _ref("0001045810-22-000001", "10-K", "2022-03-01", "2022-01-30"),
+        _ref("0001045810-23-000001", "10-K", "2023-03-01", "2023-01-29"),
+        _ref("0001045810-24-000001", "10-K", "2024-03-01", "2024-01-28"),
+        _ref("0001045810-25-000001", "10-K", "2025-03-01", "2025-01-26"),
+        _ref("0001045810-25-000002", "10-Q", "2025-05-01", "2025-04-27"),
+        _ref("0001045810-25-000003", "10-Q/A", "2025-06-01", "2024-10-27"),
+    )
+    selected, _, _ = select_trailing_fiscal_filings(rows, fiscal_years=3)
+    assert [row.accession for row in selected[-2:]] == [
+        "0001045810-25-000002",
+        "0001045810-25-000003",
+    ]
+
+
 class _Provider:
     def __init__(self, rows: tuple[FilingRef, ...]) -> None:
         self.rows = rows
