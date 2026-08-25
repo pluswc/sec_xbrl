@@ -101,7 +101,9 @@ executable/inspection checklist is maintained in
 ## M5 — Disclosure Safety Net
 - P0 disclosure can be discovered even without Anchor connection.
 - role title alone is not the sole signal.
-- text/table/detail links retain provenance.
+- source concepts, facts, dimensions, text/table/detail links retain role and
+  relationship provenance; dimensional evidence corroborates linkage but does
+  not itself create an unsupported critical-topic claim.
 
 ## M6 — 10-Q period logic
 - QTD_3M and YTD_6M/YTD_9M are distinct.

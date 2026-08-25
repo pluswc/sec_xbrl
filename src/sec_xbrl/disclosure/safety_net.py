@@ -69,6 +69,8 @@ _PARQUET_SCHEMAS: dict[str, dict[str, str]] = {
     "disclosure_evidence": {
         "evidence_id": "string", "filing_id": "string", "role_id": "string", "critical_topic": "string",
         "signal_type": "string", "raw_concept_id": "string", "fact_id": "string",
+        "axis_raw_concept_id": "string", "member_raw_concept_id": "string",
+        "source_relationship_id": "string",
         "source_document": "string", "source_locator": "string", "source_role_uri": "string",
         "source_role_definition": "string",
     },
@@ -116,11 +118,13 @@ class DisclosureSafetyNet:
         relationships: Iterable[Mapping[str, Any]],
         concepts: Iterable[Mapping[str, Any]],
         facts: Iterable[Mapping[str, Any]],
+        dimension_facts: Iterable[Mapping[str, Any]] = (),
     ) -> DisclosureSafetyNetTables:
         role_rows = tuple(dict(row) for row in roles)
         relationship_rows = tuple(dict(row) for row in relationships)
         concept_rows = {str(row["raw_concept_id"]): dict(row) for row in concepts}
         fact_rows = tuple(dict(row) for row in facts)
+        dimension_rows = tuple(dict(row) for row in dimension_facts)
         filing_id = _single_filing_id(role_rows, relationship_rows, concept_rows.values(), fact_rows)
         roles_by_id = {str(row["role_id"]): row for row in role_rows}
         if len(roles_by_id) != len(role_rows):
@@ -128,6 +132,7 @@ class DisclosureSafetyNet:
 
         concepts_by_role: dict[str, set[str]] = defaultdict(set)
         relationships_by_role: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        relationship_ids_by_role_concept: dict[tuple[str, str], list[str]] = defaultdict(list)
         for relationship in relationship_rows:
             role_id = str(relationship["role_id"])
             if role_id not in roles_by_id:
@@ -136,10 +141,19 @@ class DisclosureSafetyNet:
             concepts_by_role[role_id].update(
                 (str(relationship["from_raw_concept_id"]), str(relationship["to_raw_concept_id"]))
             )
+            relationship_id = _text(relationship.get("relationship_id"))
+            if relationship_id is not None:
+                for concept_id in (
+                    str(relationship["from_raw_concept_id"]), str(relationship["to_raw_concept_id"])
+                ):
+                    relationship_ids_by_role_concept[(role_id, concept_id)].append(relationship_id)
         facts_by_concept: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for fact in fact_rows:
             if fact.get("reported_or_derived", "REPORTED") == "REPORTED" and not fact.get("is_nil", False):
                 facts_by_concept[str(fact["raw_concept_id"])].append(fact)
+        dimensions_by_fact: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for dimension in dimension_rows:
+            dimensions_by_fact[str(dimension["fact_id"])].append(dimension)
 
         inventory: list[dict[str, Any]] = []
         index: list[dict[str, Any]] = []
@@ -190,7 +204,14 @@ class DisclosureSafetyNet:
                 for topic, signals in classifications:
                     title, concept, fact, text = signals
                     index.append(_index_row(filing_id, role_id, topic.name, topic.priority, title, concept, fact, text, table_evidence, detail_evidence))
-                    evidence.extend(_topic_evidence(filing_id, role, topic, role_concepts, role_facts, text_facts, concept_rows, table_evidence, detail_evidence))
+                    evidence.extend(_topic_evidence(
+                        filing_id, role, topic, role_concepts, role_facts, text_facts, concept_rows,
+                        table_evidence, detail_evidence, relationship_ids_by_role_concept,
+                    ))
+                    evidence.extend(_dimension_evidence(
+                        filing_id, role, topic, role_facts, concept_rows, dimensions_by_fact,
+                        relationship_ids_by_role_concept,
+                    ))
         return DisclosureSafetyNetTables(
             role_inventory=tuple(inventory),
             disclosure_index=tuple(sorted(index, key=lambda row: row["disclosure_index_id"])),
@@ -235,13 +256,19 @@ def _index_row(
 def _topic_evidence(
     filing_id: str, role: Mapping[str, Any], topic: _Topic, concept_ids: Iterable[str], facts: Iterable[Mapping[str, Any]],
     text_facts: Iterable[Mapping[str, Any]], concepts: Mapping[str, Mapping[str, Any]], table: bool, detail: bool,
+    relationship_ids: Mapping[tuple[str, str], list[str]],
 ) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     role_id = str(role["role_id"])
-    def add(signal_type: str, concept_id: str | None = None, fact: Mapping[str, Any] | None = None) -> None:
+    def add(
+        signal_type: str, concept_id: str | None = None, fact: Mapping[str, Any] | None = None,
+        relationship_id: str | None = None,
+    ) -> None:
         row = {
             "filing_id": filing_id, "role_id": role_id, "critical_topic": topic.name, "signal_type": signal_type,
             "raw_concept_id": concept_id, "fact_id": None if fact is None else _text(fact.get("fact_id")),
+            "axis_raw_concept_id": None, "member_raw_concept_id": None,
+            "source_relationship_id": relationship_id,
             "source_document": None if fact is None else _text(fact.get("source_document")),
             "source_locator": None if fact is None else _text(fact.get("source_locator")),
             "source_role_uri": _text(role.get("role_uri")), "source_role_definition": _text(role.get("role_definition")),
@@ -252,18 +279,53 @@ def _topic_evidence(
         add("ROLE_TITLE")
     for concept_id in concept_ids:
         if _matches(_concept_text(concepts.get(concept_id, {})), topic):
-            add("CONCEPT", concept_id)
+            for relationship_id in relationship_ids.get((role_id, concept_id), [None]):
+                add("CONCEPT", concept_id, relationship_id=relationship_id)
     for fact in facts:
         concept_id = str(fact["raw_concept_id"])
         if _matches(_fact_text(fact, concepts.get(concept_id, {})), topic):
-            add("FACT", concept_id, fact)
+            for relationship_id in relationship_ids.get((role_id, concept_id), [None]):
+                add("FACT", concept_id, fact, relationship_id)
     for fact in text_facts:
         if _matches(str(fact.get("value_text") or ""), topic):
-            add("TEXT_BLOCK", str(fact["raw_concept_id"]), fact)
+            concept_id = str(fact["raw_concept_id"])
+            for relationship_id in relationship_ids.get((role_id, concept_id), [None]):
+                add("TEXT_BLOCK", concept_id, fact, relationship_id)
     if table:
         add("TABLE_ROLE")
     if detail:
         add("DETAIL_ROLE")
+    return result
+
+
+def _dimension_evidence(
+    filing_id: str, role: Mapping[str, Any], topic: _Topic, facts: Iterable[Mapping[str, Any]],
+    concepts: Mapping[str, Mapping[str, Any]], dimensions_by_fact: Mapping[str, list[dict[str, Any]]],
+    relationship_ids: Mapping[tuple[str, str], list[str]],
+) -> list[dict[str, Any]]:
+    """Retain dimensions linked to topic-supported reported facts as evidence."""
+    result: list[dict[str, Any]] = []
+    role_id = str(role["role_id"])
+    for fact in facts:
+        concept_id = str(fact["raw_concept_id"])
+        if not _matches(_fact_text(fact, concepts.get(concept_id, {})), topic):
+            continue
+        for dimension in dimensions_by_fact.get(str(fact["fact_id"]), ()):
+            for relationship_id in relationship_ids.get((role_id, concept_id), [None]):
+                row = {
+                    "filing_id": filing_id, "role_id": role_id, "critical_topic": topic.name,
+                    "signal_type": "DIMENSION", "raw_concept_id": concept_id,
+                    "fact_id": _text(fact.get("fact_id")),
+                    "axis_raw_concept_id": _text(dimension.get("axis_raw_concept_id")),
+                    "member_raw_concept_id": _text(dimension.get("member_raw_concept_id")),
+                    "source_relationship_id": relationship_id,
+                    "source_document": _text(fact.get("source_document")),
+                    "source_locator": _text(fact.get("source_locator")),
+                    "source_role_uri": _text(role.get("role_uri")),
+                    "source_role_definition": _text(role.get("role_definition")),
+                }
+                row["evidence_id"] = _stable_id("disclosure-evidence", *row.values())
+                result.append(row)
     return result
 
 
@@ -288,6 +350,9 @@ def _fallback_evidence(
             "signal_type": "TEXT_BLOCK" if str(fact["fact_id"]) in text_fact_ids else "FACT",
             "raw_concept_id": _text(fact.get("raw_concept_id")),
             "fact_id": _text(fact.get("fact_id")),
+            "axis_raw_concept_id": None,
+            "member_raw_concept_id": None,
+            "source_relationship_id": None,
             "source_document": _text(fact.get("source_document")),
             "source_locator": _text(fact.get("source_locator")),
             "source_role_uri": _text(role.get("role_uri")),
@@ -304,6 +369,9 @@ def _fallback_evidence(
                 "signal_type": signal_type,
                 "raw_concept_id": None,
                 "fact_id": None,
+                "axis_raw_concept_id": None,
+                "member_raw_concept_id": None,
+                "source_relationship_id": None,
                 "source_document": None,
                 "source_locator": None,
                 "source_role_uri": _text(role.get("role_uri")),

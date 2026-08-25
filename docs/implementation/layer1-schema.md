@@ -207,7 +207,9 @@ relationship with missing network provenance.
 - source role URI and definition
 
 `signal_type` is one of `ROLE_TITLE`, `CONCEPT`, `FACT`, `TEXT_BLOCK`,
-`TABLE_ROLE`, or `DETAIL_ROLE`.  It preserves discovery evidence; it does not
+`DIMENSION`, `TABLE_ROLE`, or `DETAIL_ROLE`. `DIMENSION` links a selected
+reported Fact to its as-filed Axis/Member assignment and source relationship.
+It preserves discovery evidence; it does not
 turn a role title alone into a critical-disclosure classification.
 
 ## 10c. `traversal_evidence`
