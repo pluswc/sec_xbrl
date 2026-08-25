@@ -89,6 +89,13 @@ def _records() -> dict[str, object]:
             _fact("debt_balance", value_text=None, locator="ix:debt"),
             _fact("plain_concept", value_text="Generic narrative with no topic terms.", locator="ix:title"),
         ),
+        "dimension_facts": (
+            {
+                "fact_id": "fact-revenue_text",
+                "axis_raw_concept_id": "product_axis",
+                "member_raw_concept_id": "service_member",
+            },
+        ),
     }
 
 
@@ -131,6 +138,15 @@ def test_inventory_and_evidence_preserve_table_detail_and_text_fact_provenance()
     assert text["fact_id"] == "fact-revenue_text"
     assert text["source_document"] == "acme-2025-10k.htm"
     assert text["source_locator"] == "ix:revenue"
+    assert text["source_relationship_id"] == "edge-role_revenue_table-revenue_root-revenue_text"
+    dimension = next(
+        row
+        for row in result.disclosure_evidence
+        if row["role_id"] == REVENUE_TABLE and row["signal_type"] == "DIMENSION"
+    )
+    assert dimension["axis_raw_concept_id"] == "product_axis"
+    assert dimension["member_raw_concept_id"] == "service_member"
+    assert dimension["fact_id"] == "fact-revenue_text"
     assert any(
         row["role_id"] == REVENUE_TABLE and row["signal_type"] == "TABLE_ROLE"
         for row in result.disclosure_evidence
@@ -215,6 +231,9 @@ def test_materialization_is_separate_and_immutable(tmp_path: Path) -> None:
         "disclosure_evidence",
     }
     evidence = pl.read_parquet(tmp_path / "disclosure_evidence.parquet")
-    assert {"source_document", "source_locator", "source_role_uri"} <= set(evidence.columns)
+    assert {
+        "source_document", "source_locator", "source_role_uri", "source_relationship_id",
+        "axis_raw_concept_id", "member_raw_concept_id",
+    } <= set(evidence.columns)
     with pytest.raises(Exception, match="snapshot already exists"):
         result.write_parquet(tmp_path)
