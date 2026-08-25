@@ -22,6 +22,10 @@ Axis, and (when explicit) Member concept.  Concept metadata is retained not
 only for Fact concepts but also for resolved Context Axis/Member concepts:
 QName, namespace, taxonomy classification, label, and documentation are not
 discarded merely because a dimension concept has no reported Fact of its own.
+An unresolved Axis or explicit Member is a completeness failure: it cannot be
+stored as a QName-only Concept in an otherwise successful snapshot.  Typed
+members remain valid without a Member Concept because their as-filed typed XML
+payload is retained directly.
 Numeric, text, and nil lexical values remain distinguishable; Raw does not
 derive period class, comparative status, or canonical meaning.
 

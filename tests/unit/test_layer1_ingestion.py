@@ -8,7 +8,7 @@ from typing import ClassVar
 
 import pytest
 
-from sec_xbrl.facts.layer1 import Layer1Extractor, Layer1Tables
+from sec_xbrl.facts.layer1 import Layer1ExtractionError, Layer1Extractor, Layer1Tables
 from sec_xbrl.filing.contracts import FilingRef
 from sec_xbrl.filing.filing_index import FilingIndex, ResolvedFiling
 from sec_xbrl.filing.layer1_ingestion import Layer1IngestionError, Layer1Ingestor
@@ -62,6 +62,7 @@ class _Fact:
         self.id = identifier
         self.qname = _QName("http://fasb.org/us-gaap/2025", "RevenueFromContractWithCustomerExcludingAssessedTax")
         self.concept = _Concept(self.qname)
+        self.context = _Context()
 
 
 class _Dimension:
@@ -100,6 +101,11 @@ class _FullInlineModel:
         fact.context.qnameDims = {axis: _Dimension(axis, member)}
         self.facts = (fact,)
         self.factsInInstance = ()
+        self.qnameConcepts = {
+            fact.qname: fact.concept,
+            axis: _Concept(axis),
+            member: _Concept(member),
+        }
         self._relationship = _Relationship(fact.concept, _Concept(axis))
 
     def relationshipSet(self, *_: object) -> _RelationshipSet:
@@ -213,6 +219,23 @@ def test_ingestion_refuses_unresolved_concept_before_writing(tmp_path: Path) -> 
         ingestor.ingest(_resolved(tmp_path), model)
 
     assert not (tmp_path / "snapshots" / "0000000001").exists()
+
+
+def test_ingestion_refuses_unresolved_dimension_metadata_with_raw_completeness_state(tmp_path: Path) -> None:
+    model = _FullInlineModel()
+    model.qnameConcepts = {}
+    ingestor = Layer1Ingestor(tmp_path / "snapshots", relationship_extractor=_Relationships())
+
+    with pytest.raises(Layer1ExtractionError, match="unresolved Context Axis concept"):
+        ingestor.ingest(_resolved(tmp_path), model)
+
+    assert not (tmp_path / "snapshots" / "0000000001" / "000000000125000001").exists()
+    state = json.loads(next((tmp_path / "parse_state").rglob("*.json")).read_text())
+    assert state["stage"] == "LAYER1_EXTRACT"
+    assert state["quality_gate"] == "RAW_CORPUS_COMPLETENESS"
+    assert state["outcome"] == "FAILED"
+    assert state["expected_count"] == 1
+    assert state["actual_count"] is None
 
 
 def test_ingestion_refuses_partial_extractor_output_and_records_retryable_state(tmp_path: Path) -> None:

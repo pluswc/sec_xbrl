@@ -90,7 +90,16 @@ class _Fact:
 
 
 class _Model:
-    factsInInstance = (_Fact(), _Fact(nil=True))
+    def __init__(self) -> None:
+        self.factsInInstance = (_Fact(), _Fact(nil=True))
+        context = self.factsInInstance[0].context
+        region_axis, customer_axis = context.qnameDims
+        korea_member = context.qnameDims[region_axis].memberQname
+        self.qnameConcepts = {
+            region_axis: _Concept(region_axis, numeric=False),
+            customer_axis: _Concept(customer_axis, numeric=False),
+            korea_member: _Concept(korea_member, numeric=False),
+        }
 
 
 def _filing() -> FilingRef:
@@ -155,6 +164,13 @@ def test_dimension_concepts_preserve_resolved_taxonomy_labels_and_documentation(
         assert row["documentation"] == "Revenue documentation"
 
 
+def test_refuses_unresolved_context_axis_or_explicit_member_metadata() -> None:
+    model = type("UnresolvedDimensionModel", (), {"facts": (_Fact(),), "qnameConcepts": {}})()
+
+    with pytest.raises(Layer1ExtractionError, match="unresolved Context Axis concept"):
+        Layer1Extractor().extract(model, _filing())
+
+
 def test_parquet_retains_text_and_lossless_foreign_key_linkage(tmp_path: Path) -> None:
     pl = pytest.importorskip("polars")
     numeric = _Fact()
@@ -164,7 +180,21 @@ def test_parquet_retains_text_and_lossless_foreign_key_linkage(tmp_path: Path) -
     text.value = "Filed disclosure text"
     text.decimals = None
     text.precision = "INF"
-    model = type("MixedModel", (), {"facts": (numeric, text)})()
+    context = numeric.context
+    region_axis, customer_axis = context.qnameDims
+    korea_member = context.qnameDims[region_axis].memberQname
+    model = type(
+        "MixedModel",
+        (),
+        {
+            "facts": (numeric, text),
+            "qnameConcepts": {
+                region_axis: _Concept(region_axis, numeric=False),
+                customer_axis: _Concept(customer_axis, numeric=False),
+                korea_member: _Concept(korea_member, numeric=False),
+            },
+        },
+    )()
 
     tables = Layer1Extractor().extract(model, _filing())
     tables.write_parquet(tmp_path)
@@ -216,7 +246,22 @@ def test_inline_model_uses_complete_model_facts_not_partial_facts_in_instance() 
     first = _Fact()
     second = _Fact()
     second.id = "revenue-2"
-    model = type("InlineModel", (), {"facts": (first, second), "factsInInstance": (first,)})()
+    context = first.context
+    region_axis, customer_axis = context.qnameDims
+    korea_member = context.qnameDims[region_axis].memberQname
+    model = type(
+        "InlineModel",
+        (),
+        {
+            "facts": (first, second),
+            "factsInInstance": (first,),
+            "qnameConcepts": {
+                region_axis: _Concept(region_axis, numeric=False),
+                customer_axis: _Concept(customer_axis, numeric=False),
+                korea_member: _Concept(korea_member, numeric=False),
+            },
+        },
+    )()
 
     corpus = select_fact_corpus(model)
     tables = Layer1Extractor().extract(model, _filing())

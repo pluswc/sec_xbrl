@@ -161,18 +161,24 @@ class Layer1Extractor:
                 context_id = context_row["context_id"]
                 context_rows.setdefault(context_id, context_row)
                 for dimension in dimensions:
+                    axis_concept = _required_resolved_dimension_concept(
+                        qname_concepts, dimension["axis_qname"], "Axis"
+                    )
                     axis_row = _concept_row(
                         filing_id,
                         dimension["axis_qname"],
-                        _resolved_concept(qname_concepts, dimension["axis_qname"]),
+                        axis_concept,
                     )
                     _store_concept(concept_rows, axis_row)
                     member_id: str | None = None
                     if dimension["member_qname"] is not None:
+                        member_concept = _required_resolved_dimension_concept(
+                            qname_concepts, dimension["member_qname"], "explicit Member"
+                        )
                         member_row = _concept_row(
                             filing_id,
                             dimension["member_qname"],
-                            _resolved_concept(qname_concepts, dimension["member_qname"]),
+                            member_concept,
                         )
                         _store_concept(concept_rows, member_row)
                         member_id = member_row["raw_concept_id"]
@@ -325,6 +331,24 @@ def _resolved_concept(qname_concepts: Any, qname: Any) -> Any:
     if not callable(getter):
         return None
     return getter(qname)
+
+
+def _required_resolved_dimension_concept(qname_concepts: Any, qname: Any, kind: str) -> Any:
+    """Require Arelle metadata for a Context Axis or explicit Member.
+
+    A QName alone is not sufficient Raw provenance for a dimensional concept:
+    it would permit unresolved taxonomy imports to become a successful but
+    metadata-incomplete snapshot.  Typed members intentionally do not pass
+    through this path because their XML payload, rather than a taxonomy member
+    Concept, is the as-filed value.
+    """
+    concept = _resolved_concept(qname_concepts, qname)
+    if concept is None:
+        raise Layer1ExtractionError(
+            f"unresolved Context {kind} concept; refusing incomplete Raw dimension metadata: "
+            f"{_qname_text(qname)}"
+        )
+    return concept
 
 
 def _store_concept(rows: dict[str, dict[str, Any]], row: dict[str, Any]) -> None:

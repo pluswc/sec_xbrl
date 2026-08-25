@@ -69,6 +69,9 @@ executable/inspection checklist is maintained in
 - Facts preserve numeric/text/nil lexical value distinctions, decimals,
   precision, source locator, and Raw null period/comparative classifications.
 - dimensions preserve explicit Axis/Member identity and typed-member payload.
+- An unresolved Context Axis or explicit Member fails the raw-corpus
+  completeness gate and publishes no snapshot; typed members remain preserved
+  as their XML payload without requiring a taxonomy Member Concept.
 - typed dimensions are not silently dropped.
 - materialized raw tables remain separate Parquet files for filing, concept,
   context, unit, fact, and dimension_fact.
