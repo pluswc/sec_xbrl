@@ -77,6 +77,9 @@ and `comparative_type`; it does not mutate the M2 Parquet snapshot.  Duration
 classification uses the Context's actual start/end days, with FY accepting
 350–378 days to cover 52/53-week fiscal years.  Q4 derivation requires an
 explicit `canonical_concept_id`, `is_additive=true`, equal dimensional context,
-units, fiscal year, and structural/recast/comparability metadata.  A derived
+units, fiscal year, identical FY/YTD Context start date, and
+structural/recast/comparability metadata. A fiscal-calendar change must be
+represented by a differing `comparability_flag`, which rejects derivation
+rather than silently bridging the change. A derived
 record adds `formula`, `source_fact_ids`, and `derivation_rule_version` and is
 always distinct from its reported sources.

@@ -3,6 +3,7 @@ from __future__ import annotations
 from sec_xbrl.periods.logic import (
     DisclosureState,
     DisclosureStateTracker,
+    Layer1PeriodAnalysis,
     PeriodClassifier,
     derive_q4_facts,
 )
@@ -90,6 +91,16 @@ def test_52_and_53_week_fiscal_years_are_fy_not_calendar_assumptions() -> None:
     assert [row["period_class"] for row in rows] == ["FY", "FY"]
 
 
+def test_dei_month_day_fiscal_year_end_marks_prior_balance_comparative() -> None:
+    rows = PeriodClassifier().classify(
+        filing={"report_date": "2025-09-27", "fiscal_year_end": "--09-27"},
+        concepts=({"raw_concept_id": "raw-assets", "period_type": "instant"},),
+        contexts=(_context("prior", None, None, instant="2024-09-27"),),
+        facts=(_fact("prior", "prior", raw_concept_id="raw-assets"),),
+    )
+    assert rows[0]["comparative_type"] == "PRIOR_FY_BALANCE"
+
+
 def test_derived_q4_is_distinct_and_requires_canonical_additive_compatible_sources() -> None:
     contexts = (
         _context("fy", "2024-12-29", "2025-12-28"),
@@ -98,11 +109,11 @@ def test_derived_q4_is_distinct_and_requires_canonical_additive_compatible_sourc
     facts = (
         _fact(
             "fy", "fy", value="1000", period_class="FY", canonical_concept_id="revenue", is_additive=True,
-            fiscal_year=2025, structural_version="v1",
+            fiscal_year=2025, structural_version="v1", comparability_flag="COMPATIBLE",
         ),
         _fact(
             "ytd", "ytd", value="720", period_class="YTD_9M", canonical_concept_id="revenue", is_additive=True,
-            fiscal_year=2025, structural_version="v1",
+            fiscal_year=2025, structural_version="v1", comparability_flag="COMPATIBLE",
         ),
         _fact(
             "bad", "ytd", value="720", period_class="YTD_9M", canonical_concept_id="margin", is_additive=False,
@@ -124,7 +135,7 @@ def test_derived_q4_is_distinct_and_requires_canonical_additive_compatible_sourc
 
 def test_q4_rejects_dimension_or_recast_mismatch() -> None:
     contexts = (_context("fy", "2024-12-29", "2025-12-28"), _context("ytd", "2024-12-29", "2025-09-28"))
-    common = {"period_class": "FY", "canonical_concept_id": "revenue", "is_additive": True, "fiscal_year": 2025}
+    common = {"period_class": "FY", "canonical_concept_id": "revenue", "is_additive": True, "fiscal_year": 2025, "comparability_flag": "COMPATIBLE"}
     fy = _fact("fy", "fy", **common)
     ytd = _fact("ytd", "ytd", **{**common, "period_class": "YTD_9M", "recast_version": "recast-1"})
     assert derive_q4_facts((fy, ytd), contexts, ()) == ()
@@ -137,6 +148,24 @@ def test_q4_rejects_dimension_or_recast_mismatch() -> None:
     assert derive_q4_facts((fy, ytd_same_recast), contexts, dimensions) == ()
 
 
+def test_q4_rejects_ytd_with_a_different_fiscal_context_start() -> None:
+    contexts = (
+        _context("fy", "2024-01-01", "2024-12-31"),
+        _context("ytd", "2024-02-01", "2024-10-31"),
+    )
+    common = {"canonical_concept_id": "revenue", "is_additive": True, "fiscal_year": 2024, "comparability_flag": "COMPATIBLE"}
+    fy = _fact("fy", "fy", value="1000", period_class="FY", **common)
+    ytd = _fact("ytd", "ytd", value="750", period_class="YTD_9M", **common)
+
+    assert derive_q4_facts((fy, ytd), contexts, ()) == ()
+
+
+def test_q4_rejects_unknown_comparability_state() -> None:
+    contexts = (_context("fy", "2024-01-01", "2024-12-31"), _context("ytd", "2024-01-01", "2024-09-30"))
+    common = {"canonical_concept_id": "revenue", "is_additive": True, "fiscal_year": 2024}
+    assert derive_q4_facts((_fact("fy", "fy", period_class="FY", **common), _fact("ytd", "ytd", period_class="YTD_9M", **common)), contexts, ()) == ()
+
+
 def test_missing_disclosure_never_becomes_resolved_without_explicit_evidence() -> None:
     tracker = DisclosureStateTracker()
     state = tracker.next_state(DisclosureState.REPORTED_UNCHANGED, reported=False)
@@ -144,3 +173,17 @@ def test_missing_disclosure_never_becomes_resolved_without_explicit_evidence() -
     assert tracker.next_state(state, reported=False) == DisclosureState.NOT_REPORTED_THIS_QUARTER
     assert tracker.next_state(state, reported=True) == DisclosureState.NEW
     assert tracker.next_state(state, reported=False, resolved=True) == DisclosureState.RESOLVED
+
+
+def test_layer1_analysis_emits_classified_copy_and_explicit_policy_gated_q4_outcome() -> None:
+    contexts = (_context("qtd", "2025-06-29", "2025-09-27"),)
+    raw = _fact("raw", "qtd")
+    observations, outcomes = Layer1PeriodAnalysis().build(
+        filing={"filing_id": "f", "report_date": "2025-09-27"},
+        concepts=({"raw_concept_id": "raw-revenue", "period_type": "duration"},),
+        contexts=contexts,
+        facts=(raw,), dimension_facts=(), units=(),
+    )
+    assert raw.get("period_class") is None
+    assert observations[0]["period_class"] == "QTD_3M"
+    assert outcomes[0]["reason"] == "M7_CANONICAL_ADDITIVE_POLICY_REQUIRED"

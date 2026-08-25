@@ -143,6 +143,7 @@ class Layer1Extractor:
         unit_rows: dict[str, dict[str, Any]] = {}
         fact_rows: list[dict[str, Any]] = []
         dimension_rows: list[dict[str, Any]] = []
+        dei_metadata: dict[str, str] = {}
 
         for ordinal, fact in enumerate(facts):
             if getattr(fact, "isTuple", False):
@@ -203,6 +204,10 @@ class Layer1Extractor:
                 unit_rows.setdefault(unit_id, unit_row)
 
             lexical = getattr(fact, "value", None)
+            if _qname_parts(qname)[0].find("dei") >= 0:
+                local_name = _qname_parts(qname)[2]
+                if local_name in {"DocumentFiscalYearFocus", "DocumentFiscalPeriodFocus", "CurrentFiscalYearEndDate"}:
+                    dei_metadata[local_name] = _text(lexical) or ""
             is_nil = bool(getattr(fact, "isNil", False))
             numeric = _numeric_value(lexical) if bool(getattr(fact, "isNumeric", False)) and not is_nil else None
             fact_rows.append(
@@ -237,9 +242,9 @@ class Layer1Extractor:
             "filed_date": filing.filed_date.isoformat(),
             "report_date": filing.report_date.isoformat() if filing.report_date else None,
             "primary_document": filing.primary_document,
-            "document_fiscal_year_focus": None,
-            "document_fiscal_period_focus": None,
-            "fiscal_year_end": None,
+            "document_fiscal_year_focus": dei_metadata.get("DocumentFiscalYearFocus"),
+            "document_fiscal_period_focus": dei_metadata.get("DocumentFiscalPeriodFocus"),
+            "fiscal_year_end": dei_metadata.get("CurrentFiscalYearEndDate"),
             "is_amendment": filing.form.endswith("/A"),
             "amends_accession": None,
             "source_url": source_url,
