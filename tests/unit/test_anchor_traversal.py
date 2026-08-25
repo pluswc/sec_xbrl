@@ -110,8 +110,17 @@ def _tables() -> dict[str, object]:
             MEMBER_ROLE,
             dimensional + "domain-member",
             "north_america_member",
-            "region_hypercube",
+            "other_region_member",
             order="2",
+        ),
+        _edge(
+            "def-cycle-return",
+            "DEF",
+            MEMBER_ROLE,
+            dimensional + "domain-member",
+            "other_region_member",
+            "north_america_member",
+            order="3",
         ),
         # This edge shares no anchor/targetRole connection and must remain isolated.
         _edge(
@@ -200,8 +209,9 @@ def test_definition_follows_target_role_to_leaf_and_stops_cycle() -> None:
 
     assert by_relationship["def-member"]["evidence_type"] == "DEFINITION_MEMBER"
     assert by_relationship["def-member"]["to_raw_concept_id"] == "north_america_member"
-    assert by_relationship["def-cycle"]["to_raw_concept_id"] == "region_hypercube"
+    assert by_relationship["def-cycle"]["to_raw_concept_id"] == "other_region_member"
     assert sum(row["source_relationship_id"] == "def-cycle" for row in evidence) == 1
+    assert sum(row["source_relationship_id"] == "def-cycle-return" for row in evidence) == 1
     transition = next(
         row
         for row in evidence
@@ -209,6 +219,12 @@ def test_definition_follows_target_role_to_leaf_and_stops_cycle() -> None:
         and row["target_role_uri"] == "http://example.test/role/RegionMembers"
     )
     assert transition["role_id"] == MEMBER_ROLE
+    anchor_presence_expansion = next(
+        row
+        for row in evidence
+        if row["evidence_type"] == "ROLE_EXPANSION" and row["role_id"] == DEF_ROLE
+    )
+    assert anchor_presence_expansion["target_role_uri"] is None
 
 
 def test_calculation_is_parent_to_child_pre_does_not_expand_and_roles_remain_separate() -> None:
@@ -220,6 +236,76 @@ def test_calculation_is_parent_to_child_pre_does_not_expand_and_roles_remain_sep
     assert "pre-sibling" not in ids
     assert all(row["network_type"] != "PRE" for row in evidence)
     assert "def-unrelated" not in ids
+
+
+def test_definition_requires_semantic_primary_to_member_direction() -> None:
+    tables = _tables()
+    tables["relationships"] = (
+        *tables["relationships"],
+        _edge(
+            "def-invalid-shortcut",
+            "DEF",
+            DEF_ROLE,
+            "http://xbrl.org/int/dim/arcrole/domain-member",
+            "revenue",
+            "shortcut_member",
+        ),
+    )
+
+    result = AnchorTraversal().traverse(**tables)
+    ids = {row["source_relationship_id"] for row in result.evidence}
+
+    assert "def-all" in ids
+    assert "def-invalid-shortcut" not in ids
+
+
+def test_definition_member_hierarchy_has_no_fixed_depth_limit() -> None:
+    tables = _tables()
+    relationships = [
+        row
+        for row in tables["relationships"]
+        if row["relationship_id"] not in {"def-member", "def-cycle"}
+    ]
+    source = "region_domain"
+    for index in range(24):
+        target = f"deep_member_{index}"
+        relationships.append(
+            _edge(
+                f"def-deep-{index}",
+                "DEF",
+                MEMBER_ROLE,
+                "http://xbrl.org/int/dim/arcrole/domain-member",
+                source,
+                target,
+            )
+        )
+        source = target
+    tables["relationships"] = tuple(relationships)
+
+    result = AnchorTraversal().traverse(**tables)
+    ids = {row["source_relationship_id"] for row in result.evidence}
+
+    assert "def-deep-23" in ids
+
+
+def test_distinct_relationship_identities_are_not_collapsed_in_cycle_control() -> None:
+    tables = _tables()
+    tables["relationships"] = (
+        *tables["relationships"],
+        _edge(
+            "cal-child-distinct-network",
+            "CAL",
+            STATEMENT_ROLE,
+            "http://www.xbrl.org/2003/arcrole/summation-item",
+            "revenue",
+            "cost_of_revenue",
+        ),
+    )
+
+    result = AnchorTraversal().traverse(**tables)
+    ids = {row["source_relationship_id"] for row in result.evidence}
+
+    assert {"cal-child", "cal-child-distinct-network"} <= ids
 
 
 def test_materialization_preserves_separate_anchor_and_evidence_tables(tmp_path: Path) -> None:
