@@ -3,6 +3,7 @@
 from sec_xbrl.longitudinal.canonical import (
     MAPPING_VERSION,
     AnnualSeries,
+    AsOfSeriesSelector,
     CompanyCanonicalizer,
     CurrentSeries,
     MappingRelation,
@@ -13,6 +14,7 @@ from sec_xbrl.longitudinal.canonical import (
 __all__ = [
     "MAPPING_VERSION",
     "AnnualSeries",
+    "AsOfSeriesSelector",
     "CompanyCanonicalizer",
     "CurrentSeries",
     "MappingRelation",
