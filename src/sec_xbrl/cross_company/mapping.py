@@ -46,23 +46,102 @@ class CrossCompanyMapper:
         concept_mappings: Iterable[Mapping[str, Any]] = (),
         axis_mappings: Iterable[Mapping[str, Any]] = (),
         member_mappings: Iterable[Mapping[str, Any]] = (),
+        standard_concept_observations: Iterable[Mapping[str, Any]] = (),
     ) -> CrossCompanyMappingTables:
-        """Return additive mapping rows without changing supplied records.
+        """Build additive explicit maps plus safe standard-taxonomy equivalences.
 
-        Each input needs ``company_canonical_id``, ``relation``, ``confidence``,
-        ``evidence``, ``method``, and a mapping version.  A target analytical
-        ID is mandatory for comparable relations, but deliberately absent for
-        ``NOT_COMPARABLE`` and ``UNRESOLVED``.
+        Explicit inputs need ``company_canonical_id``, ``relation``,
+        ``confidence``, ``evidence``, ``method``, and a mapping version. A
+        target analytical ID is mandatory for comparable relations, but
+        deliberately absent for ``NOT_COMPARABLE`` and ``UNRESOLVED``.
+
+        ``standard_concept_observations`` is deliberately narrow: it can only
+        create an ``EQUIVALENT`` relation when two or more companies report the
+        exact same standard QName with compatible non-empty type and period
+        semantics.  It never attempts to infer a relation from a label.
         """
+        concept_rows = tuple(_mapping_row("concept", row) for row in concept_mappings)
+        generated_standard_rows = self.standard_concept_mappings(standard_concept_observations)
+        combined_concept_rows = concept_rows + generated_standard_rows
+        _assert_unique_mapping_keys(combined_concept_rows)
+        axis_rows = tuple(_mapping_row("axis", row) for row in axis_mappings)
+        member_rows = tuple(_mapping_row("member", row) for row in member_mappings)
+        _assert_unique_mapping_keys(axis_rows)
+        _assert_unique_mapping_keys(member_rows)
         return CrossCompanyMappingTables(
-            cross_company_concept_map=tuple(
-                _mapping_row("concept", row) for row in concept_mappings
-            ),
-            cross_company_axis_map=tuple(_mapping_row("axis", row) for row in axis_mappings),
-            cross_company_member_map=tuple(
-                _mapping_row("member", row) for row in member_mappings
-            ),
+            cross_company_concept_map=combined_concept_rows,
+            cross_company_axis_map=axis_rows,
+            cross_company_member_map=member_rows,
         )
+
+    def standard_concept_mappings(
+        self, observations: Iterable[Mapping[str, Any]]
+    ) -> tuple[dict[str, Any], ...]:
+        """Map only exact, cross-company standard concepts to equivalence.
+
+        A caller supplies Layer 2 concept observations enriched with their
+        Layer 1 concept metadata.  Rows with missing or incompatible semantic
+        fields simply remain unmapped; this function is intentionally not a
+        name/label similarity engine.
+        """
+        groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+        for source in observations:
+            row = dict(source)
+            qname = str(row.get("qname") or "")
+            taxonomy_family = str(row.get("taxonomy_family") or "")
+            data_type = str(row.get("data_type") or "")
+            period_type = str(row.get("period_type") or "")
+            company_id = _company_id(row, "concept")
+            cik = str(row.get("cik") or "")
+            if not (
+                row.get("is_standard") is True
+                and qname
+                and taxonomy_family in {"us-gaap", "dei", "srt"}
+                and data_type
+                and period_type
+                and company_id
+                and cik
+            ):
+                continue
+            groups.setdefault((qname, taxonomy_family, data_type, period_type), []).append(row)
+
+        mappings: list[dict[str, Any]] = []
+        for (qname, taxonomy_family, data_type, period_type), rows in sorted(groups.items()):
+            ciks = {str(row["cik"]) for row in rows}
+            if len(ciks) < 2:
+                continue
+            company_ids = sorted({_company_id(row, "concept") for row in rows})
+            evidence = {
+                "standard_qname": qname,
+                "taxonomy_family": taxonomy_family,
+                "data_type": data_type,
+                "period_type": period_type,
+                "compatible_company_canonical_ids": company_ids,
+                "source_filings": sorted(
+                    {str(row.get("filing_id") or row.get("source_filing_id") or "") for row in rows}
+                    - {""}
+                ),
+            }
+            for row in sorted(
+                rows,
+                key=lambda item: (_company_id(item, "concept"), _source_raw_id(item, "concept")),
+            ):
+                mappings.append(
+                    _mapping_row(
+                        "concept",
+                        {
+                            "company_canonical_id": _company_id(row, "concept"),
+                            "analytical_id": f"analytical:standard:{qname}",
+                            "relation": CrossCompanyRelation.EQUIVALENT,
+                            "confidence": 1.0,
+                            "evidence": evidence,
+                            "method": "EXACT_STANDARD_TAXONOMY_IDENTITY",
+                            "mapping_version": CROSS_COMPANY_MAPPING_VERSION,
+                            "review_required": False,
+                        },
+                    )
+                )
+        return tuple(mappings)
 
 
 class ComparisonPanelBuilder:
@@ -178,6 +257,17 @@ def _mapping_rows(
             + mappings.cross_company_member_map
         )
     return tuple(mappings)
+
+
+def _assert_unique_mapping_keys(rows: Iterable[Mapping[str, Any]]) -> None:
+    keys: set[tuple[str, str]] = set()
+    for row in rows:
+        key = (str(row["entity_type"]), str(row["company_canonical_id"]))
+        if key in keys:
+            raise ValueError(
+                "cross-company mappings cannot duplicate an entity/company canonical ID"
+            )
+        keys.add(key)
 
 
 def _source_raw_id(row: Mapping[str, Any], entity_type: str) -> str:

@@ -93,6 +93,116 @@ def test_panel_preserves_raw_company_source_and_version_for_every_row() -> None:
     assert row["mapping_version"] == "m8-review-2026-01"
 
 
+def test_exact_compatible_standard_taxonomy_identity_is_equivalent() -> None:
+    tables = CrossCompanyMapper().build(
+        standard_concept_observations=(
+            {
+                "cik": "0001045810",
+                "filing_id": "nvda-10q",
+                "raw_concept_id": "nvda:Revenue",
+                "company_canonical_concept_id": "company:nvda:concept:revenue",
+                "qname": "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+                "taxonomy_family": "us-gaap",
+                "data_type": "xbrli:monetaryItemType",
+                "period_type": "duration",
+                "is_standard": True,
+            },
+            {
+                "cik": "0000320193",
+                "filing_id": "aapl-10q",
+                "raw_concept_id": "aapl:Revenue",
+                "company_canonical_concept_id": "company:aapl:concept:revenue",
+                "qname": "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+                "taxonomy_family": "us-gaap",
+                "data_type": "xbrli:monetaryItemType",
+                "period_type": "duration",
+                "is_standard": True,
+            },
+        )
+    )
+
+    assert len(tables.cross_company_concept_map) == 2
+    assert {row["relation"] for row in tables.cross_company_concept_map} == {
+        CrossCompanyRelation.EQUIVALENT
+    }
+    assert {row["analytical_id"] for row in tables.cross_company_concept_map} == {
+        "analytical:standard:us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+    }
+    assert all(
+        row["method"] == "EXACT_STANDARD_TAXONOMY_IDENTITY"
+        for row in tables.cross_company_concept_map
+    )
+    assert all(
+        row["evidence"]["source_filings"] == ["aapl-10q", "nvda-10q"]
+        for row in tables.cross_company_concept_map
+    )
+
+
+def test_label_only_standard_claim_remains_unresolved_not_equivalent() -> None:
+    tables = CrossCompanyMapper().build(
+        standard_concept_observations=(
+            {
+                "cik": "0001045810",
+                "filing_id": "nvda-10q",
+                "raw_concept_id": "nvda:CloudLikeRevenue",
+                "company_canonical_concept_id": "company:nvda:concept:cloud-like",
+                "label": "Cloud revenue",
+                "is_standard": False,
+            },
+            {
+                "cik": "0000789019",
+                "filing_id": "msft-10q",
+                "raw_concept_id": "msft:CloudLikeRevenue",
+                "company_canonical_concept_id": "company:msft:concept:cloud-like",
+                "label": "Cloud revenue",
+                "is_standard": False,
+            },
+        )
+    )
+    rows = ComparisonPanelBuilder().build(
+        observations=(
+            {
+                "raw_concept_id": "nvda:CloudLikeRevenue",
+                "company_canonical_concept_id": "company:nvda:concept:cloud-like",
+                "filing_id": "nvda-10q",
+                "period_end": "2026-04-26",
+            },
+        ),
+        mappings=tables,
+    )
+
+    assert tables.cross_company_concept_map == ()
+    assert rows[0]["mapping_relation"] == CrossCompanyRelation.UNRESOLVED
+    assert rows[0]["mapping_confidence"] == 0.0
+
+
+def test_explicit_mapping_cannot_silently_override_generated_standard_mapping() -> None:
+    standard = {
+        "cik": "0001045810",
+        "filing_id": "nvda-10q",
+        "raw_concept_id": "nvda:Revenue",
+        "company_canonical_concept_id": "company:nvda:concept:revenue",
+        "qname": "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+        "taxonomy_family": "us-gaap",
+        "data_type": "xbrli:monetaryItemType",
+        "period_type": "duration",
+        "is_standard": True,
+    }
+    peer = {
+        **standard,
+        "cik": "0000320193",
+        "filing_id": "aapl-10q",
+        "company_canonical_concept_id": "company:aapl:concept:revenue",
+    }
+    with pytest.raises(ValueError, match="cannot duplicate"):
+        CrossCompanyMapper().build(
+            concept_mappings=(
+                _map("company:nvda:concept:revenue", CrossCompanyRelation.ANALYTICALLY_SIMILAR),
+            ),
+            standard_concept_observations=(standard, peer),
+        )
+
+
 def test_low_confidence_and_unmapped_rows_remain_visible_with_versioned_status() -> None:
     tables = CrossCompanyMapper().build(
         concept_mappings=(
