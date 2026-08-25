@@ -60,9 +60,15 @@ executable/inspection checklist is maintained in
   accession-level rejection codes and leave no published destination package.
 
 ## M2 — Layer 1 extraction
-- Concepts preserve QName/namespace/local name and standard/custom status.
-- Facts preserve context/unit/value/source.
-- dimensions preserve explicit Axis/Member identity.
+- Every non-tuple Fact from the accepted `model.facts` corpus is materialized
+  once, with lossless Fact → Concept/Context/Unit linkage inside one immutable
+  filing snapshot.
+- Concepts preserve QName/namespace/local name, standard/custom status, and
+  resolved taxonomy label/documentation for both Fact concepts and Context
+  Axis/Member concepts.
+- Facts preserve numeric/text/nil lexical value distinctions, decimals,
+  precision, source locator, and Raw null period/comparative classifications.
+- dimensions preserve explicit Axis/Member identity and typed-member payload.
 - typed dimensions are not silently dropped.
 - materialized raw tables remain separate Parquet files for filing, concept,
   context, unit, fact, and dimension_fact.

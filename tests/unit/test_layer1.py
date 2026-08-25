@@ -135,6 +135,60 @@ def test_write_parquet_materializes_separate_raw_tables(tmp_path: Path) -> None:
     assert fact["reported_or_derived"] == "REPORTED"
 
 
+def test_dimension_concepts_preserve_resolved_taxonomy_labels_and_documentation() -> None:
+    model = _Model()
+    context = model.factsInInstance[0].context
+    region_axis, customer_axis = context.qnameDims
+    korea_member = context.qnameDims[region_axis].memberQname
+    model.qnameConcepts = {
+        region_axis: _Concept(region_axis, numeric=False),
+        customer_axis: _Concept(customer_axis, numeric=False),
+        korea_member: _Concept(korea_member, numeric=False),
+    }
+
+    tables = Layer1Extractor().extract(model, _filing())
+
+    for local_name in ("RegionAxis", "CustomerAxis", "KoreaMember"):
+        row = next(item for item in tables.concepts if item["local_name"] == local_name)
+        assert row["data_type"] == "xsd:decimal"
+        assert row["label"] == "Revenue"
+        assert row["documentation"] == "Revenue documentation"
+
+
+def test_parquet_retains_text_and_lossless_foreign_key_linkage(tmp_path: Path) -> None:
+    pl = pytest.importorskip("polars")
+    numeric = _Fact()
+    text = _Fact()
+    text.id = "narrative-1"
+    text.isNumeric = False
+    text.value = "Filed disclosure text"
+    text.decimals = None
+    text.precision = "INF"
+    model = type("MixedModel", (), {"facts": (numeric, text)})()
+
+    tables = Layer1Extractor().extract(model, _filing())
+    tables.write_parquet(tmp_path)
+
+    facts = pl.read_parquet(tmp_path / "fact.parquet")
+    concepts = pl.read_parquet(tmp_path / "concept.parquet")
+    contexts = pl.read_parquet(tmp_path / "context.parquet")
+    units = pl.read_parquet(tmp_path / "unit.parquet")
+    dimensions = pl.read_parquet(tmp_path / "dimension_fact.parquet")
+    narrative = facts.filter(pl.col("value_text") == "Filed disclosure text").row(0, named=True)
+    assert narrative["raw_value"] == "Filed disclosure text"
+    assert narrative["value_numeric"] is None
+    assert narrative["precision"] == "INF"
+    concept_ids = set(concepts["raw_concept_id"].to_list())
+    assert set(facts["raw_concept_id"].to_list()) <= concept_ids
+    assert set(facts["context_id"].drop_nulls().to_list()) <= set(contexts["context_id"].to_list())
+    assert set(facts["unit_id"].drop_nulls().to_list()) <= set(units["unit_id"].to_list())
+    assert set(dimensions["fact_id"].to_list()) <= set(facts["fact_id"].to_list())
+    assert set(dimensions["axis_raw_concept_id"].to_list()) <= concept_ids
+    assert set(dimensions["member_raw_concept_id"].drop_nulls().to_list()) <= concept_ids
+    assert facts["period_class"].null_count() == facts.height
+    assert facts["comparative_type"].null_count() == facts.height
+
+
 def test_write_parquet_keeps_contract_schema_for_empty_dimensions_and_rejects_overwrite(
     tmp_path: Path,
 ) -> None:
