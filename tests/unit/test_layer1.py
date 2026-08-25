@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from sec_xbrl.facts.layer1 import Layer1ExtractionError, Layer1Extractor
+from sec_xbrl.facts.layer1 import Layer1ExtractionError, Layer1Extractor, select_fact_corpus
 from sec_xbrl.filing.contracts import FilingRef
 
 
@@ -156,3 +156,24 @@ def test_write_parquet_keeps_contract_schema_for_empty_dimensions_and_rejects_ov
     }
     with pytest.raises(Layer1ExtractionError, match="snapshot already exists"):
         tables.write_parquet(tmp_path)
+
+
+def test_inline_model_uses_complete_model_facts_not_partial_facts_in_instance() -> None:
+    first = _Fact()
+    second = _Fact()
+    second.id = "revenue-2"
+    model = type("InlineModel", (), {"facts": (first, second), "factsInInstance": (first,)})()
+
+    corpus = select_fact_corpus(model)
+    tables = Layer1Extractor().extract(model, _filing())
+
+    assert corpus.source == "model.facts"
+    assert corpus.source_count == 2
+    assert len(tables.facts) == 2
+
+
+def test_refuses_ambiguous_fact_corpus_when_instance_facts_are_not_in_model_facts() -> None:
+    model = type("BrokenModel", (), {"facts": (_Fact(),), "factsInInstance": (_Fact(),)})()
+
+    with pytest.raises(Layer1ExtractionError, match="not a subset"):
+        select_fact_corpus(model)

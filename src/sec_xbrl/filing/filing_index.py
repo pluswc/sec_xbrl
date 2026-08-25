@@ -179,10 +179,28 @@ class FilingPackageResolver:
 
 
 class ArelleFilingLoader:
-    """Materialize a resolved package and load it through Arelle in offline mode."""
+    """Materialize and load a filing with an explicit taxonomy-cache policy.
 
-    def __init__(self, model_loader: ArelleModelLoader | None = None) -> None:
-        self._model_loader = model_loader or _load_with_arelle
+    Normal ingestion is offline and therefore reproducible from the supplied
+    package plus ``taxonomy_cache``.  A one-time cache bootstrap may opt in to
+    network resolution explicitly; it is never an accidental side effect of a
+    production load.
+    """
+
+    def __init__(
+        self,
+        model_loader: ArelleModelLoader | None = None,
+        *,
+        taxonomy_cache: Path | None = None,
+        allow_network_taxonomy_resolution: bool = False,
+    ) -> None:
+        self._model_loader = model_loader or (
+            lambda entrypoint: _load_with_arelle(
+                entrypoint,
+                taxonomy_cache=taxonomy_cache,
+                allow_network_taxonomy_resolution=allow_network_taxonomy_resolution,
+            )
+        )
 
     def load(self, resolved: ResolvedFiling, destination: Path) -> Any:
         """Extract only local package files and pass the selected local path to Arelle."""
@@ -195,6 +213,23 @@ class ArelleFilingLoader:
         if model is None or getattr(model, "modelDocument", None) is None:
             raise ArelleLoadError(f"Arelle did not load entry point: {resolved.entrypoint_name}")
         return model
+
+    @classmethod
+    def bootstrap_taxonomy_cache(
+        cls, resolved: ResolvedFiling, destination: Path, taxonomy_cache: Path
+    ) -> Any:
+        """Explicitly populate a reproducible taxonomy cache for one package.
+
+        This is deliberately separate from normal ingestion: callers must
+        invoke it knowingly in a network-enabled environment, then archive or
+        retain ``taxonomy_cache`` for subsequent offline loads.  The returned
+        model is still subject to Layer 1 completeness validation.
+        """
+        loader = cls(
+            taxonomy_cache=taxonomy_cache,
+            allow_network_taxonomy_resolution=True,
+        )
+        return loader.load(resolved, destination)
 
 
 def _select_entrypoint(
@@ -257,13 +292,27 @@ def _is_safe_member_name(name: str) -> bool:
     return bool(name) and not path.is_absolute() and ".." not in path.parts and "\\" not in name
 
 
-def _load_with_arelle(entrypoint: Path) -> Any:
+def _load_with_arelle(
+    entrypoint: Path,
+    *,
+    taxonomy_cache: Path | None = None,
+    allow_network_taxonomy_resolution: bool = False,
+) -> Any:
     try:
         from arelle import Cntlr
     except ImportError as exc:  # pragma: no cover - exercised by the project dependency in CI.
         raise ArelleLoadError("arelle-release is required to load filing packages") from exc
+    # SEC-specific transforms are an Arelle runtime dependency, not a filing
+    # taxonomy import. Register them before parsing both bootstrap and offline
+    # loads so a valid SEC Inline filing is not rejected as incomplete.
+    from sec_xbrl.filing.sec_inline_transforms import register_sec_inline_transforms
+
+    register_sec_inline_transforms()
     controller = Cntlr.Cntlr(logFileName="logToBuffer")
-    controller.webCache.workOffline = True
+    if taxonomy_cache is not None:
+        taxonomy_cache.mkdir(parents=True, exist_ok=True)
+        controller.webCache.cacheDir = str(taxonomy_cache)
+    controller.webCache.workOffline = not allow_network_taxonomy_resolution
     model = controller.modelManager.load(str(entrypoint))
     if model is None or getattr(model, "modelDocument", None) is None:
         try:

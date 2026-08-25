@@ -24,6 +24,21 @@ class Layer1ExtractionError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class FactCorpus:
+    """The complete top-level Fact corpus exposed by an Arelle model.
+
+    Inline XBRL models can expose a small ``factsInInstance`` subset while
+    ``model.facts`` contains every inline fact.  Layer 1 must use the latter
+    when available; otherwise a partial subset could be mistaken for a filing
+    snapshot.
+    """
+
+    facts: tuple[Any, ...]
+    source: str
+    source_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class Layer1Tables:
     """Rows ready for immutable Layer 1 Parquet materialization."""
 
@@ -120,7 +135,8 @@ class Layer1Extractor:
         boundary and to permit small, network-free fixtures in unit tests.
         """
         filing_id = _stable_id("filing", canonicalize_cik(filing.cik), filing.accession)
-        facts = tuple(getattr(model, "factsInInstance", None) or getattr(model, "facts", ()))
+        corpus = select_fact_corpus(model)
+        facts = corpus.facts
         concept_rows: dict[str, dict[str, Any]] = {}
         context_rows: dict[str, dict[str, Any]] = {}
         unit_rows: dict[str, dict[str, Any]] = {}
@@ -223,6 +239,44 @@ class Layer1Extractor:
             facts=tuple(fact_rows),
             dimension_facts=tuple(dimension_rows),
         )
+
+
+def select_fact_corpus(model: Any) -> FactCorpus:
+    """Return the complete top-level corpus, refusing known partial subsets.
+
+    Arelle's documented ``model.facts`` is the authoritative model-wide
+    collection for Inline XBRL.  ``factsInInstance`` remains a compatibility
+    fallback only for fixture/legacy models that do not expose ``facts``.  If
+    both are present, the instance subset must be contained in the full
+    collection; a disagreement is a load/validation failure, not a reason to
+    silently choose the smaller collection.
+    """
+    all_facts_raw = getattr(model, "facts", None)
+    instance_raw = getattr(model, "factsInInstance", None)
+    all_facts = tuple(all_facts_raw or ())
+    instance_facts = tuple(instance_raw or ())
+
+    if all_facts:
+        if instance_facts:
+            all_ids = {id(fact) for fact in all_facts}
+            missing = sum(id(fact) not in all_ids for fact in instance_facts)
+            if missing:
+                raise Layer1ExtractionError(
+                    "factsInInstance is not a subset of model.facts; refusing ambiguous Fact corpus"
+                )
+        top_level = tuple(fact for fact in all_facts if not bool(getattr(fact, "isTuple", False)))
+        if not top_level:
+            raise Layer1ExtractionError("model.facts contains no top-level facts")
+        return FactCorpus(facts=top_level, source="model.facts", source_count=len(top_level))
+
+    if instance_facts:
+        top_level = tuple(fact for fact in instance_facts if not bool(getattr(fact, "isTuple", False)))
+        if not top_level:
+            raise Layer1ExtractionError("factsInInstance contains no top-level facts")
+        return FactCorpus(
+            facts=top_level, source="factsInInstance-fallback", source_count=len(top_level)
+        )
+    raise Layer1ExtractionError("loaded model exposes no facts")
 
 
 def _concept_row(filing_id: str, qname: Any, concept: Any) -> dict[str, Any]:
