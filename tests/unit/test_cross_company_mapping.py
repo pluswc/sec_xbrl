@@ -138,6 +138,50 @@ def test_exact_compatible_standard_taxonomy_identity_is_equivalent() -> None:
     )
 
 
+def test_standard_equivalence_consolidates_multiple_filings_for_one_company() -> None:
+    nvda_q1 = {
+        "cik": "0001045810",
+        "filing_id": "nvda-q1",
+        "raw_concept_id": "nvda-q1:NetIncomeLoss",
+        "company_canonical_concept_id": "company:nvda:concept:net-income",
+        "qname": "us-gaap:NetIncomeLoss",
+        "taxonomy_family": "us-gaap",
+        "data_type": "xbrli:monetaryItemType",
+        "period_type": "duration",
+        "is_standard": True,
+    }
+    tables = CrossCompanyMapper().build(
+        standard_concept_observations=(
+            nvda_q1,
+            {
+                **nvda_q1,
+                "filing_id": "nvda-q2",
+                "raw_concept_id": "nvda-q2:NetIncomeLoss",
+            },
+            {
+                **nvda_q1,
+                "cik": "0000320193",
+                "filing_id": "aapl-q2",
+                "raw_concept_id": "aapl-q2:NetIncomeLoss",
+                "company_canonical_concept_id": "company:aapl:concept:net-income",
+            },
+        )
+    )
+
+    assert len(tables.cross_company_concept_map) == 2
+    nvda = next(
+        row
+        for row in tables.cross_company_concept_map
+        if row["company_canonical_id"] == "company:nvda:concept:net-income"
+    )
+    assert nvda["evidence"]["source_filings"] == ["aapl-q2", "nvda-q1", "nvda-q2"]
+    assert nvda["evidence"]["source_filings_for_company"] == ["nvda-q1", "nvda-q2"]
+    assert nvda["evidence"]["source_raw_ids_for_company"] == [
+        "nvda-q1:NetIncomeLoss",
+        "nvda-q2:NetIncomeLoss",
+    ]
+
+
 def test_label_only_standard_claim_remains_unresolved_not_equivalent() -> None:
     tables = CrossCompanyMapper().build(
         standard_concept_observations=(

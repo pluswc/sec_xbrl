@@ -110,7 +110,10 @@ class CrossCompanyMapper:
             ciks = {str(row["cik"]) for row in rows}
             if len(ciks) < 2:
                 continue
-            company_ids = sorted({_company_id(row, "concept") for row in rows})
+            rows_by_company: dict[str, list[dict[str, Any]]] = {}
+            for row in rows:
+                rows_by_company.setdefault(_company_id(row, "concept"), []).append(row)
+            company_ids = sorted(rows_by_company)
             evidence = {
                 "standard_qname": qname,
                 "taxonomy_family": taxonomy_family,
@@ -122,19 +125,33 @@ class CrossCompanyMapper:
                     - {""}
                 ),
             }
-            for row in sorted(
-                rows,
-                key=lambda item: (_company_id(item, "concept"), _source_raw_id(item, "concept")),
-            ):
+            for company_id, company_rows in sorted(rows_by_company.items()):
+                evidence_for_company = {
+                    **evidence,
+                    "source_filings_for_company": sorted(
+                        {
+                            str(row.get("filing_id") or row.get("source_filing_id") or "")
+                            for row in company_rows
+                        }
+                        - {""}
+                    ),
+                    "source_raw_ids_for_company": sorted(
+                        {
+                            _source_raw_id(row, "concept")
+                            for row in company_rows
+                            if _source_raw_id(row, "concept")
+                        }
+                    ),
+                }
                 mappings.append(
                     _mapping_row(
                         "concept",
                         {
-                            "company_canonical_id": _company_id(row, "concept"),
+                            "company_canonical_id": company_id,
                             "analytical_id": f"analytical:standard:{qname}",
                             "relation": CrossCompanyRelation.EQUIVALENT,
                             "confidence": 1.0,
-                            "evidence": evidence,
+                            "evidence": evidence_for_company,
                             "method": "EXACT_STANDARD_TAXONOMY_IDENTITY",
                             "mapping_version": CROSS_COMPANY_MAPPING_VERSION,
                             "review_required": False,

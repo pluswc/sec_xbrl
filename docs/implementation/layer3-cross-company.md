@@ -85,7 +85,9 @@ relation in the panel even when it shares an analytical category with an
 standard QName and the same non-empty taxonomy family, data type, and period
 type. It records all supporting filing IDs in the mapping evidence and uses
 `EXACT_STANDARD_TAXONOMY_IDENTITY` as the method. This is a narrow identity
-rule, not label matching.
+rule, not label matching. Repeated filings for one company canonical concept
+produce one mapping row with consolidated company-specific filing and raw-ID
+evidence, rather than duplicate mapping rows.
 
 Company extension concepts, including cloud-like product or segment labels,
 receive no automatic map. They remain visible as `UNRESOLVED` until a reviewed
