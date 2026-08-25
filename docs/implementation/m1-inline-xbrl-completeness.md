@@ -10,6 +10,71 @@ the model-wide Inline corpus was available in `model.facts`.
 It is not an Excel or company-specific milestone.  No metric, canonical
 mapping, period classification, or recast decision is made here.
 
+## Raw Layer 1 collection scope / Raw Layer 1 수집 범위
+
+### Included / 포함
+
+For a resolved filing, Raw Layer 1 ingests **every top-level reported Fact**
+available in the validated Arelle `model.facts` corpus. This is a filing-wide
+preservation rule, not a financial-statement filter. It includes numeric,
+text, nil, and DEI Facts; Facts in each of the four primary financial
+statements; and every tagged Fact in notes and other disclosures. Each Fact
+keeps its Context, Unit where applicable, all explicit or typed dimensions,
+source document/locator, and QName-aware concept identity. The same filing
+snapshot also preserves PRE, CAL, and DEF role relationships.
+
+해결된 공시에 대해 Raw Layer 1은 검증된 Arelle `model.facts` corpus에
+존재하는 **모든 최상위 보고 Fact**를 적재한다. 이는 재무제표만 선택하는
+필터가 아니라 filing 전체를 보존하는 규칙이다. 수치·텍스트·nil·DEI Fact,
+4개 주요 재무제표의 Fact, 주석 및 기타 공시에서 태그된 모든 Fact를
+포함한다. 각 Fact에는 Context, 해당 시 Unit, 모든 explicit/typed dimension,
+원천 문서·위치, QName 기반 concept identity를 보존한다. 같은 filing
+snapshot에는 PRE·CAL·DEF role relationship도 보존한다.
+
+### Excluded / 제외
+
+Tuple containers are structural containers, not top-level reported Facts, and
+are excluded from the Raw Fact count. Untagged HTML narrative is not a Fact
+and is outside this Fact-ingestion boundary. Canonical mapping, period or
+comparative classification, recast selection, derived values/metrics, and
+statement/note selection are later-layer responsibilities; they are never
+created by Raw ingestion.
+
+Tuple container는 구조적 container일 뿐 최상위 보고 Fact가 아니므로 Raw
+Fact count에서 제외한다. 태그되지 않은 HTML narrative는 Fact가 아니며 이
+Fact 적재 경계 밖이다. Canonical mapping, 기간·비교기간 분류, recast 선택,
+derived value/metric, 재무제표·주석 선택은 모두 후속 Layer의 책임이며 Raw
+적재 단계에서 생성하지 않는다.
+
+### Downstream responsibility / 후속 처리 책임
+
+The four-statement and note/disclosure views are built later by analytical
+traversal and filtering over the complete Raw snapshot. They must not be used
+as an ingestion-time filter, because doing so would discard as-filed evidence
+that may be material to a later question.
+
+4개 재무제표 및 주석·공시 view는 완전한 Raw snapshot을 대상으로 후속
+analytical traversal과 filter가 구성한다. 이들은 적재 시점 filter가 되어서는
+안 된다. 그렇지 않으면 이후 분석 질문에 중요한 as-filed evidence를 버릴 수
+있기 때문이다.
+
+### Completeness and fail-closed meaning / 완전성 및 fail-closed 의미
+
+A successful snapshot means the validated top-level source corpus and the
+materialized Raw Fact count are equal after only the declared tuple-container
+exclusion, and all required Fact/Context/Unit/dimension/relationship tables
+are atomically published from the same filing/model. It does **not** mean that
+every Fact is analytically selected or comparable. Fail-closed means no
+successful snapshot is published if this preservation contract cannot be
+proven; an accession-level retryable parse-state records the failure instead.
+
+성공 snapshot은 선언된 tuple-container 제외 외에는 검증된 최상위 source
+corpus와 materialized Raw Fact count가 같고, 필수 Fact·Context·Unit·dimension·
+relationship table이 동일 filing/model에서 원자적으로 발행되었음을 뜻한다.
+이는 모든 Fact가 분석상 선택 가능하거나 비교 가능하다는 뜻은 아니다.
+Fail-closed는 이 보존 계약을 증명할 수 없으면 성공 snapshot을 발행하지 않고,
+대신 accession 단위의 재시도 가능한 parse-state에 실패를 남긴다는 뜻이다.
+
 ## Expected-result contract
 
 For every successfully materialized filing:

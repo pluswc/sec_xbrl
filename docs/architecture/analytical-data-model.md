@@ -40,6 +40,9 @@ Consumers: Excel | API | dashboard | research workflow
 Layer 2 company canonical mappings and Layer 3 cross-company mappings enrich
 the Analytical plane.  They never replace raw concept, axis, or member IDs.
 
+The filing-wide Raw Fact collection boundary is specified in
+[the M1 Layer 1 ingestion contract](../implementation/m1-inline-xbrl-completeness.md#raw-layer-1-collection-scope--raw-layer-1-수집-범위): statement and disclosure selection occurs only after Raw preservation.
+
 ## 3. Logical entities, grain, and keys
 
 All physical implementations (Parquet, database, or service) must preserve the
