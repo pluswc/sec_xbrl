@@ -7,6 +7,7 @@ from typing import ClassVar
 
 import pytest
 
+from sec_xbrl.facts.layer1 import Layer1ExtractionError
 from sec_xbrl.filing.contracts import FilingRef
 from sec_xbrl.relationships.layer1 import RelationshipExtractor
 
@@ -49,7 +50,13 @@ class _Model:
     statement_role = "http://example.com/role/StatementOfIncome"
     disclosure_role = "http://example.com/role/RevenueDisclosure"
     baseSets: ClassVar[dict[tuple[str, str, str, str], object]] = {
+        # Arelle exposes wildcard aliases for a fully specified base set. They
+        # must not repeat the same PRE relationship during materialization.
+        (presentation, statement_role, None, None): object(),
+        (presentation, statement_role, None, "presentationArc"): object(),
+        (presentation, statement_role, "presentationLink", None): object(),
         (presentation, statement_role, "presentationLink", "presentationArc"): object(),
+        (presentation, statement_role, "alternatePresentationLink", "alternatePresentationArc"): object(),
         (calculation, statement_role, "calculationLink", "calculationArc"): object(),
         (definition, disclosure_role, "definitionLink", "definitionArc"): object(),
     }
@@ -109,7 +116,8 @@ def test_extract_keeps_pre_cal_def_separate_and_preserves_target_role_metadata()
     tables = RelationshipExtractor().extract(_Model(), _filing())
 
     assert {row["network_type"] for row in tables.relationships} == {"PRE", "CAL", "DEF"}
-    assert len(tables.relationships) == 3
+    assert len(tables.relationships) == 4
+    assert all(row["link_qname"] is not None and row["arc_qname"] is not None for row in tables.relationships)
     assert {row["role_category"] for row in tables.roles} == {"STATEMENT", "TABLE"}
     definition = next(row for row in tables.relationships if row["network_type"] == "DEF")
     assert definition["target_role_uri"] == "http://example.com/role/RegionMembers"
@@ -121,6 +129,16 @@ def test_extract_keeps_pre_cal_def_separate_and_preserves_target_role_metadata()
     calculation = next(row for row in tables.relationships if row["network_type"] == "CAL")
     assert presentation["role_id"] == calculation["role_id"]
     assert presentation["relationship_id"] != calculation["relationship_id"]
+    presentations = [row for row in tables.relationships if row["network_type"] == "PRE"]
+    assert {row["link_qname"] for row in presentations} == {
+        "alternatePresentationLink",
+        "presentationLink",
+    }
+    assert {row["arc_qname"] for row in presentations} == {
+        "alternatePresentationArc",
+        "presentationArc",
+    }
+    assert len({row["relationship_id"] for row in presentations}) == 2
 
 
 def test_write_parquet_keeps_role_and_relationship_contract_schemas(tmp_path: Path) -> None:
@@ -132,5 +150,23 @@ def test_write_parquet_keeps_role_and_relationship_contract_schemas(tmp_path: Pa
     assert {path.stem for path in tmp_path.glob("*.parquet")} == {"role", "relationship"}
     relationship = pl.read_parquet(tmp_path / "relationship.parquet").row(0, named=True)
     assert relationship["network_type"] in {"PRE", "CAL", "DEF"}
+    assert "link_qname" in relationship
+    assert "arc_qname" in relationship
     with pytest.raises(Exception, match="snapshot already exists"):
         tables.write_parquet(tmp_path)
+
+
+def test_refuses_wildcard_only_base_set_without_network_provenance() -> None:
+    model = type(
+        "WildcardOnlyModel",
+        (),
+        {
+            "baseSets": {
+                (_Model.presentation, _Model.statement_role, None, None): object(),
+            },
+            "roleTypes": {},
+        },
+    )()
+
+    with pytest.raises(Layer1ExtractionError, match="lacks a fully specified"):
+        RelationshipExtractor().extract(model, _filing())

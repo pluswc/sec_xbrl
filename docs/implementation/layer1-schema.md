@@ -154,6 +154,8 @@ One row per fact-axis-member assignment.
 - `network_type` (`PRE`, `CAL`, `DEF`)
 - `role_id`
 - `arcrole`
+- `link_qname` / `arc_qname` (Arelle base-set identity; distinct extended-link
+  networks must not be merged merely because their role URI and endpoints match)
 - `from_raw_concept_id`
 - `to_raw_concept_id`
 - `order`
@@ -163,6 +165,13 @@ One row per fact-axis-member assignment.
 - `usable` nullable
 - `closed` nullable
 - `context_element` nullable
+
+When Arelle exposes wildcard aliases and a fully specified base-set key for
+the same `(arcrole, role URI)`, only the fully specified `(link_qname,
+arc_qname)` key is materialized. This prevents alias-driven duplicate arcs
+while retaining the actual extended-link network provenance. A recognized
+network with no fully specified key fails extraction rather than publishing a
+relationship with missing network provenance.
 
 ## 9. `anchor`
 - `filing_id`

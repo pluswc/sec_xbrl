@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sec_xbrl.facts.layer1 import Layer1ExtractionError, _qname_parts, _stable_id
+from sec_xbrl.facts.layer1 import Layer1ExtractionError, _qname_parts, _qname_text, _stable_id
 from sec_xbrl.filing.company_discovery import canonicalize_cik
 from sec_xbrl.filing.contracts import FilingRef
 
@@ -32,6 +32,8 @@ _PARQUET_SCHEMAS: dict[str, dict[str, str]] = {
         "network_type": "string",
         "role_id": "string",
         "arcrole": "string",
+        "link_qname": "string",
+        "arc_qname": "string",
         "from_raw_concept_id": "string",
         "to_raw_concept_id": "string",
         "order": "string",
@@ -115,6 +117,11 @@ class RelationshipExtractor:
                     "network_type": network_type,
                     "role_id": role_row["role_id"],
                     "arcrole": str(getattr(relationship, "arcrole", None) or arcrole),
+                    # Arelle base-set identity includes link/arc QNames.  Keep
+                    # them so matching endpoint arcs do not merge across
+                    # distinct extended-link networks.
+                    "link_qname": _network_qname(linkqname),
+                    "arc_qname": _network_qname(arcqname),
                     "from_raw_concept_id": from_id,
                     "to_raw_concept_id": to_id,
                     "order": _text(_attribute(relationship, "order")),
@@ -135,6 +142,8 @@ class RelationshipExtractor:
                     row["network_type"],
                     role_uri,
                     row["arcrole"],
+                    row["link_qname"],
+                    row["arc_qname"],
                     row["from_raw_concept_id"],
                     row["to_raw_concept_id"],
                     row["order"],
@@ -157,23 +166,47 @@ class RelationshipExtractor:
 
 def _network_keys(model: Any) -> tuple[tuple[str, str, Any, Any], ...]:
     keys = getattr(model, "baseSets", {}) or {}
-    result: list[tuple[str, str, Any, Any]] = []
-    seen: set[tuple[str, str, str, str]] = set()
+    by_network: dict[tuple[str, str], list[tuple[str, str, Any, Any]]] = {}
     for key in keys:
         if not isinstance(key, tuple) or len(key) < 2:
             continue
         arcrole, role_uri = key[:2]
         if not isinstance(arcrole, str) or not isinstance(role_uri, str):
             continue
+        # Other Arelle base sets (for example XBRL-dimensions infrastructure)
+        # are not Layer 1 PRE/CAL/DEF concept networks and are ignored here.
+        if _network_type(arcrole) is None or not role_uri:
+            continue
         linkqname = key[2] if len(key) > 2 else None
         arcqname = key[3] if len(key) > 3 else None
-        # Preserve Arelle QName objects for ``relationshipSet``.  A separate
-        # printable key provides deterministic de-duplication for fake models
-        # whose QName equivalents may not be hashable.
-        identity = (arcrole, role_uri, str(linkqname), str(arcqname))
-        if identity not in seen:
-            seen.add(identity)
-            result.append((arcrole, role_uri, linkqname, arcqname))
+        by_network.setdefault((arcrole, role_uri), []).append(
+            (arcrole, role_uri, linkqname, arcqname)
+        )
+
+    result: list[tuple[str, str, Any, Any]] = []
+    for network, candidates in by_network.items():
+        # Arelle publishes wildcard aliases for the same base set: e.g.
+        # (role, None, None), (role, None, arc), (role, link, None), and the
+        # fully specified (role, link, arc).  Only the latter identifies the
+        # distinct extended-link network.  Reading aliases would reproduce
+        # every relationship up to four times.
+        fully_specified = [
+            key for key in candidates if key[2] is not None and key[3] is not None
+        ]
+        if not fully_specified:
+            arcrole, role_uri = network
+            raise Layer1ExtractionError(
+                "recognized relationship network lacks a fully specified "
+                f"link/arc QName base set: arcrole={arcrole!r}, role={role_uri!r}"
+            )
+        # Preserve QName objects for ``relationshipSet``. A separate printable
+        # identity makes fixture QNames deterministic even when unhashable.
+        seen: set[tuple[str, str, str, str]] = set()
+        for key in fully_specified:
+            identity = (key[0], key[1], str(key[2]), str(key[3]))
+            if identity not in seen:
+                seen.add(identity)
+                result.append(key)
     return tuple(sorted(result, key=lambda key: (key[0], key[1], str(key[2]), str(key[3]))))
 
 
@@ -241,6 +274,16 @@ def _raw_concept_id(filing_id: str, model_object: Any) -> str | None:
         return None
     namespace_uri, _, local_name = _qname_parts(qname)
     return _stable_id("concept", filing_id, namespace_uri, local_name)
+
+
+def _network_qname(value: Any) -> str | None:
+    """Render a base-set QName without assuming fixture objects are QNames."""
+    if value is None:
+        return None
+    try:
+        return _qname_text(value)
+    except Layer1ExtractionError:
+        return _text(value)
 
 
 def _attribute(relationship: Any, *names: str) -> Any:
