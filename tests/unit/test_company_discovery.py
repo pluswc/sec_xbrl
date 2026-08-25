@@ -80,13 +80,22 @@ def test_provider_rejects_malformed_and_conflicting_records(tmp_path: Path) -> N
     with pytest.raises(DiscoveryError, match="unsupported forms"):
         list(CompanySubmissionsAccessionProvider([malformed]).iter_filings(forms={"8-K"}))
 
-    wrong_company = tmp_path / "wrong-company-history.json"
-    wrong_company.write_text(
+    third_party_accession = tmp_path / "third-party-accession.json"
+    third_party_accession.write_text(
         (FIXTURES / "sec_submissions_history.json")
         .read_text()
-        .replace("0000320193-24-000006", "0000789019-24-000006")
+        .replace("0000320193-24-000006", "0001193125-24-000006")
     )
-    with pytest.raises(DiscoveryError, match="accession CIK mismatch"):
+    assert list(
+        CompanySubmissionsAccessionProvider([third_party_accession], cik="320193").iter_filings(
+            forms={"10-Q"}
+        )
+    )
+    wrong_company = tmp_path / "wrong-company-history.json"
+    payload = json.loads((FIXTURES / "sec_submissions_history.json").read_text())
+    payload["cik"] = "0000789019"
+    wrong_company.write_text(json.dumps(payload))
+    with pytest.raises(DiscoveryError, match="submissions CIK mismatch"):
         list(CompanySubmissionsAccessionProvider([wrong_company], cik="320193").iter_filings(forms={"10-Q"}))
 
 

@@ -307,10 +307,9 @@ def _filing_refs_from_payload(
         accession = accessions[index]
         if not isinstance(accession, str) or not _ACCESSION_RE.fullmatch(accession):
             raise DiscoveryError(f"invalid accession at row {index}: {accession!r}")
-        if accession[:10] != cik:
-            raise DiscoveryError(
-                f"accession CIK mismatch at row {index}: expected {cik}, got {accession[:10]}"
-            )
+        # Accession numbers identify a submission sequence, not reliably the
+        # issuer.  Identity comes from the submissions payload's CIK (or the
+        # provider's explicit expected CIK for historical payloads).
         filed_date = parse_sec_date(filed_dates[index], field="filingDate")
         if filed_date is None:
             raise DiscoveryError(f"missing filingDate at row {index}")
