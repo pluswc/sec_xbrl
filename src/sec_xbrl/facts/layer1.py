@@ -137,6 +137,7 @@ class Layer1Extractor:
         filing_id = _stable_id("filing", canonicalize_cik(filing.cik), filing.accession)
         corpus = select_fact_corpus(model)
         facts = corpus.facts
+        qname_concepts = getattr(model, "qnameConcepts", {}) or {}
         concept_rows: dict[str, dict[str, Any]] = {}
         context_rows: dict[str, dict[str, Any]] = {}
         unit_rows: dict[str, dict[str, Any]] = {}
@@ -151,7 +152,7 @@ class Layer1Extractor:
             if qname is None:
                 raise Layer1ExtractionError("fact has no QName")
             concept_row = _concept_row(filing_id, qname, concept)
-            concept_rows.setdefault(concept_row["raw_concept_id"], concept_row)
+            _store_concept(concept_rows, concept_row)
 
             context = getattr(fact, "context", None)
             context_id: str | None = None
@@ -160,12 +161,26 @@ class Layer1Extractor:
                 context_id = context_row["context_id"]
                 context_rows.setdefault(context_id, context_row)
                 for dimension in dimensions:
-                    axis_row = _concept_row(filing_id, dimension["axis_qname"], None)
-                    concept_rows.setdefault(axis_row["raw_concept_id"], axis_row)
+                    axis_concept = _required_resolved_dimension_concept(
+                        qname_concepts, dimension["axis_qname"], "Axis"
+                    )
+                    axis_row = _concept_row(
+                        filing_id,
+                        dimension["axis_qname"],
+                        axis_concept,
+                    )
+                    _store_concept(concept_rows, axis_row)
                     member_id: str | None = None
                     if dimension["member_qname"] is not None:
-                        member_row = _concept_row(filing_id, dimension["member_qname"], None)
-                        concept_rows.setdefault(member_row["raw_concept_id"], member_row)
+                        member_concept = _required_resolved_dimension_concept(
+                            qname_concepts, dimension["member_qname"], "explicit Member"
+                        )
+                        member_row = _concept_row(
+                            filing_id,
+                            dimension["member_qname"],
+                            member_concept,
+                        )
+                        _store_concept(concept_rows, member_row)
                         member_id = member_row["raw_concept_id"]
                     # A dimension is a context property but is emitted per fact as
                     # required by the dimension_fact contract.
@@ -302,6 +317,57 @@ def _concept_row(filing_id: str, qname: Any, concept: Any) -> dict[str, Any]:
         "label": _label(concept),
         "documentation": _documentation(concept),
     }
+
+
+def _resolved_concept(qname_concepts: Any, qname: Any) -> Any:
+    """Return the loaded model's Concept for a QName when it is available.
+
+    Axis and member QNames occur in Contexts rather than as Fact concepts.  A
+    raw snapshot must nevertheless retain their taxonomy metadata and labels.
+    Arelle exposes this lookup through ``model.qnameConcepts``; fixtures may
+    omit it, in which case the QName provenance is still retained.
+    """
+    getter = getattr(qname_concepts, "get", None)
+    if not callable(getter):
+        return None
+    return getter(qname)
+
+
+def _required_resolved_dimension_concept(qname_concepts: Any, qname: Any, kind: str) -> Any:
+    """Require Arelle metadata for a Context Axis or explicit Member.
+
+    A QName alone is not sufficient Raw provenance for a dimensional concept:
+    it would permit unresolved taxonomy imports to become a successful but
+    metadata-incomplete snapshot.  Typed members intentionally do not pass
+    through this path because their XML payload, rather than a taxonomy member
+    Concept, is the as-filed value.
+    """
+    concept = _resolved_concept(qname_concepts, qname)
+    if concept is None:
+        raise Layer1ExtractionError(
+            f"unresolved Context {kind} concept; refusing incomplete Raw dimension metadata: "
+            f"{_qname_text(qname)}"
+        )
+    return concept
+
+
+def _store_concept(rows: dict[str, dict[str, Any]], row: dict[str, Any]) -> None:
+    """Store a concept, replacing an earlier QName-only row with richer metadata."""
+    raw_concept_id = row["raw_concept_id"]
+    existing = rows.get(raw_concept_id)
+    if existing is None or _concept_metadata_score(row) > _concept_metadata_score(existing):
+        rows[raw_concept_id] = row
+
+
+def _concept_metadata_score(row: dict[str, Any]) -> int:
+    metadata_fields = (
+        "data_type",
+        "period_type",
+        "balance",
+        "label",
+        "documentation",
+    )
+    return sum(row[field] is not None for field in metadata_fields)
 
 
 def _context_row(filing_id: str, context: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:

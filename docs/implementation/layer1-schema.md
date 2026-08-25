@@ -15,6 +15,20 @@ emits `REPORTED` facts. `period_class` and `comparative_type` remain null until
 M6, so this extraction does not apply filing-level period assumptions. Typed
 dimensions are stored in `dimension_fact.typed_member`, never discarded.
 
+For every non-tuple reported Fact, `fact.raw_concept_id` must resolve within
+the same immutable snapshot.  Non-null context and unit IDs must resolve to
+their corresponding rows, and every `dimension_fact` must resolve to its Fact,
+Axis, and (when explicit) Member concept.  Concept metadata is retained not
+only for Fact concepts but also for resolved Context Axis/Member concepts:
+QName, namespace, taxonomy classification, label, and documentation are not
+discarded merely because a dimension concept has no reported Fact of its own.
+An unresolved Axis or explicit Member is a completeness failure: it cannot be
+stored as a QName-only Concept in an otherwise successful snapshot.  Typed
+members remain valid without a Member Concept because their as-filed typed XML
+payload is retained directly.
+Numeric, text, and nil lexical values remain distinguishable; Raw does not
+derive period class, comparative status, or canonical meaning.
+
 ## M3 relationship materialization boundary
 
 `sec_xbrl.relationships.layer1.RelationshipExtractor` is the M3 boundary from
