@@ -7,7 +7,7 @@ immutable Layer 1 source rows supplied by the caller.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any
@@ -63,6 +63,37 @@ class PeriodClassifier:
             )
             result.append(fact)
         return tuple(result)
+
+
+class Layer1PeriodAnalysis:
+    """Create separate analytical observations from immutable Layer 1 rows."""
+
+    def build(
+        self,
+        *,
+        filing: Mapping[str, Any],
+        concepts: Iterable[Mapping[str, Any]],
+        contexts: Iterable[Mapping[str, Any]],
+        facts: Iterable[Mapping[str, Any]],
+        dimension_facts: Iterable[Mapping[str, Any]],
+        units: Iterable[Mapping[str, Any]],
+    ) -> tuple[tuple[dict[str, Any], ...], tuple[dict[str, Any], ...]]:
+        del units
+        observations = PeriodClassifier().classify(
+            filing=filing, concepts=concepts, contexts=contexts, facts=facts
+        )
+        # M7 owns canonical identity and additivity.  Surface the absent policy
+        # as an auditable no-candidate outcome instead of guessing Q4 sources.
+        q4 = derive_q4_facts(observations, contexts, dimension_facts)
+        outcomes = (
+            {
+                "filing_id": filing.get("filing_id"),
+                "candidate_count": len(q4),
+                "outcome": "DERIVED" if q4 else "NO_CANDIDATE",
+                "reason": None if q4 else "M7_CANONICAL_ADDITIVE_POLICY_REQUIRED",
+            },
+        )
+        return observations + q4, outcomes
 
 
 def derive_q4_facts(
@@ -173,6 +204,7 @@ def _comparative_type(
     if context is None or focus_date is None:
         return "OTHER_COMPARATIVE_CONTEXT"
     observed = _as_date(context.get("instant_date") if period_class == "INSTANT" else context.get("end_date"))
+    observed = _normalized_context_endpoint(observed, focus_date)
     if observed is None:
         return "OTHER_COMPARATIVE_CONTEXT"
     if observed == focus_date:
@@ -195,12 +227,22 @@ def _compatible(
         return False
     if dimensions.get(str(fy["fact_id"]), ()) != dimensions.get(str(ytd["fact_id"]), ()):
         return False
-    for key in ("structural_version", "recast_version", "comparability_flag"):
+    for key in ("structural_version", "recast_version"):
         if fy.get(key) != ytd.get(key):
             return False
-    fy_end = _as_date(contexts.get(str(fy.get("context_id")), {}).get("end_date"))
-    ytd_end = _as_date(contexts.get(str(ytd.get("context_id")), {}).get("end_date"))
-    return fy_end is not None and ytd_end is not None and 60 <= (fy_end - ytd_end).days <= 120
+    if fy.get("comparability_flag") != "COMPATIBLE" or ytd.get("comparability_flag") != "COMPATIBLE":
+        return False
+    fy_context = contexts.get(str(fy.get("context_id")), {})
+    ytd_context = contexts.get(str(ytd.get("context_id")), {})
+    fy_start, fy_end = _as_date(fy_context.get("start_date")), _as_date(fy_context.get("end_date"))
+    ytd_start, ytd_end = _as_date(ytd_context.get("start_date")), _as_date(ytd_context.get("end_date"))
+    return (
+        fy_start is not None
+        and fy_start == ytd_start
+        and fy_end is not None
+        and ytd_end is not None
+        and 60 <= (fy_end - ytd_end).days <= 120
+    )
 
 
 def _eligible_additive(fact: Mapping[str, Any]) -> bool:
@@ -233,8 +275,25 @@ def _as_date(value: Any) -> date | None:
     return None
 
 
+def _normalized_context_endpoint(value: date | None, focus_date: date | None) -> date | None:
+    """Normalize SEC XBRL Context endpoints to the DEI reporting-date convention.
+
+    SEC Inline filings commonly encode the end/instant boundary as the next
+    calendar day while DEI ``DocumentPeriodEndDate`` names the preceding
+    reporting date.  M6 uses this documented boundary convention only for
+    analytical comparisons; the Raw Context text/dates are never changed.
+    """
+    if value is not None and focus_date is not None and value != focus_date and (value - focus_date).days == 1:
+        return value - timedelta(days=1)
+    return value
+
+
 def _fiscal_year_end(value: Any) -> tuple[int, int] | None:
     if isinstance(value, str):
+        if value.startswith("--"):
+            parts = value[2:].split("-")
+            if len(parts) == 2 and all(part.isdigit() for part in parts):
+                return int(parts[0]), int(parts[1])
         try:
             parsed = date.fromisoformat(value)
             return parsed.month, parsed.day
