@@ -80,6 +80,25 @@ The selector records `as_of_date`, `view`,
 type, basis version, and unavailable reason.  It is generic across companies;
 company-specific recasts require supplied filing/table/text/review evidence.
 
+### Recast observation materialization
+
+`RecastObservationBuilder` is the analysis-layer adapter between multiple
+immutable Layer 1 snapshots and the as-of selector.  It receives Layer 2
+observations plus a reviewed `recast_evidence` record; it does not parse a ZIP
+or rewrite a Fact.  A recast evidence record binds the later `source_raw_fact_id`
+and `source_filing_id` to a `basis_version`, target period, source document and
+locator, explicit re-presentation flag, and one or more earlier filing IDs.
+Narrative excerpt/table evidence may be retained with the record.
+
+The adapter emits `RECAST_REPORTED` only when the later Fact and at least one
+earlier Fact share CIK, company canonical concept, complete canonical
+dimension key, unit, period class, and target period; the earlier filing must
+actually precede the later one.  A changed value, label, or filing sequence is
+not evidence.  Rows without a bound evidence record stay `REPORTED` and remain
+available to `AS_FILED`, but have no guessed `basis_version` and cannot enter
+`LATEST_RECAST`.  The adapter stores `recast_event_id`, evidence ID/payload,
+and prior raw Fact IDs so both histories remain traceable.
+
 ## Mapping QA
 Every automatic mapping above a materiality threshold must be explainable by stored evidence. Low-confidence mappings remain separate until reviewed or corroborated.
 

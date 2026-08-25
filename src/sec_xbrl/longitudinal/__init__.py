@@ -10,6 +10,7 @@ from sec_xbrl.longitudinal.canonical import (
     MappingTables,
     SeriesBuilder,
 )
+from sec_xbrl.longitudinal.recast import RecastObservationBuilder, RecastObservationError
 
 __all__ = [
     "MAPPING_VERSION",
@@ -19,5 +20,7 @@ __all__ = [
     "CurrentSeries",
     "MappingRelation",
     "MappingTables",
+    "RecastObservationBuilder",
+    "RecastObservationError",
     "SeriesBuilder",
 ]
