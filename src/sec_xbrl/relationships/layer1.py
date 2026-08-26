@@ -11,7 +11,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sec_xbrl.facts.layer1 import Layer1ExtractionError, _qname_parts, _qname_text, _stable_id
+from sec_xbrl.facts.layer1 import (
+    Layer1ExtractionError,
+    _concept_row,
+    _qname_parts,
+    _qname_text,
+    _stable_id,
+)
 from sec_xbrl.filing.company_discovery import canonicalize_cik
 from sec_xbrl.filing.contracts import FilingRef
 
@@ -53,6 +59,10 @@ class RelationshipTables:
 
     roles: tuple[dict[str, Any], ...]
     relationships: tuple[dict[str, Any], ...]
+    # Relationship endpoint Concepts are emitted for ingestion to merge into
+    # the immutable Layer 1 concept table.  A Fact-only concept inventory would
+    # make PRE/CAL/DEF hierarchy labels unavailable for abstract/no-value rows.
+    concepts: tuple[dict[str, Any], ...] = ()
 
     def write_parquet(self, destination: Path) -> None:
         """Write immutable relationship tables without rewriting an existing snapshot."""
@@ -94,6 +104,7 @@ class RelationshipExtractor:
         role_definitions = _role_definitions(model)
         role_rows: dict[str, dict[str, Any]] = {}
         relationship_rows: dict[str, dict[str, Any]] = {}
+        concept_rows: dict[str, dict[str, Any]] = {}
 
         for role_uri, definition in role_definitions.items():
             row = _role_row(filing_id, role_uri, definition)
@@ -112,6 +123,13 @@ class RelationshipExtractor:
                     # Non-concept resources (for example labels) do not belong
                     # to the PRE/CAL/DEF concept network contract.
                     continue
+                for endpoint in (
+                    getattr(relationship, "fromModelObject", None),
+                    getattr(relationship, "toModelObject", None),
+                ):
+                    concept = _relationship_concept_row(filing_id, endpoint)
+                    if concept is not None:
+                        _store_concept(concept_rows, concept)
                 row = {
                     "filing_id": filing_id,
                     "network_type": network_type,
@@ -161,6 +179,7 @@ class RelationshipExtractor:
             relationships=tuple(
                 sorted(relationship_rows.values(), key=lambda row: row["relationship_id"])
             ),
+            concepts=tuple(sorted(concept_rows.values(), key=lambda row: row["raw_concept_id"])),
         )
 
 
@@ -274,6 +293,26 @@ def _raw_concept_id(filing_id: str, model_object: Any) -> str | None:
         return None
     namespace_uri, _, local_name = _qname_parts(qname)
     return _stable_id("concept", filing_id, namespace_uri, local_name)
+
+
+def _relationship_concept_row(filing_id: str, model_object: Any) -> dict[str, Any] | None:
+    qname = getattr(model_object, "qname", None)
+    if qname is None:
+        return None
+    return _concept_row(filing_id, qname, model_object)
+
+
+def _store_concept(rows: dict[str, dict[str, Any]], row: dict[str, Any]) -> None:
+    existing = rows.get(row["raw_concept_id"])
+    if existing is None or _concept_score(row) > _concept_score(existing):
+        rows[row["raw_concept_id"]] = row
+
+
+def _concept_score(row: dict[str, Any]) -> int:
+    return sum(
+        row.get(field) is not None
+        for field in ("data_type", "period_type", "balance", "label", "documentation")
+    )
 
 
 def _network_qname(value: Any) -> str | None:

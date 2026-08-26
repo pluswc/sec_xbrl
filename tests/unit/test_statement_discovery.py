@@ -130,6 +130,41 @@ def test_discovers_income_statement_hierarchy_direct_and_structural_members() ->
     assert direct["member_label"] == "Americas"
     members = {row["member_raw_concept_id"]: row["member_status"] for row in result.structural_members}
     assert members == {"americas_member": "USED_BY_REPORTED_FACT", "europe_member": "STRUCTURAL_ONLY"}
+    assert result.calculation_decomposition == (
+        {
+            "anchor_raw_concept_id": "revenue",
+            "role_id": "statement",
+            "parent_raw_concept_id": "revenue",
+            "child_raw_concept_id": "cost_of_revenue",
+            "weight": None,
+            "source_relationship_id": "cal-revenue-cost",
+            "evidence_type": "CALCULATION_CHILD",
+            "anchor_qname": "example:revenue",
+            "anchor_label": "Revenue",
+            "anchor_taxonomy_family": "us-gaap",
+            "anchor_is_standard": True,
+            "anchor_is_custom": False,
+            "anchor_period_type": "duration",
+            "anchor_abstract": False,
+            "anchor_metadata_status": "PRESENT",
+            "parent_qname": "example:revenue",
+            "parent_label": "Revenue",
+            "parent_taxonomy_family": "us-gaap",
+            "parent_is_standard": True,
+            "parent_is_custom": False,
+            "parent_period_type": "duration",
+            "parent_abstract": False,
+            "parent_metadata_status": "PRESENT",
+            "child_qname": "example:cost_of_revenue",
+            "child_label": "Cost of Revenue",
+            "child_taxonomy_family": "us-gaap",
+            "child_is_standard": True,
+            "child_is_custom": False,
+            "child_period_type": "duration",
+            "child_abstract": False,
+            "child_metadata_status": "PRESENT",
+        },
+    )
 
 
 def test_expands_roles_only_on_xbrl_concept_evidence_not_matching_labels() -> None:
@@ -146,6 +181,11 @@ def test_expands_roles_only_on_xbrl_concept_evidence_not_matching_labels() -> No
     assert len(revenue_note_rows) == len({row["anchor_raw_concept_id"] for row in revenue_note_rows})
     assert all(row["role_id"] != "label_only" for row in result.related_roles)
     assert all("LABEL_MATCH" not in row["role_expansion_reasons"] for row in result.related_roles)
+    assert {
+        row["anchor_raw_concept_id"]
+        for row in result.related_roles
+        if row["role_id"] == "revenue_note"
+    } == {"revenue"}
 
 
 def test_period_evidence_preserves_observation_and_does_not_claim_change() -> None:

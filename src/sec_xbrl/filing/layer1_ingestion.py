@@ -14,7 +14,7 @@ import os
 import shutil
 import tempfile
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -174,6 +174,7 @@ class Layer1Ingestor:
                         f"source={corpus.source_count}, materialized={len(facts.facts)}"
                     )
                 relationships = self.relationship_extractor.extract(model, resolved.filing)
+                facts = _merge_relationship_concepts(facts, relationships.concepts)
             except Exception as exc:
                 self._write_parse_state(
                     resolved,
@@ -334,6 +335,23 @@ class Layer1Ingestor:
                 "Fact corpus contains unresolved concepts; taxonomy cache/bootstrap is required "
                 f"(first ordinals: {unresolved[:5]})"
             )
+
+
+def _merge_relationship_concepts(
+    facts: Layer1Tables, relationship_concepts: tuple[dict[str, Any], ...]
+) -> Layer1Tables:
+    """Include only concepts actually used by a stored relationship endpoint.
+
+    This avoids materializing the whole imported standard taxonomy while making
+    PRE/CAL/DEF graph rows renderable when a concept is abstract or has no Fact.
+    Fact/context concepts remain authoritative when both sources supply one.
+    """
+    merged = {str(row["raw_concept_id"]): row for row in relationship_concepts}
+    merged.update({str(row["raw_concept_id"]): row for row in facts.concepts})
+    return replace(
+        facts,
+        concepts=tuple(sorted(merged.values(), key=lambda row: str(row["raw_concept_id"]))),
+    )
 
 
 def _is_resolution_or_transform_error(error: str) -> bool:

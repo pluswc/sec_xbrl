@@ -40,6 +40,7 @@ class StatementDiscovery:
     statement_hierarchy: tuple[dict[str, Any], ...]
     direct_dimensions: tuple[dict[str, Any], ...]
     structural_members: tuple[dict[str, Any], ...]
+    calculation_decomposition: tuple[dict[str, Any], ...]
     concept_role_links: tuple[dict[str, Any], ...]
     related_roles: tuple[dict[str, Any], ...]
     period_change_evidence: tuple[dict[str, Any], ...]
@@ -53,6 +54,7 @@ class StatementDiscovery:
             "statement_hierarchy": deepcopy(self.statement_hierarchy),
             "direct_dimensions": deepcopy(self.direct_dimensions),
             "structural_members": deepcopy(self.structural_members),
+            "calculation_decomposition": deepcopy(self.calculation_decomposition),
             "concept_role_links": deepcopy(self.concept_role_links),
             "related_roles": deepcopy(self.related_roles),
             "period_change_evidence": deepcopy(self.period_change_evidence),
@@ -138,6 +140,9 @@ class CompanyDisclosureDiscovery:
             if row["statement_type"] == statement_type and str(row["anchor_raw_concept_id"]) in anchor_ids
         )
         structural_members = _structural_members(evidence, direct_dimensions, concept_by_id)
+        calculation_decomposition = _calculation_decomposition(
+            evidence, relationship_rows, concept_by_id
+        )
         concept_role_links, related_roles = _related_roles(
             anchors, evidence, role_rows, relationship_rows, concept_by_id, statement_role_ids
         )
@@ -160,6 +165,7 @@ class CompanyDisclosureDiscovery:
             statement_hierarchy=tuple(hierarchy),
             direct_dimensions=tuple(direct_dimensions),
             structural_members=tuple(structural_members),
+            calculation_decomposition=tuple(calculation_decomposition),
             concept_role_links=tuple(concept_role_links),
             related_roles=tuple(related_roles),
             period_change_evidence=tuple(period_change_evidence),
@@ -351,6 +357,48 @@ def _structural_members(
     return _unique_sorted(result, ("anchor_raw_concept_id", "axis_raw_concept_id", "member_raw_concept_id", "source_relationship_id"))
 
 
+def _calculation_decomposition(
+    evidence: Iterable[Mapping[str, Any]],
+    relationships: Iterable[Mapping[str, Any]],
+    concepts: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Expose CAL parent-to-child evidence without turning it into a formula.
+
+    CAL is evidence for a disclosed decomposition.  The caller receives the
+    source arc and weight, but this module never asserts a calculation result
+    or expands CAL in the reverse direction.
+    """
+    by_id = {
+        str(row["relationship_id"]): row
+        for row in relationships
+        if row.get("relationship_id") is not None
+    }
+    result: list[dict[str, Any]] = []
+    for row in evidence:
+        if row.get("network_type") != "CAL" or row.get("evidence_type") != "CALCULATION_CHILD":
+            continue
+        relationship = by_id.get(str(row.get("source_relationship_id")), {})
+        parent_id = str(row["from_raw_concept_id"])
+        child_id = str(row["to_raw_concept_id"])
+        item = {
+            "anchor_raw_concept_id": str(row["anchor_raw_concept_id"]),
+            "role_id": row.get("role_id"),
+            "parent_raw_concept_id": parent_id,
+            "child_raw_concept_id": child_id,
+            "weight": relationship.get("weight"),
+            "source_relationship_id": row.get("source_relationship_id"),
+            "evidence_type": "CALCULATION_CHILD",
+        }
+        item.update(_concept_fields("anchor", concepts.get(str(row["anchor_raw_concept_id"]))))
+        item.update(_concept_fields("parent", concepts.get(parent_id)))
+        item.update(_concept_fields("child", concepts.get(child_id)))
+        result.append(item)
+    return _unique_sorted(
+        result,
+        ("anchor_raw_concept_id", "role_id", "parent_raw_concept_id", "child_raw_concept_id", "source_relationship_id"),
+    )
+
+
 def _related_roles(
     anchors: Iterable[Mapping[str, Any]],
     evidence: Iterable[Mapping[str, Any]],
@@ -388,7 +436,11 @@ def _related_roles(
         matching = sorted(concept_ids & (anchor_ids | set(reached)))
         for concept_id in matching:
             relation_type = "SAME_ANCHOR_CONCEPT" if concept_id in anchor_ids else "TRAVERSED_CAL_OR_DEF_CONCEPT"
-            for anchor_id in sorted(anchor_ids if concept_id in anchor_ids else reached[concept_id]):
+            # An exact role concept can only establish the same raw Concept as
+            # its own anchor.  It must not attach a Revenue note to every
+            # statement anchor simply because Revenue is one of them.
+            source_anchors = {concept_id} if concept_id in anchor_ids else reached[concept_id]
+            for anchor_id in sorted(source_anchors):
                 row = {
                     "anchor_raw_concept_id": anchor_id,
                     "role_id": role_id,
@@ -403,7 +455,21 @@ def _related_roles(
                 row["role_definition"] = role.get("role_definition")
                 row["role_category"] = role.get("role_category")
                 links.append(row)
-                related.append({key: row[key] for key in ("anchor_raw_concept_id", "role_id", "role_uri", "role_definition", "role_category", "role_expansion_reason", "linked_raw_concept_id")})
+                related.append(
+                    {
+                        key: row[key]
+                        for key in (
+                            "anchor_raw_concept_id",
+                            "role_id",
+                            "role_uri",
+                            "role_definition",
+                            "role_category",
+                            "role_expansion_reason",
+                            "linked_raw_concept_id",
+                        )
+                    }
+                    | {key: value for key, value in row.items() if key.startswith("anchor_")}
+                )
     compact: dict[tuple[str, str], dict[str, Any]] = {}
     for row in related:
         key = (str(row["anchor_raw_concept_id"]), str(row["role_id"]))
@@ -417,6 +483,7 @@ def _related_roles(
                 "role_category": row["role_category"],
                 "role_expansion_reasons": set(),
                 "linked_raw_concept_ids": set(),
+                **{key: value for key, value in row.items() if key.startswith("anchor_")},
             },
         )
         current["role_expansion_reasons"].add(row["role_expansion_reason"])
