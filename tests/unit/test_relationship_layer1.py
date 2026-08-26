@@ -139,6 +139,11 @@ def test_extract_keeps_pre_cal_def_separate_and_preserves_target_role_metadata()
         "presentationArc",
     }
     assert len({row["relationship_id"] for row in presentations}) == 2
+    assert {row["qname"] for row in tables.concepts} == {
+        "us-gaap:GrossProfit",
+        "us-gaap:Revenue",
+        "acme:RegionAxis",
+    }
 
 
 def test_write_parquet_keeps_role_and_relationship_contract_schemas(tmp_path: Path) -> None:
