@@ -40,6 +40,13 @@ Period classification, comparative contexts, amendments, as-filed/latest-recast 
 ## M7 — Layer 2 longitudinal mappings
 Company canonical IDs, mapping evidence/versioning, Annual/Current Series.
 
+The M7 code and contract exist, but durable Layer 2 materialization is the
+next delivery sequence: [Layer 2 delivery plan](implementation/layer2-delivery-plan.md).
+It covers period observations, governed company series and as-of selection,
+capability discovery, and Derived Metrics **input** handoff.  It does not
+claim that those durable outputs already exist or add a new architectural
+Layer.
+
 ## M8 — Layer 3 cross-company semantics
 Analytical taxonomy, mapping relations/confidence/versioning, peer-comparison panel.
 
