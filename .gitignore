@@ -13,4 +13,5 @@ __pycache__/
 /data/raw/
 /data/processed/
 /data/cache/
+/data/taxonomy_cache/
 # Keep explicit small test fixtures under tests/fixtures/
