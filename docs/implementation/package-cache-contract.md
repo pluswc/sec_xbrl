@@ -29,10 +29,15 @@ byte size. A partial, corrupt, or identity-mismatched index cache is never a
 cache hit.
 
 `directory.item` is parsed as untrusted SEC metadata. Filenames must be safe
-relative paths. The resolver selects `FilingRef.primary_document` when it is
-present in both the index and ZIP; otherwise it selects the unique
-`EX-101.INS` file, or a single remaining HTML/XML candidate. Ambiguity is an
-accession-level resolution error, rather than a guess.
+relative paths. A `FilingRef.primary_document` supplied by Filing Discovery is
+also treated as untrusted: the resolver selects it only when it is a safe
+relative path and is present in the validated same-accession XBRL ZIP. SEC may
+legitimately omit that HTML document from `directory.item` while including it
+in the XBRL ZIP, so its absence from the directory index alone is not a
+resolution error. If Discovery does not supply a usable primary document, the
+resolver selects the unique `EX-101.INS` file, or a single remaining HTML/XML
+candidate. It never guesses an arbitrary ZIP HTML file; ambiguity is an
+accession-level resolution error.
 
 The Arelle loader extracts the already validated ZIP to a caller-owned working
 directory and passes Arelle only the local selected file. Its web cache is set
@@ -50,6 +55,11 @@ use schema version 2. `source` is `sec_archive` for downloads and
 - A partial directory or hash mismatch is an integrity error, never a cache hit.
 - A valid package is immutable and causes no network request on reuse.
 - SEC requests use an explicit User-Agent, bounded retry, and rate-limit delay.
+- This resolver correction does not change Layer 1 extraction semantics or its
+  parser version. It only permits a Filing Discovery-declared entry point that
+  was already present in the validated immutable package; rejected runs have
+  no published snapshot to overwrite. Package hash, accession identity, and
+  `primary_document` remain the provenance for the selected entry point.
 
 ## M1B — Legacy package adoption
 

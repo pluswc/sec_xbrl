@@ -60,6 +60,54 @@ def test_resolver_caches_index_and_resolves_primary_document_without_reuse_netwo
     assert FilingPackageResolver(package_cache, index_cache).resolve(filing, _NeverFetch()) == resolved
 
 
+def test_resolver_accepts_discovery_primary_document_present_only_in_validated_zip(tmp_path: Path) -> None:
+    filing = _filing(primary_document="example-20241231.htm")
+    resolved = FilingPackageResolver(
+        AccessionPackageCache(tmp_path / "packages"), FilingIndexCache(tmp_path / "indexes")
+    ).resolve(
+        filing,
+        _Fetch(
+            _zip_bytes("example-20241231.htm", "example.xsd"),
+            _index_bytes({"name": "example.xsd", "type": "EX-101.SCH"}),
+        ),
+    )
+
+    assert resolved.entrypoint_name == "example-20241231.htm"
+
+
+def test_resolver_rejects_discovery_primary_document_absent_from_zip(tmp_path: Path) -> None:
+    filing = _filing(primary_document="example-20241231.htm")
+
+    with pytest.raises(FilingIndexError, match="primary document is absent from XBRL package"):
+        FilingPackageResolver(
+            AccessionPackageCache(tmp_path / "packages"), FilingIndexCache(tmp_path / "indexes")
+        ).resolve(
+            filing,
+            _Fetch(
+                _zip_bytes("instance.xml"),
+                _index_bytes({"name": "example-20241231.htm", "type": "10-K"}),
+            ),
+        )
+
+
+@pytest.mark.parametrize("primary_document", ["../outside.htm", "/absolute.htm", r"dir\\file.htm"])
+def test_resolver_rejects_unsafe_discovery_primary_document(
+    tmp_path: Path, primary_document: str
+) -> None:
+    filing = _filing(primary_document=primary_document)
+
+    with pytest.raises(FilingIndexError, match="primary document has unsafe filename"):
+        FilingPackageResolver(
+            AccessionPackageCache(tmp_path / "packages"), FilingIndexCache(tmp_path / "indexes")
+        ).resolve(
+            filing,
+            _Fetch(
+                _zip_bytes("example-20241231.htm"),
+                _index_bytes({"name": "example-20241231.htm", "type": "10-K"}),
+            ),
+        )
+
+
 def test_resolver_falls_back_to_unique_xbrl_instance_and_rejects_ambiguity(tmp_path: Path) -> None:
     filing = _filing(primary_document=None)
     package_cache = AccessionPackageCache(tmp_path / "packages")

@@ -235,10 +235,9 @@ class ArelleFilingLoader:
 def _select_entrypoint(
     filing: FilingRef, entries: Iterable[FilingIndexEntry], available: set[str]
 ) -> str:
-    indexed = {entry.name: entry for entry in entries}
     if filing.primary_document:
-        if filing.primary_document not in indexed:
-            raise FilingIndexError("primary document is absent from filing index")
+        if not _is_safe_member_name(filing.primary_document):
+            raise FilingIndexError("primary document has unsafe filename")
         if filing.primary_document not in available:
             raise FilingIndexError("primary document is absent from XBRL package")
         return filing.primary_document
