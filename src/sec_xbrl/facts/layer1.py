@@ -119,7 +119,9 @@ def _polars_schema(pl: Any, table: str) -> dict[str, Any]:
 class Layer1Extractor:
     """Extract reported Arelle facts while retaining their as-filed identity."""
 
-    parser_version = "m2-layer1-v1"
+    # Inline transform support changes the set of filings that can be parsed;
+    # retain a distinct version for immutable snapshot and parse-state lineage.
+    parser_version = "m2-layer1-v2"
 
     def extract(
         self,

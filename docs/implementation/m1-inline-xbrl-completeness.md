@@ -146,6 +146,12 @@ transform functions before every bootstrap and offline load. This is a parser
 runtime dependency rather than a taxonomy-cache artifact. Unsupported SEC
 transform names still fail closed; registration does not suppress validation.
 
+The registered `boolballotbox` transform follows the SEC EFM ballot-box rule:
+`☐` is `false`, while `☑` and `☒` are `true`. Other values are rejected rather
+than coerced. Because this expands the set of filings that can be parsed,
+successful snapshots and parse-state events use the distinct Layer 1 parser
+version `m2-layer1-v2`; existing `m2-layer1-v1` artifacts remain immutable.
+
 ## Validation procedure
 
 Unit tests create an Inline-like model where `model.facts` has two reported
