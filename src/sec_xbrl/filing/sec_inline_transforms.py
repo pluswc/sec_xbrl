@@ -57,6 +57,7 @@ def register_sec_inline_transforms() -> None:
         "stateprovnameen": lambda value: _lookup(value, _STATE_CODES, "state/province"),
         "exchnameen": lambda value: _lookup(_normalize_exchange(value), _EXCHANGE_CODES, "exchange"),
         "entityfilercategoryen": lambda value: _lookup(value, _FILER_CATEGORIES, "filer category"),
+        "boolballotbox": _bool_ballot_box,
     }
     FunctionIxt.ixtNamespaceFunctions.setdefault(SEC_TRANSFORM_NAMESPACE, {}).update(registry)
 
@@ -117,6 +118,21 @@ def _lookup(value: str, mapping: dict[str, str], label: str) -> str:
     if key not in mapping:
         raise ValueError(f"unsupported SEC {label}: {value}")
     return mapping[key]
+
+
+def _bool_ballot_box(value: str) -> str:
+    """Translate the SEC EFM ballot-box glyphs to XML Schema booleans.
+
+    The SEC ``boolballotbox`` transform accepts only the three ballot-box
+    characters.  Reject every other input so an unexpected filing value remains
+    a validation failure rather than being silently treated as ``false``.
+    """
+    normalized = value.strip()
+    mapping = {"☐": "false", "☑": "true", "☒": "true"}
+    try:
+        return mapping[normalized]
+    except KeyError as exc:
+        raise ValueError(f"unsupported SEC bool ballot box: {value}") from exc
 
 
 def _normalize_exchange(value: str) -> str:
