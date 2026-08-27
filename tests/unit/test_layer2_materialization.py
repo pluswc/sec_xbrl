@@ -142,3 +142,24 @@ def test_same_input_and_versions_cannot_silently_replace_different_values(tmp_pa
     changed["analytical_fact"][0]["value_numeric"] = "95360"
     with pytest.raises(Layer2MaterializationError, match="different output values or keys"):
         publisher.publish(_run(), changed)
+
+
+@pytest.mark.parametrize("field", ("form", "filed_date", "report_date"))
+def test_run_rejects_layer1_input_without_required_filing_provenance(field: str) -> None:
+    values: dict[str, object] = {
+        "cik": "0000320193",
+        "accession": "0000320193-26-000020",
+        "form": "10-Q",
+        "filed_date": "2026-05-01",
+        "report_date": "2026-03-28",
+        "snapshot_id": "0000320193/000032019326000020",
+        "manifest_sha256": "a" * 64,
+    }
+    values[field] = ""
+    with pytest.raises(Layer2MaterializationError, match="missing required provenance"):
+        Layer2Run(
+            run_version="invalid-provenance-v1",
+            corpus_run_id="20260827T051322Z",
+            inputs=(Layer1SnapshotInput(**values),),  # type: ignore[arg-type]
+            rules=Layer2RuleVersions("period-v1", "map-v1", "evidence-v1", "selection-v1"),
+        )

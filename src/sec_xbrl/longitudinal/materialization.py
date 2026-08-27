@@ -50,9 +50,9 @@ class Layer1SnapshotInput:
     accession: str
     form: str
     filed_date: str
+    report_date: str
     snapshot_id: str
     manifest_sha256: str
-    report_date: str | None = None
     parser_version: str | None = None
 
 
@@ -86,8 +86,21 @@ class Layer2Run:
         identities = {(row.cik, row.accession, row.snapshot_id) for row in self.inputs}
         if len(identities) != len(self.inputs):
             raise Layer2MaterializationError("duplicate Layer 1 snapshot input identity")
-        if any(not all((row.cik, row.accession, row.snapshot_id, row.manifest_sha256)) for row in self.inputs):
-            raise Layer2MaterializationError("Layer 1 inputs require identity and manifest hash")
+        required_input_fields = (
+            "cik",
+            "accession",
+            "form",
+            "filed_date",
+            "report_date",
+            "snapshot_id",
+            "manifest_sha256",
+        )
+        for row in self.inputs:
+            missing = [field for field in required_input_fields if not getattr(row, field)]
+            if missing:
+                raise Layer2MaterializationError(
+                    f"Layer 1 input is missing required provenance: {missing}"
+                )
 
     @property
     def fingerprint(self) -> str:

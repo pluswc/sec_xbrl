@@ -10,7 +10,8 @@ Every run is represented by `Layer2Run` and must declare:
 
 - a non-path `run_version` and source `corpus_run_id`;
 - every consumed immutable Layer 1 snapshot: CIK, accession, form, filed and
-  report date, snapshot ID, manifest SHA-256, and optional parser version;
+  report date, snapshot ID, manifest SHA-256, and optional parser version.
+  All listed filing-identity fields except parser version are mandatory;
 - period-rule, mapping, recast-evidence, and selection-rule versions;
 - the L2 materialization-contract version.
 
