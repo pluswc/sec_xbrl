@@ -144,6 +144,11 @@ identity.
 - The contract distinguishes operational generated data from Git-tracked
   source, documentation, and tests.
 
+**Implemented boundary.** The executable L2-M0 contract is documented in
+[`layer2-materialization.md`](layer2-materialization.md).  It provides the
+typed run/input/version manifest and atomic publisher only; it makes no claim
+that L2-M1 through L2-M6 datasets have been populated from the corpus yet.
+
 ### L2-M1 — Period observation materialization
 
 **Objective.** Turn every eligible Layer 1 Fact into a period-aware

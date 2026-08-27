@@ -10,14 +10,34 @@ from sec_xbrl.longitudinal.canonical import (
     MappingTables,
     SeriesBuilder,
 )
+from sec_xbrl.longitudinal.materialization import (
+    DEFAULT_LAYER2_ROOT,
+    LAYER2_CONTRACT_VERSION,
+    LOGICAL_DATASETS,
+    Layer1SnapshotInput,
+    Layer2MaterializationError,
+    Layer2Publication,
+    Layer2Publisher,
+    Layer2RuleVersions,
+    Layer2Run,
+)
 from sec_xbrl.longitudinal.recast import RecastObservationBuilder, RecastObservationError
 
 __all__ = [
+    "DEFAULT_LAYER2_ROOT",
+    "LAYER2_CONTRACT_VERSION",
+    "LOGICAL_DATASETS",
     "MAPPING_VERSION",
     "AnnualSeries",
     "AsOfSeriesSelector",
     "CompanyCanonicalizer",
     "CurrentSeries",
+    "Layer1SnapshotInput",
+    "Layer2MaterializationError",
+    "Layer2Publication",
+    "Layer2Publisher",
+    "Layer2RuleVersions",
+    "Layer2Run",
     "MappingRelation",
     "MappingTables",
     "RecastObservationBuilder",
