@@ -110,10 +110,12 @@ are already materialized:
 | `recast_evidence` | Reviewed evidence binding a later directly reported/derived observation to a changed basis and target period. | later and prior Fact/filing IDs, basis, source document/locator, narrative/table/review evidence |
 | `capability_inventory` | What the company can safely expose by statement, disclosure, dimension, period, and Metric-input eligibility. | discovery/mapping/selection versions, coverage/status, source role/concept/member/filing references |
 
-`analytical_fact` uses the currently governed internal views `AS_FILED` and
-`LATEST_RECAST`.  A future consumer may label the latter
-`CURRENT_COMPARABLE`, but this plan does not rename or change the existing
-selection contract.
+The durable `analytical_fact.view` contract uses `AS_FILED` and
+`CURRENT_COMPARABLE`.  Existing M7 selection code and the longitudinal
+contract call the evidence-backed selection mechanism `LATEST_RECAST`.
+`LATEST_RECAST` is therefore the governed implementation mechanism that feeds
+the durable consumer view `CURRENT_COMPARABLE`; this plan preserves its
+existing evidence and no-basis-mixing rules rather than creating a third view.
 
 ## 5. Milestones and acceptance criteria
 
@@ -223,7 +225,8 @@ drill-down.
 incompatible reporting bases.
 
 **Outputs.** `recast_evidence` and selected `analytical_fact` rows for
-`AS_FILED`, `LATEST_RECAST`, and `UNAVAILABLE` results.
+`AS_FILED`, `CURRENT_COMPARABLE` (implemented through the existing
+`LATEST_RECAST` selection mechanism), and `UNAVAILABLE` results.
 
 **Required inputs/provenance.** Candidate Annual/Current observations, actual
 `filed_date`, target period, basis version, reviewed filing/table/text
@@ -233,9 +236,9 @@ evidence, mapping version, and selection-rule version.
 
 - `AS_FILED` selects only information available on or before `as_of_date`;
   later comparative observations never overwrite raw history.
-- `LATEST_RECAST` selects a single evidence-backed basis for a comparable
-  period family.  It cannot infer a recast from differing numbers, labels, or
-  filing order alone.
+- `CURRENT_COMPARABLE`, through `LATEST_RECAST`, selects a single
+  evidence-backed basis for a comparable period family.  It cannot infer a
+  recast from differing numbers, labels, or filing order alone.
 - A `RECAST_REPORTED` value has bound Fact/filing/basis/evidence lineage; a
   `DERIVED_RECAST` value additionally has compatible input IDs and a rule
   version.
@@ -245,9 +248,9 @@ evidence, mapping version, and selection-rule version.
 - The NVIDIA FY2026 geography case in
   [nvidia-fy2026-geography-golden-case.md](nvidia-fy2026-geography-golden-case.md)
   is a mandatory generic golden test: original Q1/Q2 remain AS_FILED; only
-  evidence-bound new-basis periods enter `LATEST_RECAST`; unsupported Q2/Q4
-  recast values remain unavailable; no annual value combines old Q1/Q2 with
-  new Q3/Q4.
+  evidence-bound new-basis periods enter `CURRENT_COMPARABLE` through
+  `LATEST_RECAST`; unsupported Q2/Q4 recast values remain unavailable; no
+  annual value combines old Q1/Q2 with new Q3/Q4.
 
 ### L2-M5 — Capability inventory and governed discovery
 
