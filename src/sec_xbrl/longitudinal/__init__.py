@@ -27,6 +27,11 @@ from sec_xbrl.longitudinal.materialization import (
     Layer2RuleVersions,
     Layer2Run,
 )
+from sec_xbrl.longitudinal.metric_input import (
+    METRIC_INPUT_HANDOFF_VERSION,
+    MetricInputHandoffMaterializer,
+    MetricInputHandoffResult,
+)
 from sec_xbrl.longitudinal.period_observation import (
     PERIOD_OBSERVATION_RULE_VERSION,
     PeriodObservationMaterializer,
@@ -55,6 +60,7 @@ __all__ = [
     "LAYER2_CONTRACT_VERSION",
     "LOGICAL_DATASETS",
     "MAPPING_VERSION",
+    "METRIC_INPUT_HANDOFF_VERSION",
     "PERIOD_OBSERVATION_RULE_VERSION",
     "SELECTION_MATERIALIZATION_VERSION",
     "SERIES_RULE_VERSION",
@@ -78,6 +84,8 @@ __all__ = [
     "MappingRelation",
     "MappingTables",
     "MemberOrderingView",
+    "MetricInputHandoffMaterializer",
+    "MetricInputHandoffResult",
     "PeriodObservationMaterializer",
     "PeriodObservationResult",
     "RecastObservationBuilder",
