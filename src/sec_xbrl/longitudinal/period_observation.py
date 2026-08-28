@@ -145,12 +145,25 @@ def _exclusion_reason(
         return "FACT_FILING_MISMATCH"
     if not fact.get("raw_concept_id") or str(fact.get("raw_concept_id")) not in concepts:
         return "MISSING_OR_UNRESOLVED_CONCEPT"
+    if _foreign_reference(concepts[str(fact["raw_concept_id"])], filing):
+        return "CROSS_FILING_CONCEPT_REFERENCE"
     if not fact.get("context_id") or str(fact.get("context_id")) not in contexts:
         return "MISSING_OR_UNRESOLVED_CONTEXT"
+    if _foreign_reference(contexts[str(fact["context_id"])], filing):
+        return "CROSS_FILING_CONTEXT_REFERENCE"
     if fact.get("unit_id") and str(fact["unit_id"]) not in units:
         return "MISSING_OR_UNRESOLVED_UNIT"
+    if fact.get("unit_id") and _foreign_reference(units[str(fact["unit_id"])], filing):
+        return "CROSS_FILING_UNIT_REFERENCE"
     if any(not item["axis_resolved"] or not item["member_resolved"] for item in dimensions.get(str(fact["fact_id"]), ())):
         return "MISSING_OR_UNRESOLVED_DIMENSION"
+    for dimension in dimensions.get(str(fact["fact_id"]), ()):
+        axis = concepts[str(dimension["axis_raw_concept_id"])]
+        if _foreign_reference(axis, filing):
+            return "CROSS_FILING_DIMENSION_REFERENCE"
+        member_id = dimension.get("member_raw_concept_id")
+        if member_id is not None and _foreign_reference(concepts[str(member_id)], filing):
+            return "CROSS_FILING_DIMENSION_REFERENCE"
     return None
 
 
@@ -233,30 +246,84 @@ def _observation(
         "q4_derivation_eligible": False,
     }
     if policy is not None:
-        result.update(_validated_q4_policy(policy))
+        result.update(_validated_q4_policy(policy, concept, unit))
     return result
 
 
-def _validated_q4_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
-    """Accept only explicit policy values; fail closed for non-additive metrics."""
+def _validated_q4_policy(
+    policy: Mapping[str, Any], concept: Mapping[str, Any], unit: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """Require reviewed policy *and* independently safe raw semantics.
+
+    The policy is evidence, not an authority to reclassify a per-share, share,
+    ratio, margin, or average Fact as additive.  A candidate needs a distinct
+    reviewed semantic state as well as a duration concept with monetary data
+    type and a single currency Unit.  This is intentionally conservative: an
+    uncertain value remains directly reported until a later semantic policy can
+    expose it safely.
+    """
     value_kind = policy.get("value_kind")
     forbidden = {"EPS", "WEIGHTED_AVERAGE_SHARES", "RATIO", "MARGIN", "AVERAGE", "NON_ADDITIVE"}
     eligible = (
         policy.get("canonical_concept_id")
         and policy.get("is_additive") is True
         and value_kind == "ADDITIVE_AMOUNT"
+        and policy.get("semantic_review_state") == "REVIEWED_ADDITIVE_AMOUNT"
         and str(value_kind) not in forbidden
         and policy.get("comparability_flag") == "COMPATIBLE"
+        and _has_safe_additive_amount_semantics(concept, unit)
     )
     return {
         "canonical_concept_id": policy.get("canonical_concept_id"),
         "is_additive": policy.get("is_additive") is True,
         "value_kind": value_kind,
+        "semantic_review_state": policy.get("semantic_review_state"),
         "structural_version": policy.get("structural_version"),
         "recast_version": policy.get("recast_version"),
         "comparability_flag": policy.get("comparability_flag"),
         "q4_derivation_eligible": bool(eligible),
     }
+
+
+def _has_safe_additive_amount_semantics(
+    concept: Mapping[str, Any], unit: Mapping[str, Any] | None
+) -> bool:
+    if str(concept.get("period_type") or "").lower() != "duration" or unit is None:
+        return False
+    data_type = str(concept.get("data_type") or "").lower()
+    if "monetary" not in data_type:
+        return False
+    # Defense in depth only: this is raw QName/local identity, never a label
+    # heuristic.  The primary fail-closed gate is the typed monetary Unit and
+    # reviewed semantic state above; these well-known non-additive identities
+    # catch extensions that happen to use a currency unit.
+    identity = "".join(str(concept.get(key) or "") for key in ("qname", "local_name")).lower()
+    if any(token in identity for token in ("average", "margin", "ratio", "rate", "pershare")):
+        return False
+    numerator = _measure_tokens(unit.get("numerator_measures"))
+    denominator = _measure_tokens(unit.get("denominator_measures"))
+    if denominator or not numerator:
+        return False
+    # Monetary flow candidates carry an ISO 4217 currency measure.  A share,
+    # pure, or other non-currency Unit is never eligible for subtraction.
+    if not any(token.startswith("iso4217:") for token in numerator):
+        return False
+    return True
+
+
+def _measure_tokens(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return tuple(item.strip().lower() for item in value.replace(",", " ").split() if item.strip())
+    if isinstance(value, Iterable):
+        return tuple(str(item).strip().lower() for item in value if str(item).strip())
+    return (str(value).strip().lower(),)
+
+
+def _foreign_reference(row: Mapping[str, Any], filing: Mapping[str, Any]) -> bool:
+    reference_filing_id = row.get("filing_id")
+    return bool(reference_filing_id and str(reference_filing_id) != str(filing.get("filing_id")))
 
 
 def _q4_candidates(

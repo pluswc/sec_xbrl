@@ -22,8 +22,8 @@ def _snapshot(company: str = "0000320193", year: int = 2025) -> dict[str, object
         {"context_id": f"instant-{year}", "filing_id": filing_id, "period_kind": "INSTANT", "start_date": None, "end_date": None, "instant_date": f"{year}-09-27", "duration_days": None},
     )
     concepts = (
-        {"raw_concept_id": "revenue", "filing_id": filing_id, "qname": "us-gaap:Revenue", "namespace_uri": "http://fasb.org/us-gaap", "local_name": "Revenue", "period_type": "duration"},
-        {"raw_concept_id": "assets", "filing_id": filing_id, "qname": "us-gaap:Assets", "namespace_uri": "http://fasb.org/us-gaap", "local_name": "Assets", "period_type": "instant"},
+        {"raw_concept_id": "revenue", "filing_id": filing_id, "qname": "us-gaap:Revenue", "namespace_uri": "http://fasb.org/us-gaap", "local_name": "Revenue", "period_type": "duration", "data_type": "monetaryItemType"},
+        {"raw_concept_id": "assets", "filing_id": filing_id, "qname": "us-gaap:Assets", "namespace_uri": "http://fasb.org/us-gaap", "local_name": "Assets", "period_type": "instant", "data_type": "monetaryItemType"},
         {"raw_concept_id": "geo-axis", "filing_id": filing_id, "qname": "ex:GeoAxis", "namespace_uri": "http://example.test", "local_name": "GeoAxis", "period_type": "duration"},
         {"raw_concept_id": "us-member", "filing_id": filing_id, "qname": "ex:USMember", "namespace_uri": "http://example.test", "local_name": "USMember", "period_type": "duration"},
         {"raw_concept_id": "eps", "filing_id": filing_id, "qname": "us-gaap:EarningsPerShareDiluted", "namespace_uri": "http://fasb.org/us-gaap", "local_name": "EarningsPerShareDiluted", "period_type": "duration"},
@@ -80,13 +80,57 @@ def test_q4_requires_explicit_additive_policy_and_never_derives_eps() -> None:
     )
     no_policy = PeriodObservationMaterializer().materialize(**{**snapshot, "filing": filing, "contexts": tuple(contexts), "facts": facts})
     assert len(no_policy.observations) == 2
-    policy = {fact_id: {"canonical_concept_id": "revenue", "is_additive": True, "value_kind": "ADDITIVE_AMOUNT", "structural_version": "v1", "recast_version": None, "comparability_flag": "COMPATIBLE"} for fact_id in ("fy", "ytd9")}
+    policy = {fact_id: {"canonical_concept_id": "revenue", "is_additive": True, "value_kind": "ADDITIVE_AMOUNT", "semantic_review_state": "REVIEWED_ADDITIVE_AMOUNT", "structural_version": "v1", "recast_version": None, "comparability_flag": "COMPATIBLE"} for fact_id in ("fy", "ytd9")}
     result = PeriodObservationMaterializer().materialize(**{**snapshot, "filing": filing, "contexts": tuple(contexts), "facts": facts}, q4_policy_by_fact_id=policy)
     derived = [row for row in result.observations if row["reported_or_derived"] == "DERIVED"]
     assert len(derived) == 1
     assert derived[0]["value_numeric"] == "250"
     assert derived[0]["formula"] == "FY - YTD_9M"
     assert derived[0]["source_fact_ids"] == ("fy", "ytd9")
+
+
+def test_q4_rejects_malicious_policy_for_eps_shares_ratio_margin_and_average() -> None:
+    snapshot = _snapshot()
+    filing = dict(snapshot["filing"], form="10-K")
+    filing_id = str(filing["filing_id"])
+    contexts = (
+        {"context_id": "fy", "filing_id": filing_id, "period_kind": "DURATION", "start_date": "2025-01-01", "end_date": "2025-12-31", "duration_days": 364},
+        {"context_id": "ytd9", "filing_id": filing_id, "period_kind": "DURATION", "start_date": "2025-01-01", "end_date": "2025-09-30", "duration_days": 272},
+    )
+    concepts = (
+        {"raw_concept_id": "revenue", "filing_id": filing_id, "qname": "us-gaap:Revenue", "period_type": "duration", "data_type": "monetaryItemType"},
+        {"raw_concept_id": "eps", "filing_id": filing_id, "qname": "us-gaap:EarningsPerShareDiluted", "period_type": "duration", "data_type": "perShareItemType"},
+        {"raw_concept_id": "shares", "filing_id": filing_id, "qname": "us-gaap:WeightedAverageNumberOfDilutedSharesOutstanding", "period_type": "duration", "data_type": "sharesItemType"},
+        {"raw_concept_id": "margin", "filing_id": filing_id, "qname": "example:OperatingMargin", "period_type": "duration", "data_type": "percentItemType"},
+        {"raw_concept_id": "average", "filing_id": filing_id, "qname": "example:AverageSellingPrice", "period_type": "duration", "data_type": "monetaryItemType"},
+    )
+    units = (
+        {"unit_id": "usd", "filing_id": filing_id, "numerator_measures": "iso4217:USD", "denominator_measures": None},
+        {"unit_id": "usd-per-share", "filing_id": filing_id, "numerator_measures": "iso4217:USD", "denominator_measures": "xbrli:shares"},
+        {"unit_id": "shares", "filing_id": filing_id, "numerator_measures": "xbrli:shares", "denominator_measures": None},
+        {"unit_id": "pure", "filing_id": filing_id, "numerator_measures": "xbrli:pure", "denominator_measures": None},
+    )
+    facts = tuple(
+        {"fact_id": f"{concept}-{period}", "filing_id": filing_id, "raw_concept_id": concept, "context_id": period, "unit_id": unit, "value_numeric": value, "is_nil": False}
+        for concept, unit, value in (("revenue", "usd", "1000"), ("eps", "usd-per-share", "4"), ("shares", "shares", "200"), ("margin", "pure", "50"), ("average", "usd", "12"))
+        for period in ("fy", "ytd9")
+    )
+    malicious = {fact["fact_id"]: {"canonical_concept_id": fact["raw_concept_id"], "is_additive": True, "value_kind": "ADDITIVE_AMOUNT", "semantic_review_state": "REVIEWED_ADDITIVE_AMOUNT", "structural_version": "v1", "recast_version": None, "comparability_flag": "COMPATIBLE"} for fact in facts}
+    result = PeriodObservationMaterializer().materialize(filing=filing, concepts=concepts, contexts=contexts, units=units, facts=facts, q4_policy_by_fact_id=malicious)
+
+    derived = [row for row in result.observations if row["reported_or_derived"] == "DERIVED"]
+    assert [row["raw_concept_id"] for row in derived] == ["revenue"]
+
+
+def test_foreign_layer1_references_are_explicitly_excluded() -> None:
+    snapshot = _snapshot()
+    concepts = list(snapshot["concepts"])
+    concepts[0] = {**concepts[0], "filing_id": "other-filing"}
+    result = PeriodObservationMaterializer().materialize(**{**snapshot, "concepts": tuple(concepts)})
+    exclusions = {row["source_fact_id"]: row["exclusion_reason"] for row in result.exclusions}
+
+    assert exclusions["revenue-qtd-2025"] == "CROSS_FILING_CONCEPT_REFERENCE"
+    assert exclusions["revenue-ytd-2025"] == "CROSS_FILING_CONCEPT_REFERENCE"
 
 
 def test_aapl_nvda_tsla_three_year_fixture_surface_is_completely_accounted_for() -> None:

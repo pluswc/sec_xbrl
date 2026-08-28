@@ -134,8 +134,12 @@ mixed before canonical mapping or selection.
 A malformed Layer 1 reference is emitted as `period_observation_exclusion`
 with a source Fact identity and controlled reason.  It is never silently
 dropped.  A Q4 candidate is opt-in: callers must supply reviewed canonical
-concept, additivity, `ADDITIVE_AMOUNT` value-kind, structural/recast, and
-comparability policy per source Fact.  The shared compatibility gate then also
-requires equal units, full dimensions, fiscal year and Context start.  EPS,
-weighted-average shares, ratios, margins, averages, and other non-additive
-values cannot meet that policy and are never subtraction-derived.
+concept, additivity, `ADDITIVE_AMOUNT` value-kind, a separate
+`REVIEWED_ADDITIVE_AMOUNT` semantic state, structural/recast, and
+comparability policy per source Fact. The materializer independently requires
+a duration concept with a monetary data type and a single ISO-4217 currency
+Unit without a denominator; it also uses raw QName/local identity only as a
+defense-in-depth rejection for common non-additive categories. The shared
+compatibility gate requires equal units, full dimensions, fiscal year and
+Context start. EPS, weighted-average shares, ratios, margins, averages, and
+other non-additive values cannot be subtraction-derived.
