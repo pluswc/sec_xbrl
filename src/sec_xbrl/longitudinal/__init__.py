@@ -22,6 +22,11 @@ from sec_xbrl.longitudinal.materialization import (
     Layer2Run,
 )
 from sec_xbrl.longitudinal.recast import RecastObservationBuilder, RecastObservationError
+from sec_xbrl.longitudinal.period_observation import (
+    PERIOD_OBSERVATION_RULE_VERSION,
+    PeriodObservationMaterializer,
+    PeriodObservationResult,
+)
 
 __all__ = [
     "DEFAULT_LAYER2_ROOT",
@@ -42,5 +47,8 @@ __all__ = [
     "MappingTables",
     "RecastObservationBuilder",
     "RecastObservationError",
+    "PERIOD_OBSERVATION_RULE_VERSION",
+    "PeriodObservationMaterializer",
+    "PeriodObservationResult",
     "SeriesBuilder",
 ]

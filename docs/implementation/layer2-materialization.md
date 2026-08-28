@@ -26,6 +26,7 @@ and content hashes, validation status, fingerprint, and timestamp.
 ## Logical datasets and lineage gate
 
 The supported logical dataset names are the L2 plan's `period_observation`,
+`period_observation_exclusion`,
 `company_concept_map`, `company_axis_map`, `company_member_map`,
 `structural_change`, `analytical_fact`, `recast_evidence`, and
 `capability_inventory`.  The candidate must include `analytical_fact`.
