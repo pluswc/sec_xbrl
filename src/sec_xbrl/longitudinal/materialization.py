@@ -32,6 +32,9 @@ LOGICAL_DATASETS = frozenset(
         "analytical_fact",
         "recast_evidence",
         "capability_inventory",
+        "annual_series_candidate",
+        "current_series_candidate",
+        "series_candidate_exclusion",
     }
 )
 _ANALYTICAL_SOURCE_TYPES = frozenset(
@@ -281,8 +284,10 @@ def _normalize_datasets(
     unknown = set(datasets) - LOGICAL_DATASETS
     if unknown:
         raise Layer2MaterializationError(f"unknown Layer 2 logical datasets: {sorted(unknown)}")
-    if "analytical_fact" not in datasets:
-        raise Layer2MaterializationError("analytical_fact dataset is required by the M0 contract")
+    if "analytical_fact" not in datasets and not ({"annual_series_candidate", "current_series_candidate"} & set(datasets)):
+        raise Layer2MaterializationError(
+            "candidate requires analytical_fact or an L2-M3 series candidate dataset"
+        )
     return {name: tuple(dict(row) for row in rows) for name, rows in datasets.items()}
 
 
@@ -312,6 +317,8 @@ def _validate_candidate(run: Layer2Run, datasets: Mapping[str, Sequence[Mapping[
             seen_ids.add(record_id)
             if dataset == "analytical_fact":
                 _validate_analytical_fact(row)
+            elif dataset in {"annual_series_candidate", "current_series_candidate"}:
+                _validate_series_candidate(dataset, row)
             elif dataset in _MAPPING_DATASETS:
                 # This was validated first so structural-change rows can only
                 # link to a real map in the same atomic candidate.
@@ -351,6 +358,36 @@ def _validate_analytical_fact(row: Mapping[str, Any]) -> None:
     missing = [key for key in required if not row.get(key)]
     if missing:
         raise Layer2MaterializationError(f"analytical_fact missing selection provenance: {missing}")
+
+
+def _validate_series_candidate(dataset: str, row: Mapping[str, Any]) -> None:
+    """Keep pre-selection M3 candidates traceable and period-safe."""
+    expected_type = "ANNUAL" if dataset == "annual_series_candidate" else "CURRENT"
+    required = (
+        "series_candidate_id", "series_type", "series_status",
+        "company_canonical_concept_id", "company_canonical_dimension_key",
+        "unit_semantics", "actual_period_boundaries", "actual_period_key",
+        "period_class", "series_key", "source_period_observation_id",
+        "source_filing_id", "mapping_version", "mapping_evidence",
+        "classification_rule_version", "series_rule_version",
+    )
+    missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
+    if missing:
+        raise Layer2MaterializationError(f"{dataset} missing series provenance: {missing}")
+    if row["series_type"] != expected_type:
+        raise Layer2MaterializationError(f"{dataset} has incompatible series_type")
+    if row["series_status"] not in {"CANDIDATE", "REVIEW_REQUIRED"}:
+        raise Layer2MaterializationError(f"{dataset} has unsupported series_status")
+    if row["series_status"] == "REVIEW_REQUIRED" and not row.get("unavailable_reason"):
+        raise Layer2MaterializationError(f"{dataset} review-required row needs unavailable_reason")
+    if not row.get("source_fact_id") and (
+        not row.get("source_fact_ids")
+        or not row.get("derivation_rule_version")
+        or not row.get("formula")
+    ):
+        raise Layer2MaterializationError(
+            f"{dataset} requires source_fact_id or complete derived source lineage"
+        )
 
 
 def _validate_company_mapping(dataset: str, row: Mapping[str, Any]) -> None:
@@ -438,6 +475,10 @@ def _validate_structural_change(
 def _record_id(dataset: str, row: Mapping[str, Any]) -> str:
     if dataset == "analytical_fact":
         return str(row.get("analytical_fact_id") or "")
+    if dataset in {"annual_series_candidate", "current_series_candidate"}:
+        return str(row.get("series_candidate_id") or "")
+    if dataset == "series_candidate_exclusion":
+        return str(row.get("series_candidate_exclusion_id") or "")
     for key in ("id", f"{dataset}_id", "fact_id", "source_raw_id", "event_id"):
         if row.get(key):
             return str(row[key])

@@ -53,6 +53,7 @@ class PeriodObservationMaterializer:
         facts: Iterable[Mapping[str, Any],],
         dimension_facts: Iterable[Mapping[str, Any]] = (),
         q4_policy_by_fact_id: Mapping[str, Mapping[str, Any]] | None = None,
+        source_snapshot_id: str | None = None,
     ) -> PeriodObservationResult:
         """Return one reported observation or one exclusion per raw Fact.
 
@@ -90,6 +91,7 @@ class PeriodObservationMaterializer:
                     unit=unit_by_id.get(str(fact.get("unit_id"))),
                     dimension_signature=dimensions.get(str(fact["fact_id"]), ()),
                     policy=policy.get(str(fact["fact_id"])),
+                    source_snapshot_id=source_snapshot_id,
                 )
             )
 
@@ -199,6 +201,7 @@ def _observation(
     unit: Mapping[str, Any] | None,
     dimension_signature: tuple[Mapping[str, Any], ...],
     policy: Mapping[str, Any] | None,
+    source_snapshot_id: str | None,
 ) -> dict[str, Any]:
     period_class = str(fact["period_class"])
     signature = tuple(
@@ -215,6 +218,7 @@ def _observation(
         "cik": filing.get("cik"),
         "source_fact_id": source_fact_id,
         "source_filing_id": filing.get("filing_id"),
+        "source_snapshot_id": source_snapshot_id,
         "accession": filing.get("accession"),
         "form": filing.get("form"),
         "filed_date": filing.get("filed_date"),
@@ -356,6 +360,8 @@ def _q4_candidates(
     for row in derived:
         source_ids = tuple(str(item) for item in row["source_fact_ids"])
         source = by_source[source_ids[0]]
+        ytd_source = by_source[source_ids[1]]
+        q4_start, q4_end = _q4_boundaries(source, ytd_source)
         output.append(
             {
                 **source,
@@ -365,11 +371,13 @@ def _q4_candidates(
                 "reported_or_derived": "DERIVED",
                 "value_numeric": row["value_numeric"],
                 "context_id": None,
-                "context_end_date": None,
+                "context_start_date": q4_start,
+                "context_end_date": q4_end,
                 "context_instant_date": None,
-                "context_duration_days": None,
+                "context_duration_days": _duration_days(q4_start, q4_end),
                 "period_class": "QTD_3M",
-                "period_key": _q4_period_key(source),
+                "period_key": _period_key_from_bounds(q4_start, q4_end, fallback=_q4_period_key(source)),
+                "fiscal_period_key": _q4_period_key(source),
                 "comparative_type": "CURRENT_FOCUS",
                 "raw_series_identity": (
                     source.get("cik"), source.get("raw_concept_id"), source.get("dimension_signature"),
@@ -393,6 +401,31 @@ def _period_key(context: Mapping[str, Any], period_class: str) -> str:
 def _q4_period_key(source: Mapping[str, Any]) -> str:
     year = source.get("fiscal_year")
     return f"FY{year}-Q4" if year is not None else "Q4-DERIVED"
+
+
+def _q4_boundaries(fy: Mapping[str, Any], ytd: Mapping[str, Any]) -> tuple[str | None, str | None]:
+    """Use the reviewed FY/YTD source contexts to give Q4 a real duration."""
+    fy_end = _as_date(fy.get("context_end_date"))
+    ytd_end = _as_date(ytd.get("context_end_date"))
+    if fy_end is None or ytd_end is None or ytd_end >= fy_end:
+        return None, None
+    return (ytd_end.fromordinal(ytd_end.toordinal() + 1).isoformat(), fy_end.isoformat())
+
+
+def _duration_days(start: str | None, end: str | None) -> int | None:
+    start_date, end_date = _as_date(start), _as_date(end)
+    return None if start_date is None or end_date is None else (end_date - start_date).days + 1
+
+
+def _period_key_from_bounds(start: str | None, end: str | None, *, fallback: str) -> str:
+    return f"{start}/{end}" if start is not None and end is not None else fallback
+
+
+def _as_date(value: object) -> date | None:
+    try:
+        return date.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _fiscal_year(filing: Mapping[str, Any], context: Mapping[str, Any]) -> int | None:

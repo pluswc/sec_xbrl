@@ -83,12 +83,17 @@ def test_q4_requires_explicit_additive_policy_and_never_derives_eps() -> None:
     no_policy = PeriodObservationMaterializer().materialize(**{**snapshot, "filing": filing, "contexts": tuple(contexts), "facts": facts})
     assert len(no_policy.observations) == 2
     policy = {fact_id: {"canonical_concept_id": "revenue", "is_additive": True, "value_kind": "ADDITIVE_AMOUNT", "semantic_review_state": "REVIEWED_ADDITIVE_AMOUNT", "structural_version": "v1", "recast_version": None, "comparability_flag": "COMPATIBLE"} for fact_id in ("fy", "ytd9")}
-    result = PeriodObservationMaterializer().materialize(**{**snapshot, "filing": filing, "contexts": tuple(contexts), "facts": facts}, q4_policy_by_fact_id=policy)
+    result = PeriodObservationMaterializer().materialize(**{**snapshot, "filing": filing, "contexts": tuple(contexts), "facts": facts}, q4_policy_by_fact_id=policy, source_snapshot_id="fixture/k25")
     derived = [row for row in result.observations if row["reported_or_derived"] == "DERIVED"]
     assert len(derived) == 1
     assert derived[0]["value_numeric"] == "250"
     assert derived[0]["formula"] == "FY - YTD_9M"
     assert derived[0]["source_fact_ids"] == ("fy", "ytd9")
+    assert derived[0]["source_fact_id"] is None
+    assert derived[0]["source_snapshot_id"] == "fixture/k25"
+    assert derived[0]["context_start_date"] == "2025-10-01"
+    assert derived[0]["context_end_date"] == "2025-12-31"
+    assert derived[0]["period_key"] == "2025-10-01/2025-12-31"
 
 
 def test_q4_rejects_malicious_policy_for_eps_shares_ratio_margin_and_average() -> None:
