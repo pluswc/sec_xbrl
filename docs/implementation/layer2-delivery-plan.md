@@ -289,6 +289,12 @@ coverage rules.
   the focused dimensional cases.
 - Excel/API consumers may read the inventory but do not generate it.
 
+**Implemented boundary.** `CapabilityInventoryMaterializer` produces only
+observed company Concept and Axis/Member capabilities, while
+`CapabilityInventoryQuery` exposes a read-only discovery boundary.  The
+status and drill-down contract is defined in
+[`capability-inventory.md`](capability-inventory.md).
+
 ### L2-M6 — Derived Metrics input handoff
 
 **Objective.** Publish compatible input candidates and eligibility diagnostics

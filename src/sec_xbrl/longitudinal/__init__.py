@@ -10,6 +10,12 @@ from sec_xbrl.longitudinal.canonical import (
     MappingTables,
     SeriesBuilder,
 )
+from sec_xbrl.longitudinal.capability import (
+    CAPABILITY_INVENTORY_VERSION,
+    CapabilityInventoryMaterializer,
+    CapabilityInventoryQuery,
+    CapabilityInventoryResult,
+)
 from sec_xbrl.longitudinal.materialization import (
     DEFAULT_LAYER2_ROOT,
     LAYER2_CONTRACT_VERSION,
@@ -44,6 +50,7 @@ from sec_xbrl.longitudinal.series import (
 )
 
 __all__ = [
+    "CAPABILITY_INVENTORY_VERSION",
     "DEFAULT_LAYER2_ROOT",
     "LAYER2_CONTRACT_VERSION",
     "LOGICAL_DATASETS",
@@ -55,6 +62,9 @@ __all__ = [
     "AnalyticalFactSelectionResult",
     "AnnualSeries",
     "AsOfSeriesSelector",
+    "CapabilityInventoryMaterializer",
+    "CapabilityInventoryQuery",
+    "CapabilityInventoryResult",
     "CompanyCanonicalizer",
     "CompanySeriesMaterializer",
     "CompanySeriesResult",
