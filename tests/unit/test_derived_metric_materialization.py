@@ -274,3 +274,6 @@ def test_publisher_keeps_unavailable_metric_non_numeric(tmp_path: Path) -> None:
     invalid = {**record, "metric_value_decimal": "999"}
     with pytest.raises(DerivedMetricMaterializationError, match="reason and no numeric"):
         DerivedMetricPublisher(tmp_path / "bad").publish(run, (invalid,))
+    invalid = {**record, "calculated_at": "2026-08-28T00:00:00+00:00"}
+    with pytest.raises(DerivedMetricMaterializationError, match="cannot carry calculation timestamp"):
+        DerivedMetricPublisher(tmp_path / "bad-timestamp").publish(run, (invalid,))

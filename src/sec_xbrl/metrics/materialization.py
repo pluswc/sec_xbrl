@@ -489,6 +489,10 @@ def _validate_records(rows: Sequence[Mapping[str, Any]]) -> None:
                 raise DerivedMetricMaterializationError(
                     "unavailable derived_metric requires reason and no numeric value"
                 )
+            if row.get("calculated_at") is not None:
+                raise DerivedMetricMaterializationError(
+                    "unavailable derived_metric cannot carry calculation timestamp"
+                )
         if len(row["ordered_input_candidate_ids"]) != len(row["ordered_input_lineage"]):
             raise DerivedMetricMaterializationError("derived metric input lineage is incomplete")
         if status == "AVAILABLE" and not all(
