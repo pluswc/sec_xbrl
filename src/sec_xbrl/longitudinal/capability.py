@@ -17,7 +17,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-
 CAPABILITY_INVENTORY_VERSION = "l2-m5-capability-inventory-v1"
 _STATUSES = frozenset(
     {"AVAILABLE", "PROCESSING_UNAVAILABLE", "MAPPING_REVIEW_REQUIRED", "NOT_COMPARABLE"}
