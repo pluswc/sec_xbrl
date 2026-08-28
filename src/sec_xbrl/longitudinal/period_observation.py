@@ -313,9 +313,7 @@ def _has_safe_additive_amount_semantics(
         return False
     # Monetary flow candidates carry an ISO 4217 currency measure.  A share,
     # pure, or other non-currency Unit is never eligible for subtraction.
-    if not any(token.startswith("iso4217:") for token in numerator):
-        return False
-    return True
+    return any(token.startswith("iso4217:") for token in numerator)
 
 
 def _measure_tokens(value: Any) -> tuple[str, ...]:

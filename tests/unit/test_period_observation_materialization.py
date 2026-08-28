@@ -154,12 +154,7 @@ def test_referenced_l1_rows_without_filing_identity_are_explicitly_excluded(
     result = PeriodObservationMaterializer().materialize(**{**snapshot, table: tuple(rows)})
     exclusions = {row["source_fact_id"]: row["exclusion_reason"] for row in result.exclusions}
 
-    if expected_reason == "MISSING_CONTEXT_REFERENCE_FILING_ID":
-        assert exclusions["revenue-qtd-2025"] == expected_reason
-    elif expected_reason == "MISSING_UNIT_REFERENCE_FILING_ID":
-        assert exclusions["revenue-qtd-2025"] == expected_reason
-    else:
-        assert exclusions["revenue-qtd-2025"] == expected_reason
+    assert exclusions["revenue-qtd-2025"] == expected_reason
 
 
 def test_aapl_nvda_tsla_three_year_fixture_surface_is_completely_accounted_for() -> None:
