@@ -115,8 +115,10 @@ earlier mapping.
 
 The automatic confirmation boundary is intentionally narrow:
 
-- exact standard QName and namespace identity is `SAME`, with retained context
-  semantics;
+- exact standard QName and namespace identity is `SAME` only when declared
+  `period_type` and `data_type` are both present and equal (and `balance` is
+  compatible when declared); an incomplete or duration-versus-instant/type
+  conflict remains `UNCERTAIN`;
 - a company extension namespace change is `RENAMED` only when local name,
   label, and role/axis/domain structural signatures agree;
 - a recast, split, or merge requires a supplied documented-change record that

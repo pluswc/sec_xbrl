@@ -50,6 +50,8 @@ def _concept(raw_id: str, filing_id: str, **extra: object) -> dict[str, object]:
         "local_name": "Revenue",
         "label": "Revenue",
         "is_standard": False,
+        "period_type": "duration",
+        "data_type": "monetaryItemType",
         **extra,
     }
 
@@ -254,6 +256,42 @@ def test_same_standard_concept_with_changed_role_network_records_role_restructur
     event = next(item for item in tables.structural_change if item["event_type"] == "ROLE_RESTRUCTURE")
     assert event["source_raw_id"] == "revenue-new"
     assert event["company_canonical_id"] == same["company_canonical_id"]
+
+
+def test_exact_standard_qname_with_incompatible_period_or_type_is_uncertain() -> None:
+    concepts = (
+        _concept("duration", "k24", is_standard=True, qname="us-gaap:Revenue"),
+        _concept(
+            "instant",
+            "k25",
+            is_standard=True,
+            qname="us-gaap:Revenue",
+            period_type="instant",
+        ),
+        _concept(
+            "shares",
+            "k25",
+            is_standard=True,
+            qname="us-gaap:Revenue",
+            data_type="sharesItemType",
+        ),
+    )
+    rows = CompanyCanonicalizer().build(filings=_filings(), concepts=concepts).company_concept_map
+    assert [row["relation"] for row in rows] == ["SAME", "UNCERTAIN", "UNCERTAIN"]
+    assert rows[0]["company_canonical_id"] != rows[1]["company_canonical_id"]
+    assert rows[0]["company_canonical_id"] != rows[2]["company_canonical_id"]
+
+
+def test_exact_standard_qname_with_compatible_period_and_type_is_same() -> None:
+    rows = CompanyCanonicalizer().build(
+        filings=_filings(),
+        concepts=(
+            _concept("old", "k24", is_standard=True, qname="us-gaap:Revenue"),
+            _concept("new", "k25", is_standard=True, qname="us-gaap:Revenue"),
+        ),
+    ).company_concept_map
+    assert rows[1]["relation"] == "SAME"
+    assert rows[1]["company_canonical_id"] == rows[0]["company_canonical_id"]
 
 
 def test_mapping_tables_are_publisher_ready_with_l2_m0_contract(tmp_path: Path) -> None:

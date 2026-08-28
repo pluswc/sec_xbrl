@@ -164,6 +164,55 @@ def test_publisher_accepts_auditable_period_observation_exclusions(tmp_path: Pat
     assert published.output_counts["period_observation_exclusion"] == 1
 
 
+@pytest.mark.parametrize(
+    "event, message",
+    [
+        (
+            {
+                "event_id": "bad-event",
+                "cik": "0000320193",
+                "filing_id": "filing-aapl-q2",
+                "source_raw_id": "raw-revenue",
+                "company_canonical_id": "company:0000320193:concept:revenue",
+                "mapping_version": "map-v1",
+                "event_type": "NOT_A_CONTROLLED_EVENT",
+                "valid_from_filing_id": "filing-aapl-q2",
+                "continuity_break": False,
+                "review_required": False,
+                "review_state": "AUTO_ACCEPTED",
+                "evidence": {"raw": "raw-revenue"},
+            },
+            "missing provenance",
+        ),
+        (
+            {
+                "event_id": "bad-event",
+                "cik": "0000320193",
+                "filing_id": "filing-aapl-q2",
+                "source_raw_id": "raw-revenue",
+                "company_canonical_id": "company:0000320193:concept:revenue",
+                "mapping_id": "company-map:fixture",
+                "mapping_version": "map-v1",
+                "event_type": "NOT_A_CONTROLLED_EVENT",
+                "valid_from_filing_id": "filing-aapl-q2",
+                "continuity_break": False,
+                "review_required": False,
+                "review_state": "AUTO_ACCEPTED",
+                "evidence": {"raw": "raw-revenue"},
+            },
+            "unsupported event_type",
+        ),
+    ],
+)
+def test_publisher_rejects_unlinked_or_uncontrolled_structural_change(
+    tmp_path: Path, event: dict[str, object], message: str
+) -> None:
+    with pytest.raises(Layer2MaterializationError, match=message):
+        Layer2Publisher(tmp_path / "layer2").publish(
+            _run(), {"analytical_fact": _datasets()["analytical_fact"], "structural_change": [event]}
+        )
+
+
 @pytest.mark.parametrize("field", ("form", "filed_date", "report_date"))
 def test_run_rejects_layer1_input_without_required_filing_provenance(field: str) -> None:
     values: dict[str, object] = {

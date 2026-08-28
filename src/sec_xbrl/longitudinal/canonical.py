@@ -711,7 +711,32 @@ def _exact_standard_identity(left: Mapping[str, Any], right: Mapping[str, Any]) 
         and bool(right.get("is_standard"))
         and left.get("qname") == right.get("qname")
         and left.get("namespace_uri") == right.get("namespace_uri")
+        and _compatible_context_semantics(left, right)
     )
+
+
+def _compatible_context_semantics(
+    left: Mapping[str, Any], right: Mapping[str, Any]
+) -> bool:
+    """Fail closed when exact-QName concepts lack compatible raw semantics.
+
+    A QName is not sufficient evidence when one filing presents a duration
+    measure and another presents an instant, or when their declared XBRL data
+    types differ.  Layer 1 resolves these fields for concepts; incomplete
+    fixtures or malformed source rows therefore remain review-required rather
+    than being silently coalesced.
+    """
+    required = ("period_type", "data_type")
+    if any(not left.get(key) or not right.get(key) for key in required):
+        return False
+    if any(left.get(key) != right.get(key) for key in required):
+        return False
+    # Balance is relevant only where one side declares it.  A missing balance
+    # on both is valid for duration concepts; a one-sided or changed balance is
+    # a semantic incompatibility.
+    if left.get("balance") is not None or right.get("balance") is not None:
+        return left.get("balance") == right.get("balance")
+    return True
 
 
 def _well_supported_namespace_change(
@@ -869,8 +894,10 @@ def _event(
         "valid_from_filing_id": mapping["valid_from_filing_id"],
         "valid_from_period": mapping["valid_from_period"],
         "mapping_version": mapping["mapping_version"],
+        "mapping_id": mapping["mapping_id"],
         "continuity_break": mapping["continuity_break"],
         "review_required": mapping["review_required"],
+        "review_state": mapping["review_state"],
         "evidence": dict(evidence),
     }
 

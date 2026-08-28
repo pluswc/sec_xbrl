@@ -41,6 +41,19 @@ _MAPPING_DATASETS = frozenset(
     {"company_concept_map", "company_axis_map", "company_member_map"}
 )
 _MAPPING_RELATIONS = frozenset({"SAME", "RENAMED", "RECAST", "SPLIT", "MERGED", "UNCERTAIN"})
+_STRUCTURAL_CHANGE_EVENTS = frozenset(
+    {
+        "NEW_CONCEPT",
+        "NEW_AXIS",
+        "NEW_MEMBER",
+        "MEMBER_RENAME",
+        "SEGMENT_RECAST",
+        "SPLIT",
+        "MERGE",
+        "ROLE_RESTRUCTURE",
+        "UNKNOWN_CHANGE",
+    }
+)
 
 
 class Layer2MaterializationError(RuntimeError):
@@ -359,10 +372,27 @@ def _validate_company_mapping(dataset: str, row: Mapping[str, Any]) -> None:
 
 
 def _validate_structural_change(row: Mapping[str, Any]) -> None:
-    required = ("event_id", "filing_id", "source_raw_id", "event_type", "mapping_version", "evidence")
+    required = (
+        "event_id",
+        "filing_id",
+        "source_raw_id",
+        "company_canonical_id",
+        "mapping_id",
+        "event_type",
+        "valid_from_filing_id",
+        "mapping_version",
+        "continuity_break",
+        "review_required",
+        "review_state",
+        "evidence",
+    )
     missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
     if missing:
         raise Layer2MaterializationError(f"structural_change missing provenance: {missing}")
+    if str(row["event_type"]) not in _STRUCTURAL_CHANGE_EVENTS:
+        raise Layer2MaterializationError("structural_change has unsupported event_type")
+    if bool(row["review_required"]) != (row.get("review_state") == "REVIEW_REQUIRED"):
+        raise Layer2MaterializationError("structural_change review state is inconsistent")
 
 
 def _record_id(dataset: str, row: Mapping[str, Any]) -> str:
