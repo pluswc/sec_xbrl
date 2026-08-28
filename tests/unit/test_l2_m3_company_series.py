@@ -237,3 +237,31 @@ def test_m3_candidates_can_publish_without_premature_analytical_fact(tmp_path: P
     )
     published = Layer2Publisher(tmp_path / "layer2").publish(run, result.as_datasets())
     assert published.output_counts["annual_series_candidate"] == 1
+
+
+def test_m3_preserves_m1_approved_derived_q4_with_snapshot_filing_map() -> None:
+    observations = (
+        {
+            **_observation(fact="q4", filing="k25", form="10-K", period_class="QTD_3M", end="2025-12-31", value="250"),
+            "source_fact_id": None, "source_fact_ids": ("fy", "ytd9"), "reported_or_derived": "DERIVED",
+            "formula": "FY - YTD_9M", "derivation_rule_version": "m6-q4-subtraction-v1",
+            "period_key": "2025-10-01/2025-12-31", "context_start_date": "2025-10-01",
+        },
+    )
+    result = CompanySeriesMaterializer().materialize(
+        observations=observations, mappings=_maps(), declared_snapshot_ids=("snap/k25",),
+        snapshot_id_by_filing_id={"k25": "snap/k25"},
+    )
+    candidate = result.current[0]
+    assert candidate["source_fact_id"] is None
+    assert candidate["source_fact_ids"] == ("fy", "ytd9")
+    assert candidate["actual_period_boundaries"] == ("2025-10-01", "2025-12-31", None)
+    assert not result.exclusions
+
+
+def test_m3_requires_explicit_snapshot_identity_when_declaration_is_requested() -> None:
+    result = CompanySeriesMaterializer().materialize(
+        observations=(_observation(fact="qtd", filing="q26", form="10-Q", period_class="QTD_3M", end="2025-12-27", value="1"),),
+        mappings=_maps(), declared_snapshot_ids=("snap/q26",),
+    )
+    assert result.exclusions[0]["exclusion_reason"] == "MISSING_SOURCE_SNAPSHOT_ID"

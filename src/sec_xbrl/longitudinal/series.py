@@ -50,6 +50,7 @@ class CompanySeriesMaterializer:
         observations: Iterable[Mapping[str, Any]],
         mappings: Iterable[Mapping[str, Any]] | Any,
         declared_snapshot_ids: Iterable[str] | None = None,
+        snapshot_id_by_filing_id: Mapping[str, str] | None = None,
     ) -> CompanySeriesResult:
         map_rows = _mapping_rows(mappings)
         maps = _maps_by_identity(map_rows)
@@ -63,7 +64,7 @@ class CompanySeriesMaterializer:
         exclusions: list[dict[str, Any]] = []
         for source in observations:
             row = dict(source)
-            reason = _source_compatibility_reason(row, declared)
+            reason = _source_compatibility_reason(row, declared, snapshot_id_by_filing_id)
             if reason:
                 exclusions.append(_exclusion(row, reason))
                 continue
@@ -200,6 +201,7 @@ def _candidate(
         ),
         "source_period_observation_id": row["period_observation_id"],
         "source_fact_id": row["source_fact_id"],
+        "source_fact_ids": row.get("source_fact_ids"),
         "source_filing_id": filing_id,
         "accession": row.get("accession"),
         "form": row.get("form"),
@@ -212,6 +214,8 @@ def _candidate(
         "value_numeric": row.get("value_numeric"),
         "value_text": row.get("value_text"),
         "reported_or_derived": row.get("reported_or_derived"),
+        "formula": row.get("formula"),
+        "derivation_rule_version": row.get("derivation_rule_version"),
         "mapping_version": _mapping_versions(maps, filing_id, row, review),
         "mapping_evidence": _mapping_evidence(maps, filing_id, row),
         "mapping_review_required": review,
@@ -310,11 +314,14 @@ def _mapping_evidence(
     )
 
 
-def _source_compatibility_reason(row: Mapping[str, Any], declared: set[str] | None) -> str | None:
+def _source_compatibility_reason(
+    row: Mapping[str, Any],
+    declared: set[str] | None,
+    snapshot_id_by_filing_id: Mapping[str, str] | None,
+) -> str | None:
     required = (
         "period_observation_id",
         "cik",
-        "source_fact_id",
         "source_filing_id",
         "form",
         "period_class",
@@ -322,11 +329,19 @@ def _source_compatibility_reason(row: Mapping[str, Any], declared: set[str] | No
     )
     if any(not row.get(key) for key in required):
         return "MISSING_PERIOD_OBSERVATION_PROVENANCE"
-    if (
-        declared is not None
-        and str(row.get("source_snapshot_id") or row.get("snapshot_id") or "") not in declared
-    ):
-        return "SOURCE_SNAPSHOT_NOT_DECLARED"
+    if row.get("reported_or_derived") == "DERIVED":
+        if not row.get("source_fact_ids") or not row.get("derivation_rule_version") or not row.get("formula"):
+            return "MISSING_DERIVED_SOURCE_LINEAGE"
+    elif not row.get("source_fact_id"):
+        return "MISSING_PERIOD_OBSERVATION_PROVENANCE"
+    if declared is not None:
+        snapshot_id = row.get("source_snapshot_id") or row.get("snapshot_id")
+        if snapshot_id is None and snapshot_id_by_filing_id is not None:
+            snapshot_id = snapshot_id_by_filing_id.get(str(row["source_filing_id"]))
+        if snapshot_id is None:
+            return "MISSING_SOURCE_SNAPSHOT_ID"
+        if str(snapshot_id) not in declared:
+            return "SOURCE_SNAPSHOT_NOT_DECLARED"
     if not row.get("context_end_date") and not row.get("context_instant_date"):
         return "MISSING_ACTUAL_PERIOD_BOUNDARY"
     return None
@@ -340,6 +355,7 @@ def _exclusion(row: Mapping[str, Any], reason: str) -> dict[str, Any]:
         "cik": row.get("cik"),
         "source_period_observation_id": row.get("period_observation_id"),
         "source_fact_id": row.get("source_fact_id"),
+        "source_fact_ids": row.get("source_fact_ids"),
         "source_filing_id": row.get("source_filing_id"),
         "exclusion_reason": reason,
         "series_rule_version": SERIES_RULE_VERSION,

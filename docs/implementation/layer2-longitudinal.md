@@ -184,6 +184,14 @@ or uncertain Concept/Axis/Member mappings use filing-scoped raw fallback keys
 and publish `REVIEW_REQUIRED` / `MAPPING_REVIEW_REQUIRED`; they never join an
 existing canonical series.  A declared snapshot mismatch or missing actual
 period boundary is an explicit exclusion rather than an inferred candidate.
+When an M3 run declares snapshot identities, every M1 observation must carry
+`source_snapshot_id`; a deterministic `source_filing_id -> snapshot_id` input
+map is an allowed adapter for legacy observations.  Missing identity is an
+explicit `MISSING_SOURCE_SNAPSHOT_ID` exclusion, never an implicit bypass.
+M1 derives an approved Q4 candidate with source Fact IDs, formula, derivation
+rule, and actual Q4 start/end boundaries from its compatible FY/YTD contexts;
+M3 retains that controlled derived lineage rather than requiring a singular
+reported Fact ID.
 
 `MemberOrderingView` is a read-only presentation helper.  For each current
 QTD member group, it selects the latest valid QTD observation, then sorts those
@@ -199,6 +207,11 @@ signature lineage.  Context dates and the raw concept period type determine
 `QTD_3M`, `YTD_6M`, `YTD_9M`, `FY`, `INSTANT`, or `OTHER_DURATION`; the period
 class is part of the raw series identity, so these observations cannot be
 mixed before canonical mapping or selection.
+
+The caller supplies the immutable Layer 1 `source_snapshot_id` when producing
+an operational run; it is copied to reported observations and to any derived
+Q4 candidate.  This permits a later declared-input validation without making
+a filepath or a label part of the analytical identity.
 
 A malformed Layer 1 reference is emitted as `period_observation_exclusion`
 with a source Fact identity and controlled reason.  It is never silently

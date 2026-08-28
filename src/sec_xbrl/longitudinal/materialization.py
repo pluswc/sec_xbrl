@@ -368,7 +368,7 @@ def _validate_series_candidate(dataset: str, row: Mapping[str, Any]) -> None:
         "company_canonical_concept_id", "company_canonical_dimension_key",
         "unit_semantics", "actual_period_boundaries", "actual_period_key",
         "period_class", "series_key", "source_period_observation_id",
-        "source_fact_id", "source_filing_id", "mapping_version", "mapping_evidence",
+        "source_filing_id", "mapping_version", "mapping_evidence",
         "classification_rule_version", "series_rule_version",
     )
     missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
@@ -380,6 +380,14 @@ def _validate_series_candidate(dataset: str, row: Mapping[str, Any]) -> None:
         raise Layer2MaterializationError(f"{dataset} has unsupported series_status")
     if row["series_status"] == "REVIEW_REQUIRED" and not row.get("unavailable_reason"):
         raise Layer2MaterializationError(f"{dataset} review-required row needs unavailable_reason")
+    if not row.get("source_fact_id") and (
+        not row.get("source_fact_ids")
+        or not row.get("derivation_rule_version")
+        or not row.get("formula")
+    ):
+        raise Layer2MaterializationError(
+            f"{dataset} requires source_fact_id or complete derived source lineage"
+        )
 
 
 def _validate_company_mapping(dataset: str, row: Mapping[str, Any]) -> None:
