@@ -21,6 +21,11 @@ from sec_xbrl.longitudinal.materialization import (
     Layer2RuleVersions,
     Layer2Run,
 )
+from sec_xbrl.longitudinal.period_observation import (
+    PERIOD_OBSERVATION_RULE_VERSION,
+    PeriodObservationMaterializer,
+    PeriodObservationResult,
+)
 from sec_xbrl.longitudinal.recast import RecastObservationBuilder, RecastObservationError
 
 __all__ = [
@@ -28,6 +33,7 @@ __all__ = [
     "LAYER2_CONTRACT_VERSION",
     "LOGICAL_DATASETS",
     "MAPPING_VERSION",
+    "PERIOD_OBSERVATION_RULE_VERSION",
     "AnnualSeries",
     "AsOfSeriesSelector",
     "CompanyCanonicalizer",
@@ -40,6 +46,8 @@ __all__ = [
     "Layer2Run",
     "MappingRelation",
     "MappingTables",
+    "PeriodObservationMaterializer",
+    "PeriodObservationResult",
     "RecastObservationBuilder",
     "RecastObservationError",
     "SeriesBuilder",

@@ -24,6 +24,7 @@ DEFAULT_LAYER2_ROOT = Path("data/processed/analytical/layer2")
 LOGICAL_DATASETS = frozenset(
     {
         "period_observation",
+        "period_observation_exclusion",
         "company_concept_map",
         "company_axis_map",
         "company_member_map",

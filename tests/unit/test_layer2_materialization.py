@@ -144,6 +144,26 @@ def test_same_input_and_versions_cannot_silently_replace_different_values(tmp_pa
         publisher.publish(_run(), changed)
 
 
+def test_publisher_accepts_auditable_period_observation_exclusions(tmp_path: Path) -> None:
+    published = Layer2Publisher(tmp_path / "layer2").publish(
+        _run(),
+        {
+            "analytical_fact": _datasets()["analytical_fact"],
+            "period_observation_exclusion": [
+                {
+                    "period_observation_exclusion_id": "missing-context",
+                    "cik": "0000320193",
+                    "source_fact_id": "raw-missing-context",
+                    "source_filing_id": "filing-aapl-q2",
+                    "exclusion_reason": "MISSING_OR_UNRESOLVED_CONTEXT",
+                    "classification_rule_version": "l2-m1-period-observation-v1",
+                }
+            ],
+        },
+    )
+    assert published.output_counts["period_observation_exclusion"] == 1
+
+
 @pytest.mark.parametrize("field", ("form", "filed_date", "report_date"))
 def test_run_rejects_layer1_input_without_required_filing_provenance(field: str) -> None:
     values: dict[str, object] = {

@@ -102,6 +102,7 @@ are already materialized:
 | Logical dataset | Purpose | Minimum provenance |
 | --- | --- | --- |
 | `period_observation` | A Layer 1 Fact classified by actual Context period and comparative role; may include a governed Q4 derived candidate. | raw Fact/filing/context/unit/dimension IDs, period class/key, classification/derivation rule version |
+| `period_observation_exclusion` | Explicit account of a source Fact that cannot safely form an observation. | source Fact/filing identity, exclusion reason, classification-rule version |
 | `company_concept_map` | Raw Concept to company canonical Concept mapping. | source/raw and canonical IDs, relation, validity, method, confidence, evidence, version, review flag |
 | `company_axis_map` | Raw Axis to company canonical Axis mapping. | same mapping provenance as above |
 | `company_member_map` | Raw Member to company canonical Member mapping. | same mapping provenance as above, including parent/domain evidence where relevant |
