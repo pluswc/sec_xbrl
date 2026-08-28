@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-MAPPING_VERSION = "m7-company-canonical-v1"
+MAPPING_VERSION = "l2-m2-company-canonical-v1"
 
 
 class MappingRelation(StrEnum):
@@ -36,6 +36,19 @@ class MappingTables:
     company_axis_map: tuple[dict[str, Any], ...]
     company_member_map: tuple[dict[str, Any], ...]
     structural_change: tuple[dict[str, Any], ...]
+
+    def as_datasets(self) -> dict[str, tuple[dict[str, Any], ...]]:
+        """Return the four publisher-ready L2-M2 logical datasets.
+
+        This is deliberately an additive hand-off.  It does not publish data,
+        choose an as-of view, or mutate a Layer 1 record.
+        """
+        return {
+            "company_concept_map": self.company_concept_map,
+            "company_axis_map": self.company_axis_map,
+            "company_member_map": self.company_member_map,
+            "structural_change": self.structural_change,
+        }
 
 
 class CompanyCanonicalizer:
@@ -59,9 +72,22 @@ class CompanyCanonicalizer:
         filing_rows = tuple(dict(row) for row in filings)
         cik = _single_cik(filing_rows)
         order = _filing_order(filing_rows)
+        filing_by_id = {str(row["filing_id"]): row for row in filing_rows}
         relationships_by_concept = _relationships_by_concept(relationships)
         changes = _changes_by_raw_id(documented_changes)
-        rows = tuple(dict(row) for row in concepts)
+        # Concepts are immutable Layer 1 records.  The copied analysis rows
+        # receive filing validity only from their declared source filing.
+        rows = tuple(
+            {
+                **dict(row),
+                **{
+                    key: filing_by_id.get(str(row.get("filing_id")), {}).get(key)
+                    for key in ("report_date", "filed_date", "accession")
+                    if not row.get(key)
+                },
+            }
+            for row in concepts
+        )
         dimension_rows = tuple(dimension_facts)
         axis_ids = {
             str(row["axis_raw_concept_id"])
@@ -161,14 +187,27 @@ class CompanyCanonicalizer:
                     canonical_id=canonical_id,
                     valid_from_filing_id=str(row.get("filing_id") or ""),
                     relation=MappingRelation.SAME,
-                    method="NEW_RAW_ID",
+                    method="RAW_IDENTITY_BASELINE",
                     confidence=1.0,
-                    evidence={"raw_identity": raw_id},
+                    evidence={
+                        "raw_identity": raw_id,
+                        "qname": row.get("qname"),
+                        "context_semantics": _context_semantics(row),
+                        "structural_signature": _role_axis_signature(row, relationships),
+                    },
                     mapping_version=MAPPING_VERSION,
                     continuity_break=False,
                     review_required=False,
                 )
-                events.append(_event(row, entity_type, "NEW_" + entity_type.upper()))
+                events.append(
+                    _event(
+                        row,
+                        entity_type,
+                        "NEW_" + entity_type.upper(),
+                        mapping=mapping,
+                        evidence=mapping["evidence"],
+                    )
+                )
             else:
                 canonical_id = (
                     _canonical_id(cik, entity_type, raw_id, f"recast:{row.get('filing_id')}")
@@ -202,7 +241,45 @@ class CompanyCanonicalizer:
                         _event(
                             row,
                             entity_type,
-                            "SEGMENT_RECAST" if entity_type == "member" else "UNKNOWN_CHANGE",
+                            _event_type_for_relation(entity_type, decision["relation"]),
+                            mapping=mapping,
+                            evidence=decision["evidence"],
+                        )
+                    )
+                elif decision["relation"] == MappingRelation.RENAMED and entity_type == "member":
+                    events.append(
+                        _event(
+                            row,
+                            entity_type,
+                            "MEMBER_RENAME",
+                            mapping=mapping,
+                            evidence=decision["evidence"],
+                        )
+                    )
+                elif decision["relation"] == MappingRelation.SAME and _role_restructured(
+                    row, decision["evidence"], relationships
+                ):
+                    events.append(
+                        _event(
+                            row,
+                            entity_type,
+                            "ROLE_RESTRUCTURE",
+                            mapping=mapping,
+                            evidence={
+                                **decision["evidence"],
+                                "prior_role_signature": _role_axis_signature(prior, relationships),
+                                "current_role_signature": _role_axis_signature(row, relationships),
+                            },
+                        )
+                    )
+                elif decision["relation"] == MappingRelation.UNCERTAIN:
+                    events.append(
+                        _event(
+                            row,
+                            entity_type,
+                            "UNKNOWN_CHANGE",
+                            mapping=mapping,
+                            evidence=decision["evidence"],
                         )
                     )
             result.append(mapping)
@@ -542,22 +619,31 @@ def _best_candidate(
     raw_id = _raw_id(row)
     documented = changes.get(raw_id)
     if documented:
+        relation = _documented_relation(documented)
         prior = next(
             (
                 item
-                for item in established
-                if _raw_id(item["source"]) == documented.get("prior_raw_id")
+                for item in reversed(tuple(established))
+                if _raw_id(item["source"]) in _documented_prior_raw_ids(documented)
             ),
             None,
         )
         if prior:
             return prior["mapping"], {
                 "confirmed": True,
-                "relation": MappingRelation.RECAST,
-                "method": "DOCUMENTED_RECAST",
+                "relation": relation,
+                "method": "DOCUMENTED_" + relation.value,
                 "confidence": 1.0,
-                "evidence": {"documented_recast": dict(documented)},
-                "continuity_break": True,
+                "evidence": {
+                    "documented_change": dict(documented),
+                    "prior_raw_ids": sorted(_documented_prior_raw_ids(documented)),
+                    "context_semantics": _context_semantics(row),
+                },
+                "continuity_break": relation in {
+                    MappingRelation.RECAST,
+                    MappingRelation.SPLIT,
+                    MappingRelation.MERGED,
+                },
             }
     for item in reversed(tuple(established)):
         source = item["source"]
@@ -567,7 +653,13 @@ def _best_candidate(
                 "relation": MappingRelation.SAME,
                 "method": "EXACT_STANDARD_TAXONOMY",
                 "confidence": 1.0,
-                "evidence": {"qname": row.get("qname"), "namespace_uri": row.get("namespace_uri")},
+                "evidence": {
+                    "qname": row.get("qname"),
+                    "namespace_uri": row.get("namespace_uri"),
+                    "prior_raw_id": _raw_id(source),
+                    "context_semantics": _context_semantics(row),
+                    "prior_context_semantics": _context_semantics(source),
+                },
                 "continuity_break": False,
             }
     for item in reversed(tuple(established)):
@@ -619,7 +711,32 @@ def _exact_standard_identity(left: Mapping[str, Any], right: Mapping[str, Any]) 
         and bool(right.get("is_standard"))
         and left.get("qname") == right.get("qname")
         and left.get("namespace_uri") == right.get("namespace_uri")
+        and _compatible_context_semantics(left, right)
     )
+
+
+def _compatible_context_semantics(
+    left: Mapping[str, Any], right: Mapping[str, Any]
+) -> bool:
+    """Fail closed when exact-QName concepts lack compatible raw semantics.
+
+    A QName is not sufficient evidence when one filing presents a duration
+    measure and another presents an instant, or when their declared XBRL data
+    types differ.  Layer 1 resolves these fields for concepts; incomplete
+    fixtures or malformed source rows therefore remain review-required rather
+    than being silently coalesced.
+    """
+    required = ("period_type", "data_type")
+    if any(not left.get(key) or not right.get(key) for key in required):
+        return False
+    if any(left.get(key) != right.get(key) for key in required):
+        return False
+    # Balance is relevant only where one side declares it.  A missing balance
+    # on both is valid for duration concepts; a one-sided or changed balance is
+    # a semantic incompatibility.
+    if left.get("balance") is not None or right.get("balance") is not None:
+        return left.get("balance") == right.get("balance")
+    return True
 
 
 def _well_supported_namespace_change(
@@ -654,6 +771,25 @@ def _role_axis_signature(
     return tuple(sorted(values))
 
 
+def _role_restructured(
+    row: Mapping[str, Any],
+    evidence: Mapping[str, Any],
+    relationships: Mapping[str, tuple[dict[str, Any], ...]],
+) -> bool:
+    """Record an observed network move without treating it as an ID change."""
+    prior_signature: tuple[str, ...] = ()
+    # Exact standard identity stores the former raw ID in its evidence.  A
+    # structural event is relevant only when both filings expose signatures.
+    prior_raw_id = evidence.get("prior_raw_id")
+    if not prior_raw_id:
+        return False
+    prior_signature = _role_axis_signature(
+        {"raw_concept_id": prior_raw_id}, relationships
+    )
+    current_signature = _role_axis_signature(row, relationships)
+    return bool(prior_signature and current_signature and prior_signature != current_signature)
+
+
 def _continuity_evidence(
     left: Mapping[str, Any],
     right: Mapping[str, Any],
@@ -664,6 +800,8 @@ def _continuity_evidence(
         "label": left.get("label"),
         "prior_raw_id": _raw_id(right),
         "axis_domain_role_signature": _role_axis_signature(left, relationships),
+        "context_semantics": _context_semantics(left),
+        "prior_context_semantics": _context_semantics(right),
     }
 
 
@@ -713,9 +851,17 @@ def _mapping_row(
         "cik": cik,
         "entity_type": entity_type,
         "source_raw_id": raw_id,
+        "source_raw_concept_id": raw_id,
+        "source_filing_id": str(source.get("filing_id") or ""),
+        "source_qname": source.get("qname"),
+        "source_namespace_uri": source.get("namespace_uri"),
+        "source_local_name": source.get("local_name"),
         "company_canonical_id": canonical_id,
+        "canonical_entity_type": entity_type,
         "valid_from_filing_id": valid_from_filing_id,
         "valid_to_filing_id": None,
+        "valid_from_period": _validity_period(source),
+        "valid_to_period": None,
         "relation": relation.value,
         "method": method,
         "confidence": confidence,
@@ -723,16 +869,77 @@ def _mapping_row(
         "mapping_version": mapping_version,
         "continuity_break": continuity_break,
         "review_required": review_required,
+        "review_state": "REVIEW_REQUIRED" if review_required else "AUTO_ACCEPTED",
     }
 
 
-def _event(row: Mapping[str, Any], entity_type: str, event_type: str) -> dict[str, Any]:
+def _event(
+    row: Mapping[str, Any],
+    entity_type: str,
+    event_type: str,
+    *,
+    mapping: Mapping[str, Any],
+    evidence: Mapping[str, Any],
+) -> dict[str, Any]:
     return {
+        "event_id": "structural-change:"
+        + _digest(str(row.get("filing_id") or ""), _raw_id(row), event_type, mapping["mapping_id"]),
+        "cik": mapping["cik"],
         "filing_id": row.get("filing_id"),
         "source_raw_id": _raw_id(row),
+        "source_raw_concept_id": _raw_id(row),
+        "company_canonical_id": mapping["company_canonical_id"],
         "entity_type": entity_type,
         "event_type": event_type,
+        "valid_from_filing_id": mapping["valid_from_filing_id"],
+        "valid_from_period": mapping["valid_from_period"],
+        "mapping_version": mapping["mapping_version"],
+        "mapping_id": mapping["mapping_id"],
+        "continuity_break": mapping["continuity_break"],
+        "review_required": mapping["review_required"],
+        "review_state": mapping["review_state"],
+        "evidence": dict(evidence),
     }
+
+
+def _context_semantics(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Retain only declared raw semantic fields; never infer from values."""
+    return {
+        key: row.get(key)
+        for key in ("period_type", "data_type", "balance", "abstract")
+        if row.get(key) is not None
+    }
+
+
+def _validity_period(row: Mapping[str, Any]) -> str | None:
+    for key in ("report_date", "period_end", "end_date", "instant_date"):
+        if row.get(key):
+            return str(row[key])
+    return None
+
+
+def _documented_prior_raw_ids(change: Mapping[str, Any]) -> set[str]:
+    values = {str(change["prior_raw_id"])} if change.get("prior_raw_id") else set()
+    values.update(str(value) for value in change.get("prior_raw_ids", ()) if value)
+    return values
+
+
+def _documented_relation(change: Mapping[str, Any]) -> MappingRelation:
+    value = str(change.get("relation") or "RECAST").upper()
+    try:
+        return MappingRelation(value)
+    except ValueError as exc:
+        raise ValueError(f"unsupported documented mapping relation: {value!r}") from exc
+
+
+def _event_type_for_relation(entity_type: str, relation: MappingRelation) -> str:
+    if relation == MappingRelation.RECAST:
+        return "SEGMENT_RECAST" if entity_type == "member" else "UNKNOWN_CHANGE"
+    if relation == MappingRelation.SPLIT:
+        return "SPLIT"
+    if relation == MappingRelation.MERGED:
+        return "MERGE"
+    return "UNKNOWN_CHANGE"
 
 
 def _mapping_rows(
