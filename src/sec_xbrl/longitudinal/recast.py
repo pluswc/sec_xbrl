@@ -64,7 +64,9 @@ class RecastObservationBuilder:
                 raise RecastObservationError("recast evidence source filing does not match source Fact")
             if _period_key(source) != item["target_period_key"]:
                 raise RecastObservationError("recast evidence target period does not match source Fact")
-            if derived_id and source_id not in set(str(value) for value in source.get("source_fact_ids") or ()):
+            if derived_id and source_id not in {
+                str(value) for value in source.get("source_fact_ids") or ()
+            }:
                 raise RecastObservationError(
                     "derived recast evidence source raw Fact must be a compatible derived input"
                 )

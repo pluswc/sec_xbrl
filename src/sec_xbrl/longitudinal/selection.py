@@ -21,7 +21,6 @@ from sec_xbrl.longitudinal.recast import (
     validate_recast_evidence,
 )
 
-
 SELECTION_MATERIALIZATION_VERSION = "l2-m4-as-of-recast-v1"
 
 
