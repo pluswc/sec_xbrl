@@ -37,6 +37,10 @@ LOGICAL_DATASETS = frozenset(
 _ANALYTICAL_SOURCE_TYPES = frozenset(
     {"REPORTED", "RECAST_REPORTED", "DERIVED_RECAST", "UNAVAILABLE"}
 )
+_MAPPING_DATASETS = frozenset(
+    {"company_concept_map", "company_axis_map", "company_member_map"}
+)
+_MAPPING_RELATIONS = frozenset({"SAME", "RENAMED", "RECAST", "SPLIT", "MERGED", "UNCERTAIN"})
 
 
 class Layer2MaterializationError(RuntimeError):
@@ -285,6 +289,10 @@ def _validate_candidate(run: Layer2Run, datasets: Mapping[str, Sequence[Mapping[
             seen_ids.add(record_id)
             if dataset == "analytical_fact":
                 _validate_analytical_fact(row)
+            elif dataset in _MAPPING_DATASETS:
+                _validate_company_mapping(dataset, row)
+            elif dataset == "structural_change":
+                _validate_structural_change(row)
             try:
                 _canonical_json(row)
             except (TypeError, ValueError) as exc:
@@ -318,6 +326,43 @@ def _validate_analytical_fact(row: Mapping[str, Any]) -> None:
     missing = [key for key in required if not row.get(key)]
     if missing:
         raise Layer2MaterializationError(f"analytical_fact missing selection provenance: {missing}")
+
+
+def _validate_company_mapping(dataset: str, row: Mapping[str, Any]) -> None:
+    """Reject a map that cannot explain its raw-to-canonical decision."""
+    expected_entity = dataset.removeprefix("company_").removesuffix("_map")
+    required = (
+        "mapping_id",
+        "source_raw_id",
+        "source_filing_id",
+        "company_canonical_id",
+        "valid_from_filing_id",
+        "relation",
+        "method",
+        "evidence",
+        "mapping_version",
+        "continuity_break",
+        "review_required",
+        "review_state",
+    )
+    missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
+    if missing:
+        raise Layer2MaterializationError(f"{dataset} missing mapping provenance: {missing}")
+    if row.get("entity_type") != expected_entity:
+        raise Layer2MaterializationError(f"{dataset} has incompatible entity_type")
+    if str(row["relation"]) not in _MAPPING_RELATIONS:
+        raise Layer2MaterializationError(f"{dataset} has unsupported mapping relation")
+    if bool(row["review_required"]) != (row.get("review_state") == "REVIEW_REQUIRED"):
+        raise Layer2MaterializationError(f"{dataset} review state is inconsistent")
+    if str(row["relation"]) == "UNCERTAIN" and not row["review_required"]:
+        raise Layer2MaterializationError(f"{dataset} cannot silently coalesce unresolved mapping")
+
+
+def _validate_structural_change(row: Mapping[str, Any]) -> None:
+    required = ("event_id", "filing_id", "source_raw_id", "event_type", "mapping_version", "evidence")
+    missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
+    if missing:
+        raise Layer2MaterializationError(f"structural_change missing provenance: {missing}")
 
 
 def _record_id(dataset: str, row: Mapping[str, Any]) -> str:

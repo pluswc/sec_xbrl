@@ -10,6 +10,7 @@ Connect the same company's economic concepts, axes and members across 10-K/10-Q 
 
 Each mapping contains:
 - source raw ID
+- source filing ID and retained raw QName/namespace/local-name identity
 - company canonical ID
 - valid-from / valid-to filing or period
 - relation (`SAME`, `RENAMED`, `RECAST`, `SPLIT`, `MERGED`, `UNCERTAIN`)
@@ -17,6 +18,7 @@ Each mapping contains:
 - confidence
 - evidence payload
 - mapping version
+- continuity-break and explicit review state
 
 ## Matching evidence hierarchy
 1. exact standard taxonomy identity + compatible context semantics
@@ -101,6 +103,34 @@ and prior raw Fact IDs so both histories remain traceable.
 
 ## Mapping QA
 Every automatic mapping above a materiality threshold must be explainable by stored evidence. Low-confidence mappings remain separate until reviewed or corroborated.
+
+## L2-M2 canonical-mapping materialization
+
+`CompanyCanonicalizer` is the L2-M2 producer.  Its `MappingTables.as_datasets()`
+returns the publisher-ready `company_concept_map`, `company_axis_map`,
+`company_member_map`, and `structural_change` datasets for the L2-M0 atomic
+publisher.  A mapping preserves its source filing and raw identity alongside
+the company canonical ID; it does not update a Layer 1 record or replace an
+earlier mapping.
+
+The automatic confirmation boundary is intentionally narrow:
+
+- exact standard QName and namespace identity is `SAME`, with retained context
+  semantics;
+- a company extension namespace change is `RENAMED` only when local name,
+  label, and role/axis/domain structural signatures agree;
+- a recast, split, or merge requires a supplied documented-change record that
+  names the earlier raw identity; it creates a new canonical identity when it
+  breaks continuity;
+- text or label agreement alone yields `UNCERTAIN`, a distinct canonical ID,
+  `REVIEW_REQUIRED`, and an `UNKNOWN_CHANGE` event.
+
+Structural events are provenance rows, not inferred accounting facts.  New
+raw entities emit `NEW_CONCEPT`, `NEW_AXIS`, or `NEW_MEMBER`; member renames,
+documented recasts, splits, and merges emit their controlled event types.
+Each event has a CIK, filing/raw/canonical identity, mapping version, validity,
+review state, and the exact mapping evidence used to create it.  No event is
+created from value continuity alone.
 
 ## M7 materialization boundary
 

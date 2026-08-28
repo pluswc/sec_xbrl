@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 
 from sec_xbrl.longitudinal import (
     AsOfSeriesSelector,
     CompanyCanonicalizer,
+    Layer1SnapshotInput,
+    Layer2Publisher,
+    Layer2RuleVersions,
+    Layer2Run,
     MappingRelation,
     SeriesBuilder,
 )
@@ -165,6 +170,126 @@ def test_dimension_facts_classify_raw_concepts_into_additive_axis_and_member_map
     assert [row["source_raw_id"] for row in tables.company_concept_map] == ["revenue"]
     assert [row["source_raw_id"] for row in tables.company_axis_map] == ["segment-axis"]
     assert [row["source_raw_id"] for row in tables.company_member_map] == ["consumer-member"]
+
+
+def test_aapl_product_service_and_nvda_segment_geography_are_raw_traceable() -> None:
+    """Representative names are fixtures, never ticker-specific mapping logic."""
+    cases = (
+        (
+            "0000320193",
+            "aapl-10k",
+            "product-service-axis",
+            "iphone-member",
+            "ProductOrServiceAxis",
+            "IPhoneMember",
+        ),
+        (
+            "0001045810",
+            "nvda-10q",
+            "segment-axis",
+            "united-states-member",
+            "OperatingSegmentsAxis",
+            "UnitedStatesMember",
+        ),
+    )
+    for cik, filing_id, axis_id, member_id, axis_name, member_name in cases:
+        tables = CompanyCanonicalizer().build(
+            filings=({"filing_id": filing_id, "cik": cik, "filed_date": "2026-01-01"},),
+            concepts=(
+                _concept(axis_id, filing_id, local_name=axis_name, label=axis_name),
+                _concept(member_id, filing_id, local_name=member_name, label=member_name),
+            ),
+            dimension_facts=(
+                {
+                    "fact_id": "revenue-fact",
+                    "axis_raw_concept_id": axis_id,
+                    "member_raw_concept_id": member_id,
+                },
+            ),
+        )
+        axis, member = tables.company_axis_map[0], tables.company_member_map[0]
+        assert axis["source_raw_id"] == axis_id
+        assert axis["source_filing_id"] == filing_id
+        assert axis["company_canonical_id"]
+        assert axis["evidence"]["raw_identity"] == axis_id
+        assert member["source_raw_id"] == member_id
+        assert member["source_filing_id"] == filing_id
+        assert member["company_canonical_id"]
+        event = next(item for item in tables.structural_change if item["source_raw_id"] == member_id)
+        assert event["evidence"]["raw_identity"] == member_id
+
+
+def test_uncertain_mapping_is_not_coalesced_and_has_explainable_change_event() -> None:
+    tables = CompanyCanonicalizer().build(
+        filings=_filings(),
+        concepts=(
+            _concept("old", "k24"),
+            _concept("new", "k25", namespace_uri="https://example.test/2025"),
+        ),
+    )
+    uncertain = tables.company_concept_map[-1]
+    assert uncertain["relation"] == "UNCERTAIN"
+    assert uncertain["review_state"] == "REVIEW_REQUIRED"
+    assert uncertain["company_canonical_id"] != tables.company_concept_map[0]["company_canonical_id"]
+    change = tables.structural_change[-1]
+    assert change["event_type"] == "UNKNOWN_CHANGE"
+    assert change["company_canonical_id"] == uncertain["company_canonical_id"]
+    assert change["evidence"] == uncertain["evidence"]
+
+
+def test_same_standard_concept_with_changed_role_network_records_role_restructure() -> None:
+    tables = CompanyCanonicalizer().build(
+        filings=_filings(),
+        concepts=(
+            _concept("revenue-old", "k24", is_standard=True, qname="us-gaap:Revenue"),
+            _concept("revenue-new", "k25", is_standard=True, qname="us-gaap:Revenue"),
+        ),
+        relationships=(
+            {"from_raw_concept_id": "revenue-old", "role_uri": "role:old", "network_type": "PRE"},
+            {"from_raw_concept_id": "revenue-new", "role_uri": "role:new", "network_type": "PRE"},
+        ),
+    )
+    same = tables.company_concept_map[-1]
+    assert same["relation"] == "SAME"
+    event = next(item for item in tables.structural_change if item["event_type"] == "ROLE_RESTRUCTURE")
+    assert event["source_raw_id"] == "revenue-new"
+    assert event["company_canonical_id"] == same["company_canonical_id"]
+
+
+def test_mapping_tables_are_publisher_ready_with_l2_m0_contract(tmp_path: Path) -> None:
+    tables = CompanyCanonicalizer().build(filings=_filings(), concepts=(_concept("revenue", "k24"),))
+    run = Layer2Run(
+        run_version="l2-m2-contract-fixture-v1",
+        corpus_run_id="fixture",
+        inputs=(
+            Layer1SnapshotInput(
+                cik="0000123456",
+                accession="fixture-1",
+                form="10-K",
+                filed_date="2025-02-01",
+                report_date="2024-12-31",
+                snapshot_id="fixture/1",
+                manifest_sha256="a" * 64,
+            ),
+        ),
+        rules=Layer2RuleVersions("period-v1", "l2-m2-company-canonical-v1", "recast-v1", "selection-v1"),
+    )
+    datasets = {
+        **tables.as_datasets(),
+        "analytical_fact": [
+            {
+                "analytical_fact_id": "fixture-unavailable",
+                "cik": "0000123456",
+                "view": "AS_FILED",
+                "as_of_date": "2025-02-01",
+                "source_type": "UNAVAILABLE",
+                "unavailable_reason": "NOT_SELECTED_IN_L2_M2",
+            }
+        ],
+    }
+    publication = Layer2Publisher(tmp_path / "layer2").publish(run, datasets)
+    assert publication.output_counts["company_concept_map"] == 1
+    assert publication.output_counts["structural_change"] == 1
 
 
 def test_annual_and_current_series_keep_period_classes_distinct_and_surface_review() -> None:
