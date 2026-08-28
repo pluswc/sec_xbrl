@@ -10,18 +10,36 @@ from sec_xbrl.metrics.registry import MetricDefinitionError, seed_metric_registr
 def _candidate(role: str, *, status: str = "CANDIDATE", source_type: str = "REPORTED") -> dict[str, object]:
     return {
         "metric_input_candidate_id": f"candidate:{role}",
+        "analytical_fact_id": f"candidate:{role}",
         "metric_input_role": role,
         "candidate_status": status,
         "source_type": source_type,
         "selected_fact_id": "fact:1",
+        "source_fact_ids": (),
+        "source_filing_id": "filing:1",
+        "cik": "0000320193",
+        "view": "AS_FILED",
+        "as_of_date": "2026-08-28",
+        "basis_version": None,
+        "series_type": "CURRENT",
+        "period_class": "QTD_3M",
+        "period_key": "2026-Q1",
+        "company_canonical_dimension_key": (),
+        "unit_semantics": "USD",
+        "mapping_version": "map-v1",
+        "metric_input_handoff_version": "l2-m6-metric-input-handoff-v1",
     }
 
 
 def _compatibility(definition_id: str, roles: tuple[str, ...]) -> dict[str, object]:
     return {
+        "metric_input_compatibility_id": "compatibility:1",
         "metric_definition_id": definition_id,
         "compatibility_status": "ELIGIBLE",
         "required_input_roles": roles,
+        "input_analytical_fact_ids": tuple(f"candidate:{role}" for role in roles),
+        "input_selected_fact_ids": ("fact:1",) * len(roles),
+        "metric_input_handoff_version": "l2-m6-metric-input-handoff-v1",
     }
 
 
@@ -56,6 +74,47 @@ def test_registry_rejects_calculated_values(field: str) -> None:
         )
 
 
+def test_registry_rejects_prohibited_null_formula_and_incomplete_provenance() -> None:
+    registry = seed_metric_registry()
+    candidate = _candidate("GROSS_PROFIT")
+    candidate["formula"] = None
+    with pytest.raises(MetricDefinitionError, match="calculated"):
+        registry.validate_handoff(
+            definition_id="gross_margin@1.0.0",
+            candidates=(candidate, _candidate("REVENUE")),
+            compatibility=_compatibility("gross_margin@1.0.0", ("GROSS_PROFIT", "REVENUE")),
+        )
+    candidate = _candidate("GROSS_PROFIT")
+    del candidate["source_filing_id"]
+    with pytest.raises(MetricDefinitionError, match="provenance"):
+        registry.validate_handoff(
+            definition_id="gross_margin@1.0.0",
+            candidates=(candidate, _candidate("REVENUE")),
+            compatibility=_compatibility("gross_margin@1.0.0", ("GROSS_PROFIT", "REVENUE")),
+        )
+
+
+def test_registry_rejects_unavailable_and_unlinked_compatibility() -> None:
+    registry = seed_metric_registry()
+    unavailable = _candidate("GROSS_PROFIT")
+    unavailable["candidate_status"] = "UNAVAILABLE"
+    unavailable["source_type"] = "UNAVAILABLE"
+    with pytest.raises(MetricDefinitionError, match="unavailable"):
+        registry.validate_handoff(
+            definition_id="gross_margin@1.0.0",
+            candidates=(unavailable, _candidate("REVENUE")),
+            compatibility=_compatibility("gross_margin@1.0.0", ("GROSS_PROFIT", "REVENUE")),
+        )
+    compatibility = _compatibility("gross_margin@1.0.0", ("GROSS_PROFIT", "REVENUE"))
+    compatibility["input_analytical_fact_ids"] = ("wrong", "also-wrong")
+    with pytest.raises(MetricDefinitionError, match="analytical Fact IDs"):
+        registry.validate_handoff(
+            definition_id="gross_margin@1.0.0",
+            candidates=(_candidate("GROSS_PROFIT"), _candidate("REVENUE")),
+            compatibility=compatibility,
+        )
+
+
 def test_registry_rejects_raw_name_inference_and_wrong_roles() -> None:
     registry = seed_metric_registry()
     raw_candidate = _candidate("GROSS_PROFIT")
@@ -76,7 +135,7 @@ def test_registry_rejects_raw_name_inference_and_wrong_roles() -> None:
 
 def test_eps_rejects_non_direct_candidate() -> None:
     registry = seed_metric_registry()
-    with pytest.raises(MetricDefinitionError, match="direct-observation-only"):
+    with pytest.raises(MetricDefinitionError, match="cannot use derived"):
         registry.validate_direct_observation(
             definition_id="eps@1.0.0",
             candidate=_candidate("EPS", source_type="DERIVED_RECAST"),

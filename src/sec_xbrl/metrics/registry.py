@@ -8,13 +8,51 @@ candidate and compatibility records.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 METRIC_REGISTRY_CONTRACT_VERSION = "derived-metrics-m0-registry-v1"
-_CALCULATED_FIELDS = frozenset(
-    {"value", "metric_value", "calculated_value", "formula_result", "derived_metric_id"}
+_PROHIBITED_HANDOFF_FIELDS = frozenset(
+    {
+        "value",
+        "metric_value",
+        "calculated_value",
+        "formula_result",
+        "derived_metric_id",
+        "formula",
+        "formula_id",
+        "formula_version",
+    }
+)
+_CANDIDATE_REQUIRED = (
+    "metric_input_candidate_id",
+    "cik",
+    "metric_input_role",
+    "analytical_fact_id",
+    "source_filing_id",
+    "view",
+    "as_of_date",
+    "basis_version",
+    "series_type",
+    "period_class",
+    "period_key",
+    "company_canonical_dimension_key",
+    "unit_semantics",
+    "mapping_version",
+    "source_type",
+    "candidate_status",
+    "metric_input_handoff_version",
+)
+_COMPATIBILITY_REQUIRED = (
+    "metric_input_compatibility_id",
+    "metric_definition_id",
+    "compatibility_status",
+    "required_input_roles",
+    "input_analytical_fact_ids",
+    "input_selected_fact_ids",
+    "metric_input_handoff_version",
 )
 
 
@@ -121,7 +159,10 @@ class MetricRegistry:
         any compatibility result that is not eligible.
         """
         definition = self.resolve(definition_id)
+        if definition.category is MetricCategory.DIRECT_OBSERVATION:
+            raise MetricDefinitionError("direct metric requires direct-observation candidate boundary")
         _reject_calculated_fields(compatibility)
+        _require_schema(compatibility, _COMPATIBILITY_REQUIRED, "compatibility")
         if compatibility.get("metric_definition_id") not in {None, definition_id}:
             raise MetricDefinitionError("compatibility references another metric definition")
         if compatibility.get("compatibility_status") != "ELIGIBLE":
@@ -133,8 +174,7 @@ class MetricRegistry:
         roles: list[str] = []
         for candidate in records:
             _reject_calculated_fields(candidate)
-            if not candidate.get("metric_input_candidate_id"):
-                raise MetricDefinitionError("candidate lacks L2-M6 candidate identity")
+            _require_schema(candidate, _CANDIDATE_REQUIRED, "candidate")
             if candidate.get("raw_concept_id") or candidate.get("label"):
                 raise MetricDefinitionError("registry consumes L2-M6 candidates, not raw concept inference")
             candidate_id = str(candidate["metric_input_candidate_id"])
@@ -142,14 +182,23 @@ class MetricRegistry:
                 raise MetricDefinitionError("duplicate metric input candidate")
             ids.add(candidate_id)
             roles.append(str(candidate.get("metric_input_role") or ""))
+            _validate_selected_source(candidate, direct=False)
         expected = tuple(role.value for role in definition.input_roles)
         if tuple(roles) != expected:
             raise MetricDefinitionError("candidate roles do not match declared definition input roles")
         compatibility_roles = tuple(str(role) for role in compatibility.get("required_input_roles", ()))
         if compatibility_roles != expected:
             raise MetricDefinitionError("compatibility roles do not match declared definition")
-        if definition.category is MetricCategory.DIRECT_OBSERVATION:
-            self._validate_direct_observations(definition, records)
+        analytical_ids = tuple(str(candidate["analytical_fact_id"]) for candidate in records)
+        if tuple(str(item) for item in compatibility["input_analytical_fact_ids"]) != analytical_ids:
+            raise MetricDefinitionError("compatibility analytical Fact IDs do not link to candidates")
+        selected_ids = tuple(
+            str(candidate["selected_fact_id"])
+            for candidate in records
+            if candidate.get("selected_fact_id")
+        )
+        if tuple(str(item) for item in compatibility["input_selected_fact_ids"]) != selected_ids:
+            raise MetricDefinitionError("compatibility selected Fact IDs do not link to candidates")
 
     def validate_direct_observation(
         self, *, definition_id: str, candidate: Mapping[str, Any]
@@ -166,13 +215,13 @@ class MetricRegistry:
             raise MetricDefinitionError("derived metric requires compatibility diagnostic")
         record = dict(candidate)
         _reject_calculated_fields(record)
-        if not record.get("metric_input_candidate_id"):
-            raise MetricDefinitionError("candidate lacks L2-M6 candidate identity")
+        _require_schema(record, _CANDIDATE_REQUIRED, "candidate")
         if record.get("raw_concept_id") or record.get("label"):
             raise MetricDefinitionError("registry consumes L2-M6 candidates, not raw concept inference")
         expected = definition.input_roles[0].value
         if record.get("metric_input_role") != expected:
             raise MetricDefinitionError("candidate role does not match direct definition")
+        _validate_selected_source(record, direct=True)
         self._validate_direct_observations(definition, (record,))
 
     def _validate_definitions(self) -> None:
@@ -250,9 +299,41 @@ class MetricRegistry:
 
 
 def _reject_calculated_fields(record: Mapping[str, Any]) -> None:
-    found = sorted(field for field in _CALCULATED_FIELDS if record.get(field) is not None)
+    found = sorted(field for field in _PROHIBITED_HANDOFF_FIELDS if field in record)
     if found:
         raise MetricDefinitionError(f"definition registry cannot accept calculated value fields: {found}")
+
+
+def _require_schema(record: Mapping[str, Any], required: tuple[str, ...], name: str) -> None:
+    missing = [field for field in required if field not in record]
+    if missing:
+        raise MetricDefinitionError(f"{name} lacks required L2-M6 provenance: {missing}")
+    # A reporting basis may intentionally be unknown in AS_FILED records; its
+    # field must nevertheless be preserved.  Empty dimensions are a valid total.
+    nonempty = set(required) - {"basis_version", "company_canonical_dimension_key"}
+    empty = [field for field in nonempty if record.get(field) is None or record.get(field) == ""]
+    if empty:
+        raise MetricDefinitionError(f"{name} has empty L2-M6 provenance: {empty}")
+
+
+def _validate_selected_source(candidate: Mapping[str, Any], *, direct: bool) -> None:
+    if candidate.get("candidate_status") == "UNAVAILABLE" or candidate.get("source_type") == "UNAVAILABLE":
+        raise MetricDefinitionError("unavailable L2-M6 candidate cannot enter metric definition")
+    source_type = str(candidate.get("source_type"))
+    if source_type not in {"REPORTED", "RECAST_REPORTED", "DERIVED_RECAST"}:
+        raise MetricDefinitionError("candidate has unsupported selected source type")
+    selected = candidate.get("selected_fact_id")
+    source_ids = tuple(candidate.get("source_fact_ids") or ())
+    if not selected and not source_ids:
+        raise MetricDefinitionError("candidate lacks selected raw Fact or derived source Fact lineage")
+    if source_type in {"REPORTED", "RECAST_REPORTED"} and not selected:
+        raise MetricDefinitionError("reported candidate requires selected raw Fact lineage")
+    if source_type == "RECAST_REPORTED" and not candidate.get("recast_evidence_id"):
+        raise MetricDefinitionError("recast reported candidate requires recast evidence")
+    if source_type == "DERIVED_RECAST" and direct:
+        raise MetricDefinitionError("direct metric cannot use derived source type")
+    if not direct and candidate.get("candidate_status") != "CANDIDATE":
+        raise MetricDefinitionError("derived metric requires candidate-status L2-M6 input")
 
 
 def seed_metric_registry() -> MetricRegistry:
