@@ -34,9 +34,20 @@ def _candidate(role: str, *, status: str = "CANDIDATE", source_type: str = "REPO
 def _compatibility(definition_id: str, roles: tuple[str, ...]) -> dict[str, object]:
     return {
         "metric_input_compatibility_id": "compatibility:1",
+        "cik": "0000320193",
         "metric_definition_id": definition_id,
+        "view": "AS_FILED",
+        "as_of_date": "2026-08-28",
+        "series_type": "CURRENT",
+        "period_class": "QTD_3M",
+        "period_key": "2026-Q1",
+        "basis_version": None,
+        "company_canonical_dimension_key": (),
+        "unit_semantics": "USD",
+        "mapping_versions": ("map-v1",),
         "compatibility_status": "ELIGIBLE",
         "required_input_roles": roles,
+        "input_metric_input_candidate_ids": tuple(f"candidate:{role}" for role in roles),
         "input_analytical_fact_ids": tuple(f"candidate:{role}" for role in roles),
         "input_selected_fact_ids": ("fact:1",) * len(roles),
         "metric_input_handoff_version": "l2-m6-metric-input-handoff-v1",
@@ -104,6 +115,22 @@ def test_registry_rejects_unavailable_and_unlinked_compatibility() -> None:
             definition_id="gross_margin@1.0.0",
             candidates=(unavailable, _candidate("REVENUE")),
             compatibility=_compatibility("gross_margin@1.0.0", ("GROSS_PROFIT", "REVENUE")),
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (("unit_semantics", "EUR"), ("company_canonical_dimension_key", ("region:us",))),
+)
+def test_registry_rejects_scope_mismatch_with_compatibility(field: str, value: object) -> None:
+    registry = seed_metric_registry()
+    compatibility = _compatibility("gross_margin@1.0.0", ("GROSS_PROFIT", "REVENUE"))
+    compatibility[field] = value
+    with pytest.raises(MetricDefinitionError, match=field):
+        registry.validate_handoff(
+            definition_id="gross_margin@1.0.0",
+            candidates=(_candidate("GROSS_PROFIT"), _candidate("REVENUE")),
+            compatibility=compatibility,
         )
     compatibility = _compatibility("gross_margin@1.0.0", ("GROSS_PROFIT", "REVENUE"))
     compatibility["input_analytical_fact_ids"] = ("wrong", "also-wrong")

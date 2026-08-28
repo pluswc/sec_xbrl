@@ -379,6 +379,10 @@ def _diagnostic(
             )
         ),
         "required_input_roles": required_roles,
+        "input_metric_input_candidate_ids": tuple(
+            _id("metric-input", (row.get("analytical_fact_id"), row.get("metric_input_role")))
+            for row in inputs
+        ),
         "input_analytical_fact_ids": tuple(row["analytical_fact_id"] for row in inputs),
         "input_selected_fact_ids": tuple(
             row.get("selected_fact_id") for row in inputs if row.get("selected_fact_id")

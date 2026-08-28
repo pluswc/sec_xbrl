@@ -47,9 +47,20 @@ _CANDIDATE_REQUIRED = (
 )
 _COMPATIBILITY_REQUIRED = (
     "metric_input_compatibility_id",
+    "cik",
     "metric_definition_id",
+    "view",
+    "as_of_date",
+    "series_type",
+    "period_class",
+    "period_key",
+    "basis_version",
+    "company_canonical_dimension_key",
+    "unit_semantics",
+    "mapping_versions",
     "compatibility_status",
     "required_input_roles",
+    "input_metric_input_candidate_ids",
     "input_analytical_fact_ids",
     "input_selected_fact_ids",
     "metric_input_handoff_version",
@@ -192,6 +203,9 @@ class MetricRegistry:
         analytical_ids = tuple(str(candidate["analytical_fact_id"]) for candidate in records)
         if tuple(str(item) for item in compatibility["input_analytical_fact_ids"]) != analytical_ids:
             raise MetricDefinitionError("compatibility analytical Fact IDs do not link to candidates")
+        candidate_ids = tuple(str(candidate["metric_input_candidate_id"]) for candidate in records)
+        if tuple(str(item) for item in compatibility["input_metric_input_candidate_ids"]) != candidate_ids:
+            raise MetricDefinitionError("compatibility candidate IDs do not link to candidates")
         selected_ids = tuple(
             str(candidate["selected_fact_id"])
             for candidate in records
@@ -199,6 +213,7 @@ class MetricRegistry:
         )
         if tuple(str(item) for item in compatibility["input_selected_fact_ids"]) != selected_ids:
             raise MetricDefinitionError("compatibility selected Fact IDs do not link to candidates")
+        _validate_governed_scope(definition, records, compatibility)
 
     def validate_direct_observation(
         self, *, definition_id: str, candidate: Mapping[str, Any]
@@ -334,6 +349,41 @@ def _validate_selected_source(candidate: Mapping[str, Any], *, direct: bool) -> 
         raise MetricDefinitionError("direct metric cannot use derived source type")
     if not direct and candidate.get("candidate_status") != "CANDIDATE":
         raise MetricDefinitionError("derived metric requires candidate-status L2-M6 input")
+
+
+def _validate_governed_scope(
+    definition: MetricDefinition,
+    candidates: tuple[dict[str, Any], ...],
+    compatibility: Mapping[str, Any],
+) -> None:
+    """Ensure the diagnostic's scope is the candidates' actual governed scope."""
+    common_fields = (
+        "cik",
+        "view",
+        "as_of_date",
+        "series_type",
+        "period_class",
+        "basis_version",
+        "company_canonical_dimension_key",
+        "unit_semantics",
+    )
+    for candidate in candidates:
+        for field in common_fields:
+            if candidate.get(field) != compatibility.get(field):
+                raise MetricDefinitionError(f"candidate incompatible with diagnostic {field}")
+        if definition.metric_id == "revenue_growth":
+            expected_period = (
+                compatibility.get("comparison_period_key")
+                if candidate.get("metric_input_role") == MetricInputRole.PRIOR_REVENUE.value
+                else compatibility.get("period_key")
+            )
+        else:
+            expected_period = compatibility.get("period_key")
+        if candidate.get("period_key") != expected_period:
+            raise MetricDefinitionError("candidate incompatible with diagnostic period_key")
+    expected_versions = tuple(sorted({str(row["mapping_version"]) for row in candidates}))
+    if tuple(compatibility.get("mapping_versions") or ()) != expected_versions:
+        raise MetricDefinitionError("compatibility mapping versions do not link to candidates")
 
 
 def seed_metric_registry() -> MetricRegistry:
