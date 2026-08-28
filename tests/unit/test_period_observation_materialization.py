@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import pytest
+
 from sec_xbrl.longitudinal import PeriodObservationMaterializer
 
 
@@ -131,6 +133,33 @@ def test_foreign_layer1_references_are_explicitly_excluded() -> None:
 
     assert exclusions["revenue-qtd-2025"] == "CROSS_FILING_CONCEPT_REFERENCE"
     assert exclusions["revenue-ytd-2025"] == "CROSS_FILING_CONCEPT_REFERENCE"
+
+
+@pytest.mark.parametrize(
+    ("table", "index", "expected_reason"),
+    (
+        ("concepts", 0, "MISSING_CONCEPT_REFERENCE_FILING_ID"),
+        ("contexts", 0, "MISSING_CONTEXT_REFERENCE_FILING_ID"),
+        ("units", 0, "MISSING_UNIT_REFERENCE_FILING_ID"),
+        ("concepts", 2, "MISSING_DIMENSION_REFERENCE_FILING_ID"),
+        ("concepts", 3, "MISSING_DIMENSION_REFERENCE_FILING_ID"),
+    ),
+)
+def test_referenced_l1_rows_without_filing_identity_are_explicitly_excluded(
+    table: str, index: int, expected_reason: str
+) -> None:
+    snapshot = _snapshot()
+    rows = list(snapshot[table])
+    rows[index] = {key: value for key, value in rows[index].items() if key != "filing_id"}
+    result = PeriodObservationMaterializer().materialize(**{**snapshot, table: tuple(rows)})
+    exclusions = {row["source_fact_id"]: row["exclusion_reason"] for row in result.exclusions}
+
+    if expected_reason == "MISSING_CONTEXT_REFERENCE_FILING_ID":
+        assert exclusions["revenue-qtd-2025"] == expected_reason
+    elif expected_reason == "MISSING_UNIT_REFERENCE_FILING_ID":
+        assert exclusions["revenue-qtd-2025"] == expected_reason
+    else:
+        assert exclusions["revenue-qtd-2025"] == expected_reason
 
 
 def test_aapl_nvda_tsla_three_year_fixture_surface_is_completely_accounted_for() -> None:

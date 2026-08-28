@@ -145,25 +145,32 @@ def _exclusion_reason(
         return "FACT_FILING_MISMATCH"
     if not fact.get("raw_concept_id") or str(fact.get("raw_concept_id")) not in concepts:
         return "MISSING_OR_UNRESOLVED_CONCEPT"
-    if _foreign_reference(concepts[str(fact["raw_concept_id"])], filing):
-        return "CROSS_FILING_CONCEPT_REFERENCE"
+    concept_reference = _reference_filing_reason(concepts[str(fact["raw_concept_id"])], filing, "CONCEPT")
+    if concept_reference:
+        return concept_reference
     if not fact.get("context_id") or str(fact.get("context_id")) not in contexts:
         return "MISSING_OR_UNRESOLVED_CONTEXT"
-    if _foreign_reference(contexts[str(fact["context_id"])], filing):
-        return "CROSS_FILING_CONTEXT_REFERENCE"
+    context_reference = _reference_filing_reason(contexts[str(fact["context_id"])], filing, "CONTEXT")
+    if context_reference:
+        return context_reference
     if fact.get("unit_id") and str(fact["unit_id"]) not in units:
         return "MISSING_OR_UNRESOLVED_UNIT"
-    if fact.get("unit_id") and _foreign_reference(units[str(fact["unit_id"])], filing):
-        return "CROSS_FILING_UNIT_REFERENCE"
+    if fact.get("unit_id"):
+        unit_reference = _reference_filing_reason(units[str(fact["unit_id"])], filing, "UNIT")
+        if unit_reference:
+            return unit_reference
     if any(not item["axis_resolved"] or not item["member_resolved"] for item in dimensions.get(str(fact["fact_id"]), ())):
         return "MISSING_OR_UNRESOLVED_DIMENSION"
     for dimension in dimensions.get(str(fact["fact_id"]), ()):
         axis = concepts[str(dimension["axis_raw_concept_id"])]
-        if _foreign_reference(axis, filing):
-            return "CROSS_FILING_DIMENSION_REFERENCE"
+        axis_reference = _reference_filing_reason(axis, filing, "DIMENSION")
+        if axis_reference:
+            return axis_reference
         member_id = dimension.get("member_raw_concept_id")
-        if member_id is not None and _foreign_reference(concepts[str(member_id)], filing):
-            return "CROSS_FILING_DIMENSION_REFERENCE"
+        if member_id is not None:
+            member_reference = _reference_filing_reason(concepts[str(member_id)], filing, "DIMENSION")
+            if member_reference:
+                return member_reference
     return None
 
 
@@ -321,9 +328,13 @@ def _measure_tokens(value: Any) -> tuple[str, ...]:
     return (str(value).strip().lower(),)
 
 
-def _foreign_reference(row: Mapping[str, Any], filing: Mapping[str, Any]) -> bool:
+def _reference_filing_reason(row: Mapping[str, Any], filing: Mapping[str, Any], kind: str) -> str | None:
     reference_filing_id = row.get("filing_id")
-    return bool(reference_filing_id and str(reference_filing_id) != str(filing.get("filing_id")))
+    if not reference_filing_id:
+        return f"MISSING_{kind}_REFERENCE_FILING_ID"
+    if str(reference_filing_id) != str(filing.get("filing_id")):
+        return f"CROSS_FILING_{kind}_REFERENCE"
+    return None
 
 
 def _q4_candidates(

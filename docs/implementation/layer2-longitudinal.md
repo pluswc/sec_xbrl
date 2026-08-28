@@ -133,7 +133,10 @@ mixed before canonical mapping or selection.
 
 A malformed Layer 1 reference is emitted as `period_observation_exclusion`
 with a source Fact identity and controlled reason.  It is never silently
-dropped.  A Q4 candidate is opt-in: callers must supply reviewed canonical
+dropped. Every referenced Concept, Context, Unit, Axis, and explicit Member
+must carry the same filing identity as the source Fact; a missing or foreign
+filing identity is an explicit exclusion, never an inferred join. A Q4
+candidate is opt-in: callers must supply reviewed canonical
 concept, additivity, `ADDITIVE_AMOUNT` value-kind, a separate
 `REVIEWED_ADDITIVE_AMOUNT` semantic state, structural/recast, and
 comparability policy per source Fact. The materializer independently requires
