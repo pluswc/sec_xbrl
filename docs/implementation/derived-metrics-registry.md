@@ -63,13 +63,14 @@ actually available for a company and period.
    eligible M6 handoff plus selected L2 observation values, calculate an
    immutable `derived_metric` row with formula/input lineage.  See
    [the M1 materialization contract](derived-metrics-materialization.md).
-2. **DM-M2 — Definition governance and approved mappings.** Add reviewed
+2. **DM-M2 — Series and as-of metric selection.** Build same-company metric
+   series from immutable M1 records without mixing periods, bases, or
+   definition versions; provide the governed read-only query boundary.
+3. **DM-M3 — Definition governance and approved mappings.** Add reviewed
    company/standard role assignments and definition lifecycle review without
    changing L1 raw identity.
-3. **DM-M3 — Series and as-of metric selection.** Build same-company metric
-   series without mixing periods, bases, or definition versions.
-4. **DM-M4 — Metric capability and consumer API.** Expose available metric
-   definitions and diagnostics to Excel/API; consumers remain read-only.
+4. **DM-M4 — Metric capability.** Expose available metric definitions and
+   diagnostics to Excel/API; consumers remain read-only.
 5. **DM-M5 — Cross-company metric comparability.** Apply Layer 3 mappings and
    explicitly distinguish comparable, similar, and unavailable peer metrics.
 
