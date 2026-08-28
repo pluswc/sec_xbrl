@@ -4,8 +4,8 @@ from dataclasses import replace
 
 import pytest
 
-from sec_xbrl.metrics.registry import MetricDefinitionError, seed_metric_registry
 from sec_xbrl.longitudinal.metric_input import MetricInputHandoffMaterializer
+from sec_xbrl.metrics.registry import MetricDefinitionError, seed_metric_registry
 
 
 def _candidate(role: str, *, status: str = "CANDIDATE", source_type: str = "REPORTED") -> dict[str, object]:
