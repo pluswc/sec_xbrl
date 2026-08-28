@@ -61,6 +61,7 @@ _COMPATIBILITY_REQUIRED = (
     "compatibility_status",
     "required_input_roles",
     "input_metric_input_candidate_ids",
+    "input_role_bindings",
     "input_analytical_fact_ids",
     "input_selected_fact_ids",
     "metric_input_handoff_version",
@@ -182,7 +183,6 @@ class MetricRegistry:
         if not records:
             raise MetricDefinitionError("metric definition requires L2-M6 candidates")
         ids = set()
-        roles: list[str] = []
         for candidate in records:
             _reject_calculated_fields(candidate)
             _require_schema(candidate, _CANDIDATE_REQUIRED, "candidate")
@@ -192,11 +192,8 @@ class MetricRegistry:
             if candidate_id in ids:
                 raise MetricDefinitionError("duplicate metric input candidate")
             ids.add(candidate_id)
-            roles.append(str(candidate.get("metric_input_role") or ""))
             _validate_selected_source(candidate, direct=False)
         expected = tuple(role.value for role in definition.input_roles)
-        if tuple(roles) != expected:
-            raise MetricDefinitionError("candidate roles do not match declared definition input roles")
         compatibility_roles = tuple(str(role) for role in compatibility.get("required_input_roles", ()))
         if compatibility_roles != expected:
             raise MetricDefinitionError("compatibility roles do not match declared definition")
@@ -206,6 +203,7 @@ class MetricRegistry:
         candidate_ids = tuple(str(candidate["metric_input_candidate_id"]) for candidate in records)
         if tuple(str(item) for item in compatibility["input_metric_input_candidate_ids"]) != candidate_ids:
             raise MetricDefinitionError("compatibility candidate IDs do not link to candidates")
+        _validate_assessment_role_bindings(compatibility, candidate_ids, expected)
         selected_ids = tuple(
             str(candidate["selected_fact_id"])
             for candidate in records
@@ -367,6 +365,10 @@ def _validate_governed_scope(
         "company_canonical_dimension_key",
         "unit_semantics",
     )
+    assessment_roles = {
+        str(binding["metric_input_candidate_id"]): str(binding["assessment_input_role"])
+        for binding in compatibility["input_role_bindings"]
+    }
     for candidate in candidates:
         for field in common_fields:
             if candidate.get(field) != compatibility.get(field):
@@ -374,7 +376,8 @@ def _validate_governed_scope(
         if definition.metric_id == "revenue_growth":
             expected_period = (
                 compatibility.get("comparison_period_key")
-                if candidate.get("metric_input_role") == MetricInputRole.PRIOR_REVENUE.value
+                if assessment_roles[str(candidate["metric_input_candidate_id"])]
+                == MetricInputRole.PRIOR_REVENUE.value
                 else compatibility.get("period_key")
             )
         else:
@@ -384,6 +387,29 @@ def _validate_governed_scope(
     expected_versions = tuple(sorted({str(row["mapping_version"]) for row in candidates}))
     if tuple(compatibility.get("mapping_versions") or ()) != expected_versions:
         raise MetricDefinitionError("compatibility mapping versions do not link to candidates")
+
+
+def _validate_assessment_role_bindings(
+    compatibility: Mapping[str, Any], candidate_ids: tuple[str, ...], expected_roles: tuple[str, ...]
+) -> None:
+    bindings = compatibility.get("input_role_bindings")
+    if not isinstance(bindings, (tuple, list)):
+        raise MetricDefinitionError("compatibility input role bindings are invalid")
+    actual_ids: list[str] = []
+    actual_roles: list[str] = []
+    for binding in bindings:
+        if not isinstance(binding, Mapping):
+            raise MetricDefinitionError("compatibility input role binding is invalid")
+        candidate_id = binding.get("metric_input_candidate_id")
+        role = binding.get("assessment_input_role")
+        if not candidate_id or not role:
+            raise MetricDefinitionError("compatibility input role binding lacks provenance")
+        actual_ids.append(str(candidate_id))
+        actual_roles.append(str(role))
+    if tuple(actual_ids) != candidate_ids:
+        raise MetricDefinitionError("compatibility role bindings do not link to candidates")
+    if tuple(actual_roles) != expected_roles:
+        raise MetricDefinitionError("assessment roles do not match declared definition input roles")
 
 
 def seed_metric_registry() -> MetricRegistry:

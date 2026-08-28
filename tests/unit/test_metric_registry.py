@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 
 from sec_xbrl.metrics.registry import MetricDefinitionError, seed_metric_registry
+from sec_xbrl.longitudinal.metric_input import MetricInputHandoffMaterializer
 
 
 def _candidate(role: str, *, status: str = "CANDIDATE", source_type: str = "REPORTED") -> dict[str, object]:
@@ -48,10 +49,45 @@ def _compatibility(definition_id: str, roles: tuple[str, ...]) -> dict[str, obje
         "compatibility_status": "ELIGIBLE",
         "required_input_roles": roles,
         "input_metric_input_candidate_ids": tuple(f"candidate:{role}" for role in roles),
+        "input_role_bindings": tuple(
+            {
+                "metric_input_candidate_id": f"candidate:{role}",
+                "assessment_input_role": role,
+            }
+            for role in roles
+        ),
         "input_analytical_fact_ids": tuple(f"candidate:{role}" for role in roles),
         "input_selected_fact_ids": ("fact:1",) * len(roles),
         "metric_input_handoff_version": "l2-m6-metric-input-handoff-v1",
     }
+
+
+def _m6_fact(fact_id: str, concept: str, **overrides: object) -> dict[str, object]:
+    return {
+        "analytical_fact_id": fact_id,
+        "cik": "0000320193",
+        "raw_concept_id": concept,
+        "selected_fact_id": f"raw:{fact_id}",
+        "source_filing_id": "filing:q1",
+        "view": "CURRENT_COMPARABLE",
+        "as_of_date": "2026-05-01",
+        "basis_version": "basis-v1",
+        "series_type": "CURRENT",
+        "period_class": "QTD_3M",
+        "period_key": "FY26-Q1",
+        "company_canonical_dimension_key": (),
+        "unit_semantics": "usd",
+        "mapping_version": "map-v1",
+        "source_type": "REPORTED",
+        **overrides,
+    }
+
+
+def _m6_records_for(
+    candidates: tuple[dict[str, object], ...], diagnostic: dict[str, object]
+) -> tuple[dict[str, object], ...]:
+    by_id = {str(candidate["metric_input_candidate_id"]): candidate for candidate in candidates}
+    return tuple(by_id[str(item)] for item in diagnostic["input_metric_input_candidate_ids"])
 
 
 def test_seed_registry_has_controlled_versioned_definitions() -> None:
@@ -152,7 +188,7 @@ def test_registry_rejects_raw_name_inference_and_wrong_roles() -> None:
             candidates=(raw_candidate, _candidate("REVENUE")),
             compatibility=_compatibility("gross_margin@1.0.0", ("GROSS_PROFIT", "REVENUE")),
         )
-    with pytest.raises(MetricDefinitionError, match="candidate roles"):
+    with pytest.raises(MetricDefinitionError, match="analytical Fact IDs"):
         registry.validate_handoff(
             definition_id="gross_margin@1.0.0",
             candidates=(_candidate("REVENUE"), _candidate("GROSS_PROFIT")),
@@ -175,6 +211,47 @@ def test_eps_accepts_direct_l2_m6_candidate() -> None:
         definition_id="eps@1.0.0",
         candidate=_candidate("EPS", status="DIRECT_OBSERVATION_ONLY"),
     )
+
+
+def test_registry_integrates_with_actual_m6_margin_growth_q4_and_direct_candidates() -> None:
+    registry = seed_metric_registry()
+    result = MetricInputHandoffMaterializer().materialize(
+        analytical_facts=(
+            _m6_fact("revenue", "us-gaap:Revenues", comparison_period_key="FY25-Q1"),
+            _m6_fact("prior", "us-gaap:Revenues", period_key="FY25-Q1"),
+            _m6_fact("gross", "us-gaap:GrossProfit"),
+            _m6_fact("operating", "us-gaap:OperatingIncomeLoss"),
+            _m6_fact(
+                "q4", "us-gaap:Revenues", period_key="FY26-Q4", source_type="DERIVED_RECAST",
+                derived_observation_id="q4", source_fact_ids=("fy", "ytd"),
+                derivation_rule_version="q4-v1", formula="FY-YTD",
+            ),
+            _m6_fact("eps", "us-gaap:EarningsPerShareDiluted"),
+        ),
+        metric_definition_ids={
+            "GROSS_MARGIN": "gross_margin@1.0.0",
+            "OPERATING_MARGIN": "operating_margin@1.0.0",
+            "REVENUE_GROWTH": "revenue_growth@1.0.0",
+            "Q4_FLOW": "q4_flow_eligibility@1.0.0",
+        },
+    )
+    for assessment, definition_id in (
+        ("GROSS_MARGIN", "gross_margin@1.0.0"),
+        ("OPERATING_MARGIN", "operating_margin@1.0.0"),
+        ("REVENUE_GROWTH", "revenue_growth@1.0.0"),
+        ("Q4_FLOW", "q4_flow_eligibility@1.0.0"),
+    ):
+        diagnostic = next(
+            row for row in result.compatibility
+            if row["metric_assessment_id"] == assessment and row["compatibility_status"] == "ELIGIBLE"
+        )
+        registry.validate_handoff(
+            definition_id=definition_id,
+            candidates=_m6_records_for(result.candidates, diagnostic),
+            compatibility=diagnostic,
+        )
+    eps = next(row for row in result.candidates if row["metric_input_role"] == "EPS")
+    registry.validate_direct_observation(definition_id="eps@1.0.0", candidate=eps)
 
 
 def test_definition_dependency_cycles_are_rejected() -> None:
