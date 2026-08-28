@@ -18,10 +18,14 @@ def _candidate(
         "cik": "0001045810",
         "series_type": "CURRENT",
         "series_status": status,
+        "raw_concept_id": "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+        "raw_dimension_signature": (("axis:geography", "member:us", None, "explicit", False),),
         "company_canonical_concept_id": "company:geographic-revenue",
         "company_canonical_dimension_key": (("axis:geography", "member:us", None, "explicit", False),),
         "unit_id": "usd",
+        "unit_semantics": (("iso4217:USD",), ()),
         "period_class": "QTD_3M",
+        "actual_period_boundaries": ("2026-01-01", "2026-03-31", None),
         "actual_period_key": period,
         "period_key": period,
         "source_fact_id": fact,
@@ -70,6 +74,8 @@ def test_nvidia_golden_shape_preserves_as_filed_and_never_mixes_incomplete_recas
     assert as_filed["FY26-Q2"]["value_numeric"] == "23470"
     assert comparable["FY26-Q1"]["value_numeric"] == "25685"
     assert comparable["FY26-Q1"]["source_type"] == "RECAST_REPORTED"
+    assert comparable["FY26-Q1"]["raw_concept_id"] == "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+    assert comparable["FY26-Q1"]["unit_semantics"] == (("iso4217:USD",), ())
     for period in ("FY26-Q2", "FY26-Q3", "FY26-Q4"):
         assert comparable[period]["source_type"] == "UNAVAILABLE"
         assert comparable[period]["unavailable_reason"] == "PERIOD_NOT_AVAILABLE_IN_SELECTED_BASIS"

@@ -319,6 +319,14 @@ definition already exists.
 - L2-M6 neither calculates/stores a durable `derived_metric` value nor creates
   a Metric registry.  Those are follow-on Derived Metrics-plane work.
 
+**Implemented boundary.** `MetricInputHandoffMaterializer` publishes
+`metric_input_candidate` and `metric_input_compatibility` records from
+selected `analytical_fact` rows.  It assesses Gross Margin, Operating Margin,
+Revenue Growth, and controlled Q4 flow eligibility without calculating a
+metric.  Its role, provenance, compatibility, direct EPS/share, and no-metric
+output rules are defined in
+[`metric-input-handoff.md`](metric-input-handoff.md).
+
 ## 6. Dependency and delivery order
 
 ```text

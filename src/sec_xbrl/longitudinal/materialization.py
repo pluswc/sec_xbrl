@@ -32,6 +32,8 @@ LOGICAL_DATASETS = frozenset(
         "analytical_fact",
         "recast_evidence",
         "capability_inventory",
+        "metric_input_candidate",
+        "metric_input_compatibility",
         "annual_series_candidate",
         "current_series_candidate",
         "series_candidate_exclusion",
@@ -40,9 +42,7 @@ LOGICAL_DATASETS = frozenset(
 _ANALYTICAL_SOURCE_TYPES = frozenset(
     {"REPORTED", "RECAST_REPORTED", "DERIVED_RECAST", "UNAVAILABLE"}
 )
-_MAPPING_DATASETS = frozenset(
-    {"company_concept_map", "company_axis_map", "company_member_map"}
-)
+_MAPPING_DATASETS = frozenset({"company_concept_map", "company_axis_map", "company_member_map"})
 _MAPPING_RELATIONS = frozenset({"SAME", "RENAMED", "RECAST", "SPLIT", "MERGED", "UNCERTAIN"})
 _STRUCTURAL_CHANGE_EVENTS = frozenset(
     {
@@ -229,7 +229,9 @@ class Layer2Publisher:
                 existing = self._existing_publication(destination, run, counts, content_hashes)
                 if existing is not None:
                     return existing
-                raise Layer2MaterializationError(f"published run version already exists: {destination}")
+                raise Layer2MaterializationError(
+                    f"published run version already exists: {destination}"
+                )
             os.replace(temporary, destination)
             return Layer2Publication(
                 run_root=destination,
@@ -257,7 +259,9 @@ class Layer2Publisher:
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            raise Layer2MaterializationError(f"invalid Layer 2 run manifest: {manifest_path}") from exc
+            raise Layer2MaterializationError(
+                f"invalid Layer 2 run manifest: {manifest_path}"
+            ) from exc
         if manifest.get("run_fingerprint") != run.fingerprint:
             raise Layer2MaterializationError(
                 "run_version already belongs to different inputs or rule versions; use a new run_version"
@@ -284,9 +288,15 @@ def _normalize_datasets(
     unknown = set(datasets) - LOGICAL_DATASETS
     if unknown:
         raise Layer2MaterializationError(f"unknown Layer 2 logical datasets: {sorted(unknown)}")
-    if (
-        "analytical_fact" not in datasets
-        and not ({"annual_series_candidate", "current_series_candidate", "capability_inventory"} & set(datasets))
+    if "analytical_fact" not in datasets and not (
+        {
+            "annual_series_candidate",
+            "current_series_candidate",
+            "capability_inventory",
+            "metric_input_candidate",
+            "metric_input_compatibility",
+        }
+        & set(datasets)
     ):
         raise Layer2MaterializationError(
             "candidate requires analytical_fact or an L2-M3 series candidate dataset"
@@ -294,7 +304,9 @@ def _normalize_datasets(
     return {name: tuple(dict(row) for row in rows) for name, rows in datasets.items()}
 
 
-def _validate_candidate(run: Layer2Run, datasets: Mapping[str, Sequence[Mapping[str, Any]]]) -> dict[str, int]:
+def _validate_candidate(
+    run: Layer2Run, datasets: Mapping[str, Sequence[Mapping[str, Any]]]
+) -> dict[str, int]:
     input_ciks = {row.cik for row in run.inputs}
     counts: dict[str, int] = {}
     mappings_by_id: dict[str, Mapping[str, Any]] = {}
@@ -317,10 +329,14 @@ def _validate_candidate(run: Layer2Run, datasets: Mapping[str, Sequence[Mapping[
             if not row.get("cik"):
                 raise Layer2MaterializationError(f"{dataset} row is missing cik")
             if str(row["cik"]) not in input_ciks:
-                raise Layer2MaterializationError(f"{dataset} row references CIK outside declared inputs")
+                raise Layer2MaterializationError(
+                    f"{dataset} row references CIK outside declared inputs"
+                )
             record_id = _record_id(dataset, row)
             if record_id in seen_ids:
-                raise Layer2MaterializationError(f"duplicate {dataset} record identity: {record_id}")
+                raise Layer2MaterializationError(
+                    f"duplicate {dataset} record identity: {record_id}"
+                )
             seen_ids.add(record_id)
             if dataset == "analytical_fact":
                 _validate_analytical_fact(row, recast_by_id)
@@ -338,10 +354,16 @@ def _validate_candidate(run: Layer2Run, datasets: Mapping[str, Sequence[Mapping[
                 _validate_structural_change(row, mappings_by_id)
             elif dataset == "capability_inventory":
                 _validate_capability_inventory(row)
+            elif dataset == "metric_input_candidate":
+                _validate_metric_input_candidate(row)
+            elif dataset == "metric_input_compatibility":
+                _validate_metric_input_compatibility(row)
             try:
                 _canonical_json(row)
             except (TypeError, ValueError) as exc:
-                raise Layer2MaterializationError(f"{dataset} row is not canonical JSON serializable") from exc
+                raise Layer2MaterializationError(
+                    f"{dataset} row is not canonical JSON serializable"
+                ) from exc
         counts[dataset] = len(rows)
     if "capability_inventory" in datasets:
         covered_ciks = {str(row.get("cik")) for row in datasets["capability_inventory"]}
@@ -361,15 +383,21 @@ def _validate_analytical_fact(
         raise Layer2MaterializationError("analytical_fact requires analytical_fact_id")
     source_type = str(row.get("source_type") or "")
     if source_type not in _ANALYTICAL_SOURCE_TYPES:
-        raise Layer2MaterializationError(f"unsupported analytical_fact source_type: {source_type!r}")
+        raise Layer2MaterializationError(
+            f"unsupported analytical_fact source_type: {source_type!r}"
+        )
     has_numeric = row.get("value_numeric") is not None
     selected_fact_id = row.get("selected_fact_id")
     unavailable_reason = row.get("unavailable_reason")
     if source_type == "UNAVAILABLE":
         if has_numeric or selected_fact_id:
-            raise Layer2MaterializationError("UNAVAILABLE analytical_fact cannot have numeric value or selected_fact_id")
+            raise Layer2MaterializationError(
+                "UNAVAILABLE analytical_fact cannot have numeric value or selected_fact_id"
+            )
         if not unavailable_reason:
-            raise Layer2MaterializationError("UNAVAILABLE analytical_fact requires unavailable_reason")
+            raise Layer2MaterializationError(
+                "UNAVAILABLE analytical_fact requires unavailable_reason"
+            )
         return
     if row.get("view") not in {"AS_FILED", "CURRENT_COMPARABLE"}:
         raise Layer2MaterializationError("analytical_fact has unsupported view")
@@ -384,10 +412,14 @@ def _validate_analytical_fact(
     if missing:
         raise Layer2MaterializationError(f"analytical_fact missing selection provenance: {missing}")
     if source_type == "RECAST_REPORTED" and not row.get("recast_evidence_id"):
-        raise Layer2MaterializationError("RECAST_REPORTED analytical_fact requires recast_evidence_id")
+        raise Layer2MaterializationError(
+            "RECAST_REPORTED analytical_fact requires recast_evidence_id"
+        )
     if source_type == "DERIVED_RECAST" and (
-        not row.get("source_fact_ids") or not row.get("derivation_rule_version")
-        or not row.get("derived_observation_id") or not row.get("recast_evidence_id")
+        not row.get("source_fact_ids")
+        or not row.get("derivation_rule_version")
+        or not row.get("derived_observation_id")
+        or not row.get("recast_evidence_id")
     ):
         raise Layer2MaterializationError(
             "DERIVED_RECAST analytical_fact requires source Fact IDs and derivation rule version"
@@ -409,10 +441,9 @@ def _validate_recast_reference(
         if fact.get("source_type") == "RECAST_REPORTED":
             if fact.get("selected_fact_id") == evidence.get("source_raw_fact_id"):
                 return
-        elif (
-            fact.get("derived_observation_id") == evidence.get("source_derived_observation_id")
-            and evidence.get("source_raw_fact_id") in set(fact.get("source_fact_ids") or ())
-        ):
+        elif fact.get("derived_observation_id") == evidence.get(
+            "source_derived_observation_id"
+        ) and evidence.get("source_raw_fact_id") in set(fact.get("source_fact_ids") or ()):
             return
     raise Layer2MaterializationError(
         "recast analytical_fact must resolve to compatible recast_evidence in the same candidate"
@@ -422,29 +453,50 @@ def _validate_recast_reference(
 def _validate_recast_evidence(row: Mapping[str, Any]) -> None:
     """Keep the published evidence table useful independently of its adapter."""
     required = (
-        "recast_evidence_id", "source_filing_id", "source_raw_fact_id",
-        "target_period_key", "basis_version", "evidence_kind", "source_document",
-        "source_locator", "prior_source_filing_ids", "evidence_version",
+        "recast_evidence_id",
+        "source_filing_id",
+        "source_raw_fact_id",
+        "target_period_key",
+        "basis_version",
+        "evidence_kind",
+        "source_document",
+        "source_locator",
+        "prior_source_filing_ids",
+        "evidence_version",
     )
     missing = [key for key in required if not row.get(key)]
     if missing:
         raise Layer2MaterializationError(f"recast_evidence missing provenance: {missing}")
     if row.get("explicitly_represented") is not True:
-        raise Layer2MaterializationError("recast_evidence requires explicit re-presentation evidence")
+        raise Layer2MaterializationError(
+            "recast_evidence requires explicit re-presentation evidence"
+        )
     if row.get("source_derived_observation_id") is not None and not row.get("source_raw_fact_id"):
-        raise Layer2MaterializationError("derived recast evidence requires a compatible source raw Fact")
+        raise Layer2MaterializationError(
+            "derived recast evidence requires a compatible source raw Fact"
+        )
 
 
 def _validate_series_candidate(dataset: str, row: Mapping[str, Any]) -> None:
     """Keep pre-selection M3 candidates traceable and period-safe."""
     expected_type = "ANNUAL" if dataset == "annual_series_candidate" else "CURRENT"
     required = (
-        "series_candidate_id", "series_type", "series_status",
-        "company_canonical_concept_id", "company_canonical_dimension_key",
-        "unit_semantics", "actual_period_boundaries", "actual_period_key",
-        "period_class", "series_key", "source_period_observation_id",
-        "source_filing_id", "mapping_version", "mapping_evidence",
-        "classification_rule_version", "series_rule_version",
+        "series_candidate_id",
+        "series_type",
+        "series_status",
+        "company_canonical_concept_id",
+        "company_canonical_dimension_key",
+        "unit_semantics",
+        "actual_period_boundaries",
+        "actual_period_key",
+        "period_class",
+        "series_key",
+        "source_period_observation_id",
+        "source_filing_id",
+        "mapping_version",
+        "mapping_evidence",
+        "classification_rule_version",
+        "series_rule_version",
     )
     missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
     if missing:
@@ -549,28 +601,42 @@ def _validate_structural_change(
 
 def _validate_capability_inventory(row: Mapping[str, Any]) -> None:
     """Require capability status and drill-down evidence to be explicit."""
-    required = ("capability_inventory_id", "capability_type", "capability_status",
-                "period_classes", "series_types", "source_fact_ids", "source_filing_ids",
-                "source_role_ids", "source_disclosure_ids", "capability_inventory_version")
+    required = (
+        "capability_inventory_id",
+        "capability_type",
+        "capability_status",
+        "period_classes",
+        "series_types",
+        "source_fact_ids",
+        "source_filing_ids",
+        "source_role_ids",
+        "source_disclosure_ids",
+        "capability_inventory_version",
+    )
     missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
     if missing:
         raise Layer2MaterializationError(f"capability_inventory missing provenance: {missing}")
     if row["capability_status"] not in {
-        "AVAILABLE", "PROCESSING_UNAVAILABLE", "MAPPING_REVIEW_REQUIRED", "NOT_COMPARABLE"
+        "AVAILABLE",
+        "PROCESSING_UNAVAILABLE",
+        "MAPPING_REVIEW_REQUIRED",
+        "NOT_COMPARABLE",
     }:
         raise Layer2MaterializationError("capability_inventory has unsupported capability_status")
     if row["capability_status"] == "AVAILABLE" and row.get("status_reason") is not None:
-        raise Layer2MaterializationError("available capability_inventory row cannot have status_reason")
+        raise Layer2MaterializationError(
+            "available capability_inventory row cannot have status_reason"
+        )
     if row["capability_status"] != "AVAILABLE" and not row.get("status_reason"):
-        raise Layer2MaterializationError("unavailable capability_inventory row requires status_reason")
+        raise Layer2MaterializationError(
+            "unavailable capability_inventory row requires status_reason"
+        )
     if row["capability_type"] not in {"CONCEPT", "DIMENSION_MEMBER", "COMPANY_COVERAGE"}:
         raise Layer2MaterializationError("capability_inventory has unsupported capability_type")
     if row["capability_type"] == "DIMENSION_MEMBER" and (
         not row.get("axis_raw_concept_id") or not row.get("member_raw_concept_id")
     ):
-        raise Layer2MaterializationError(
-            "dimension capability requires observed axis and member"
-        )
+        raise Layer2MaterializationError("dimension capability requires observed axis and member")
     if row["capability_type"] in {"CONCEPT", "DIMENSION_MEMBER"}:
         required_observed = ("raw_concept_id", "source_fact_ids", "source_filing_ids")
         missing_observed = [key for key in required_observed if not row.get(key)]
@@ -579,6 +645,94 @@ def _validate_capability_inventory(row: Mapping[str, Any]) -> None:
                 "observed capability requires raw concept and source Fact/filing lineage: "
                 + ", ".join(missing_observed)
             )
+
+
+def _validate_metric_input_candidate(row: Mapping[str, Any]) -> None:
+    """M6 hands off selected inputs; it must not contain a calculated value."""
+    required = (
+        "metric_input_candidate_id",
+        "metric_input_role",
+        "analytical_fact_id",
+        "view",
+        "as_of_date",
+        "period_class",
+        "period_key",
+        "mapping_version",
+        "candidate_status",
+        "metric_input_handoff_version",
+    )
+    missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
+    if missing:
+        raise Layer2MaterializationError(f"metric_input_candidate missing provenance: {missing}")
+    if row["candidate_status"] not in {"CANDIDATE", "UNAVAILABLE", "DIRECT_OBSERVATION_ONLY"}:
+        raise Layer2MaterializationError("metric_input_candidate has unsupported candidate_status")
+    if row["candidate_status"] == "UNAVAILABLE" and not row.get("unavailable_reason"):
+        raise Layer2MaterializationError(
+            "unavailable metric_input_candidate requires unavailable_reason"
+        )
+    if row["candidate_status"] == "CANDIDATE" and not (
+        row.get("selected_fact_id") or row.get("source_fact_ids")
+    ):
+        raise Layer2MaterializationError(
+            "available metric_input_candidate requires selected Fact or derived source Fact lineage"
+        )
+    if row["candidate_status"] == "CANDIDATE" and not row.get("source_filing_id"):
+        raise Layer2MaterializationError(
+            "available metric_input_candidate requires source filing lineage"
+        )
+    if (
+        row["candidate_status"] == "DIRECT_OBSERVATION_ONLY"
+        and row.get("unavailable_reason") != "DIRECT_OBSERVATION_NO_REVERSE_ENGINEERING"
+    ):
+        raise Layer2MaterializationError(
+            "direct EPS/share candidate must prohibit reverse engineering"
+        )
+    forbidden = {"value_numeric", "value_text", "derived_metric_id", "metric_value"}
+    if forbidden & set(row):
+        raise Layer2MaterializationError(
+            "metric_input_candidate cannot store calculated metric value"
+        )
+
+
+def _validate_metric_input_compatibility(row: Mapping[str, Any]) -> None:
+    required = (
+        "metric_input_compatibility_id",
+        "metric_assessment_id",
+        "view",
+        "as_of_date",
+        "period_class",
+        "period_key",
+        "company_canonical_dimension_key",
+        "required_input_roles",
+        "input_analytical_fact_ids",
+        "compatibility_status",
+        "metric_input_handoff_version",
+    )
+    missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
+    if missing:
+        raise Layer2MaterializationError(
+            f"metric_input_compatibility missing provenance: {missing}"
+        )
+    if row["metric_assessment_id"] not in {
+        "GROSS_MARGIN",
+        "OPERATING_MARGIN",
+        "REVENUE_GROWTH",
+        "Q4_FLOW",
+    }:
+        raise Layer2MaterializationError("metric_input_compatibility has unsupported assessment")
+    if row["compatibility_status"] not in {"ELIGIBLE", "UNAVAILABLE"}:
+        raise Layer2MaterializationError("metric_input_compatibility has unsupported status")
+    if row["compatibility_status"] == "UNAVAILABLE" and not row.get("unavailable_reason"):
+        raise Layer2MaterializationError("unavailable metric input compatibility requires reason")
+    if row["compatibility_status"] == "ELIGIBLE" and row.get("unavailable_reason") is not None:
+        raise Layer2MaterializationError(
+            "eligible metric input compatibility cannot have unavailable reason"
+        )
+    forbidden = {"value_numeric", "value_text", "derived_metric_id", "metric_value", "formula"}
+    if forbidden & set(row):
+        raise Layer2MaterializationError(
+            "metric_input_compatibility cannot store a calculated metric"
+        )
 
 
 def _record_id(dataset: str, row: Mapping[str, Any]) -> str:
@@ -590,6 +744,10 @@ def _record_id(dataset: str, row: Mapping[str, Any]) -> str:
         return str(row.get("series_candidate_exclusion_id") or "")
     if dataset == "capability_inventory":
         return str(row.get("capability_inventory_id") or "")
+    if dataset == "metric_input_candidate":
+        return str(row.get("metric_input_candidate_id") or "")
+    if dataset == "metric_input_compatibility":
+        return str(row.get("metric_input_compatibility_id") or "")
     for key in ("id", f"{dataset}_id", "fact_id", "source_raw_id", "event_id"):
         if row.get(key):
             return str(row[key])
@@ -612,7 +770,9 @@ def _write_datasets(root: Path, datasets: Mapping[str, Sequence[Mapping[str, Any
 def _dataset_hashes(datasets: Mapping[str, Sequence[Mapping[str, Any]]]) -> dict[str, str]:
     """Stable content digests prove idempotent keys *and* values, not counts alone."""
     return {
-        dataset: _sha256_json([json.loads(_canonical_json(row)) for row in _sorted_rows(dataset, rows)])
+        dataset: _sha256_json(
+            [json.loads(_canonical_json(row)) for row in _sorted_rows(dataset, rows)]
+        )
         for dataset, rows in sorted(datasets.items())
     }
 
@@ -623,9 +783,13 @@ def _validate_written_candidate(root: Path, manifest_name: str, counts: Mapping[
         dataset = path.stem
         if dataset not in observed:
             raise Layer2MaterializationError(f"unexpected dataset file: {path}")
-        observed[dataset] += sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line)
+        observed[dataset] += sum(
+            1 for line in path.read_text(encoding="utf-8").splitlines() if line
+        )
     if observed != dict(counts):
-        raise Layer2MaterializationError(f"written output counts do not match manifest: {observed} != {counts}")
+        raise Layer2MaterializationError(
+            f"written output counts do not match manifest: {observed} != {counts}"
+        )
     manifest_path = root / manifest_name
     if manifest_path.exists():
         try:
