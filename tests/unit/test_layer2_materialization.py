@@ -213,6 +213,49 @@ def test_publisher_rejects_unlinked_or_uncontrolled_structural_change(
         )
 
 
+def test_publisher_rejects_controlled_structural_event_without_matching_map(tmp_path: Path) -> None:
+    mapping = {
+        "mapping_id": "company-map:real",
+        "cik": "0000320193",
+        "entity_type": "concept",
+        "source_raw_id": "raw-revenue",
+        "source_filing_id": "filing-aapl-q2",
+        "company_canonical_id": "company:0000320193:concept:revenue",
+        "valid_from_filing_id": "filing-aapl-q2",
+        "relation": "SAME",
+        "method": "RAW_IDENTITY_BASELINE",
+        "evidence": {"raw": "raw-revenue"},
+        "mapping_version": "map-v1",
+        "continuity_break": False,
+        "review_required": False,
+        "review_state": "AUTO_ACCEPTED",
+    }
+    event = {
+        "event_id": "fabricated-controlled-event",
+        "cik": "0000320193",
+        "filing_id": "filing-aapl-q2",
+        "source_raw_id": "raw-revenue",
+        "company_canonical_id": "company:0000320193:concept:wrong",
+        "mapping_id": "company-map:real",
+        "event_type": "NEW_CONCEPT",
+        "valid_from_filing_id": "filing-aapl-q2",
+        "mapping_version": "map-v1",
+        "continuity_break": False,
+        "review_required": False,
+        "review_state": "AUTO_ACCEPTED",
+        "evidence": {"raw": "raw-revenue"},
+    }
+    with pytest.raises(Layer2MaterializationError, match="does not match linked mapping"):
+        Layer2Publisher(tmp_path / "layer2").publish(
+            _run(),
+            {
+                "analytical_fact": _datasets()["analytical_fact"],
+                "company_concept_map": [mapping],
+                "structural_change": [event],
+            },
+        )
+
+
 @pytest.mark.parametrize("field", ("form", "filed_date", "report_date"))
 def test_run_rejects_layer1_input_without_required_filing_provenance(field: str) -> None:
     values: dict[str, object] = {

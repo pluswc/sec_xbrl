@@ -289,6 +289,16 @@ def _normalize_datasets(
 def _validate_candidate(run: Layer2Run, datasets: Mapping[str, Sequence[Mapping[str, Any]]]) -> dict[str, int]:
     input_ciks = {row.cik for row in run.inputs}
     counts: dict[str, int] = {}
+    mappings_by_id: dict[str, Mapping[str, Any]] = {}
+    for dataset in _MAPPING_DATASETS:
+        for row in datasets.get(dataset, ()):
+            _validate_company_mapping(dataset, row)
+            mapping_id = str(row["mapping_id"])
+            if mapping_id in mappings_by_id:
+                raise Layer2MaterializationError(
+                    f"duplicate company mapping identity across datasets: {mapping_id}"
+                )
+            mappings_by_id[mapping_id] = row
     for dataset, rows in datasets.items():
         seen_ids: set[str] = set()
         for row in rows:
@@ -303,9 +313,11 @@ def _validate_candidate(run: Layer2Run, datasets: Mapping[str, Sequence[Mapping[
             if dataset == "analytical_fact":
                 _validate_analytical_fact(row)
             elif dataset in _MAPPING_DATASETS:
-                _validate_company_mapping(dataset, row)
+                # This was validated first so structural-change rows can only
+                # link to a real map in the same atomic candidate.
+                pass
             elif dataset == "structural_change":
-                _validate_structural_change(row)
+                _validate_structural_change(row, mappings_by_id)
             try:
                 _canonical_json(row)
             except (TypeError, ValueError) as exc:
@@ -371,7 +383,9 @@ def _validate_company_mapping(dataset: str, row: Mapping[str, Any]) -> None:
         raise Layer2MaterializationError(f"{dataset} cannot silently coalesce unresolved mapping")
 
 
-def _validate_structural_change(row: Mapping[str, Any]) -> None:
+def _validate_structural_change(
+    row: Mapping[str, Any], mappings_by_id: Mapping[str, Mapping[str, Any]]
+) -> None:
     required = (
         "event_id",
         "filing_id",
@@ -393,6 +407,25 @@ def _validate_structural_change(row: Mapping[str, Any]) -> None:
         raise Layer2MaterializationError("structural_change has unsupported event_type")
     if bool(row["review_required"]) != (row.get("review_state") == "REVIEW_REQUIRED"):
         raise Layer2MaterializationError("structural_change review state is inconsistent")
+    mapping = mappings_by_id.get(str(row["mapping_id"]))
+    if mapping is None:
+        raise Layer2MaterializationError(
+            "structural_change mapping_id must resolve to a mapping row in the same candidate"
+        )
+    linked_fields = (
+        "cik",
+        "source_raw_id",
+        "company_canonical_id",
+        "valid_from_filing_id",
+        "mapping_version",
+        "review_required",
+        "review_state",
+    )
+    mismatched = [key for key in linked_fields if row.get(key) != mapping.get(key)]
+    if mismatched:
+        raise Layer2MaterializationError(
+            f"structural_change does not match linked mapping fields: {mismatched}"
+        )
 
 
 def _record_id(dataset: str, row: Mapping[str, Any]) -> str:

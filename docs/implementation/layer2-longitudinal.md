@@ -134,6 +134,13 @@ Each event has a CIK, filing/raw/canonical identity, mapping version, validity,
 review state, and the exact mapping evidence used to create it.  No event is
 created from value continuity alone.
 
+At publication, a `structural_change.mapping_id` must resolve to exactly one
+mapping row in one of the three company-map datasets in the **same atomic
+candidate**.  Its CIK, raw ID, canonical ID, validity filing, mapping version,
+and review state must match that map.  An event-only candidate, fabricated
+mapping ID, or mismatched canonical ID fails closed rather than becoming a
+standalone disclosure claim.
+
 ## M7 materialization boundary
 
 `sec_xbrl.longitudinal.CompanyCanonicalizer` consumes copies of ordered Layer
