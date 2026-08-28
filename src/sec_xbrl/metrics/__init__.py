@@ -1,9 +1,14 @@
-"""Governed Derived Metrics definitions.
+"""Governed Derived Metrics definitions and durable materialization."""
 
-This package owns definitions and input-contract validation only.  It does not
-calculate or persist a ``derived_metric`` value.
-"""
-
+from sec_xbrl.metrics.materialization import (
+    DEFAULT_DERIVED_METRICS_ROOT,
+    DERIVED_METRICS_CONTRACT_VERSION,
+    DerivedMetricMaterializationError,
+    DerivedMetricMaterializer,
+    DerivedMetricPublication,
+    DerivedMetricPublisher,
+    DerivedMetricsRun,
+)
 from sec_xbrl.metrics.registry import (
     METRIC_REGISTRY_CONTRACT_VERSION,
     DefinitionStatus,
@@ -17,8 +22,15 @@ from sec_xbrl.metrics.registry import (
 )
 
 __all__ = [
+    "DEFAULT_DERIVED_METRICS_ROOT",
+    "DERIVED_METRICS_CONTRACT_VERSION",
     "METRIC_REGISTRY_CONTRACT_VERSION",
     "DefinitionStatus",
+    "DerivedMetricMaterializationError",
+    "DerivedMetricMaterializer",
+    "DerivedMetricPublication",
+    "DerivedMetricPublisher",
+    "DerivedMetricsRun",
     "FormulaMetadata",
     "MetricCategory",
     "MetricDefinition",

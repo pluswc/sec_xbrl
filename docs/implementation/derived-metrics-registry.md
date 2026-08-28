@@ -59,12 +59,13 @@ actually available for a company and period.
 
 ## Follow-on milestones
 
-1. **DM-M1 — Definition governance and approved mappings.** Add reviewed
+1. **DM-M1 — Derived metric materialization.** Consume one definition and
+   eligible M6 handoff plus selected L2 observation values, calculate an
+   immutable `derived_metric` row with formula/input lineage.  See
+   [the M1 materialization contract](derived-metrics-materialization.md).
+2. **DM-M2 — Definition governance and approved mappings.** Add reviewed
    company/standard role assignments and definition lifecycle review without
    changing L1 raw identity.
-2. **DM-M2 — Derived metric materialization.** Consume one definition and
-   eligible M6 handoff, calculate an immutable `derived_metric` row with
-   formula/input lineage and explicit unavailable outputs.
 3. **DM-M3 — Series and as-of metric selection.** Build same-company metric
    series without mixing periods, bases, or definition versions.
 4. **DM-M4 — Metric capability and consumer API.** Expose available metric
