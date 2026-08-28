@@ -42,6 +42,12 @@ from sec_xbrl.longitudinal.series import (
     CompanySeriesResult,
     MemberOrderingView,
 )
+from sec_xbrl.longitudinal.capability import (
+    CAPABILITY_INVENTORY_VERSION,
+    CapabilityInventoryMaterializer,
+    CapabilityInventoryQuery,
+    CapabilityInventoryResult,
+)
 
 __all__ = [
     "DEFAULT_LAYER2_ROOT",
@@ -59,6 +65,10 @@ __all__ = [
     "CompanySeriesMaterializer",
     "CompanySeriesResult",
     "CurrentSeries",
+    "CAPABILITY_INVENTORY_VERSION",
+    "CapabilityInventoryMaterializer",
+    "CapabilityInventoryQuery",
+    "CapabilityInventoryResult",
     "Layer1SnapshotInput",
     "Layer2MaterializationError",
     "Layer2Publication",

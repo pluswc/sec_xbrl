@@ -284,7 +284,10 @@ def _normalize_datasets(
     unknown = set(datasets) - LOGICAL_DATASETS
     if unknown:
         raise Layer2MaterializationError(f"unknown Layer 2 logical datasets: {sorted(unknown)}")
-    if "analytical_fact" not in datasets and not ({"annual_series_candidate", "current_series_candidate"} & set(datasets)):
+    if (
+        "analytical_fact" not in datasets
+        and not ({"annual_series_candidate", "current_series_candidate", "capability_inventory"} & set(datasets))
+    ):
         raise Layer2MaterializationError(
             "candidate requires analytical_fact or an L2-M3 series candidate dataset"
         )
@@ -333,6 +336,8 @@ def _validate_candidate(run: Layer2Run, datasets: Mapping[str, Sequence[Mapping[
                 pass
             elif dataset == "structural_change":
                 _validate_structural_change(row, mappings_by_id)
+            elif dataset == "capability_inventory":
+                _validate_capability_inventory(row)
             try:
                 _canonical_json(row)
             except (TypeError, ValueError) as exc:
@@ -534,6 +539,28 @@ def _validate_structural_change(
         )
 
 
+def _validate_capability_inventory(row: Mapping[str, Any]) -> None:
+    """Require capability status and drill-down evidence to be explicit."""
+    required = ("capability_inventory_id", "capability_type", "capability_status",
+                "period_classes", "series_types", "source_fact_ids", "source_filing_ids",
+                "source_role_ids", "source_disclosure_ids", "capability_inventory_version")
+    missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
+    if missing:
+        raise Layer2MaterializationError(f"capability_inventory missing provenance: {missing}")
+    if row["capability_status"] not in {
+        "AVAILABLE", "PROCESSING_UNAVAILABLE", "MAPPING_REVIEW_REQUIRED", "NOT_COMPARABLE"
+    }:
+        raise Layer2MaterializationError("capability_inventory has unsupported capability_status")
+    if row["capability_status"] == "AVAILABLE" and row.get("status_reason") is not None:
+        raise Layer2MaterializationError("available capability_inventory row cannot have status_reason")
+    if row["capability_status"] != "AVAILABLE" and not row.get("status_reason"):
+        raise Layer2MaterializationError("unavailable capability_inventory row requires status_reason")
+    if row["capability_type"] not in {"CONCEPT", "DIMENSION_MEMBER", "COMPANY_COVERAGE"}:
+        raise Layer2MaterializationError("capability_inventory has unsupported capability_type")
+    if row["capability_type"] == "DIMENSION_MEMBER" and not row.get("axis_raw_concept_id"):
+        raise Layer2MaterializationError("dimension capability requires observed axis")
+
+
 def _record_id(dataset: str, row: Mapping[str, Any]) -> str:
     if dataset == "analytical_fact":
         return str(row.get("analytical_fact_id") or "")
@@ -541,6 +568,8 @@ def _record_id(dataset: str, row: Mapping[str, Any]) -> str:
         return str(row.get("series_candidate_id") or "")
     if dataset == "series_candidate_exclusion":
         return str(row.get("series_candidate_exclusion_id") or "")
+    if dataset == "capability_inventory":
+        return str(row.get("capability_inventory_id") or "")
     for key in ("id", f"{dataset}_id", "fact_id", "source_raw_id", "event_id"):
         if row.get(key):
             return str(row[key])
