@@ -58,10 +58,15 @@ class AnalyticalFactMaterializer:
         candidates = tuple(_selection_candidate(row) for row in (*annual_candidates, *current_candidates))
         evidence = tuple(validate_recast_evidence(row) for row in recast_evidence)
         self._validate_candidates(candidates)
-        cik_by_raw_fact = {
-            str(row.get("source_raw_fact_id") or row.get("source_fact_id")): row.get("cik")
-            for row in candidates
-        }
+        cik_by_raw_fact: dict[str, Any] = {}
+        for row in candidates:
+            cik = row.get("cik")
+            for source_id in (
+                row.get("source_raw_fact_id"), row.get("source_fact_id"),
+                *(row.get("source_fact_ids") or ()),
+            ):
+                if source_id:
+                    cik_by_raw_fact[str(source_id)] = cik
         evidence = tuple(
             {
                 **row,
@@ -101,12 +106,12 @@ class AnalyticalFactMaterializer:
         # selected basis produces PERIOD_NOT_AVAILABLE... rather than omitting
         # history.  Non-evidence rows are made ineligible by clearing their
         # supplied basis at this trust boundary.
-        eligible_ids = {str(row.get("source_raw_fact_id") or row.get("fact_id")) for row in comparable_rows}
+        eligible_ids = {_observation_identity(row) for row in comparable_rows}
         governed = []
         for row in all_rows:
             copied = dict(row)
-            raw_id = str(copied.get("source_raw_fact_id") or copied.get("fact_id") or "")
-            if raw_id not in eligible_ids:
+            observation_id = _observation_identity(copied)
+            if observation_id not in eligible_ids:
                 copied["basis_version"] = None
                 if copied.get("source_type") != "RECAST_REPORTED":
                     copied["source_type"] = "REPORTED"
@@ -117,12 +122,22 @@ class AnalyticalFactMaterializer:
             for row in all_rows
             if row.get("selection_unavailable_reason")
         }
+        derived_periods = {
+            _selection_scope(row)
+            for row in all_rows if row.get("reported_or_derived") == "DERIVED"
+        }
         return tuple(
             {
                 **row,
-                "unavailable_reason": review_periods.get(_selection_scope(row), row.get("unavailable_reason")),
+                "unavailable_reason": (
+                    review_periods.get(_selection_scope(row))
+                    or ("DERIVED_RECAST_EVIDENCE_REQUIRED" if _selection_scope(row) in derived_periods else None)
+                    or row.get("unavailable_reason")
+                ),
             }
-            if row.get("source_type") == "UNAVAILABLE" and _selection_scope(row) in review_periods
+            if row.get("source_type") == "UNAVAILABLE" and (
+                _selection_scope(row) in review_periods or _selection_scope(row) in derived_periods
+            )
             else row
             for row in selected
         )
@@ -156,6 +171,11 @@ def _selection_candidate(source: Mapping[str, Any]) -> dict[str, Any]:
     row = dict(source)
     if not row.get("source_raw_fact_id") and row.get("source_fact_id"):
         row["source_raw_fact_id"] = row["source_fact_id"]
+    if row.get("reported_or_derived") == "DERIVED" and not row.get("derived_observation_id"):
+        # M3 carries the originating M1 derived ID when available.  The
+        # candidate ID is a deterministic fallback identity for the governed
+        # selection boundary; it is never presented as a raw SEC Fact.
+        row["derived_observation_id"] = row.get("source_period_observation_id") or row.get("series_candidate_id")
     if not row.get("period_key") and row.get("actual_period_key"):
         row["period_key"] = row["actual_period_key"]
     return row
@@ -169,11 +189,23 @@ def _selection_scope(row: Mapping[str, Any]) -> tuple[object, ...]:
     )
 
 
+def _observation_identity(row: Mapping[str, Any]) -> str:
+    if row.get("derived_observation_id"):
+        return "derived:" + str(row["derived_observation_id"])
+    return "fact:" + str(row.get("source_raw_fact_id") or row.get("fact_id") or "")
+
+
 def _analytical_fact(row: Mapping[str, Any], *, durable_view: str) -> dict[str, Any]:
-    unavailable = row.get("source_type") == "UNAVAILABLE" or row.get("selection_unavailable_reason")
+    derived_without_governance = (
+        row.get("reported_or_derived") == "DERIVED"
+        and row.get("source_type") != "DERIVED_RECAST"
+    )
+    unavailable = row.get("source_type") == "UNAVAILABLE" or row.get("selection_unavailable_reason") or derived_without_governance
     source_type = "UNAVAILABLE" if unavailable else str(row.get("source_type") or "REPORTED")
     reason = row.get("selection_unavailable_reason") or row.get("unavailable_reason")
-    selected = None if unavailable else row.get("selected_raw_fact_id")
+    if derived_without_governance:
+        reason = "DERIVED_RECAST_EVIDENCE_REQUIRED"
+    selected = None if unavailable or source_type == "DERIVED_RECAST" else row.get("selected_raw_fact_id")
     period_key = str(row.get("period_key") or row.get("actual_period_key") or "")
     identity = (durable_view, row.get("as_of_date"), row.get("series_type"), row.get("cik"),
                 row.get("company_canonical_concept_id"), row.get("company_canonical_dimension_key"),
@@ -194,6 +226,7 @@ def _analytical_fact(row: Mapping[str, Any], *, durable_view: str) -> dict[str, 
         "value_text": None if unavailable else row.get("value_text"),
         "selected_fact_id": selected,
         "source_fact_ids": row.get("source_fact_ids"),
+        "derived_observation_id": row.get("derived_observation_id"),
         "source_filing_id": None if unavailable else row.get("source_filing_id"),
         "filed_date": None if unavailable else row.get("filed_date"),
         "mapping_version": row.get("mapping_version"),

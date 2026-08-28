@@ -295,6 +295,10 @@ def _validate_candidate(run: Layer2Run, datasets: Mapping[str, Sequence[Mapping[
     input_ciks = {row.cik for row in run.inputs}
     counts: dict[str, int] = {}
     mappings_by_id: dict[str, Mapping[str, Any]] = {}
+    recast_by_id: dict[str, list[Mapping[str, Any]]] = {}
+    for row in datasets.get("recast_evidence", ()):
+        _validate_recast_evidence(row)
+        recast_by_id.setdefault(str(row["recast_evidence_id"]), []).append(row)
     for dataset in _MAPPING_DATASETS:
         for row in datasets.get(dataset, ()):
             _validate_company_mapping(dataset, row)
@@ -316,9 +320,11 @@ def _validate_candidate(run: Layer2Run, datasets: Mapping[str, Sequence[Mapping[
                 raise Layer2MaterializationError(f"duplicate {dataset} record identity: {record_id}")
             seen_ids.add(record_id)
             if dataset == "analytical_fact":
-                _validate_analytical_fact(row)
+                _validate_analytical_fact(row, recast_by_id)
             elif dataset == "recast_evidence":
-                _validate_recast_evidence(row)
+                # Checked before facts so evidence references can be validated
+                # regardless of logical-dataset insertion order.
+                pass
             elif dataset in {"annual_series_candidate", "current_series_candidate"}:
                 _validate_series_candidate(dataset, row)
             elif dataset in _MAPPING_DATASETS:
@@ -335,7 +341,9 @@ def _validate_candidate(run: Layer2Run, datasets: Mapping[str, Sequence[Mapping[
     return dict(sorted(counts.items()))
 
 
-def _validate_analytical_fact(row: Mapping[str, Any]) -> None:
+def _validate_analytical_fact(
+    row: Mapping[str, Any], recast_by_id: Mapping[str, Sequence[Mapping[str, Any]]] | None = None
+) -> None:
     if not row.get("analytical_fact_id"):
         raise Layer2MaterializationError("analytical_fact requires analytical_fact_id")
     source_type = str(row.get("source_type") or "")
@@ -352,11 +360,11 @@ def _validate_analytical_fact(row: Mapping[str, Any]) -> None:
         return
     if row.get("view") not in {"AS_FILED", "CURRENT_COMPARABLE"}:
         raise Layer2MaterializationError("analytical_fact has unsupported view")
-    if not selected_fact_id:
+    if source_type != "DERIVED_RECAST" and not selected_fact_id:
         raise Layer2MaterializationError("analytical_fact requires selected raw Fact ID")
     if unavailable_reason:
         raise Layer2MaterializationError("available analytical_fact cannot have unavailable_reason")
-    if has_numeric and not selected_fact_id:
+    if has_numeric and not selected_fact_id and source_type != "DERIVED_RECAST":
         raise Layer2MaterializationError("numeric analytical_fact requires selected raw Fact ID")
     required = ("view", "as_of_date", "selection_rule_version")
     missing = [key for key in required if not row.get(key)]
@@ -366,10 +374,36 @@ def _validate_analytical_fact(row: Mapping[str, Any]) -> None:
         raise Layer2MaterializationError("RECAST_REPORTED analytical_fact requires recast_evidence_id")
     if source_type == "DERIVED_RECAST" and (
         not row.get("source_fact_ids") or not row.get("derivation_rule_version")
+        or not row.get("derived_observation_id") or not row.get("recast_evidence_id")
     ):
         raise Layer2MaterializationError(
             "DERIVED_RECAST analytical_fact requires source Fact IDs and derivation rule version"
         )
+    if source_type in {"RECAST_REPORTED", "DERIVED_RECAST"}:
+        _validate_recast_reference(row, recast_by_id or {})
+
+
+def _validate_recast_reference(
+    fact: Mapping[str, Any], evidence_by_id: Mapping[str, Sequence[Mapping[str, Any]]]
+) -> None:
+    """Require a selected recast value to resolve inside this atomic run."""
+    evidence_id = str(fact.get("recast_evidence_id") or "")
+    candidates = evidence_by_id.get(evidence_id, ())
+    for evidence in candidates:
+        common = ("cik", "source_filing_id", "basis_version")
+        if any(fact.get(key) != evidence.get(key) for key in common):
+            continue
+        if fact.get("source_type") == "RECAST_REPORTED":
+            if fact.get("selected_fact_id") == evidence.get("source_raw_fact_id"):
+                return
+        elif (
+            fact.get("derived_observation_id") == evidence.get("source_derived_observation_id")
+            and evidence.get("source_raw_fact_id") in set(fact.get("source_fact_ids") or ())
+        ):
+            return
+    raise Layer2MaterializationError(
+        "recast analytical_fact must resolve to compatible recast_evidence in the same candidate"
+    )
 
 
 def _validate_recast_evidence(row: Mapping[str, Any]) -> None:
@@ -384,6 +418,8 @@ def _validate_recast_evidence(row: Mapping[str, Any]) -> None:
         raise Layer2MaterializationError(f"recast_evidence missing provenance: {missing}")
     if row.get("explicitly_represented") is not True:
         raise Layer2MaterializationError("recast_evidence requires explicit re-presentation evidence")
+    if row.get("source_derived_observation_id") is not None and not row.get("source_raw_fact_id"):
+        raise Layer2MaterializationError("derived recast evidence requires a compatible source raw Fact")
 
 
 def _validate_series_candidate(dataset: str, row: Mapping[str, Any]) -> None:

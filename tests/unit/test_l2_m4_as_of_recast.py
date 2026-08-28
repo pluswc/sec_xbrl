@@ -117,3 +117,49 @@ def test_m4_result_is_directly_publishable_with_evidence_lineage(tmp_path) -> No
     )
     published = Layer2Publisher(tmp_path / "layer2").publish(run, result.as_datasets())
     assert published.output_counts == {"analytical_fact": 2, "recast_evidence": 1}
+
+
+def test_derived_recast_is_comparable_only_with_inputs_rule_and_evidence() -> None:
+    previous = _candidate("old-q4", "fy25-10k", "2026-02-25", "FY25-Q4", "80")
+    derived = {
+        **_candidate("placeholder", "fy26-10k", "2027-02-25", "FY25-Q4", "90"),
+        "source_fact_id": None,
+        "source_fact_ids": ("fy-new", "ytd-new"),
+        "derived_observation_id": "derived-q4-new",
+        "reported_or_derived": "DERIVED",
+        "derivation_rule_version": "q4-subtraction-v1",
+        "formula": "FY - YTD_9M",
+    }
+    evidence = {
+        **_evidence("fy-new", "FY25-Q4"),
+        "source_filing_id": "fy26-10k",
+        "source_derived_observation_id": "derived-q4-new",
+        "prior_source_filing_ids": ("fy25-10k",),
+    }
+    result = AnalyticalFactMaterializer().materialize(
+        current_candidates=(previous, derived), recast_evidence=(evidence,), as_of_date="2027-02-26"
+    )
+    comparable = next(row for row in result.analytical_facts if row["view"] == "CURRENT_COMPARABLE")
+    assert comparable["source_type"] == "DERIVED_RECAST"
+    assert comparable["value_numeric"] == "90"
+    assert comparable["selected_fact_id"] is None
+    assert comparable["source_fact_ids"] == ("fy-new", "ytd-new")
+
+
+def test_derived_candidate_without_governed_lineage_is_unavailable() -> None:
+    derived = {
+        **_candidate("placeholder", "fy26-10k", "2027-02-25", "FY25-Q4", "90"),
+        "source_fact_id": None,
+        "source_fact_ids": (),
+        "derived_observation_id": "derived-q4-new",
+        "reported_or_derived": "DERIVED",
+        "derivation_rule_version": None,
+        "formula": None,
+    }
+    result = AnalyticalFactMaterializer().materialize(
+        current_candidates=(derived,), as_of_date="2027-02-26"
+    )
+    assert {row["source_type"] for row in result.analytical_facts} == {"UNAVAILABLE"}
+    assert {row["unavailable_reason"] for row in result.analytical_facts} == {
+        "DERIVED_RECAST_EVIDENCE_REQUIRED"
+    }
