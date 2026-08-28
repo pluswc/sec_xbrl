@@ -343,6 +343,14 @@ def _validate_candidate(run: Layer2Run, datasets: Mapping[str, Sequence[Mapping[
             except (TypeError, ValueError) as exc:
                 raise Layer2MaterializationError(f"{dataset} row is not canonical JSON serializable") from exc
         counts[dataset] = len(rows)
+    if "capability_inventory" in datasets:
+        covered_ciks = {str(row.get("cik")) for row in datasets["capability_inventory"]}
+        missing_ciks = sorted(input_ciks - covered_ciks)
+        if missing_ciks:
+            raise Layer2MaterializationError(
+                "capability_inventory requires explicit coverage for every declared input CIK: "
+                + ", ".join(missing_ciks)
+            )
     return dict(sorted(counts.items()))
 
 
@@ -557,8 +565,20 @@ def _validate_capability_inventory(row: Mapping[str, Any]) -> None:
         raise Layer2MaterializationError("unavailable capability_inventory row requires status_reason")
     if row["capability_type"] not in {"CONCEPT", "DIMENSION_MEMBER", "COMPANY_COVERAGE"}:
         raise Layer2MaterializationError("capability_inventory has unsupported capability_type")
-    if row["capability_type"] == "DIMENSION_MEMBER" and not row.get("axis_raw_concept_id"):
-        raise Layer2MaterializationError("dimension capability requires observed axis")
+    if row["capability_type"] == "DIMENSION_MEMBER" and (
+        not row.get("axis_raw_concept_id") or not row.get("member_raw_concept_id")
+    ):
+        raise Layer2MaterializationError(
+            "dimension capability requires observed axis and member"
+        )
+    if row["capability_type"] in {"CONCEPT", "DIMENSION_MEMBER"}:
+        required_observed = ("raw_concept_id", "source_fact_ids", "source_filing_ids")
+        missing_observed = [key for key in required_observed if not row.get(key)]
+        if missing_observed:
+            raise Layer2MaterializationError(
+                "observed capability requires raw concept and source Fact/filing lineage: "
+                + ", ".join(missing_observed)
+            )
 
 
 def _record_id(dataset: str, row: Mapping[str, Any]) -> str:
