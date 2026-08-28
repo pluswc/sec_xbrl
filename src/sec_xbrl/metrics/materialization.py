@@ -77,6 +77,7 @@ class DerivedMetricMaterializer:
         candidates: Iterable[Mapping[str, Any]],
         compatibility: Mapping[str, Any],
         selected_observation_values: Iterable[Mapping[str, Any]],
+        evaluated_at: str,
     ) -> dict[str, Any]:
         """Create one immutable output, after registry and value-lineage gates.
 
@@ -86,6 +87,7 @@ class DerivedMetricMaterializer:
         This deliberate separation lets M0 reject values in its handoff while
         still allowing M1 to calculate from selected L2 observations.
         """
+        _timestamp(evaluated_at)
         definition = self.registry.resolve(definition_id)
         if definition.category is not MetricCategory.DERIVED:
             raise DerivedMetricMaterializationError("only DERIVED definitions can be materialized")
@@ -99,46 +101,28 @@ class DerivedMetricMaterializer:
                 definition_id=definition_id, candidates=candidate_rows, compatibility=compatibility
             )
         except MetricDefinitionError as exc:
-            raise DerivedMetricMaterializationError(str(exc)) from exc
-        values = _bind_selected_values(candidate_rows, selected_observation_values)
-        input_values = tuple(
-            values[str(row["metric_input_candidate_id"])] for row in candidate_rows
-        )
-        calculated = _calculate(definition.metric_id, input_values)
+            return _unavailable_record(
+                definition, compatibility, candidate_rows, evaluated_at, f"M6_HANDOFF_INVALID:{exc}"
+            )
+        try:
+            values = _bind_selected_values(candidate_rows, selected_observation_values)
+            input_values = tuple(
+                values[str(row["metric_input_candidate_id"])] for row in candidate_rows
+            )
+            calculated = _calculate(definition.metric_id, input_values)
+        except DerivedMetricMaterializationError as exc:
+            return _unavailable_record(
+                definition,
+                compatibility,
+                candidate_rows,
+                evaluated_at,
+                f"INPUT_VALUE_UNAVAILABLE:{exc}",
+            )
         formula = definition.formula
         if formula is None:  # registry protects this, retained as a hard boundary.
             raise DerivedMetricMaterializationError("derived definition lacks formula provenance")
-        ordered_lineage = tuple(
-            {
-                "metric_input_candidate_id": row["metric_input_candidate_id"],
-                "analytical_fact_id": row["analytical_fact_id"],
-                "selected_fact_id": row.get("selected_fact_id"),
-                "source_fact_ids": tuple(row.get("source_fact_ids") or ()),
-                "source_filing_id": row["source_filing_id"],
-                "view": row["view"],
-                "as_of_date": row["as_of_date"],
-                "basis_version": row["basis_version"],
-                "period_class": row["period_class"],
-                "period_key": row["period_key"],
-                "company_canonical_dimension_key": row["company_canonical_dimension_key"],
-                "unit_semantics": row["unit_semantics"],
-                "mapping_version": row["mapping_version"],
-                "source_type": row["source_type"],
-                "value_decimal": _decimal_text(value["value_decimal"]),
-            }
-            for row, value in zip(candidate_rows, input_values, strict=True)
-        )
-        identity = (
-            definition_id,
-            compatibility["cik"],
-            compatibility["view"],
-            compatibility["as_of_date"],
-            compatibility["period_key"],
-            repr(compatibility["company_canonical_dimension_key"]),
-            tuple(row["metric_input_candidate_id"] for row in candidate_rows),
-        )
-        return {
-            "derived_metric_id": _id("derived-metric", identity),
+        ordered_lineage = _ordered_lineage(candidate_rows, values)
+        return _record_base(definition, compatibility, candidate_rows, ordered_lineage) | {
             "metric_definition_id": definition.definition_id,
             "metric_id": definition.metric_id,
             "metric_definition_version": definition.version,
@@ -148,6 +132,9 @@ class DerivedMetricMaterializer:
             "calculation_status": "AVAILABLE",
             "unavailable_reason": None,
             "metric_value_decimal": _decimal_text(calculated),
+            "source_type": "DERIVED_METRIC",
+            "calculated_at": evaluated_at,
+            "evaluated_at": evaluated_at,
             "metric_unit_semantics": definition.output_unit_semantics,
             "cik": compatibility["cik"],
             "view": compatibility["view"],
@@ -318,6 +305,101 @@ def _bind_selected_values(
     return bound
 
 
+def _record_base(
+    definition: Any,
+    compatibility: Mapping[str, Any],
+    candidates: Sequence[Mapping[str, Any]],
+    ordered_lineage: tuple[dict[str, Any], ...],
+) -> dict[str, Any]:
+    """Keep an unavailable evaluation as traceable as a successful one."""
+    scope = dict(compatibility)
+    template = candidates[0] if candidates else {}
+    def field(name: str) -> Any:
+        return scope.get(name, template.get(name))
+
+    identity = (
+        definition.definition_id,
+        field("cik"), field("view"), field("as_of_date"), field("period_key"),
+        repr(field("company_canonical_dimension_key")),
+        tuple(row.get("metric_input_candidate_id") for row in candidates),
+        scope.get("metric_input_compatibility_id"),
+    )
+    return {
+        "derived_metric_id": _id("derived-metric", identity),
+        "metric_definition_id": definition.definition_id,
+        "metric_id": definition.metric_id,
+        "metric_definition_version": definition.version,
+        "formula_id": definition.formula.formula_id if definition.formula else None,
+        "formula_version": definition.formula.formula_version if definition.formula else None,
+        "formula_expression": definition.formula.expression if definition.formula else None,
+        "metric_unit_semantics": definition.output_unit_semantics,
+        "cik": field("cik"),
+        "view": field("view"),
+        "as_of_date": field("as_of_date"),
+        "basis_version": field("basis_version"),
+        "series_type": field("series_type"),
+        "period_class": field("period_class"),
+        "period_key": field("period_key"),
+        "comparison_period_key": scope.get("comparison_period_key"),
+        "company_canonical_dimension_key": field("company_canonical_dimension_key"),
+        "input_unit_semantics": field("unit_semantics"),
+        "mapping_versions": tuple(scope.get("mapping_versions") or ()),
+        "metric_input_handoff_version": scope.get("metric_input_handoff_version"),
+        "metric_input_compatibility_id": scope.get("metric_input_compatibility_id"),
+        "ordered_input_candidate_ids": tuple(row.get("metric_input_candidate_id") for row in candidates),
+        "ordered_input_analytical_fact_ids": tuple(row.get("analytical_fact_id") for row in candidates),
+        "ordered_input_selected_fact_ids": tuple(row.get("selected_fact_id") for row in candidates),
+        "ordered_input_lineage": ordered_lineage,
+        "derived_metrics_contract_version": DERIVED_METRICS_CONTRACT_VERSION,
+    }
+
+
+def _ordered_lineage(
+    candidates: Sequence[Mapping[str, Any]], values: Mapping[str, Mapping[str, Any]] | None = None
+) -> tuple[dict[str, Any], ...]:
+    return tuple(
+        {
+            "metric_input_candidate_id": row.get("metric_input_candidate_id"),
+            "analytical_fact_id": row.get("analytical_fact_id"),
+            "selected_fact_id": row.get("selected_fact_id"),
+            "source_fact_ids": tuple(row.get("source_fact_ids") or ()),
+            "source_filing_id": row.get("source_filing_id"),
+            "view": row.get("view"),
+            "as_of_date": row.get("as_of_date"),
+            "basis_version": row.get("basis_version"),
+            "period_class": row.get("period_class"),
+            "period_key": row.get("period_key"),
+            "company_canonical_dimension_key": row.get("company_canonical_dimension_key"),
+            "unit_semantics": row.get("unit_semantics"),
+            "mapping_version": row.get("mapping_version"),
+            "source_type": row.get("source_type"),
+            "value_decimal": (
+                _decimal_text(values[str(row["metric_input_candidate_id"])]["value_decimal"])
+                if values is not None and str(row.get("metric_input_candidate_id")) in values
+                else None
+            ),
+        }
+        for row in candidates
+    )
+
+
+def _unavailable_record(
+    definition: Any,
+    compatibility: Mapping[str, Any],
+    candidates: Sequence[Mapping[str, Any]],
+    evaluated_at: str,
+    reason: str,
+) -> dict[str, Any]:
+    return _record_base(definition, compatibility, candidates, _ordered_lineage(candidates)) | {
+        "calculation_status": "UNAVAILABLE",
+        "unavailable_reason": reason,
+        "metric_value_decimal": None,
+        "source_type": "DERIVED_METRIC",
+        "calculated_at": None,
+        "evaluated_at": evaluated_at,
+    }
+
+
 def _calculate(metric_id: str, values: Sequence[Mapping[str, Any]]) -> Decimal:
     operands = [value["value_decimal"] for value in values]
     if metric_id in {"gross_margin", "operating_margin"}:
@@ -351,6 +433,13 @@ def _decimal_text(value: Decimal) -> str:
     return format(value.normalize(), "f") if value else "0"
 
 
+def _timestamp(value: str) -> None:
+    try:
+        datetime.fromisoformat(value)
+    except (AttributeError, ValueError) as exc:
+        raise DerivedMetricMaterializationError("evaluation timestamp must be ISO-8601") from exc
+
+
 def _validate_records(rows: Sequence[Mapping[str, Any]]) -> None:
     ids: set[str] = set()
     required = (
@@ -360,7 +449,8 @@ def _validate_records(rows: Sequence[Mapping[str, Any]]) -> None:
         "formula_id",
         "formula_version",
         "calculation_status",
-        "metric_value_decimal",
+        "source_type",
+        "evaluated_at",
         "cik",
         "view",
         "as_of_date",
@@ -376,20 +466,32 @@ def _validate_records(rows: Sequence[Mapping[str, Any]]) -> None:
             raise DerivedMetricMaterializationError(
                 "derived_metric lacks required provenance: " + ", ".join(missing)
             )
-        if (
-            row.get("calculation_status") != "AVAILABLE"
-            or row.get("unavailable_reason") is not None
-        ):
+        if row.get("source_type") != "DERIVED_METRIC":
+            raise DerivedMetricMaterializationError("derived_metric requires DERIVED_METRIC source type")
+        status = row.get("calculation_status")
+        if status not in {"AVAILABLE", "UNAVAILABLE"}:
             raise DerivedMetricMaterializationError(
-                "M1 publisher accepts only successfully calculated metrics"
+                "derived_metric has unsupported calculation status"
             )
         if row["derived_metric_id"] in ids:
             raise DerivedMetricMaterializationError("duplicate derived_metric identity")
         ids.add(str(row["derived_metric_id"]))
-        _decimal(row["metric_value_decimal"])
+        _timestamp(str(row["evaluated_at"]))
+        if status == "AVAILABLE":
+            if row.get("unavailable_reason") is not None or row.get("metric_value_decimal") is None:
+                raise DerivedMetricMaterializationError("available derived_metric requires numeric value only")
+            if not row.get("calculated_at"):
+                raise DerivedMetricMaterializationError("available derived_metric requires calculation timestamp")
+            _timestamp(str(row["calculated_at"]))
+            _decimal(row["metric_value_decimal"])
+        else:
+            if not row.get("unavailable_reason") or row.get("metric_value_decimal") is not None:
+                raise DerivedMetricMaterializationError(
+                    "unavailable derived_metric requires reason and no numeric value"
+                )
         if len(row["ordered_input_candidate_ids"]) != len(row["ordered_input_lineage"]):
             raise DerivedMetricMaterializationError("derived metric input lineage is incomplete")
-        if not all(
+        if status == "AVAILABLE" and not all(
             item.get("selected_fact_id") or item.get("source_fact_ids")
             for item in row["ordered_input_lineage"]
         ):

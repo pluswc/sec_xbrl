@@ -112,6 +112,7 @@ def test_m6_to_registry_to_materialized_margin_keeps_full_lineage() -> None:
         candidates=candidates,
         compatibility=diagnostic,
         selected_observation_values=_inputs(candidates, facts),
+        evaluated_at="2026-08-28T00:00:00+00:00",
     )
     assert row["metric_value_decimal"] == "40"
     assert row["metric_unit_semantics"] == "PERCENT"
@@ -133,12 +134,13 @@ def test_growth_uses_declared_predecessor_and_decimal_percent() -> None:
         candidates=candidates,
         compatibility=diagnostic,
         selected_observation_values=_inputs(candidates, facts),
+        evaluated_at="2026-08-28T00:00:00+00:00",
     )
     assert row["metric_value_decimal"] == "25"
     assert row["comparison_period_key"] == "FY25-Q1"
 
 
-def test_missing_or_mismatched_selected_value_never_calculates() -> None:
+def test_missing_or_mismatched_selected_value_is_reasoned_unavailable() -> None:
     facts = (
         _fact("revenue", "us-gaap:Revenues", "200"),
         _fact("gross", "us-gaap:GrossProfit", "80"),
@@ -148,23 +150,27 @@ def test_missing_or_mismatched_selected_value_never_calculates() -> None:
     candidates = _candidates(handoff, diagnostic)
     values = list(_inputs(candidates, facts))
     values[0]["basis_version"] = "wrong-basis"
-    with pytest.raises(DerivedMetricMaterializationError, match="provenance mismatch"):
-        DerivedMetricMaterializer(seed_metric_registry()).materialize(
-            definition_id="gross_margin@1.0.0",
-            candidates=candidates,
-            compatibility=diagnostic,
-            selected_observation_values=values,
-        )
-    with pytest.raises(DerivedMetricMaterializationError, match="no selected observation value"):
-        DerivedMetricMaterializer(seed_metric_registry()).materialize(
-            definition_id="gross_margin@1.0.0",
-            candidates=candidates,
-            compatibility=diagnostic,
-            selected_observation_values=(),
-        )
+    row = DerivedMetricMaterializer(seed_metric_registry()).materialize(
+        definition_id="gross_margin@1.0.0",
+        candidates=candidates,
+        compatibility=diagnostic,
+        selected_observation_values=values,
+        evaluated_at="2026-08-28T00:00:00+00:00",
+    )
+    assert row["calculation_status"] == "UNAVAILABLE"
+    assert row["metric_value_decimal"] is None
+    assert "provenance mismatch" in row["unavailable_reason"]
+    row = DerivedMetricMaterializer(seed_metric_registry()).materialize(
+        definition_id="gross_margin@1.0.0",
+        candidates=candidates,
+        compatibility=diagnostic,
+        selected_observation_values=(),
+        evaluated_at="2026-08-28T00:00:00+00:00",
+    )
+    assert "no selected observation value" in row["unavailable_reason"]
 
 
-def test_ineligible_handoff_direct_observation_and_q4_eligibility_only_are_rejected() -> None:
+def test_ineligible_handoff_is_unavailable_and_direct_q4_are_rejected() -> None:
     facts = (_fact("revenue", "us-gaap:Revenues", "200"),)
     handoff = _handoff(*facts)
     unavailable = next(
@@ -172,19 +178,22 @@ def test_ineligible_handoff_direct_observation_and_q4_eligibility_only_are_rejec
     )
     candidate = next(row for row in handoff.candidates if row["analytical_fact_id"] == "revenue")
     materializer = DerivedMetricMaterializer(seed_metric_registry())
-    with pytest.raises(DerivedMetricMaterializationError, match="not eligible"):
-        materializer.materialize(
-            definition_id="gross_margin@1.0.0",
-            candidates=(candidate,),
-            compatibility=unavailable,
-            selected_observation_values=_inputs((candidate,), facts),
-        )
+    row = materializer.materialize(
+        definition_id="gross_margin@1.0.0",
+        candidates=(candidate,),
+        compatibility=unavailable,
+        selected_observation_values=_inputs((candidate,), facts),
+        evaluated_at="2026-08-28T00:00:00+00:00",
+    )
+    assert row["calculation_status"] == "UNAVAILABLE"
+    assert row["source_type"] == "DERIVED_METRIC"
     with pytest.raises(DerivedMetricMaterializationError, match="only DERIVED"):
         materializer.materialize(
             definition_id="eps@1.0.0",
             candidates=(),
             compatibility={},
             selected_observation_values=(),
+            evaluated_at="2026-08-28T00:00:00+00:00",
         )
     with pytest.raises(DerivedMetricMaterializationError, match="eligibility-only"):
         materializer.materialize(
@@ -192,7 +201,31 @@ def test_ineligible_handoff_direct_observation_and_q4_eligibility_only_are_rejec
             candidates=(),
             compatibility={},
             selected_observation_values=(),
+            evaluated_at="2026-08-28T00:00:00+00:00",
         )
+
+
+def test_zero_denominator_is_unavailable_with_evaluation_lineage() -> None:
+    facts = (
+        _fact("revenue", "us-gaap:Revenues", "0"),
+        _fact("gross", "us-gaap:GrossProfit", "80"),
+    )
+    handoff = _handoff(*facts)
+    diagnostic = _eligible(handoff, "GROSS_MARGIN")
+    candidates = _candidates(handoff, diagnostic)
+    row = DerivedMetricMaterializer(seed_metric_registry()).materialize(
+        definition_id="gross_margin@1.0.0",
+        candidates=candidates,
+        compatibility=diagnostic,
+        selected_observation_values=_inputs(candidates, facts),
+        evaluated_at="2026-08-28T00:00:00+00:00",
+    )
+    assert row["calculation_status"] == "UNAVAILABLE"
+    assert row["metric_value_decimal"] is None
+    assert row["calculated_at"] is None
+    assert row["evaluated_at"] == "2026-08-28T00:00:00+00:00"
+    assert "denominator is zero" in row["unavailable_reason"]
+    assert row["ordered_input_lineage"][0]["selected_fact_id"] == "raw:gross"
 
 
 def test_atomic_publisher_reuses_same_run_and_rejects_different_output(tmp_path: Path) -> None:
@@ -208,6 +241,7 @@ def test_atomic_publisher_reuses_same_run_and_rejects_different_output(tmp_path:
         candidates=candidates,
         compatibility=diagnostic,
         selected_observation_values=_inputs(candidates, facts),
+        evaluated_at="2026-08-28T00:00:00+00:00",
     )
     run = DerivedMetricsRun(
         "m1-fixture", "layer2-fingerprint", METRIC_REGISTRY_CONTRACT_VERSION, "seed-v1"
@@ -220,3 +254,23 @@ def test_atomic_publisher_reuses_same_run_and_rejects_different_output(tmp_path:
     changed = {**record, "metric_value_decimal": "25.1"}
     with pytest.raises(DerivedMetricMaterializationError, match="different output"):
         publisher.publish(run, (changed,))
+
+
+def test_publisher_keeps_unavailable_metric_non_numeric(tmp_path: Path) -> None:
+    facts = (_fact("revenue", "us-gaap:Revenues", "0"), _fact("gross", "us-gaap:GrossProfit", "80"))
+    handoff = _handoff(*facts)
+    diagnostic = _eligible(handoff, "GROSS_MARGIN")
+    candidates = _candidates(handoff, diagnostic)
+    record = DerivedMetricMaterializer(seed_metric_registry()).materialize(
+        definition_id="gross_margin@1.0.0",
+        candidates=candidates,
+        compatibility=diagnostic,
+        selected_observation_values=_inputs(candidates, facts),
+        evaluated_at="2026-08-28T00:00:00+00:00",
+    )
+    run = DerivedMetricsRun("unavailable-fixture", "layer2-fingerprint", METRIC_REGISTRY_CONTRACT_VERSION, "seed-v1")
+    output = DerivedMetricPublisher(tmp_path / "metrics").publish(run, (record,))
+    assert output.output_count == 1
+    invalid = {**record, "metric_value_decimal": "999"}
+    with pytest.raises(DerivedMetricMaterializationError, match="reason and no numeric"):
+        DerivedMetricPublisher(tmp_path / "bad").publish(run, (invalid,))

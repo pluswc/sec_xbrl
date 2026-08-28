@@ -26,8 +26,12 @@ That decision remains M6's governed handoff.
 Calculations use finite `Decimal` values.  Both ratios and growth rates are
 stored as percentage points (multiplied by 100), which is part of this formula
 version's output convention.  Zero denominators, absent values, duplicate
-bindings, mismatched provenance, or non-eligible diagnostics fail closed; no
-numeric record is created.
+bindings, mismatched provenance, or non-eligible diagnostics fail closed.  M1
+publishes an immutable `UNAVAILABLE` record with the diagnostic, input lineage,
+and explicit reason, but no numeric value.  Available and unavailable records
+are both marked `source_type=DERIVED_METRIC`; an available record has a
+`calculated_at` timestamp while an unavailable evaluation retains
+`evaluated_at` and has `calculated_at=null`.
 
 `q4_flow_eligibility@1.0.0` remains `ELIGIBILITY_ONLY` in the M0 registry, so
 M1 does not publish a Q4 metric value from it.  EPS and weighted-average shares
