@@ -29,7 +29,11 @@ The supported logical dataset names are the L2 plan's `period_observation`,
 `period_observation_exclusion`,
 `company_concept_map`, `company_axis_map`, `company_member_map`,
 `structural_change`, `analytical_fact`, `recast_evidence`, and
-`capability_inventory`.  The candidate must include `analytical_fact`.
+`capability_inventory`, plus L2-M3's `annual_series_candidate`,
+`current_series_candidate`, and `series_candidate_exclusion`.  A candidate
+must include `analytical_fact` **or** at least one M3 series-candidate dataset.
+The latter is deliberately not an `analytical_fact`: it has not gone through
+the M4 as-of/recast selection gate.
 
 Each row must identify a CIK included in the declared Layer 1 inputs.  An
 `analytical_fact` has a unique `analytical_fact_id` and follows this hard gate:

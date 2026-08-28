@@ -225,6 +225,11 @@ value descending, without changing the series data.
 Revenue-breakdown candidates with source Fact, filing, and mapping-version
 drill-down.
 
+**Implemented boundary.** `CompanySeriesMaterializer` publishes the atomic
+publisher-ready Annual/Current candidate datasets.  It does not select an
+`analytical_fact`, infer a recast, calculate a Metric, or make an Excel view;
+those remain L2-M4 and later consumer responsibilities.
+
 ### L2-M4 — As-of selection and recast/basis control
 
 **Objective.** Select governed values without overwriting history or mixing
