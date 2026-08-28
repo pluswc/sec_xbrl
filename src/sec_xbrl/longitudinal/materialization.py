@@ -415,13 +415,20 @@ def _validate_structural_change(
     linked_fields = (
         "cik",
         "source_raw_id",
+        "source_raw_concept_id",
         "company_canonical_id",
         "valid_from_filing_id",
+        "valid_from_period",
         "mapping_version",
+        "continuity_break",
         "review_required",
         "review_state",
     )
     mismatched = [key for key in linked_fields if row.get(key) != mapping.get(key)]
+    if row.get("filing_id") != mapping.get("source_filing_id"):
+        mismatched.append("filing_id/source_filing_id")
+    if row.get("entity_type") != mapping.get("entity_type"):
+        mismatched.append("entity_type")
     if mismatched:
         raise Layer2MaterializationError(
             f"structural_change does not match linked mapping fields: {mismatched}"

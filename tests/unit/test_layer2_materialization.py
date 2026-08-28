@@ -256,6 +256,61 @@ def test_publisher_rejects_controlled_structural_event_without_matching_map(tmp_
         )
 
 
+@pytest.mark.parametrize(
+    "field, value",
+    [("filing_id", "other-filing"), ("continuity_break", True)],
+)
+def test_publisher_rejects_structural_event_with_mismatched_shared_mapping_fields(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    mapping = {
+        "mapping_id": "company-map:real",
+        "cik": "0000320193",
+        "entity_type": "concept",
+        "source_raw_id": "raw-revenue",
+        "source_raw_concept_id": "raw-revenue",
+        "source_filing_id": "filing-aapl-q2",
+        "company_canonical_id": "company:0000320193:concept:revenue",
+        "valid_from_filing_id": "filing-aapl-q2",
+        "valid_from_period": "2026-03-28",
+        "relation": "SAME",
+        "method": "RAW_IDENTITY_BASELINE",
+        "evidence": {"raw": "raw-revenue"},
+        "mapping_version": "map-v1",
+        "continuity_break": False,
+        "review_required": False,
+        "review_state": "AUTO_ACCEPTED",
+    }
+    event: dict[str, object] = {
+        "event_id": "controlled-event",
+        "cik": "0000320193",
+        "filing_id": "filing-aapl-q2",
+        "source_raw_id": "raw-revenue",
+        "source_raw_concept_id": "raw-revenue",
+        "company_canonical_id": "company:0000320193:concept:revenue",
+        "mapping_id": "company-map:real",
+        "entity_type": "concept",
+        "event_type": "NEW_CONCEPT",
+        "valid_from_filing_id": "filing-aapl-q2",
+        "valid_from_period": "2026-03-28",
+        "mapping_version": "map-v1",
+        "continuity_break": False,
+        "review_required": False,
+        "review_state": "AUTO_ACCEPTED",
+        "evidence": {"raw": "raw-revenue"},
+    }
+    event[field] = value
+    with pytest.raises(Layer2MaterializationError, match="does not match linked mapping"):
+        Layer2Publisher(tmp_path / "layer2").publish(
+            _run(),
+            {
+                "analytical_fact": _datasets()["analytical_fact"],
+                "company_concept_map": [mapping],
+                "structural_change": [event],
+            },
+        )
+
+
 @pytest.mark.parametrize("field", ("form", "filed_date", "report_date"))
 def test_run_rejects_layer1_input_without_required_filing_provenance(field: str) -> None:
     values: dict[str, object] = {

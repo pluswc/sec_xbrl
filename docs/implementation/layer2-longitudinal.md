@@ -137,9 +137,10 @@ created from value continuity alone.
 At publication, a `structural_change.mapping_id` must resolve to exactly one
 mapping row in one of the three company-map datasets in the **same atomic
 candidate**.  Its CIK, raw ID, canonical ID, validity filing, mapping version,
-and review state must match that map.  An event-only candidate, fabricated
-mapping ID, or mismatched canonical ID fails closed rather than becoming a
-standalone disclosure claim.
+continuity-break flag, and review state must match that map; the event filing
+and entity type must equal the map's source filing and entity type.  An
+event-only candidate, fabricated mapping ID, or mismatched canonical ID fails
+closed rather than becoming a standalone disclosure claim.
 
 ## M7 materialization boundary
 
