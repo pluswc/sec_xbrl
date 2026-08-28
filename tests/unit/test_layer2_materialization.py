@@ -117,6 +117,50 @@ def test_analytical_fact_cannot_publish_without_lineage_or_reason(
     assert not (tmp_path / "layer2" / _run().run_version).exists()
 
 
+def test_recast_evidence_cannot_publish_without_explicit_basis_binding(tmp_path: Path) -> None:
+    evidence = {
+        "recast_evidence_id": "evidence-1",
+        "cik": "0000320193",
+        "source_filing_id": "filing-2",
+        "source_raw_fact_id": "fact-2",
+        "target_period_key": "FY26-Q1",
+        "basis_version": "basis-v2",
+        "evidence_kind": "TABLE",
+        "source_document": "filing.htm",
+        "source_locator": "Note 1",
+        "prior_source_filing_ids": ("filing-1",),
+        "evidence_version": "m9-recast-evidence-v1",
+        "explicitly_represented": False,
+    }
+    with pytest.raises(Layer2MaterializationError, match="explicit re-presentation"):
+        Layer2Publisher(tmp_path / "layer2").publish(
+            _run(),
+            {"analytical_fact": [_datasets()["analytical_fact"][0]], "recast_evidence": [evidence]},
+        )
+
+
+def test_recast_analytical_fact_requires_matching_same_run_evidence(tmp_path: Path) -> None:
+    fact = {
+        "analytical_fact_id": "recast-fact", "cik": "0000320193",
+        "view": "CURRENT_COMPARABLE", "as_of_date": "2026-05-01",
+        "source_type": "RECAST_REPORTED", "selected_fact_id": "new-fact",
+        "source_filing_id": "filing-2", "basis_version": "basis-v2", "value_numeric": "120",
+        "recast_evidence_id": "evidence-1", "selection_rule_version": "selection-v1",
+    }
+    evidence = {
+        "recast_evidence_id": "evidence-1", "cik": "0000320193",
+        "source_filing_id": "filing-2", "source_raw_fact_id": "other-fact",
+        "target_period_key": "FY26-Q1", "basis_version": "basis-v2",
+        "evidence_kind": "TABLE", "source_document": "filing.htm", "source_locator": "Note 1",
+        "prior_source_filing_ids": ("filing-1",), "evidence_version": "m9-recast-evidence-v1",
+        "explicitly_represented": True,
+    }
+    with pytest.raises(Layer2MaterializationError, match="must resolve to compatible recast_evidence"):
+        Layer2Publisher(tmp_path / "layer2").publish(
+            _run(), {"analytical_fact": [fact], "recast_evidence": [evidence]}
+        )
+
+
 def test_failed_validation_leaves_no_partial_published_run(tmp_path: Path) -> None:
     with pytest.raises(Layer2MaterializationError, match="outside declared inputs"):
         Layer2Publisher(tmp_path / "layer2").publish(

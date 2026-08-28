@@ -198,6 +198,29 @@ QTD member group, it selects the latest valid QTD observation, then sorts those
 members by numeric value descending with deterministic member/typed-member
 ties and nulls last.  It never changes candidate keys, rows, or time-series
 order.
+
+## L2-M4 governed analytical-fact materialization
+
+`AnalyticalFactMaterializer` is the only Layer 2 producer that changes an M3
+candidate into an `analytical_fact`.  It publishes the durable consumer views
+`AS_FILED` and `CURRENT_COMPARABLE` together with the reviewed
+`recast_evidence` rows that make a comparable selection explainable.
+
+`AS_FILED` preserves the first directly reported observation available by the
+requested `as_of_date`.  A later comparative fact does not overwrite it.
+`CURRENT_COMPARABLE` invokes `LATEST_RECAST`, but has a stricter admission
+boundary: its reported inputs must have a validated evidence binding from
+`RecastObservationBuilder`; caller-provided changed values, labels, filing
+order, or basis labels are not enough.  A governed derived-recast input must
+also carry its compatible source Fact IDs and derivation-rule version.
+
+The selection passes all target periods to the mechanism.  Therefore if the
+latest selected basis has no compatible observation for a period, it publishes
+`source_type=UNAVAILABLE` and
+`PERIOD_NOT_AVAILABLE_IN_SELECTED_BASIS`; it never fills that cell from an
+older basis.  A mapping-review candidate is likewise an explicit
+`MAPPING_REVIEW_REQUIRED` unavailable result.  Each output retains selection,
+mapping, recast, filing, raw-Fact, and (when applicable) derivation lineage.
 # L2-M1 period-observation boundary
 
 `PeriodObservationMaterializer` is the first durable Layer 2 producer.  It

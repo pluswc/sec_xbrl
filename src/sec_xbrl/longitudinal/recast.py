@@ -42,14 +42,17 @@ class RecastObservationBuilder:
         evidence: Iterable[Mapping[str, Any]] = (),
     ) -> tuple[dict[str, Any], ...]:
         rows = [deepcopy(dict(row)) for row in observations]
-        by_fact = {
-            _raw_fact_id(row): row for row in rows if _raw_fact_id(row)
+        by_fact = {_raw_fact_id(row): row for row in rows if _raw_fact_id(row)}
+        by_derived = {
+            str(row["derived_observation_id"]): row
+            for row in rows if row.get("derived_observation_id")
         }
-        evidence_rows = [_validated_evidence(row) for row in evidence]
+        evidence_rows = [validate_recast_evidence(row) for row in evidence]
         bound: dict[str, dict[str, Any]] = {}
         for item in evidence_rows:
             source_id = item["source_raw_fact_id"]
-            source = by_fact.get(source_id)
+            derived_id = item.get("source_derived_observation_id")
+            source = by_derived.get(str(derived_id)) if derived_id else by_fact.get(source_id)
             if source is None:
                 raise RecastObservationError(
                     f"recast evidence {item['recast_evidence_id']} references unknown "
@@ -61,16 +64,24 @@ class RecastObservationBuilder:
                 raise RecastObservationError("recast evidence source filing does not match source Fact")
             if _period_key(source) != item["target_period_key"]:
                 raise RecastObservationError("recast evidence target period does not match source Fact")
+            if derived_id and source_id not in {
+                str(value) for value in source.get("source_fact_ids") or ()
+            }:
+                raise RecastObservationError(
+                    "derived recast evidence source raw Fact must be a compatible derived input"
+                )
             if item["source_filing_id"] in item["prior_source_filing_ids"]:
                 raise RecastObservationError("recast evidence cannot cite its own filing as a prior filing")
-            if source_id in bound:
-                raise RecastObservationError("one raw Fact cannot be bound to two recast evidence records")
-            bound[source_id] = item
+            bound_key = "derived:" + str(derived_id) if derived_id else "fact:" + source_id
+            if bound_key in bound:
+                raise RecastObservationError("one source observation cannot be bound to two recast evidence records")
+            bound[bound_key] = item
 
         result: list[dict[str, Any]] = []
         for row in rows:
             source_id = _raw_fact_id(row)
-            item = bound.get(source_id)
+            derived_id = row.get("derived_observation_id")
+            item = bound.get("derived:" + str(derived_id)) if derived_id else bound.get("fact:" + source_id)
             if item is None:
                 # This is a trust boundary.  Do not accept a caller-supplied
                 # RECAST_REPORTED flag, basis, or evidence ID: an observation
@@ -97,7 +108,7 @@ class RecastObservationBuilder:
             result.append({
                 **row,
                 "source_raw_fact_id": source_id,
-                "source_type": "RECAST_REPORTED",
+                "source_type": "DERIVED_RECAST" if derived_id else "RECAST_REPORTED",
                 "basis_version": item["basis_version"],
                 "recast_evidence_id": item["recast_evidence_id"],
                 "recast_evidence": item,
@@ -107,7 +118,8 @@ class RecastObservationBuilder:
         return tuple(sorted(result, key=lambda row: (_scope_key(row), _raw_fact_id(row))))
 
 
-def _validated_evidence(value: Mapping[str, Any]) -> dict[str, Any]:
+def validate_recast_evidence(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate one reviewed evidence binding without materializing a Fact."""
     row = deepcopy(dict(value))
     required = (
         "recast_evidence_id", "source_filing_id", "source_raw_fact_id", "target_period_key",
@@ -125,6 +137,8 @@ def _validated_evidence(value: Mapping[str, Any]) -> dict[str, Any]:
     if not prior_ids:
         raise RecastObservationError("recast evidence must identify earlier source filing(s)")
     row["prior_source_filing_ids"] = prior_ids
+    if row.get("source_derived_observation_id") is not None:
+        row["source_derived_observation_id"] = str(row["source_derived_observation_id"])
     row["evidence_version"] = RECAST_EVIDENCE_VERSION
     return row
 
