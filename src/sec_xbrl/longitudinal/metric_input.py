@@ -145,6 +145,9 @@ def _candidate(row: Mapping[str, Any]) -> dict[str, Any]:
         "selected_fact_id": row.get("selected_fact_id"),
         "source_fact_ids": tuple(row.get("source_fact_ids") or ()),
         "source_filing_id": row.get("source_filing_id"),
+        # Preserve the evidence binding needed by a downstream direct-observation
+        # definition to distinguish a reported recast from an unsupported value.
+        "recast_evidence_id": row.get("recast_evidence_id"),
         "view": row.get("view"),
         "as_of_date": row.get("as_of_date"),
         "basis_version": row.get("basis_version"),
@@ -376,6 +379,25 @@ def _diagnostic(
             )
         ),
         "required_input_roles": required_roles,
+        "input_metric_input_candidate_ids": tuple(
+            _id("metric-input", (row.get("analytical_fact_id"), row.get("metric_input_role")))
+            for row in inputs
+        ),
+        # An assessment can rename an input's source role.  For example both
+        # revenue-growth candidates retain source role REVENUE while their
+        # ordered assessment roles are CURRENT_REVENUE and PRIOR_REVENUE.
+        "input_role_bindings": tuple(
+            {
+                "metric_input_candidate_id": _id(
+                    "metric-input", (row.get("analytical_fact_id"), row.get("metric_input_role"))
+                ),
+                "assessment_input_role": required_role,
+            }
+            # Unavailable diagnostics may deliberately contain fewer inputs
+            # than declared roles.  Eligible records are validated downstream
+            # to have a complete one-to-one binding.
+            for row, required_role in zip(inputs, required_roles)
+        ),
         "input_analytical_fact_ids": tuple(row["analytical_fact_id"] for row in inputs),
         "input_selected_fact_ids": tuple(
             row.get("selected_fact_id") for row in inputs if row.get("selected_fact_id")
