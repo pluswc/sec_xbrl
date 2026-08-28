@@ -373,6 +373,8 @@ def _ordered_lineage(
             "unit_semantics": row.get("unit_semantics"),
             "mapping_version": row.get("mapping_version"),
             "source_type": row.get("source_type"),
+            "recast_evidence_id": row.get("recast_evidence_id"),
+            "derivation_rule_version": row.get("derivation_rule_version"),
             "value_decimal": (
                 _decimal_text(values[str(row["metric_input_candidate_id"])]["value_decimal"])
                 if values is not None and str(row.get("metric_input_candidate_id")) in values

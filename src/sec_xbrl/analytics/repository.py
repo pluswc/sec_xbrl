@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
+
+from sec_xbrl.metrics.series import DerivedMetricSeriesMaterializer
 
 
 class AnalyticalRepositoryError(LookupError):
@@ -46,6 +49,7 @@ class AnalyticalRepository:
         concepts: Iterable[Mapping[str, Any]] = (),
         facts: Iterable[Mapping[str, Any]] = (),
         series: Iterable[Mapping[str, Any]] = (),
+        metric_series_run_roots: Iterable[Path] = (),
         comparisons: Iterable[Mapping[str, Any]] = (),
     ) -> None:
         self._companies = _copy_rows(companies)
@@ -53,6 +57,12 @@ class AnalyticalRepository:
         self._concepts = _copy_rows(concepts)
         self._facts = _copy_rows(facts)
         self._series = _copy_rows(series)
+        metric_materializer = DerivedMetricSeriesMaterializer()
+        self._metric_series_candidates = tuple(
+            candidate
+            for root in metric_series_run_roots
+            for candidate in metric_materializer.load_published_candidates(Path(root))
+        )
         self._comparisons = _copy_rows(comparisons)
         self._filings_by_id = {
             str(row["filing_id"]): row for row in self._filings if row.get("filing_id")
@@ -132,6 +142,39 @@ class AnalyticalRepository:
             and _within_period(row, start, end)
         ]
         return tuple(self._with_provenance(row, _company_for_row(row, resolved)) for row in _sort_rows(rows))
+
+    def get_metric_series(
+        self,
+        company: str,
+        metric: str,
+        *,
+        as_of_date: str,
+        view: str,
+        frequency: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        definition_version: str | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        """Read a governed same-company metric series without recalculation.
+
+        Callers must choose both the historical view and its date.  The facade
+        only selects immutable M1 revisions; it never substitutes a basis,
+        infers a metric from a label, or evaluates a formula.
+        """
+        resolved = self.resolve_company(company)
+        candidates = [
+            row
+            for row in self._metric_series_candidates
+            if _row_is_company(row, resolved)
+            and metric in {str(row.get("metric_id") or ""), str(row.get("metric_definition_id") or "")}
+            and (frequency is None or str(row.get("period_class") or "") == frequency)
+            and (definition_version is None or str(row.get("metric_definition_version") or "") == definition_version)
+            and _within_period(row, start, end)
+        ]
+        selected = DerivedMetricSeriesMaterializer().select(
+            candidates, as_of_date=as_of_date, view=view
+        )
+        return tuple(self._with_provenance(row, resolved) for row in selected)
 
     def trace_fact(self, fact_id: str) -> dict[str, Any]:
         """Return one provenance-enriched reported or derived fact by stable ID."""
@@ -223,7 +266,7 @@ def _concept_matches(row: Mapping[str, Any], selector: str) -> bool:
 
 
 def _period_value(row: Mapping[str, Any]) -> str | None:
-    for key in ("source_period", "report_period", "period_end"):
+    for key in ("source_period", "report_period", "period_end", "period_key"):
         value = row.get(key)
         if value is not None:
             return str(value)
@@ -245,4 +288,3 @@ def _period_range(value: str | tuple[str | None, str | None] | None) -> tuple[st
 
 def _sort_rows(rows: Iterable[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
     return sorted(rows, key=lambda row: (_period_value(row) or "", str(row.get("fact_id") or "")))
-
