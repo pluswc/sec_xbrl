@@ -172,7 +172,9 @@ class MetricRegistry:
         """
         definition = self.resolve(definition_id)
         if definition.category is MetricCategory.DIRECT_OBSERVATION:
-            raise MetricDefinitionError("direct metric requires direct-observation candidate boundary")
+            raise MetricDefinitionError(
+                "direct metric requires direct-observation candidate boundary"
+            )
         _reject_calculated_fields(compatibility)
         _require_schema(compatibility, _COMPATIBILITY_REQUIRED, "compatibility")
         if compatibility.get("metric_definition_id") not in {None, definition_id}:
@@ -187,21 +189,33 @@ class MetricRegistry:
             _reject_calculated_fields(candidate)
             _require_schema(candidate, _CANDIDATE_REQUIRED, "candidate")
             if candidate.get("raw_concept_id") or candidate.get("label"):
-                raise MetricDefinitionError("registry consumes L2-M6 candidates, not raw concept inference")
+                raise MetricDefinitionError(
+                    "registry consumes L2-M6 candidates, not raw concept inference"
+                )
             candidate_id = str(candidate["metric_input_candidate_id"])
             if candidate_id in ids:
                 raise MetricDefinitionError("duplicate metric input candidate")
             ids.add(candidate_id)
             _validate_selected_source(candidate, direct=False)
         expected = tuple(role.value for role in definition.input_roles)
-        compatibility_roles = tuple(str(role) for role in compatibility.get("required_input_roles", ()))
+        compatibility_roles = tuple(
+            str(role) for role in compatibility.get("required_input_roles", ())
+        )
         if compatibility_roles != expected:
             raise MetricDefinitionError("compatibility roles do not match declared definition")
         analytical_ids = tuple(str(candidate["analytical_fact_id"]) for candidate in records)
-        if tuple(str(item) for item in compatibility["input_analytical_fact_ids"]) != analytical_ids:
-            raise MetricDefinitionError("compatibility analytical Fact IDs do not link to candidates")
+        if (
+            tuple(str(item) for item in compatibility["input_analytical_fact_ids"])
+            != analytical_ids
+        ):
+            raise MetricDefinitionError(
+                "compatibility analytical Fact IDs do not link to candidates"
+            )
         candidate_ids = tuple(str(candidate["metric_input_candidate_id"]) for candidate in records)
-        if tuple(str(item) for item in compatibility["input_metric_input_candidate_ids"]) != candidate_ids:
+        if (
+            tuple(str(item) for item in compatibility["input_metric_input_candidate_ids"])
+            != candidate_ids
+        ):
             raise MetricDefinitionError("compatibility candidate IDs do not link to candidates")
         _validate_assessment_role_bindings(compatibility, candidate_ids, expected)
         selected_ids = tuple(
@@ -230,7 +244,9 @@ class MetricRegistry:
         _reject_calculated_fields(record)
         _require_schema(record, _CANDIDATE_REQUIRED, "candidate")
         if record.get("raw_concept_id") or record.get("label"):
-            raise MetricDefinitionError("registry consumes L2-M6 candidates, not raw concept inference")
+            raise MetricDefinitionError(
+                "registry consumes L2-M6 candidates, not raw concept inference"
+            )
         expected = definition.input_roles[0].value
         if record.get("metric_input_role") != expected:
             raise MetricDefinitionError("candidate role does not match direct definition")
@@ -246,10 +262,17 @@ class MetricRegistry:
             if not definition.input_roles:
                 raise MetricDefinitionError("metric definition requires declared input roles")
             if not all(
-                (definition.period_policy, definition.basis_policy, definition.dimension_policy,
-                 definition.output_unit_semantics, definition.output_semantics,
-                 definition.definition_source, definition.reviewed_by, definition.reviewed_at,
-                 definition.change_note)
+                (
+                    definition.period_policy,
+                    definition.basis_policy,
+                    definition.dimension_policy,
+                    definition.output_unit_semantics,
+                    definition.output_semantics,
+                    definition.definition_source,
+                    definition.reviewed_by,
+                    definition.reviewed_at,
+                    definition.change_note,
+                )
             ):
                 raise MetricDefinitionError("metric definition lacks required governance metadata")
             if definition.status is DefinitionStatus.ACTIVE:
@@ -258,19 +281,25 @@ class MetricRegistry:
                 active_by_metric.add(definition.metric_id)
             if definition.category is MetricCategory.DERIVED:
                 if definition.formula is None:
-                    raise MetricDefinitionError("derived metric requires declarative formula metadata")
+                    raise MetricDefinitionError(
+                        "derived metric requires declarative formula metadata"
+                    )
                 if definition.direct_observation_required:
                     raise MetricDefinitionError("derived metric cannot require direct observation")
             else:
                 if definition.formula is not None:
                     raise MetricDefinitionError("direct observation metric cannot define a formula")
                 if not definition.direct_observation_required:
-                    raise MetricDefinitionError("direct observation metric requires direct-observation policy")
+                    raise MetricDefinitionError(
+                        "direct observation metric requires direct-observation policy"
+                    )
             if definition.metric_id in definition.dependency_metric_ids:
                 raise MetricDefinitionError("metric definition cannot depend on itself")
             unknown = set(definition.dependency_metric_ids) - all_metric_ids
             if unknown:
-                raise MetricDefinitionError(f"metric definition has unknown dependencies: {sorted(unknown)}")
+                raise MetricDefinitionError(
+                    f"metric definition has unknown dependencies: {sorted(unknown)}"
+                )
         self._reject_dependency_cycles()
 
     def _reject_dependency_cycles(self) -> None:
@@ -300,7 +329,9 @@ class MetricRegistry:
             return
         for candidate in candidates:
             if candidate.get("candidate_status") != "DIRECT_OBSERVATION_ONLY":
-                raise MetricDefinitionError("direct metric requires direct-observation-only candidate")
+                raise MetricDefinitionError(
+                    "direct metric requires direct-observation-only candidate"
+                )
             if candidate.get("source_type") not in {"REPORTED", "RECAST_REPORTED"}:
                 raise MetricDefinitionError("direct metric cannot use derived source type")
             if not candidate.get("selected_fact_id"):
@@ -314,7 +345,9 @@ class MetricRegistry:
 def _reject_calculated_fields(record: Mapping[str, Any]) -> None:
     found = sorted(field for field in _PROHIBITED_HANDOFF_FIELDS if field in record)
     if found:
-        raise MetricDefinitionError(f"definition registry cannot accept calculated value fields: {found}")
+        raise MetricDefinitionError(
+            f"definition registry cannot accept calculated value fields: {found}"
+        )
 
 
 def _require_schema(record: Mapping[str, Any], required: tuple[str, ...], name: str) -> None:
@@ -330,7 +363,10 @@ def _require_schema(record: Mapping[str, Any], required: tuple[str, ...], name: 
 
 
 def _validate_selected_source(candidate: Mapping[str, Any], *, direct: bool) -> None:
-    if candidate.get("candidate_status") == "UNAVAILABLE" or candidate.get("source_type") == "UNAVAILABLE":
+    if (
+        candidate.get("candidate_status") == "UNAVAILABLE"
+        or candidate.get("source_type") == "UNAVAILABLE"
+    ):
         raise MetricDefinitionError("unavailable L2-M6 candidate cannot enter metric definition")
     source_type = str(candidate.get("source_type"))
     if source_type not in {"REPORTED", "RECAST_REPORTED", "DERIVED_RECAST"}:
@@ -338,7 +374,9 @@ def _validate_selected_source(candidate: Mapping[str, Any], *, direct: bool) -> 
     selected = candidate.get("selected_fact_id")
     source_ids = tuple(candidate.get("source_fact_ids") or ())
     if not selected and not source_ids:
-        raise MetricDefinitionError("candidate lacks selected raw Fact or derived source Fact lineage")
+        raise MetricDefinitionError(
+            "candidate lacks selected raw Fact or derived source Fact lineage"
+        )
     if source_type in {"REPORTED", "RECAST_REPORTED"} and not selected:
         raise MetricDefinitionError("reported candidate requires selected raw Fact lineage")
     if source_type == "RECAST_REPORTED" and not candidate.get("recast_evidence_id"):
@@ -390,7 +428,9 @@ def _validate_governed_scope(
 
 
 def _validate_assessment_role_bindings(
-    compatibility: Mapping[str, Any], candidate_ids: tuple[str, ...], expected_roles: tuple[str, ...]
+    compatibility: Mapping[str, Any],
+    candidate_ids: tuple[str, ...],
+    expected_roles: tuple[str, ...],
 ) -> None:
     bindings = compatibility.get("input_role_bindings")
     if not isinstance(bindings, (tuple, list)):
@@ -420,6 +460,7 @@ def seed_metric_registry() -> MetricRegistry:
         "reviewed_at": "2026-08-28",
         "change_note": "initial controlled definition",
     }
+
     def formula(metric: str, expression: str) -> FormulaMetadata:
         return FormulaMetadata(
             formula_id=f"formula:{metric}",
@@ -428,45 +469,106 @@ def seed_metric_registry() -> MetricRegistry:
             sign_convention="reported sign retained",
             scaling_convention="input scaling must match governed unit semantics",
         )
+
     return MetricRegistry(
         (
             MetricDefinition(
-                "gross_margin", "1.0.0", DefinitionStatus.ACTIVE, MetricCategory.DERIVED,
-                (MetricInputRole.GROSS_PROFIT, MetricInputRole.REVENUE), "SAME_PERIOD",
-                "SAME_BASIS", "FULL_SIGNATURE_EQUAL", "PERCENT", "RATIO",
-                formula("gross_margin", "GROSS_PROFIT / REVENUE"), False, (), **audit,
-            ),
-            MetricDefinition(
-                "operating_margin", "1.0.0", DefinitionStatus.ACTIVE, MetricCategory.DERIVED,
-                (MetricInputRole.OPERATING_INCOME, MetricInputRole.REVENUE), "SAME_PERIOD",
-                "SAME_BASIS", "FULL_SIGNATURE_EQUAL", "PERCENT", "RATIO",
-                formula("operating_margin", "OPERATING_INCOME / REVENUE"), False, (), **audit,
-            ),
-            MetricDefinition(
-                "revenue_growth", "1.0.0", DefinitionStatus.ACTIVE, MetricCategory.DERIVED,
-                (MetricInputRole.CURRENT_REVENUE, MetricInputRole.PRIOR_REVENUE),
-                "DECLARED_PREDECESSOR", "SAME_BASIS", "FULL_SIGNATURE_EQUAL", "PERCENT",
-                "GROWTH_RATE", formula("revenue_growth", "CURRENT_REVENUE / PRIOR_REVENUE - 1"),
-                False, (), **audit,
-            ),
-            MetricDefinition(
-                "q4_flow_eligibility", "1.0.0", DefinitionStatus.ACTIVE, MetricCategory.DERIVED,
-                (MetricInputRole.CONTROLLED_Q4_FLOW,), "CONTROLLED_Q4", "SAME_BASIS",
-                "FULL_SIGNATURE_EQUAL", "INPUT_UNIT", "ELIGIBILITY_ONLY",
-                formula("q4_flow_eligibility", "controlled input eligibility; no value calculation"),
-                False, (), **audit,
-            ),
-            MetricDefinition(
-                "eps", "1.0.0", DefinitionStatus.ACTIVE, MetricCategory.DIRECT_OBSERVATION,
-                (MetricInputRole.EPS,), "REPORTED_PERIOD", "REPORTED_OR_EVIDENCE_BOUND_RECAST",
-                "FULL_SIGNATURE_EQUAL", "PER_SHARE", "DIRECT_REPORTED_OBSERVATION", None, True, (),
+                "gross_margin",
+                "1.0.0",
+                DefinitionStatus.ACTIVE,
+                MetricCategory.DERIVED,
+                (MetricInputRole.GROSS_PROFIT, MetricInputRole.REVENUE),
+                "SAME_PERIOD",
+                "SAME_BASIS",
+                "FULL_SIGNATURE_EQUAL",
+                "PERCENT",
+                "RATIO",
+                formula("gross_margin", "GROSS_PROFIT / REVENUE"),
+                False,
+                (),
                 **audit,
             ),
             MetricDefinition(
-                "weighted_average_shares", "1.0.0", DefinitionStatus.ACTIVE,
-                MetricCategory.DIRECT_OBSERVATION, (MetricInputRole.WEIGHTED_AVERAGE_SHARES,),
-                "REPORTED_PERIOD", "REPORTED_OR_EVIDENCE_BOUND_RECAST", "FULL_SIGNATURE_EQUAL",
-                "SHARES", "DIRECT_REPORTED_OBSERVATION", None, True, (), **audit,
+                "operating_margin",
+                "1.0.0",
+                DefinitionStatus.ACTIVE,
+                MetricCategory.DERIVED,
+                (MetricInputRole.OPERATING_INCOME, MetricInputRole.REVENUE),
+                "SAME_PERIOD",
+                "SAME_BASIS",
+                "FULL_SIGNATURE_EQUAL",
+                "PERCENT",
+                "RATIO",
+                formula("operating_margin", "OPERATING_INCOME / REVENUE"),
+                False,
+                (),
+                **audit,
+            ),
+            MetricDefinition(
+                "revenue_growth",
+                "1.0.0",
+                DefinitionStatus.ACTIVE,
+                MetricCategory.DERIVED,
+                (MetricInputRole.CURRENT_REVENUE, MetricInputRole.PRIOR_REVENUE),
+                "DECLARED_PREDECESSOR",
+                "SAME_BASIS",
+                "FULL_SIGNATURE_EQUAL",
+                "PERCENT",
+                "GROWTH_RATE",
+                formula("revenue_growth", "CURRENT_REVENUE / PRIOR_REVENUE - 1"),
+                False,
+                (),
+                **audit,
+            ),
+            MetricDefinition(
+                "q4_flow_eligibility",
+                "1.0.0",
+                DefinitionStatus.ACTIVE,
+                MetricCategory.DERIVED,
+                (MetricInputRole.CONTROLLED_Q4_FLOW,),
+                "CONTROLLED_Q4",
+                "SAME_BASIS",
+                "FULL_SIGNATURE_EQUAL",
+                "INPUT_UNIT",
+                "ELIGIBILITY_ONLY",
+                formula(
+                    "q4_flow_eligibility", "controlled input eligibility; no value calculation"
+                ),
+                False,
+                (),
+                **audit,
+            ),
+            MetricDefinition(
+                "eps",
+                "1.0.0",
+                DefinitionStatus.ACTIVE,
+                MetricCategory.DIRECT_OBSERVATION,
+                (MetricInputRole.EPS,),
+                "REPORTED_PERIOD",
+                "REPORTED_OR_EVIDENCE_BOUND_RECAST",
+                "FULL_SIGNATURE_EQUAL",
+                "PER_SHARE",
+                "DIRECT_REPORTED_OBSERVATION",
+                None,
+                True,
+                (),
+                **audit,
+            ),
+            MetricDefinition(
+                "weighted_average_shares",
+                "1.0.0",
+                DefinitionStatus.ACTIVE,
+                MetricCategory.DIRECT_OBSERVATION,
+                (MetricInputRole.WEIGHTED_AVERAGE_SHARES,),
+                "REPORTED_PERIOD",
+                "REPORTED_OR_EVIDENCE_BOUND_RECAST",
+                "FULL_SIGNATURE_EQUAL",
+                "SHARES",
+                "DIRECT_REPORTED_OBSERVATION",
+                None,
+                True,
+                (),
+                **audit,
             ),
         )
     )
