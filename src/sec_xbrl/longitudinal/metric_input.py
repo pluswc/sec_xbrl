@@ -145,6 +145,9 @@ def _candidate(row: Mapping[str, Any]) -> dict[str, Any]:
         "selected_fact_id": row.get("selected_fact_id"),
         "source_fact_ids": tuple(row.get("source_fact_ids") or ()),
         "source_filing_id": row.get("source_filing_id"),
+        # Preserve the evidence binding needed by a downstream direct-observation
+        # definition to distinguish a reported recast from an unsupported value.
+        "recast_evidence_id": row.get("recast_evidence_id"),
         "view": row.get("view"),
         "as_of_date": row.get("as_of_date"),
         "basis_version": row.get("basis_version"),
