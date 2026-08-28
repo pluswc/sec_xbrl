@@ -117,6 +117,28 @@ def test_analytical_fact_cannot_publish_without_lineage_or_reason(
     assert not (tmp_path / "layer2" / _run().run_version).exists()
 
 
+def test_recast_evidence_cannot_publish_without_explicit_basis_binding(tmp_path: Path) -> None:
+    evidence = {
+        "recast_evidence_id": "evidence-1",
+        "cik": "0000320193",
+        "source_filing_id": "filing-2",
+        "source_raw_fact_id": "fact-2",
+        "target_period_key": "FY26-Q1",
+        "basis_version": "basis-v2",
+        "evidence_kind": "TABLE",
+        "source_document": "filing.htm",
+        "source_locator": "Note 1",
+        "prior_source_filing_ids": ("filing-1",),
+        "evidence_version": "m9-recast-evidence-v1",
+        "explicitly_represented": False,
+    }
+    with pytest.raises(Layer2MaterializationError, match="explicit re-presentation"):
+        Layer2Publisher(tmp_path / "layer2").publish(
+            _run(),
+            {"analytical_fact": [_datasets()["analytical_fact"][0]], "recast_evidence": [evidence]},
+        )
+
+
 def test_failed_validation_leaves_no_partial_published_run(tmp_path: Path) -> None:
     with pytest.raises(Layer2MaterializationError, match="outside declared inputs"):
         Layer2Publisher(tmp_path / "layer2").publish(

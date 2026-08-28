@@ -45,7 +45,7 @@ class RecastObservationBuilder:
         by_fact = {
             _raw_fact_id(row): row for row in rows if _raw_fact_id(row)
         }
-        evidence_rows = [_validated_evidence(row) for row in evidence]
+        evidence_rows = [validate_recast_evidence(row) for row in evidence]
         bound: dict[str, dict[str, Any]] = {}
         for item in evidence_rows:
             source_id = item["source_raw_fact_id"]
@@ -107,7 +107,8 @@ class RecastObservationBuilder:
         return tuple(sorted(result, key=lambda row: (_scope_key(row), _raw_fact_id(row))))
 
 
-def _validated_evidence(value: Mapping[str, Any]) -> dict[str, Any]:
+def validate_recast_evidence(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate one reviewed evidence binding without materializing a Fact."""
     row = deepcopy(dict(value))
     required = (
         "recast_evidence_id", "source_filing_id", "source_raw_fact_id", "target_period_key",

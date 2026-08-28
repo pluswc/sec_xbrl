@@ -317,6 +317,8 @@ def _validate_candidate(run: Layer2Run, datasets: Mapping[str, Sequence[Mapping[
             seen_ids.add(record_id)
             if dataset == "analytical_fact":
                 _validate_analytical_fact(row)
+            elif dataset == "recast_evidence":
+                _validate_recast_evidence(row)
             elif dataset in {"annual_series_candidate", "current_series_candidate"}:
                 _validate_series_candidate(dataset, row)
             elif dataset in _MAPPING_DATASETS:
@@ -348,6 +350,8 @@ def _validate_analytical_fact(row: Mapping[str, Any]) -> None:
         if not unavailable_reason:
             raise Layer2MaterializationError("UNAVAILABLE analytical_fact requires unavailable_reason")
         return
+    if row.get("view") not in {"AS_FILED", "CURRENT_COMPARABLE"}:
+        raise Layer2MaterializationError("analytical_fact has unsupported view")
     if not selected_fact_id:
         raise Layer2MaterializationError("analytical_fact requires selected raw Fact ID")
     if unavailable_reason:
@@ -358,6 +362,28 @@ def _validate_analytical_fact(row: Mapping[str, Any]) -> None:
     missing = [key for key in required if not row.get(key)]
     if missing:
         raise Layer2MaterializationError(f"analytical_fact missing selection provenance: {missing}")
+    if source_type == "RECAST_REPORTED" and not row.get("recast_evidence_id"):
+        raise Layer2MaterializationError("RECAST_REPORTED analytical_fact requires recast_evidence_id")
+    if source_type == "DERIVED_RECAST" and (
+        not row.get("source_fact_ids") or not row.get("derivation_rule_version")
+    ):
+        raise Layer2MaterializationError(
+            "DERIVED_RECAST analytical_fact requires source Fact IDs and derivation rule version"
+        )
+
+
+def _validate_recast_evidence(row: Mapping[str, Any]) -> None:
+    """Keep the published evidence table useful independently of its adapter."""
+    required = (
+        "recast_evidence_id", "source_filing_id", "source_raw_fact_id",
+        "target_period_key", "basis_version", "evidence_kind", "source_document",
+        "source_locator", "prior_source_filing_ids", "evidence_version",
+    )
+    missing = [key for key in required if not row.get(key)]
+    if missing:
+        raise Layer2MaterializationError(f"recast_evidence missing provenance: {missing}")
+    if row.get("explicitly_represented") is not True:
+        raise Layer2MaterializationError("recast_evidence requires explicit re-presentation evidence")
 
 
 def _validate_series_candidate(dataset: str, row: Mapping[str, Any]) -> None:

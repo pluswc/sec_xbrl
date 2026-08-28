@@ -26,7 +26,16 @@ from sec_xbrl.longitudinal.period_observation import (
     PeriodObservationMaterializer,
     PeriodObservationResult,
 )
-from sec_xbrl.longitudinal.recast import RecastObservationBuilder, RecastObservationError
+from sec_xbrl.longitudinal.recast import (
+    RecastObservationBuilder,
+    RecastObservationError,
+    validate_recast_evidence,
+)
+from sec_xbrl.longitudinal.selection import (
+    SELECTION_MATERIALIZATION_VERSION,
+    AnalyticalFactMaterializer,
+    AnalyticalFactSelectionResult,
+)
 from sec_xbrl.longitudinal.series import (
     SERIES_RULE_VERSION,
     CompanySeriesMaterializer,
@@ -60,5 +69,9 @@ __all__ = [
     "PeriodObservationResult",
     "RecastObservationBuilder",
     "RecastObservationError",
+    "validate_recast_evidence",
+    "SELECTION_MATERIALIZATION_VERSION",
+    "AnalyticalFactMaterializer",
+    "AnalyticalFactSelectionResult",
     "SeriesBuilder",
 ]
