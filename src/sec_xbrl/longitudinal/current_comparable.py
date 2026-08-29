@@ -86,8 +86,7 @@ class CurrentComparableMaterializer:
         *,
         evidence_registry: Iterable[Mapping[str, Any]] = (),
     ) -> CurrentComparableResult:
-        if not isinstance(publication, VerifiedLayer2Publication) or not publication.is_reader_attested:
-            raise CurrentComparableError("C3-M3 requires a verified C3-M1 publication")
+        _require_attested_publication(publication)
         evidence = ReviewedRecastRegistry().parse(evidence_registry)
         as_filed = tuple(
             dict(row) for row in publication.records("analytical_fact") if row.get("view") == "AS_FILED"
@@ -154,6 +153,7 @@ class CurrentComparablePublisher:
         run_version: str,
         upstream: VerifiedLayer2Publication,
     ) -> CurrentComparablePublication:
+        _require_attested_publication(upstream)
         if not run_version or "/" in run_version or "\\" in run_version:
             raise CurrentComparableError("current comparable run_version must be a non-path identifier")
         rows = {name: tuple(sorted((dict(row) for row in values), key=_canonical_json))
@@ -199,6 +199,7 @@ class CurrentComparablePublicationReader:
     """Read a companion only after its exact upstream and content verification."""
 
     def load(self, run_root: Path, *, upstream: VerifiedLayer2Publication) -> CurrentComparableResult:
+        _require_attested_publication(upstream)
         root, manifest_path = Path(run_root), Path(run_root) / CurrentComparablePublisher.manifest_name
         if not root.is_dir() or root.is_symlink() or not manifest_path.is_file() or manifest_path.is_symlink():
             raise CurrentComparableError("current comparable companion release is missing or unsafe")
@@ -269,6 +270,11 @@ def _validate_evidence(value: Mapping[str, Any]) -> dict[str, Any]:
             )
         )
     return row
+
+
+def _require_attested_publication(publication: object) -> None:
+    if not isinstance(publication, VerifiedLayer2Publication) or not publication.is_reader_attested:
+        raise CurrentComparableError("C3-M3 requires a reader-attested verified C3-M1 publication")
 
 
 def _validate_source_indexes(as_filed: tuple[dict[str, Any], ...], candidates: Mapping[str, dict[str, Any]]) -> None:
