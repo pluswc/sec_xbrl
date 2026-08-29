@@ -60,7 +60,7 @@ class ReviewInventoryMaterializer:
             raise ReviewInventoryError("C3-M5 requires an immutable CorpusRelease")
         if publication.identity.get("layer2_run_fingerprint") != release.layer2_run.fingerprint:
             raise ReviewInventoryError("C3-M1 publication does not match supplied CorpusRelease")
-        if tuple(sorted(publication.input_ciks)) != tuple(sorted(release.ciks)):
+        if set(publication.input_ciks) != set(release.ciks):
             raise ReviewInventoryError("C3-M1 publication company scope does not match supplied CorpusRelease")
         facts = [dict(row) for row in publication.records("analytical_fact")
                  if row.get("view") == "AS_FILED" and row.get("source_type") == "REPORTED"
