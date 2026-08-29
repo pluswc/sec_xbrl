@@ -10,6 +10,13 @@ from sec_xbrl.longitudinal.canonical import (
     MappingTables,
     SeriesBuilder,
 )
+from sec_xbrl.longitudinal.corpus_release import (
+    RAW_TABLES,
+    CorpusRelease,
+    CorpusReleaseAdapter,
+    CorpusReleaseError,
+    CorpusSnapshot,
+)
 from sec_xbrl.longitudinal.capability import (
     CAPABILITY_INVENTORY_VERSION,
     CapabilityInventoryMaterializer,
@@ -77,6 +84,10 @@ __all__ = [
     "CompanySeriesMaterializer",
     "CompanySeriesResult",
     "CurrentSeries",
+    "CorpusRelease",
+    "CorpusReleaseAdapter",
+    "CorpusReleaseError",
+    "CorpusSnapshot",
     "Layer1SnapshotInput",
     "Layer2MaterializationError",
     "Layer2Publication",
@@ -94,6 +105,7 @@ __all__ = [
     "PeriodObservationResult",
     "RecastObservationBuilder",
     "RecastObservationError",
+    "RAW_TABLES",
     "SeriesBuilder",
     "validate_recast_evidence",
 ]
