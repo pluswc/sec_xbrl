@@ -146,6 +146,13 @@ def test_reader_rejects_bad_jsonl_count_and_manifest_declaration(tmp_path: Path)
     with pytest.raises(Layer2PublicationValidationError, match="fingerprint"):
         Layer2PublicationReader().load(published.run_root)
 
+    published = _publication(tmp_path / "validation")
+    manifest = json.loads(published.manifest_path.read_text(encoding="utf-8"))
+    manifest["validation"] = {}
+    published.manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(Layer2PublicationValidationError, match="successful validation"):
+        Layer2PublicationReader().load(published.run_root)
+
 
 def test_repository_does_not_infer_company_metadata_and_returns_deep_copies(tmp_path: Path) -> None:
     published = _publication(tmp_path)

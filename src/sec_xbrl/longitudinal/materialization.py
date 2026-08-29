@@ -933,7 +933,17 @@ def _validate_manifest_shape(manifest: Mapping[str, Any]) -> None:
     if any(not isinstance(value, str) or len(value) != 64 for value in hashes.values()):
         raise Layer2PublicationValidationError("Layer 2 manifest has invalid content hash")
     validation = manifest["validation"]
-    if not isinstance(validation, dict) or any(value != "SUCCESS" for value in validation.values()):
+    expected_validation = {
+        "ANALYTICAL_FACT_LINEAGE",
+        "RUN_INPUT_AND_VERSION_MANIFEST",
+        "DETERMINISTIC_OUTPUT_IDENTITY",
+        "ATOMIC_PUBLICATION",
+    }
+    if (
+        not isinstance(validation, dict)
+        or set(validation) != expected_validation
+        or any(value != "SUCCESS" for value in validation.values())
+    ):
         raise Layer2PublicationValidationError("Layer 2 manifest did not declare successful validation")
 
 
