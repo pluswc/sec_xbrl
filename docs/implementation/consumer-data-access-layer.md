@@ -8,8 +8,12 @@ API나 MCP 서버를 뜻하지 않으며, Excel 전용 인터페이스도 아니
 전송 계층이 같은 의미의 조회 결과를 사용하게 하는 경계다.
 
 현재의 구현체는 `sec_xbrl.analytics.ConsumerDataAccess` 계약과 이를 구현한
-`AnalyticalRepository`다. Repository는 해시 검증된 발행본을 읽는
-publication-backed 구현체다. 이후 DB 또는 Parquet 구현체도 이 계약을
+`AnalyticalRepository`다. C2에서는 `Layer2PublicationReader`가 원자적으로
+발행된 canonical JSONL Layer 2 run을 manifest·run fingerprint·row count·canonical
+content SHA-256까지 검증한 뒤 Repository를 구성한다. 각 row에는 run version,
+fingerprint, contract version, manifest SHA-256로 이루어진 publication identity가
+남는다. 이는 JSONL publication adapter이며 DB 또는 Parquet adapter는 아직
+구현되지 않았다. 이후 DB 또는 Parquet 구현체도 이 계약을
 충족하면 소비자는 저장 위치를 알 필요가 없다.
 
 ```text
@@ -41,6 +45,7 @@ Raw Layer 1 → Analytical plane → Derived Metrics plane
 | --- | --- | --- |
 | `resolve_company(selector)` | 한 회사를 명시적으로 식별 | 없거나 모호하면 오류; 임의 선택 금지 |
 | `get_fact_series(...)` | Analytical Fact 시계열 | QTD/YTD/FY/INSTANT 혼합 금지 |
+| `get_analytical_facts(...)` | 검증된 L2 `analytical_fact` 직접 조회 | 명시적 view, exact filter, publication identity 보존 |
 | `discover_capabilities(...)` | 실제 적재된 Concept/Axis/Member 탐색 | M5 관측 상태와 원천 근거 보존 |
 | `discover_metrics(...)` | 회사의 검증된 Derived Metric 후보 탐색 | 계산·as-of 선택·basis 대체 금지 |
 | `get_metric_series(...)` | view/as-of를 명시한 Metric 시계열 | 검증된 M1→M2 발행본만 사용 |
@@ -94,6 +99,7 @@ candidate가 없다는 뜻일 뿐, SEC 공시 전체에 해당 Metric이 없다�
 
 DB adapter는 SQL을 사용할 수 있고 Parquet adapter는 파일을 읽을 수 있다.
 그 차이는 구현 세부 사항이며, 소비자 contract 또는 분석 정책의 차이가 아니다.
+현재 C2 JSONL adapter를 DB/Parquet adapter로 표현해서는 안 된다.
 
 ## Current boundary and future work / 현재 범위와 후속 작업
 

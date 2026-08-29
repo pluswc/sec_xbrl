@@ -66,6 +66,20 @@ not a commitment that later high-volume materialization will remain JSONL; a
 Parquet writer may replace the row encoding only while retaining the same
 logical records, keys, manifest, and publication semantics.
 
+### Consumer C2 verified-publication reader
+
+`Layer2PublicationReader` is the read-only consumer-side validator for this
+canonical JSONL layout. Before it exposes any records it reconstructs the run
+declaration and fingerprint, verifies the contract/storage identity, rejects
+staging/partial/unexpected files, parses every JSONL row, re-applies the
+publisher's logical row validation, and checks declared counts and canonical
+content hashes. It returns a publication identity (run version, fingerprint,
+contract version, manifest SHA-256) with every consumer-admitted row.
+
+This is intentionally not a database or Parquet reader. A future physical
+adapter must preserve the same logical datasets and immutable publication
+identity, but is a separate implementation milestone.
+
 The publisher validates every supplied row before staging.  It then writes to
 `<root>/.staging/` and validates row counts and the manifest before one atomic
 directory rename to `<run_version>`.  Any validation or write failure removes
