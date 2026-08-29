@@ -86,7 +86,7 @@ class CurrentComparableMaterializer:
         *,
         evidence_registry: Iterable[Mapping[str, Any]] = (),
     ) -> CurrentComparableResult:
-        if not isinstance(publication, VerifiedLayer2Publication):
+        if not isinstance(publication, VerifiedLayer2Publication) or not publication.is_reader_attested:
             raise CurrentComparableError("C3-M3 requires a verified C3-M1 publication")
         evidence = ReviewedRecastRegistry().parse(evidence_registry)
         as_filed = tuple(
@@ -105,13 +105,20 @@ class CurrentComparableMaterializer:
             source = candidates.get(item["source_series_candidate_id"])
             if source is None:
                 raise CurrentComparableError("recast evidence references unknown source series candidate")
-            _validate_evidence_binding(item, source, by_fact_id)
+            raw = observations.get(
+                (str(source.get("source_filing_id") or ""), str(source.get("source_fact_id") or ""))
+            )
+            if raw is None:
+                raise CurrentComparableError(
+                    "recast source candidate lacks exact period-observation provenance"
+                )
+            _validate_evidence_binding(item, source, raw, by_fact_id)
             if item["source_type"] == "DERIVED_RECAST":
                 _validate_derived_inputs(item, candidates)
             for fact_id in item["prior_analytical_fact_ids"]:
                 if fact_id in bound:
                     raise CurrentComparableError("one AS_FILED fact cannot receive two comparable selections")
-                bound[fact_id] = {"evidence": item, "source": source}
+                bound[fact_id] = {"evidence": item, "source": source, "raw": raw}
 
         result: list[dict[str, Any]] = []
         for historical in as_filed:
@@ -121,9 +128,7 @@ class CurrentComparableMaterializer:
                 result.append(_unavailable(historical, "RECAST_EVIDENCE_NOT_AVAILABLE"))
                 continue
             evidence_row, source = item["evidence"], item["source"]
-            raw = observations.get((str(source.get("source_filing_id") or ""), str(source.get("source_fact_id") or "")))
-            if raw is None:
-                raise CurrentComparableError("recast source candidate lacks exact period-observation provenance")
+            raw = item["raw"]
             if evidence_row["source_type"] == "RECAST_REPORTED":
                 result.append(_reported_recast(historical, source, raw, evidence_row))
             else:
@@ -225,7 +230,7 @@ class CurrentComparablePublicationReader:
 
 def _validate_evidence(value: Mapping[str, Any]) -> dict[str, Any]:
     row = dict(value)
-    required = ("recast_evidence_id", "cik", "company_canonical_concept_id", "company_canonical_dimension_key",
+    required = ("registry_version", "recast_evidence_id", "cik", "company_canonical_concept_id", "company_canonical_dimension_key",
                 "period_class", "target_period_keys", "old_basis_version", "new_basis_version", "source_type",
                 "source_series_candidate_id", "source_filing_id", "source_raw_fact_id", "filed_date",
                 "source_document", "source_locator", "evidence_identity", "evidence_kind", "explicitly_represented",
@@ -233,7 +238,7 @@ def _validate_evidence(value: Mapping[str, Any]) -> dict[str, Any]:
     missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
     if missing:
         raise CurrentComparableError("reviewed recast evidence missing: " + ", ".join(missing))
-    if row.get("registry_version", RECAST_REGISTRY_VERSION) != RECAST_REGISTRY_VERSION:
+    if row.get("registry_version") != RECAST_REGISTRY_VERSION:
         raise CurrentComparableError("unsupported reviewed recast registry version")
     if row["source_type"] not in {"RECAST_REPORTED", "DERIVED_RECAST"}:
         raise CurrentComparableError("reviewed recast evidence has unsupported source_type")
@@ -250,9 +255,19 @@ def _validate_evidence(value: Mapping[str, Any]) -> dict[str, Any]:
     row["target_period_keys"], row["prior_analytical_fact_ids"] = periods, previous
     row["registry_version"] = RECAST_REGISTRY_VERSION
     if row["source_type"] == "DERIVED_RECAST":
-        if not row.get("derivation_rule_version") or not row.get("source_series_candidate_ids"):
+        if not row.get("derivation_rule_version") or not row.get("derived_input_bindings"):
             raise CurrentComparableError("derived recast evidence requires rule and exact source candidates")
-        row["source_series_candidate_ids"] = tuple(str(item) for item in row["source_series_candidate_ids"] if item)
+        bindings = tuple(dict(item) for item in row["derived_input_bindings"] if isinstance(item, Mapping))
+        if {str(item.get("role") or "") for item in bindings} != {"FY", "YTD_9M"} or len(bindings) != 2:
+            raise CurrentComparableError("derived recast requires ordered FY and YTD_9M input bindings")
+        if any(not item.get("series_candidate_id") for item in bindings):
+            raise CurrentComparableError("derived recast input binding requires exact series candidate ID")
+        row["derived_input_bindings"] = tuple(
+            sorted(
+                ({"role": str(item["role"]), "series_candidate_id": str(item["series_candidate_id"])} for item in bindings),
+                key=lambda item: item["role"],
+            )
+        )
     return row
 
 
@@ -263,7 +278,12 @@ def _validate_source_indexes(as_filed: tuple[dict[str, Any], ...], candidates: M
         raise CurrentComparableError("C3-M1 publication has unidentifiable comparable input")
 
 
-def _validate_evidence_binding(item: Mapping[str, Any], source: Mapping[str, Any], facts: Mapping[str, Mapping[str, Any]]) -> None:
+def _validate_evidence_binding(
+    item: Mapping[str, Any],
+    source: Mapping[str, Any],
+    raw: Mapping[str, Any],
+    facts: Mapping[str, Mapping[str, Any]],
+) -> None:
     expected = ("cik", "company_canonical_concept_id", "period_class", "source_filing_id")
     if any(str(source.get(key) or "") != str(item.get(key) or "") for key in expected):
         raise CurrentComparableError("recast evidence source candidate scope does not match")
@@ -275,26 +295,30 @@ def _validate_evidence_binding(item: Mapping[str, Any], source: Mapping[str, Any
         raise CurrentComparableError("recast evidence target period does not match source candidate")
     if str(source.get("filed_date") or "") != str(item["filed_date"]):
         raise CurrentComparableError("recast evidence filing date does not match source candidate")
+    if str(source.get("basis_version") or "") != str(item["new_basis_version"]):
+        raise CurrentComparableError("recast evidence new basis does not match source candidate")
+    for key in ("source_document", "source_locator"):
+        if str(source.get(key) or "") != str(item[key]) or str(raw.get(key) or "") != str(item[key]):
+            raise CurrentComparableError("recast evidence source document or locator does not match raw lineage")
     for fact_id in item["prior_analytical_fact_ids"]:
         prior = facts.get(fact_id)
         if prior is None:
             raise CurrentComparableError("recast evidence references unknown AS_FILED fact")
         if _scope(prior) != _scope_item(item, str(prior.get("period_key") or "")):
             raise CurrentComparableError("recast evidence prior fact has incompatible period, dimensions, or company scope")
-        if prior.get("basis_version") not in {None, item["old_basis_version"]}:
+        if str(prior.get("basis_version") or "") != str(item["old_basis_version"]):
             raise CurrentComparableError("recast evidence prior fact basis does not match old basis")
 
 
 def _validate_derived_inputs(item: Mapping[str, Any], candidates: Mapping[str, dict[str, Any]]) -> None:
-    inputs = [candidates.get(key) for key in item["source_series_candidate_ids"]]
+    by_role = {binding["role"]: candidates.get(binding["series_candidate_id"]) for binding in item["derived_input_bindings"]}
+    inputs = list(by_role.values())
     if any(row is None for row in inputs):
         raise CurrentComparableError("derived recast evidence is missing exact source candidate input")
     source = candidates[item["source_series_candidate_id"]]
-    if item["source_series_candidate_id"] not in item["source_series_candidate_ids"]:
-        raise CurrentComparableError("derived recast evidence must bind its declared output candidate")
-    if len(inputs) != 2:
-        raise CurrentComparableError("derived recast requires two exact source candidates")
-    if any((_scope(row)[:4] != _scope(source)[:4] or row.get("unit_semantics") != source.get("unit_semantics")) for row in inputs if row):
+    if str(by_role["FY"].get("period_class") or "") != "FY" or str(by_role["YTD_9M"].get("period_class") or "") != "YTD_9M":
+        raise CurrentComparableError("derived recast input roles do not match FY and YTD_9M periods")
+    if any((_scope(row)[:3] != _scope(source)[:3] or row.get("unit_semantics") != source.get("unit_semantics") or str(row.get("basis_version") or "") != str(item["new_basis_version"])) for row in inputs if row):
         raise CurrentComparableError("derived recast inputs are not fully compatible")
 
 
@@ -303,16 +327,19 @@ def _reported_recast(historical: Mapping[str, Any], source: Mapping[str, Any], r
 
 
 def _derived_recast(historical: Mapping[str, Any], source: Mapping[str, Any], raw: Mapping[str, Any], candidates: Mapping[str, dict[str, Any]], evidence: Mapping[str, Any]) -> dict[str, Any]:
-    inputs = [candidates[key] for key in evidence["source_series_candidate_ids"]]
+    by_role = {
+        binding["role"]: candidates[binding["series_candidate_id"]]
+        for binding in evidence["derived_input_bindings"]
+    }
     try:
-        values = [Decimal(str(row["value_numeric"])) for row in inputs]
+        fy, ytd = Decimal(str(by_role["FY"]["value_numeric"])), Decimal(str(by_role["YTD_9M"]["value_numeric"]))
     except (InvalidOperation, KeyError, TypeError) as exc:
         raise CurrentComparableError("derived recast input has no numeric value") from exc
-    if evidence["derivation_rule_version"] != "c3-m3-fy-minus-ytd9m-v1" or len(values) != 2:
+    if evidence["derivation_rule_version"] != "c3-m3-fy-minus-ytd9m-v1":
         raise CurrentComparableError("unsupported derived recast rule or input cardinality")
-    value = str(values[0] - values[1])
+    value = str(fy - ytd)
     return _available(historical, source, raw, evidence, source_type="DERIVED_RECAST", value=value,
-                      source_fact_ids=tuple(str(row["source_fact_id"]) for row in inputs))
+                      source_fact_ids=(str(by_role["FY"]["source_fact_id"]), str(by_role["YTD_9M"]["source_fact_id"])))
 
 
 def _available(historical: Mapping[str, Any], source: Mapping[str, Any], raw: Mapping[str, Any], evidence: Mapping[str, Any], *, source_type: str, value: Any, source_fact_ids: tuple[Any, ...]) -> dict[str, Any]:

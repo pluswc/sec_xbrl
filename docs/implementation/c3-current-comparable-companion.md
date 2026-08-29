@@ -26,6 +26,17 @@ Every registry record identifies:
 - whether the output is directly re-presented (`RECAST_REPORTED`) or a
   reviewed derivation (`DERIVED_RECAST`).
 
+`registry_version` is required on every record; it is never defaulted. Both a
+direct source candidate and each derived source input must carry the declared
+new-basis version. Each prior AS_FILED fact must carry the declared old-basis
+version. A direct evidence document and locator must exactly match the
+retained candidate and raw period-observation provenance.
+
+For the currently approved `FY - YTD_9M` derivation, registry input bindings
+are named and ordered by role (`FY`, `YTD_9M`), not accepted as an arbitrary
+two-row list. Both inputs must have the expected period class and identical
+company, canonical concept, full dimensions, unit, and new basis.
+
 The parser verifies every one of these bindings against the verified C3-M1
 publication. A direct recast requires the exact later candidate/raw Fact. A
 derived recast requires all exact candidate inputs, a compatible full scope,
@@ -55,6 +66,10 @@ partial, extra-file, or upstream-mismatched release.
 
 This is an analytical-plane producer. It is not an Excel policy, a default
 basis selector, a Metric producer, or a text-extraction workflow.
+
+The materializer accepts only a publication attested by
+`Layer2PublicationReader` after manifest/layout/hash validation. A manually
+constructed object with the same Python fields is rejected.
 
 ## NVIDIA geographic recast golden
 

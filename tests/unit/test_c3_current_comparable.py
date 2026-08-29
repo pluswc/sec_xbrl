@@ -11,7 +11,10 @@ from sec_xbrl.longitudinal import (
     CurrentComparablePublicationReader,
     CurrentComparablePublisher,
 )
-from sec_xbrl.longitudinal.materialization import VerifiedLayer2Publication
+from sec_xbrl.longitudinal.materialization import (
+    VerifiedLayer2Publication,
+    _READER_ATTESTATION_TOKEN,
+)
 
 
 CIK = "0001045810"
@@ -21,7 +24,7 @@ def _fact(period: str) -> dict[str, object]:
     return {
         "analytical_fact_id": f"as-filed:{period}", "cik": CIK, "view": "AS_FILED",
         "company_canonical_concept_id": "company:revenue", "company_canonical_dimension_key": (("geo", "us"),),
-        "period_class": "QTD_3M", "period_key": period, "basis_version": None,
+        "period_class": "QTD_3M", "period_key": period, "basis_version": "billing-location-v1",
         "source_type": "REPORTED", "selected_fact_id": f"old:{period}", "source_filing_id": f"old-filing:{period}",
         "filed_date": "2026-01-01", "value_numeric": "1", "unit_semantics": "USD",
     }
@@ -32,7 +35,8 @@ def _candidate(identifier: str, period: str = "FY26-Q1", value: str = "25685") -
         "series_candidate_id": identifier, "cik": CIK, "company_canonical_concept_id": "company:revenue",
         "company_canonical_dimension_key": (("geo", "us"),), "period_class": "QTD_3M", "actual_period_key": period,
         "source_filing_id": "new-filing", "source_fact_id": "new:q1", "filed_date": "2026-11-20",
-        "value_numeric": value, "unit_semantics": "USD",
+        "value_numeric": value, "unit_semantics": "USD", "basis_version": "customer-headquarters-v2",
+        "source_document": "nvda.htm", "source_locator": "geography-table",
     }
 
 
@@ -48,12 +52,13 @@ def _publication() -> VerifiedLayer2Publication:
             "analytical_fact": tuple(MappingProxyType(_fact(period)) for period in ("FY26-Q1", "FY26-Q2", "FY26-Q3", "FY26-Q4")),
             "current_series_candidate": tuple(MappingProxyType(row) for row in candidates),
             "period_observation": tuple(MappingProxyType(row) for row in observations),
-        }),
+        }), _READER_ATTESTATION_TOKEN,
     )
 
 
 def _evidence(**changes: object) -> dict[str, object]:
     value = {
+        "registry_version": "c3-m3-reviewed-recast-evidence-v1",
         "recast_evidence_id": "nvda-us-geography-fy26-v2-q1", "cik": CIK,
         "company_canonical_concept_id": "company:revenue", "company_canonical_dimension_key": (("geo", "us"),),
         "period_class": "QTD_3M", "target_period_keys": ("FY26-Q1",), "old_basis_version": "billing-location-v1",
@@ -86,6 +91,8 @@ def test_empty_registry_is_explicit_unavailable_not_as_filed_fallback() -> None:
     {"company_canonical_dimension_key": (("geo", "non-us"),)},
     {"target_period_keys": ("FY26-Q2",)},
     {"source_raw_fact_id": "wrong"},
+    {"source_document": "tampered.htm"},
+    {"source_locator": "tampered-locator"},
 ])
 def test_mismatched_evidence_fails_closed(changed: dict[str, object]) -> None:
     with pytest.raises(CurrentComparableError):
@@ -93,9 +100,25 @@ def test_mismatched_evidence_fails_closed(changed: dict[str, object]) -> None:
 
 
 def test_derived_recast_requires_exact_inputs() -> None:
-    evidence = _evidence(source_type="DERIVED_RECAST", derivation_rule_version="c3-m3-fy-minus-ytd9m-v1", source_series_candidate_ids=("candidate:new-q1",))
-    with pytest.raises(CurrentComparableError, match="exact source candidates"):
+    evidence = _evidence(
+        source_type="DERIVED_RECAST",
+        derivation_rule_version="c3-m3-fy-minus-ytd9m-v1",
+        derived_input_bindings=({"role": "FY", "series_candidate_id": "candidate:new-q1"},),
+    )
+    with pytest.raises(CurrentComparableError, match="FY and YTD_9M"):
         CurrentComparableMaterializer().materialize(_publication(), evidence_registry=(evidence,))
+
+
+def test_registry_version_and_reader_attestation_are_required() -> None:
+    with pytest.raises(CurrentComparableError, match="registry_version"):
+        CurrentComparableMaterializer().materialize(
+            _publication(), evidence_registry=(_evidence(registry_version=None),)
+        )
+    forged = VerifiedLayer2Publication(
+        Path("/forged"), Path("/forged/manifest"), MappingProxyType({}), (), MappingProxyType({})
+    )
+    with pytest.raises(CurrentComparableError, match="verified"):
+        CurrentComparableMaterializer().materialize(forged)
 
 
 def test_companion_reader_verifies_upstream_hash_and_tampering(tmp_path: Path) -> None:
