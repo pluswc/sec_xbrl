@@ -12,10 +12,9 @@ from sec_xbrl.longitudinal import (
     CurrentComparablePublisher,
 )
 from sec_xbrl.longitudinal.materialization import (
-    VerifiedLayer2Publication,
     _READER_ATTESTATION_TOKEN,
+    VerifiedLayer2Publication,
 )
-
 
 CIK = "0001045810"
 
