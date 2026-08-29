@@ -53,6 +53,11 @@ structural-change records, Annual/Current series candidates and exclusions,
   AS_FILED observation.
 - Amendments remain separate immutable release snapshots and retain accession,
   filing, raw Fact, Context, unit, dimensions, and filing lineage.
+- Each available consumer-facing AS_FILED fact copies `form`, `accession`,
+  `report_date`, raw `context_id`, and raw `unit_id` from its exact selected
+  Layer 1 Fact and filing. An unavailable fact has no selected raw Fact and
+  leaves these raw-reference fields null rather than borrowing them from a
+  competing candidate.
 - No recast evidence is supplied and no `CURRENT_COMPARABLE` output is
   published.
 - C3-M1 passes no Q4 policy to L2-M1. It never derives residual Q4, including

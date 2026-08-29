@@ -109,6 +109,7 @@ class AsFiledPublicationPipeline:
         dimensions_by_cik: dict[str, list[dict[str, Any]]] = defaultdict(list)
         relationships_by_cik: dict[str, list[dict[str, Any]]] = defaultdict(list)
         evidence_by_fact_id: dict[str, dict[str, Any]] = {}
+        raw_provenance_by_fact: dict[tuple[str, str], dict[str, Any]] = {}
 
         period_materializer = PeriodObservationMaterializer()
         for snapshot in release.snapshots:
@@ -137,7 +138,9 @@ class AsFiledPublicationPipeline:
             dimensions_by_cik[cik].extend(snapshot.records("dimension_fact"))
             relationships = snapshot.records("relationship")
             relationships_by_cik[cik].extend(relationships)
-            evidence_by_fact_id.update(_role_evidence(snapshot.records("fact"), relationships))
+            facts = snapshot.records("fact")
+            evidence_by_fact_id.update(_role_evidence(facts, relationships))
+            raw_provenance_by_fact.update(_raw_fact_provenance(filing, facts, snapshot.records("context")))
 
         datasets: dict[str, list[dict[str, Any]]] = defaultdict(list)
         all_analytical: list[dict[str, Any]] = []
@@ -173,6 +176,7 @@ class AsFiledPublicationPipeline:
             as_filed = _resolve_as_filed_identity_collisions(
                 row for row in selected.analytical_facts if row.get("view") == "AS_FILED"
             )
+            as_filed = _with_selected_raw_provenance(as_filed, raw_provenance_by_fact)
             if any(row.get("view") != "AS_FILED" for row in as_filed):
                 raise AsFiledPublicationError("C3-M1 emitted a non-AS_FILED analytical fact")
             capabilities = CapabilityInventoryMaterializer().materialize(
@@ -215,6 +219,71 @@ class AsFiledPublicationPipeline:
 def _append_mapping_datasets(target: dict[str, list[dict[str, Any]]], mappings: MappingTables) -> None:
     for name, rows in mappings.as_datasets().items():
         target[name].extend(rows)
+
+
+def _raw_fact_provenance(
+    filing: Mapping[str, Any],
+    facts: Iterable[Mapping[str, Any]],
+    contexts: Iterable[Mapping[str, Any]],
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """Index exact raw provenance needed at the consumer-facing fact grain."""
+    filing_id = str(filing.get("filing_id") or "")
+    if not filing_id:
+        raise AsFiledPublicationError("CorpusRelease filing is missing filing_id")
+    context_by_id = {str(row.get("context_id") or ""): dict(row) for row in contexts}
+    result: dict[tuple[str, str], dict[str, Any]] = {}
+    for source in facts:
+        fact = dict(source)
+        fact_id = str(fact.get("fact_id") or "")
+        if not fact_id or str(fact.get("filing_id") or "") != filing_id:
+            raise AsFiledPublicationError("CorpusRelease Fact provenance is invalid")
+        context_id = fact.get("context_id")
+        if context_id is not None:
+            context = context_by_id.get(str(context_id))
+            if context is None or str(context.get("filing_id") or "") != filing_id:
+                raise AsFiledPublicationError("CorpusRelease Fact context provenance is invalid")
+        key = (filing_id, fact_id)
+        if key in result:
+            raise AsFiledPublicationError("duplicate raw Fact identity inside CorpusRelease snapshot")
+        result[key] = {
+            "source_filing_id": filing_id,
+            "accession": filing.get("accession"),
+            "form": filing.get("form"),
+            "filed_date": filing.get("filed_date"),
+            "report_date": filing.get("report_date"),
+            "context_id": context_id,
+            "unit_id": fact.get("unit_id"),
+        }
+    return result
+
+
+def _with_selected_raw_provenance(
+    rows: Iterable[Mapping[str, Any]],
+    provenance_by_fact: Mapping[tuple[str, str], Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Copy filing/context/unit identity from the selected immutable raw Fact.
+
+    This is provenance enrichment only.  It cannot select a replacement Fact
+    or attach raw filing identity to an unavailable result.
+    """
+    result: list[dict[str, Any]] = []
+    raw_fields = ("accession", "form", "report_date", "context_id", "unit_id")
+    for source in rows:
+        row = dict(source)
+        if row.get("source_type") == "UNAVAILABLE":
+            result.append({**row, **{field: None for field in raw_fields}})
+            continue
+        selected_fact_id = row.get("selected_fact_id")
+        source_filing_id = row.get("source_filing_id")
+        if not selected_fact_id or not source_filing_id:
+            raise AsFiledPublicationError("available AS_FILED fact lacks selected raw Fact lineage")
+        provenance = provenance_by_fact.get((str(source_filing_id), str(selected_fact_id)))
+        if provenance is None:
+            raise AsFiledPublicationError("selected AS_FILED raw Fact is absent from CorpusRelease")
+        if row.get("filed_date") != provenance["filed_date"]:
+            raise AsFiledPublicationError("AS_FILED filed_date disagrees with selected raw Fact filing")
+        result.append({**row, **provenance})
+    return tuple(result)
 
 
 def _resolve_as_filed_identity_collisions(
