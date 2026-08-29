@@ -7,11 +7,13 @@ comparison records, copies them on entry, and returns copies on every query.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Mapping, Sequence
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from sec_xbrl.longitudinal.capability import CapabilityInventoryQuery
 from sec_xbrl.metrics.series import DerivedMetricSeriesMaterializer
 
 
@@ -29,6 +31,18 @@ class CompanyAmbiguousError(AnalyticalRepositoryError):
 
 class FactNotFoundError(AnalyticalRepositoryError):
     """Raised when no reported or derived fact has the requested fact ID."""
+
+
+class CapabilityInventoryNotFoundError(AnalyticalRepositoryError):
+    """Raised when a resolved company has no supplied capability inventory."""
+
+
+class DerivedMetricNotFoundError(AnalyticalRepositoryError):
+    """Raised when no verified derived metric has the requested stable ID."""
+
+
+class DerivedMetricConflictError(AnalyticalRepositoryError):
+    """Raised when one derived metric ID has conflicting verified records."""
 
 
 class AnalyticalRepository:
@@ -49,6 +63,7 @@ class AnalyticalRepository:
         concepts: Iterable[Mapping[str, Any]] = (),
         facts: Iterable[Mapping[str, Any]] = (),
         series: Iterable[Mapping[str, Any]] = (),
+        capability_inventory: Iterable[Mapping[str, Any]] = (),
         metric_series_run_roots: Iterable[Path] = (),
         comparisons: Iterable[Mapping[str, Any]] = (),
     ) -> None:
@@ -57,8 +72,10 @@ class AnalyticalRepository:
         self._concepts = _copy_rows(concepts)
         self._facts = _copy_rows(facts)
         self._series = _copy_rows(series)
+        self._capability_inventory = _copy_rows(capability_inventory)
+        self._capability_query = CapabilityInventoryQuery(self._capability_inventory)
         metric_materializer = DerivedMetricSeriesMaterializer()
-        self._metric_series_candidates = tuple(
+        self._metric_series_candidates = _copy_rows(
             candidate
             for root in metric_series_run_roots
             for candidate in metric_materializer.load_published_candidates(Path(root))
@@ -176,6 +193,65 @@ class AnalyticalRepository:
         )
         return tuple(self._with_provenance(row, resolved) for row in selected)
 
+    def discover_capabilities(
+        self,
+        company: str,
+        *,
+        raw_concept_id: str | None = None,
+        axis_raw_concept_id: str | None = None,
+        member_raw_concept_id: str | None = None,
+        period_class: str | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return supplied M5 capabilities for one resolved public company.
+
+        This method delegates filtering and ``NOT_REPORTED`` behavior to the
+        governed M5 query contract.  It does not infer disclosure categories
+        or promote an omitted structure to a company-wide claim.
+        """
+        resolved = self.resolve_company(company)
+        cik = resolved.get("cik")
+        if cik is None:
+            raise CapabilityInventoryNotFoundError(
+                "resolved company has no CIK for capability inventory lookup"
+            )
+        try:
+            return self._capability_query.discover(
+                cik=str(cik),
+                raw_concept_id=raw_concept_id,
+                axis_raw_concept_id=axis_raw_concept_id,
+                member_raw_concept_id=member_raw_concept_id,
+                period_class=period_class,
+            )
+        except LookupError as exc:
+            raise CapabilityInventoryNotFoundError(
+                f"company has no supplied capability inventory: {cik}"
+            ) from exc
+
+    def trace_metric(self, derived_metric_id: str) -> dict[str, Any]:
+        """Return one immutable M1 metric record admitted through verified M2 roots.
+
+        A metric identity must identify exactly one stored record.  Conflicting
+        records from multiple verified roots fail closed; the facade never
+        selects one by root ordering, metric value, or recency.
+        """
+        target = str(derived_metric_id).strip()
+        if not target:
+            raise DerivedMetricNotFoundError("derived metric ID must not be empty")
+        rows = [
+            row
+            for row in self._metric_series_candidates
+            if str(row.get("derived_metric_id") or "") == target
+        ]
+        if not rows:
+            raise DerivedMetricNotFoundError(f"no verified derived metric matches {target!r}")
+        versions = {_canonical_record(row) for row in rows}
+        if len(versions) != 1:
+            raise DerivedMetricConflictError(
+                f"verified derived metric identity {target!r} has conflicting records"
+            )
+        row = min(rows, key=_canonical_record)
+        return self._with_provenance(row, _company_for_row(row, self._companies))
+
     def trace_fact(self, fact_id: str) -> dict[str, Any]:
         """Return one provenance-enriched reported or derived fact by stable ID."""
         target = str(fact_id)
@@ -214,6 +290,11 @@ class AnalyticalRepository:
 
 def _copy_rows(rows: Iterable[Mapping[str, Any]]) -> tuple[dict[str, Any], ...]:
     return tuple(deepcopy(dict(row)) for row in rows)
+
+
+def _canonical_record(row: Mapping[str, Any]) -> str:
+    """Use a stable full-record comparison for conflict detection only."""
+    return json.dumps(row, default=list, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
 
 def _normalize_cik(value: object) -> str:
