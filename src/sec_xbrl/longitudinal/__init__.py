@@ -29,6 +29,17 @@ from sec_xbrl.longitudinal.corpus_release import (
     CorpusReleaseError,
     CorpusSnapshot,
 )
+from sec_xbrl.longitudinal.current_comparable import (
+    CURRENT_COMPARABLE_VERSION,
+    RECAST_REGISTRY_VERSION,
+    CurrentComparableError,
+    CurrentComparableMaterializer,
+    CurrentComparablePublication,
+    CurrentComparablePublicationReader,
+    CurrentComparablePublisher,
+    CurrentComparableResult,
+    ReviewedRecastRegistry,
+)
 from sec_xbrl.longitudinal.materialization import (
     DEFAULT_LAYER2_ROOT,
     LAYER2_CONTRACT_VERSION,
@@ -81,6 +92,7 @@ from sec_xbrl.longitudinal.series import (
 
 __all__ = [
     "CAPABILITY_INVENTORY_VERSION",
+    "CURRENT_COMPARABLE_VERSION",
     "DEFAULT_LAYER2_ROOT",
     "LAYER2_CONTRACT_VERSION",
     "LOGICAL_DATASETS",
@@ -89,6 +101,7 @@ __all__ = [
     "PERIOD_OBSERVATION_RULE_VERSION",
     "QUARTERLY_POLICY_VERSION",
     "RAW_TABLES",
+    "RECAST_REGISTRY_VERSION",
     "SELECTION_MATERIALIZATION_VERSION",
     "SERIES_RULE_VERSION",
     "AnalyticalFactMaterializer",
@@ -109,6 +122,12 @@ __all__ = [
     "CorpusReleaseAdapter",
     "CorpusReleaseError",
     "CorpusSnapshot",
+    "CurrentComparableError",
+    "CurrentComparableMaterializer",
+    "CurrentComparablePublication",
+    "CurrentComparablePublicationReader",
+    "CurrentComparablePublisher",
+    "CurrentComparableResult",
     "CurrentSeries",
     "Layer1SnapshotInput",
     "Layer2MaterializationError",
@@ -134,6 +153,7 @@ __all__ = [
     "QuarterlySemanticDeclaration",
     "RecastObservationBuilder",
     "RecastObservationError",
+    "ReviewedRecastRegistry",
     "SeriesBuilder",
     "validate_recast_evidence",
 ]

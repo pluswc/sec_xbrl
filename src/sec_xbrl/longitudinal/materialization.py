@@ -14,7 +14,7 @@ import os
 import shutil
 import tempfile
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
@@ -40,6 +40,10 @@ LOGICAL_DATASETS = frozenset(
         "series_candidate_exclusion",
     }
 )
+# A capability set only by ``Layer2PublicationReader`` after full manifest,
+# layout, row-contract, count, and hash verification.  Consumers must not
+# treat a manually constructed public dataclass as a verified publication.
+_READER_ATTESTATION_TOKEN = object()
 _ANALYTICAL_SOURCE_TYPES = frozenset(
     {"REPORTED", "RECAST_REPORTED", "DERIVED_RECAST", "UNAVAILABLE"}
 )
@@ -167,12 +171,18 @@ class VerifiedLayer2Publication:
     identity: Mapping[str, str]
     input_ciks: tuple[str, ...]
     datasets: Mapping[str, tuple[Mapping[str, Any], ...]]
+    _reader_attestation: object | None = field(default=None, repr=False, compare=False)
 
     def records(self, dataset: str) -> tuple[dict[str, Any], ...]:
         """Return independent copies of one verified logical dataset."""
         if dataset not in LOGICAL_DATASETS:
             raise Layer2PublicationValidationError(f"unknown Layer 2 dataset: {dataset}")
         return tuple(dict(row) for row in self.datasets.get(dataset, ()))
+
+    @property
+    def is_reader_attested(self) -> bool:
+        """True only for results created by the verified publication reader."""
+        return self._reader_attestation is _READER_ATTESTATION_TOKEN
 
 
 class Layer2PublicationReader:
@@ -232,6 +242,7 @@ class Layer2PublicationReader:
             identity=MappingProxyType(identity),
             input_ciks=tuple(sorted(item.cik for item in run.inputs)),
             datasets=copied,
+            _reader_attestation=_READER_ATTESTATION_TOKEN,
         )
 
 
