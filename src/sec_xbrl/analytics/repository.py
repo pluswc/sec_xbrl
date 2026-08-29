@@ -100,7 +100,7 @@ class AnalyticalRepository:
         *,
         company_catalog: Iterable[Mapping[str, Any]] = (),
         metric_series_run_roots: Iterable[Path] = (),
-    ) -> "AnalyticalRepository":
+    ) -> AnalyticalRepository:
         """Build a consumer repository from manifest-verified L2 publications only.
 
         This is the current canonical-JSONL publication adapter.  It does not

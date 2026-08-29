@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from sec_xbrl.analytics import AnalyticalRepository
+from sec_xbrl.analytics import AnalyticalRepository, CompanyNotFoundError
 from sec_xbrl.longitudinal import (
     Layer1SnapshotInput,
     Layer2PublicationReader,
@@ -158,7 +158,7 @@ def test_repository_does_not_infer_company_metadata_and_returns_deep_copies(tmp_
     published = _publication(tmp_path)
     repository = AnalyticalRepository.from_layer2_publications((published.run_root,))
     assert repository.resolve_company("0000320193") == {"cik": "0000320193"}
-    with pytest.raises(Exception):
+    with pytest.raises(CompanyNotFoundError):
         repository.resolve_company("AAPL")
     first = repository.get_analytical_facts("0000320193", view="AS_FILED")
     expected = deepcopy(first)

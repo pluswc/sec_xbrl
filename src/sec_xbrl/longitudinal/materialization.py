@@ -17,8 +17,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 from types import MappingProxyType
+from typing import Any
 
 LAYER2_CONTRACT_VERSION = "l2-materialization-v1"
 DEFAULT_LAYER2_ROOT = Path("data/processed/analytical/layer2")
