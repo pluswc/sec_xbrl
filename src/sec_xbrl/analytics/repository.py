@@ -227,6 +227,67 @@ class AnalyticalRepository:
                 f"company has no supplied capability inventory: {cik}"
             ) from exc
 
+    def discover_metrics(
+        self,
+        company: str,
+        *,
+        metric_id: str | None = None,
+        definition_version: str | None = None,
+        frequency: str | None = None,
+        view: str | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        """Discover admitted metric candidates without metric selection.
+
+        This is a discovery view over records that were admitted through the
+        hash-verified M1-to-M2 publication path during construction.  It does
+        not call M2 selection, choose an ``as_of_date``, calculate a value, or
+        infer a Metric from a label.  Each response group retains its full
+        dimension, basis, definition, formula, status, and mapping variants;
+        its ``observed_metric_records`` preserve every admitted candidate and
+        associated publication provenance.
+
+        ``NOT_REPORTED`` is deliberately limited to the supplied verified
+        publication scope.  It means no admitted candidate for this resolved
+        company matches the exact request; it is not a claim about every SEC
+        filing or a company-wide metric template.
+        """
+        resolved = self.resolve_company(company)
+        candidates = [
+            row
+            for row in self._metric_series_candidates
+            if _row_is_company(row, resolved)
+            and (metric_id is None or str(row.get("metric_id") or "") == metric_id)
+            and (
+                definition_version is None
+                or str(row.get("metric_definition_version") or "") == definition_version
+            )
+            and (frequency is None or str(row.get("period_class") or "") == frequency)
+            and (view is None or str(row.get("view") or "") == view)
+        ]
+        if not candidates:
+            return (
+                {
+                    "cik": deepcopy(resolved.get("cik")),
+                    "company_canonical_id": deepcopy(resolved.get("company_canonical_id")),
+                    "metric_discovery_status": "NOT_REPORTED",
+                    "status_reason": "NO_ADMITTED_VERIFIED_METRIC_MATCHES_REQUEST",
+                    "metric_discovery_scope": "SUPPLIED_VERIFIED_METRIC_PUBLICATIONS_ONLY",
+                    "requested_metric_id": metric_id,
+                    "requested_definition_version": definition_version,
+                    "requested_frequency": frequency,
+                    "requested_view": view,
+                },
+            )
+
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for row in candidates:
+            grouped.setdefault(_metric_discovery_group_key(row), []).append(row)
+        discovered = [
+            _metric_discovery_row(resolved, rows)
+            for _, rows in sorted(grouped.items())
+        ]
+        return tuple(deepcopy(row) for row in discovered)
+
     def trace_metric(self, derived_metric_id: str) -> dict[str, Any]:
         """Return one immutable M1 metric record admitted through verified M2 roots.
 
@@ -357,6 +418,91 @@ def _period_value(row: Mapping[str, Any]) -> str | None:
 def _within_period(row: Mapping[str, Any], start: str | None, end: str | None) -> bool:
     value = _period_value(row)
     return value is not None and (start is None or value >= start) and (end is None or value <= end)
+
+
+def _metric_discovery_group_key(row: Mapping[str, Any]) -> str:
+    """Identify a discovery variant without collapsing analytical semantics."""
+    return _canonical_record({
+        key: row.get(key)
+        for key in (
+            "cik",
+            "metric_id",
+            "metric_definition_id",
+            "metric_definition_version",
+            "formula_id",
+            "formula_version",
+            "view",
+            "basis_version",
+            "company_canonical_dimension_key",
+            "input_unit_semantics",
+            "metric_unit_semantics",
+            "series_type",
+            "period_class",
+            "calculation_status",
+            "unavailable_reason",
+            "source_type",
+            "mapping_versions",
+        )
+    })
+
+
+def _metric_discovery_row(
+    company: Mapping[str, Any], rows: Iterable[Mapping[str, Any]]
+) -> dict[str, Any]:
+    """Create one deterministic discovery row and retain all exact candidates."""
+    observed = tuple(sorted((_copy_rows(rows)), key=_metric_candidate_sort_key))
+    template = observed[0]
+    return {
+        "cik": deepcopy(template.get("cik") or company.get("cik")),
+        "company_canonical_id": deepcopy(company.get("company_canonical_id")),
+        "metric_discovery_status": "OBSERVED",
+        "metric_id": deepcopy(template.get("metric_id")),
+        "metric_definition_id": deepcopy(template.get("metric_definition_id")),
+        "metric_definition_version": deepcopy(template.get("metric_definition_version")),
+        "formula_id": deepcopy(template.get("formula_id")),
+        "formula_version": deepcopy(template.get("formula_version")),
+        "view": deepcopy(template.get("view")),
+        "basis_version": deepcopy(template.get("basis_version")),
+        "company_canonical_dimension_key": deepcopy(template.get("company_canonical_dimension_key")),
+        "input_unit_semantics": deepcopy(template.get("input_unit_semantics")),
+        "metric_unit_semantics": deepcopy(template.get("metric_unit_semantics")),
+        "series_type": deepcopy(template.get("series_type")),
+        "calculation_status": deepcopy(template.get("calculation_status")),
+        "unavailable_reason": deepcopy(template.get("unavailable_reason")),
+        "source_type": deepcopy(template.get("source_type")),
+        "mapping_versions": deepcopy(template.get("mapping_versions")),
+        "observed_period_classes": tuple(sorted({str(row["period_class"]) for row in observed})),
+        "observed_period_keys": tuple(sorted({str(row["period_key"]) for row in observed})),
+        "observed_views": tuple(sorted({str(row["view"]) for row in observed})),
+        "observed_as_of_dates": tuple(sorted({str(row["as_of_date"]) for row in observed})),
+        "derived_metric_ids": tuple(sorted({str(row["derived_metric_id"]) for row in observed})),
+        "metric_series_candidate_ids": tuple(
+            sorted({str(row["metric_series_candidate_id"]) for row in observed})
+        ),
+        "source_metric_run_versions": tuple(
+            sorted({str(row["source_metric_run_version"]) for row in observed})
+        ),
+        "source_metric_run_fingerprints": tuple(
+            sorted({str(row["source_metric_run_fingerprint"]) for row in observed})
+        ),
+        "source_metric_manifest_identities": tuple(
+            sorted({str(row["source_metric_manifest_identity"]) for row in observed})
+        ),
+        "metric_series_contract_versions": tuple(
+            sorted({str(row["metric_series_contract_version"]) for row in observed})
+        ),
+        "observed_metric_records": observed,
+    }
+
+
+def _metric_candidate_sort_key(row: Mapping[str, Any]) -> tuple[str, ...]:
+    return (
+        str(row.get("period_class") or ""),
+        str(row.get("period_key") or ""),
+        str(row.get("as_of_date") or ""),
+        str(row.get("evaluated_at") or ""),
+        str(row.get("derived_metric_id") or ""),
+    )
 
 
 def _period_range(value: str | tuple[str | None, str | None] | None) -> tuple[str | None, str | None]:
