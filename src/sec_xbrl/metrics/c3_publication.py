@@ -16,7 +16,7 @@ import shutil
 import tempfile
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +51,7 @@ _STANDARD_ROLE_BY_LOCAL_NAME = {
     "weightedaveragenumberofsharesoutstandingbasic": "WEIGHTED_AVERAGE_SHARES",
     "weightedaveragenumberofdilutedsharesoutstanding": "WEIGHTED_AVERAGE_SHARES",
 }
+_RESULT_ATTESTATION_TOKEN = object()
 
 
 class C3MetricPublicationError(RuntimeError):
@@ -70,10 +71,20 @@ class C3MetricPublication:
 
 @dataclass(frozen=True, slots=True)
 class C3MetricResult:
+    """M6/M1 inputs that remain bound to one exact verified upstream."""
+
+    upstream_layer2_run_fingerprint: str
+    upstream_layer2_manifest_sha256: str
     candidates: tuple[dict[str, Any], ...]
     compatibility: tuple[dict[str, Any], ...]
     derived_metrics: tuple[dict[str, Any], ...]
     coverage: tuple[dict[str, Any], ...]
+    content_fingerprint: str
+    _materialization_attestation: object | None = field(default=None, repr=False, compare=False)
+
+    @property
+    def is_materialized_by_c3_pipeline(self) -> bool:
+        return self._materialization_attestation is _RESULT_ATTESTATION_TOKEN
 
     def companion_datasets(self) -> dict[str, tuple[dict[str, Any], ...]]:
         return {
@@ -149,7 +160,18 @@ class C3MetricPublicationPipeline:
             compatibility=compatibility,
             upstream=publication,
         )
-        return C3MetricResult(candidates, compatibility, tuple(records), coverage)
+        records_tuple = tuple(records)
+        fingerprint = _result_content_fingerprint(candidates, compatibility, records_tuple, coverage)
+        return C3MetricResult(
+            publication.identity["layer2_run_fingerprint"],
+            publication.identity["layer2_manifest_sha256"],
+            candidates,
+            compatibility,
+            records_tuple,
+            coverage,
+            fingerprint,
+            _RESULT_ATTESTATION_TOKEN,
+        )
 
     def publish(
         self,
@@ -163,6 +185,7 @@ class C3MetricPublicationPipeline:
         registry_version: str,
     ) -> C3MetricPublication:
         _require_as_filed_publication(publication)
+        _require_result_matches_upstream(result, publication)
         if not run_version or "/" in run_version or "\\" in run_version:
             raise C3MetricPublicationError("C3 metric run_version must be a non-path identifier")
         # M1's existing atomic publisher is the metric-series admission root.
@@ -203,6 +226,7 @@ class C3MetricCompanionPublisher:
         metric_publication: DerivedMetricPublication,
     ) -> C3MetricPublication:
         _require_as_filed_publication(upstream)
+        _require_result_matches_upstream(result, upstream)
         rows = {
             name: tuple(sorted((dict(row) for row in values), key=_canonical_json))
             for name, values in result.companion_datasets().items()
@@ -315,7 +339,18 @@ class C3MetricCompanionReader:
             rows[name] = tuple(dict(row) for row in value)
         # Repeat M2's admission validation; it checks the M1 manifest/content hash.
         DerivedMetricSeriesMaterializer().load_published_candidates(metric_publication.run_root)
-        return C3MetricResult(rows["metric_input_candidate"], rows["metric_input_compatibility"], (), rows["metric_coverage"])
+        candidates = rows["metric_input_candidate"]
+        compatibility = rows["metric_input_compatibility"]
+        coverage = rows["metric_coverage"]
+        return C3MetricResult(
+            str(manifest["upstream_layer2_run_fingerprint"]),
+            str(manifest["upstream_layer2_manifest_sha256"]),
+            candidates,
+            compatibility,
+            (),
+            coverage,
+            _result_content_fingerprint(candidates, compatibility, (), coverage),
+        )
 
     def load_metric_publication(self, run_root: Path) -> DerivedMetricPublication:
         """Attest one M1 root before it can be bound to a C3 companion.
@@ -350,6 +385,24 @@ def _require_as_filed_publication(publication: VerifiedLayer2Publication) -> Non
         raise C3MetricPublicationError("C3-M4 accepts an AS_FILED-only C3-M1 publication")
     if not publication.identity.get("layer2_run_fingerprint") or not publication.identity.get("layer2_manifest_sha256"):
         raise C3MetricPublicationError("verified C3-M1 publication lacks immutable identity")
+
+
+def _require_result_matches_upstream(
+    result: C3MetricResult, publication: VerifiedLayer2Publication
+) -> None:
+    if not result.is_materialized_by_c3_pipeline:
+        raise C3MetricPublicationError("C3 metric publication requires a pipeline-materialized result")
+    if result.content_fingerprint != _result_content_fingerprint(
+        result.candidates, result.compatibility, result.derived_metrics, result.coverage
+    ):
+        raise C3MetricPublicationError("C3 metric materialization result content has been altered")
+    if (
+        result.upstream_layer2_run_fingerprint != publication.identity.get("layer2_run_fingerprint")
+        or result.upstream_layer2_manifest_sha256 != publication.identity.get("layer2_manifest_sha256")
+    ):
+        raise C3MetricPublicationError(
+            "C3 metric materialization result does not match supplied verified upstream"
+        )
 
 
 def _value_payload(candidate: Mapping[str, Any], facts: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
@@ -499,6 +552,21 @@ def _canonical_json(value: object) -> str:
 
 def _hash_rows(rows: Iterable[Mapping[str, Any]]) -> str:
     return hashlib.sha256(_canonical_json(tuple(dict(row) for row in rows)).encode("utf-8")).hexdigest()
+
+
+def _result_content_fingerprint(
+    candidates: Iterable[Mapping[str, Any]],
+    compatibility: Iterable[Mapping[str, Any]],
+    derived_metrics: Iterable[Mapping[str, Any]],
+    coverage: Iterable[Mapping[str, Any]],
+) -> str:
+    payload = {
+        "candidate": tuple(dict(row) for row in candidates),
+        "compatibility": tuple(dict(row) for row in compatibility),
+        "derived_metric": tuple(dict(row) for row in derived_metrics),
+        "coverage": tuple(dict(row) for row in coverage),
+    }
+    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
 
 
 def _file_sha256(path: Path) -> str:

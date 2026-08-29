@@ -23,6 +23,7 @@ from sec_xbrl.metrics import (
     C3MetricCompanionReader,
     C3MetricPublicationError,
     C3MetricPublicationPipeline,
+    C3MetricResult,
     DerivedMetricPublisher,
     DerivedMetricsRun,
     seed_metric_registry,
@@ -110,6 +111,60 @@ def test_c3_consumer_rejects_unlinked_but_individually_verified_m2_root(tmp_path
             layer2_publication_root=upstream.run_root,
             c3_metric_companion_root=published.run_root,
             metric_series_run_root=unrelated.run_root,
+        )
+
+
+def test_c3_publish_rejects_result_from_a_different_verified_upstream(tmp_path: Path) -> None:
+    upstream_a = _upstream(tmp_path / "a")
+    upstream_b = _upstream(tmp_path / "b")
+    pipeline = C3MetricPublicationPipeline(seed_metric_registry())
+    result = pipeline.materialize(upstream_a, evaluated_at="2026-08-29T00:00:00+00:00")
+    assert upstream_a.identity["layer2_manifest_sha256"] != upstream_b.identity["layer2_manifest_sha256"]
+    with pytest.raises(C3MetricPublicationError, match="does not match supplied verified upstream"):
+        pipeline.publish(
+            upstream_b,
+            result=result,
+            output_root=tmp_path / "c3",
+            run_version="c3-m4",
+            metric_run_version="c3-m4-m1",
+            metric_output_root=tmp_path / "m1",
+            registry_version="controlled-seed-v1",
+        )
+
+
+def test_c3_publish_rejects_manually_forged_result(tmp_path: Path) -> None:
+    upstream = _upstream(tmp_path)
+    forged = C3MetricResult(
+        upstream.identity["layer2_run_fingerprint"],
+        upstream.identity["layer2_manifest_sha256"],
+        (), (), (), (), "forged",
+    )
+    with pytest.raises(C3MetricPublicationError, match="pipeline-materialized result"):
+        C3MetricPublicationPipeline(seed_metric_registry()).publish(
+            upstream,
+            result=forged,
+            output_root=tmp_path / "c3",
+            run_version="c3-m4",
+            metric_run_version="c3-m4-m1",
+            metric_output_root=tmp_path / "m1",
+            registry_version="controlled-seed-v1",
+        )
+
+
+def test_c3_publish_rejects_altered_pipeline_result_content(tmp_path: Path) -> None:
+    upstream = _upstream(tmp_path)
+    pipeline = C3MetricPublicationPipeline(seed_metric_registry())
+    result = pipeline.materialize(upstream, evaluated_at="2026-08-29T00:00:00+00:00")
+    result.coverage[0]["available_count"] = 999
+    with pytest.raises(C3MetricPublicationError, match="content has been altered"):
+        pipeline.publish(
+            upstream,
+            result=result,
+            output_root=tmp_path / "c3",
+            run_version="c3-m4",
+            metric_run_version="c3-m4-m1",
+            metric_output_root=tmp_path / "m1",
+            registry_version="controlled-seed-v1",
         )
 
 
