@@ -1,5 +1,14 @@
 """Governed Derived Metrics definitions and durable materialization."""
 
+from sec_xbrl.metrics.c3_publication import (
+    C3_METRIC_PUBLICATION_VERSION,
+    C3MetricCompanionPublisher,
+    C3MetricCompanionReader,
+    C3MetricPublication,
+    C3MetricPublicationError,
+    C3MetricPublicationPipeline,
+    C3MetricResult,
+)
 from sec_xbrl.metrics.materialization import (
     DEFAULT_DERIVED_METRICS_ROOT,
     DERIVED_METRICS_CONTRACT_VERSION,
@@ -27,10 +36,17 @@ from sec_xbrl.metrics.series import (
 )
 
 __all__ = [
+    "C3_METRIC_PUBLICATION_VERSION",
     "DEFAULT_DERIVED_METRICS_ROOT",
     "DERIVED_METRICS_CONTRACT_VERSION",
     "DERIVED_METRIC_SERIES_CONTRACT_VERSION",
     "METRIC_REGISTRY_CONTRACT_VERSION",
+    "C3MetricCompanionPublisher",
+    "C3MetricCompanionReader",
+    "C3MetricPublication",
+    "C3MetricPublicationError",
+    "C3MetricPublicationPipeline",
+    "C3MetricResult",
     "DefinitionStatus",
     "DerivedMetricMaterializationError",
     "DerivedMetricMaterializer",

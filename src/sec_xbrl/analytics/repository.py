@@ -155,6 +155,40 @@ class AnalyticalRepository:
             metric_series_run_roots=metric_series_run_roots,
         )
 
+    @classmethod
+    def from_c3_metric_publication(
+        cls,
+        *,
+        layer2_publication_root: Path,
+        c3_metric_companion_root: Path,
+        metric_series_run_root: Path,
+        company_catalog: Iterable[Mapping[str, Any]] = (),
+    ) -> AnalyticalRepository:
+        """Build a C3 scenario repository through its composite admission gate.
+
+        Generic ``from_layer2_publications`` intentionally continues to admit
+        generic verified M2 metric roots.  A C3 scenario needs more: the
+        companion binds the exact C3-M1 Layer 2 manifest identity to one M1
+        metric manifest, and its reader rechecks both before this constructor
+        delegates to the normal read-only repository.
+        """
+        from sec_xbrl.metrics.c3_publication import C3MetricCompanionReader
+
+        layer2_root = Path(layer2_publication_root)
+        upstream = Layer2PublicationReader().load(layer2_root)
+        reader = C3MetricCompanionReader()
+        metric_publication = reader.load_metric_publication(Path(metric_series_run_root))
+        reader.load(
+            Path(c3_metric_companion_root),
+            upstream=upstream,
+            metric_publication=metric_publication,
+        )
+        return cls.from_layer2_publications(
+            (layer2_root,),
+            company_catalog=company_catalog,
+            metric_series_run_roots=(Path(metric_series_run_root),),
+        )
+
     def resolve_company(self, selector: str) -> dict[str, Any]:
         """Resolve an exact CIK, ticker, canonical ID, or normalized company name.
 
