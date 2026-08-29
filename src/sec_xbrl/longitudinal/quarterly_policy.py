@@ -280,6 +280,41 @@ class QuarterlyPeriodPolicyMaterializer:
         )
 
 
+class QuarterlyPeriodPolicyV2Materializer:
+    """M2-v2: consume only a reader-attested, full-scope policy registry.
+
+    The v1 declaration API remains for backwards-compatible historical runs.
+    New governed Q4 activation must enter through this class; concept-only
+    declarations cannot authorize a different dimension, basis, unit, company,
+    or source Fact.
+    """
+
+    def materialize(self, publication: VerifiedLayer2Publication, *, release: CorpusRelease, registry_root: Path) -> QuarterlyPolicyResult:
+        from sec_xbrl.longitudinal.q4_policy_registry import Q4PolicyRegistryReader
+        registry = Q4PolicyRegistryReader().load(registry_root, upstream=publication, release=release)
+        base = QuarterlyPeriodPolicyMaterializer().materialize(publication, release=release, declarations=registry.semantic_declarations())
+        permitted = {
+            (_scope_from_registry(row), frozenset(str(x) for x in row["approved_analytical_fact_ids"]))
+            for row in registry.declarations
+        }
+        accepted = []
+        for candidate in base.q4_candidates:
+            source_ids = frozenset(str(x) for x in candidate["input_analytical_fact_ids"])
+            scope = _candidate_scope(candidate)
+            if any(scope == declared_scope and source_ids <= facts for declared_scope, facts in permitted):
+                accepted.append(candidate)
+        accepted_ids = {str(row["quarterly_policy_candidate_id"]) for row in accepted}
+        # All non-accepted base candidates are deliberately represented as
+        # unavailable because their full scope or source evidence was not in
+        # the reader-attested registry.
+        excluded = list(base.q4_exclusions)
+        for candidate in base.q4_candidates:
+            if str(candidate["quarterly_policy_candidate_id"]) not in accepted_ids:
+                for fact_id in candidate["input_analytical_fact_ids"]:
+                    excluded.append({"quarterly_policy_exclusion_id": _id("quarterly-q4-exclusion", (fact_id, "Q4_V2_EXACT_SCOPE_POLICY_REQUIRED")), "cik": candidate["cik"], "analytical_fact_id": fact_id, "other_analytical_fact_id": None, "period_class": "FY_OR_YTD_9M", "exclusion_reason": "Q4_V2_EXACT_SCOPE_POLICY_REQUIRED", "policy_version": "c3-m5-quarterly-policy-v2"})
+        return QuarterlyPolicyResult(tuple(sorted(accepted, key=lambda x: x["quarterly_policy_candidate_id"])), tuple(sorted({x["quarterly_policy_exclusion_id"]: x for x in excluded}.values(), key=lambda x: x["quarterly_policy_exclusion_id"])), base.predecessor_linkage)
+
+
 def _declarations(
     rows: Iterable[QuarterlySemanticDeclaration],
 ) -> dict[str, QuarterlySemanticDeclaration]:
@@ -400,6 +435,18 @@ def _scope(row: Mapping[str, Any]) -> tuple[Any, ...]:
         row.get("basis_version"),
         repr(row.get("unit_semantics")),
     )
+
+
+def _scope_from_registry(row: Mapping[str, Any]) -> tuple[Any, ...]:
+    return (str(row.get("cik") or ""), str(row.get("company_canonical_concept_id") or ""),
+            repr(row.get("company_canonical_dimension_key")), row.get("basis_version"),
+            repr(row.get("unit_semantics")))
+
+
+def _candidate_scope(row: Mapping[str, Any]) -> tuple[Any, ...]:
+    return (str(row.get("cik") or ""), str(row.get("company_canonical_concept_id") or ""),
+            repr(row.get("company_canonical_dimension_key")), row.get("basis_version"),
+            repr(row.get("unit_semantics")))
 
 
 def _q4(

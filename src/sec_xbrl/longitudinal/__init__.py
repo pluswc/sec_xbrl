@@ -67,6 +67,7 @@ from sec_xbrl.longitudinal.quarterly_policy import (
     QUARTERLY_POLICY_VERSION,
     QuarterlyPeriodPolicyError,
     QuarterlyPeriodPolicyMaterializer,
+    QuarterlyPeriodPolicyV2Materializer,
     QuarterlyPolicyPublication,
     QuarterlyPolicyPublicationReader,
     QuarterlyPolicyPublisher,
@@ -86,6 +87,15 @@ from sec_xbrl.longitudinal.review_inventory import (
     ReviewInventoryPublicationReader,
     ReviewInventoryPublisher,
     ReviewInventoryResult,
+)
+from sec_xbrl.longitudinal.q4_policy_registry import (
+    Q4_POLICY_REGISTRY_VERSION,
+    Q4PolicyRegistryError,
+    Q4PolicyRegistryMaterializer,
+    Q4PolicyRegistryPublication,
+    Q4PolicyRegistryPublisher,
+    Q4PolicyRegistryReader,
+    Q4PolicyRegistryResult,
 )
 from sec_xbrl.longitudinal.selection import (
     SELECTION_MATERIALIZATION_VERSION,
@@ -112,6 +122,7 @@ __all__ = [
     "RAW_TABLES",
     "RECAST_REGISTRY_VERSION",
     "REVIEW_INVENTORY_VERSION",
+    "Q4_POLICY_REGISTRY_VERSION",
     "SELECTION_MATERIALIZATION_VERSION",
     "SERIES_RULE_VERSION",
     "AnalyticalFactMaterializer",
@@ -156,6 +167,7 @@ __all__ = [
     "PeriodObservationResult",
     "QuarterlyPeriodPolicyError",
     "QuarterlyPeriodPolicyMaterializer",
+    "QuarterlyPeriodPolicyV2Materializer",
     "QuarterlyPolicyPublication",
     "QuarterlyPolicyPublicationReader",
     "QuarterlyPolicyPublisher",
@@ -170,6 +182,12 @@ __all__ = [
     "ReviewInventoryPublicationReader",
     "ReviewInventoryPublisher",
     "ReviewInventoryResult",
+    "Q4PolicyRegistryError",
+    "Q4PolicyRegistryMaterializer",
+    "Q4PolicyRegistryPublication",
+    "Q4PolicyRegistryPublisher",
+    "Q4PolicyRegistryReader",
+    "Q4PolicyRegistryResult",
     "SeriesBuilder",
     "validate_recast_evidence",
 ]

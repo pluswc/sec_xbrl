@@ -18,6 +18,7 @@ from sec_xbrl.longitudinal import (
 )
 from sec_xbrl.longitudinal.materialization import VerifiedLayer2Publication
 from sec_xbrl.longitudinal.review_inventory import ReviewInventoryError, ReviewInventoryResult
+from sec_xbrl.longitudinal.quarterly_policy import QuarterlyPolicyResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +29,7 @@ class ReviewInventoryReportInput:
     inventory_root: Path
     upstream: VerifiedLayer2Publication
     release: CorpusRelease
+    quarterly_result: QuarterlyPolicyResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +70,7 @@ class KoreanReviewInventoryReportGenerator:
             result = ReviewInventoryPublicationReader().load(
                 Path(item.inventory_root), upstream=item.upstream, release=item.release
             )
-            reports.append(_company_summary(ticker, result, top_n=top_n))
+            reports.append(_company_summary(ticker, result, item.upstream, item.quarterly_result, top_n=top_n))
         if requested - seen:
             raise ReviewInventoryError("ticker scope has no supplied report input")
         if not reports:
@@ -86,7 +88,7 @@ class KoreanReviewInventoryReportGenerator:
         return KoreanReviewInventoryReport(_render_markdown(summary), summary)
 
 
-def _company_summary(ticker: str, result: ReviewInventoryResult, *, top_n: int) -> dict[str, Any]:
+def _company_summary(ticker: str, result: ReviewInventoryResult, upstream: VerifiedLayer2Publication, quarterly: QuarterlyPolicyResult | None, *, top_n: int) -> dict[str, Any]:
     q4 = [dict(row) for row in result.q4_candidates]
     recast = [dict(row) for row in result.recast_candidates]
     artifact = [dict(row) for row in result.artifact_coverage]
@@ -108,7 +110,7 @@ def _company_summary(ticker: str, result: ReviewInventoryResult, *, top_n: int) 
     return {
         "ticker": ticker,
         "cik": q4[0].get("cik") if q4 else None,
-        "candidate_counts": {"q4_technical": len(q4), "recast_evidence_review": len(recast)},
+        "candidate_counts": {"reported_as_filed": sum(1 for row in upstream.records("analytical_fact") if row.get("view") == "AS_FILED"), "q4_derived": 0 if quarterly is None else len(quarterly.q4_candidates), "q4_technical": len(q4), "recast_evidence_review": len(recast)},
         "q4_status": {"technical_eligibility": "PENDING_SEMANTIC_REVIEW", "semantic_approval": "NOT_APPROVED"},
         "q4_top_fy_end_concepts": breakdown,
         "q4_lineage_example": example,
@@ -138,10 +140,10 @@ def _reviewer_intake() -> list[str]:
 
 
 def _render_markdown(summary: Mapping[str, Any]) -> str:
-    lines = ["# C3-M5 검토 인벤토리", "", "이 문서는 검토용 소비자 출력입니다. Q4 숫자를 계산하지 않고, 재제시를 주장하거나 CURRENT_COMPARABLE을 활성화하지 않습니다.", "", "## 기업별 현황", "", "| 티커 | CIK | Q4 기술 후보 | 재제시 근거 검토 후보 |", "| --- | --- | ---: | ---: |"]
+    lines = ["# C3-M5 분기 상태 및 검토 인벤토리", "", "이 문서는 governed consumer 출력입니다. Reported AS_FILED와 승인된 Derived Q4, 그리고 아직 검토 대기인 후보를 분리합니다. Pending Review에 대해서는 Q4 숫자를 계산하지 않고, 재제시를 주장하거나 CURRENT_COMPARABLE을 활성화하지 않습니다.", "", "## 기업별 현황", "", "| 티커 | CIK | Reported AS_FILED | Derived Q4 | Pending Review | 재제시 근거 검토 후보 |", "| --- | --- | ---: | ---: | ---: | ---: |"]
     for company in summary["companies"]:
         counts = company["candidate_counts"]
-        lines.append(f"| {company['ticker']} | {company['cik'] or 'N/A'} | {counts['q4_technical']} | {counts['recast_evidence_review']} |")
+        lines.append(f"| {company['ticker']} | {company['cik'] or 'N/A'} | {counts['reported_as_filed']} | {counts['q4_derived']} | {counts['q4_technical']} | {counts['recast_evidence_review']} |")
     for company in summary["companies"]:
         lines += ["", f"## {company['ticker']} ({company['cik'] or 'N/A'})", "", "**기술 적합성**: FY/YTD 9M의 기간·단위·차원·통화 조건이 맞는 검토 후보입니다.  **의미 승인**: 아직 `NOT_APPROVED`이며, `PENDING_SEMANTIC_REVIEW`는 Q4 계산 허가가 아닙니다.", "", "상위 FY 종료일 / 기술 Concept (최대 10개):", "", "| FY 종료일 | 기술 Concept ID | 후보 수 |", "| --- | --- | ---: |"]
         for row in company["q4_top_fy_end_concepts"]:
