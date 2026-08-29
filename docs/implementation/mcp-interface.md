@@ -1,9 +1,16 @@
-# Analytical Consumer API and Future XBRL MCP Interface
+# Consumer Data Access Layer and Future XBRL MCP Interface
+
+The primary consumer boundary is the storage-agnostic, in-process
+[`Consumer Data Access Layer`](consumer-data-access-layer.md). It is a common
+library/adapter contract, not an HTTP API and not an Excel-specific interface.
+`AnalyticalRepository` is its current publication-backed implementation. MCP
+is a possible future transport adapter only.
 
 ## Consumer C0 implemented boundary
 
-Consumer C0 extends the existing M9 **in-process** analytical boundary at
-`sec_xbrl.analytics.AnalyticalRepository`. It is not an MCP server and does
+Consumer C0/C1 extends the existing M9 **in-process** analytical boundary at
+`sec_xbrl.analytics.AnalyticalRepository`, which conforms to
+`sec_xbrl.analytics.ConsumerDataAccess`. It is not an MCP server and does
 not define transport, tool registration, authentication, or serialization. An
 MCP adapter may later expose these stable methods after analytical views prove
 stable.
@@ -38,7 +45,16 @@ never mutates supplied records or exposes Arelle/parser objects.
    company with no supplied inventory raises `CapabilityInventoryNotFoundError`.
    It returns only observed capability/status/provenance rows and never creates
    a product, segment, geography, or statement template.
-6. `trace_metric(derived_metric_id)` returns one full stored metric record only
+6. `discover_metrics(company, *, metric_id=None, definition_version=None,
+   frequency=None, view=None)` reads only candidates admitted from
+   hash-verified M1→M2 publication roots. It groups only compatible discovery
+   variants and preserves basis, full dimensions, definition, status,
+   unavailable reason, observed candidate records, and publication identity.
+   It never selects an as-of value or claims an unobserved Metric from a label.
+   Its scoped `NOT_REPORTED` response means no supplied verified publication
+   candidate matches the exact request, not that the company made no SEC
+   disclosure.
+7. `trace_metric(derived_metric_id)` returns one full stored metric record only
    when it was loaded from a hash-verified M1 publication through the M2
    materializer. Missing IDs raise `DerivedMetricNotFoundError`; conflicting
    verified records for one immutable ID raise `DerivedMetricConflictError`.
@@ -56,6 +72,7 @@ or an unverified file path.
 | `resolve_company` | `selector` | — |
 | `get_fact_series` | `company`, `concept` | `frequency`, `start`, `end`, `view` |
 | `discover_capabilities` | `company` | raw Concept, Axis, Member, `period_class` |
+| `discover_metrics` | `company` | metric ID, definition version, frequency, view |
 | `get_metric_series` | `company`, metric ID/definition ID, `view`, `as_of_date` | `frequency`, period range, definition version |
 | `trace_fact` | `fact_id` | — |
 | `trace_metric` | `derived_metric_id` | — |

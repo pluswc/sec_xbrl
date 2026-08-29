@@ -25,6 +25,8 @@ Analytical plane
 Derived Metrics plane
   └─ governed rule + compatible inputs + formula lineage
              ↓
+Consumer Data Access Layer (common library/adapter contract)
+             ↓
 Consumers: Excel | API | dashboard | research workflow
 ```
 
@@ -35,7 +37,8 @@ Consumers: Excel | API | dashboard | research workflow
 | Raw / As-filed Layer 1 | Preserve each filing's original XBRL meaning | facts, contexts, units, axis/member assignments, roles, relationships, text provenance | replace prior facts with later information or calculate business metrics |
 | Analytical | Create an as-of governed panel from raw facts and versioned mappings | a quarterly revenue series, segment/geographic breakdown, current/comparable selection | mutate raw facts or hide an incompatible basis |
 | Derived Metrics | Materialize calculations whose formula and inputs are explicit | gross margin, growth, compatible derived Q4, FCF | present a calculation as a directly reported value |
-| Consumer | Render or query governed values | Excel earnings model, API response, dashboard chart | parse a filing, select a recast, or invent a calculation policy |
+| Consumer Data Access Layer | Common storage-agnostic governed-data query contract | publication-backed repository, future DB/Parquet adapter | parse a filing, select a recast, calculate a metric, or define display policy |
+| Consumer | Render or query governed values through the common data-access contract | Excel earnings model, dashboard chart, research workflow | parse a filing, select a recast, or invent a calculation policy |
 
 Layer 2 company canonical mappings and Layer 3 cross-company mappings enrich
 the Analytical plane.  They never replace raw concept, axis, or member IDs.
@@ -134,8 +137,9 @@ record and may be used as validation rather than substitution.
 
 ## 6. Consumption contract
 
-Consumers receive governed rows—not parser objects or unqualified source ZIP
-contents.  A consumer request/output must be able to carry:
+Consumers receive governed rows through a common library/adapter data-access
+contract—not parser objects or unqualified source ZIP contents. A consumer
+request/output must be able to carry:
 
 - company, period/frequency, selected view, and `as_of_date`;
 - analytical or metric ID, value, unit/scaling, and full dimension signature;
@@ -147,6 +151,11 @@ Excel may apply layout, labels, indentation, conditional formatting, totals,
 and presentation-only formulas.  It cannot promote a newly computed value to a
 persisted analytical metric, decide a recast is comparable, or fill a missing
 value.  The same rule applies to APIs and dashboards.
+
+The common Consumer Data Access Layer is not necessarily a network API. The
+current publication-backed Python repository and a future DB/Parquet adapter
+must honor the same query and provenance commitments; a transport adapter may
+be added later without becoming an analytical policy engine.
 
 ## 7. Migration and prototype exception
 

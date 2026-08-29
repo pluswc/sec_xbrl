@@ -54,6 +54,12 @@ Analytical taxonomy, mapping relations/confidence/versioning, peer-comparison pa
 M9 migrates Excel/API/dashboard consumers to governed Analytical and Derived
 Metrics outputs after the necessary Layer 1–3 and analytical-data QA is stable.
 
+Consumer C0/C1 first establishes a common **Consumer Data Access Layer**: a
+storage-agnostic library/adapter contract implemented today by the
+publication-backed `AnalyticalRepository`. It is not an Excel-specific or HTTP
+API requirement. Future DB/Parquet and optional transport adapters preserve
+the contract; a governed Excel view is a later consumer migration.
+
 ## GitHub workflow
 Recommended milestone branches:
 - `feature/m0-data-contract`

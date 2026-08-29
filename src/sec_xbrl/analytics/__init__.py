@@ -10,6 +10,7 @@ from sec_xbrl.analytics.repository import (
     DerivedMetricNotFoundError,
     FactNotFoundError,
 )
+from sec_xbrl.analytics.data_access import ConsumerDataAccess
 
 __all__ = [
     "AnalyticalRepository",
@@ -17,6 +18,7 @@ __all__ = [
     "CapabilityInventoryNotFoundError",
     "CompanyAmbiguousError",
     "CompanyNotFoundError",
+    "ConsumerDataAccess",
     "DerivedMetricConflictError",
     "DerivedMetricNotFoundError",
     "FactNotFoundError",
