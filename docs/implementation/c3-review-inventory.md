@@ -57,7 +57,12 @@ manually assembled lookalike object fails closed.
 not a one-off company report.  For every requested ticker it first calls the
 companion reader with its exact reader-attested M1 publication and
 `CorpusRelease`; therefore an altered inventory or mismatched upstream cannot
-be rendered.  It returns Korean Markdown and structured JSON with candidate
+be rendered.  To display `Derived Q4`, it also requires a reader-attested
+M2-v2 quarterly-policy root and the matching Q4 policy-registry root.  The
+generator independently verifies the M1 manifest/fingerprint, CorpusRelease
+fingerprint, and registry manifest SHA linkage before rendering a derived
+value. Inventory-only candidates remain `Pending Review`; they are not a
+derived value. It returns Korean Markdown and structured JSON with candidate
 counts, the distinction between technical eligibility and semantic approval,
 FY/YTD source lineage, artifact coverage, recast-review interpretation, and
 reviewer intake instructions.  Technical IDs remain visible as IDs; the
@@ -71,12 +76,17 @@ JSON output paths:
 python -m sec_xbrl.analytics.review_inventory_report \
   --inventory-root /published/c3-m5-aapl \
   --layer2-root /published/c3-m1-aapl \
+  --quarterly-policy-root /published/c3-m2-v2-aapl \
+  --q4-policy-registry-root /published/c3-q4-policy-aapl \
   --ticker AAPL \
   --corpus-root /corpus/20260827T051322Z \
   --corpus-run-id 20260827T051322Z \
   --output-markdown review.md --output-json review.json
 ```
 
-The command's ticker scope is caller-provided: it has no embedded company
-list.  It never calculates Q4 values, approves semantic declarations, claims
-a recast, or activates `CURRENT_COMPARABLE`.
+For multiple companies, each of `--inventory-root`, `--layer2-root`,
+`--quarterly-policy-root`, `--q4-policy-registry-root`, and `--ticker` is
+repeated in the same positional order. The command's ticker scope is
+caller-provided: it has no embedded company list. It never calculates Q4
+values, approves semantic declarations, claims a recast, or activates
+`CURRENT_COMPARABLE`.

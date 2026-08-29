@@ -63,3 +63,10 @@ def test_report_reader_rejects_tampered_inventory(tmp_path: Path) -> None:
 def test_report_rejects_unknown_scope(tmp_path: Path) -> None:
     with pytest.raises(ReviewInventoryError, match="ticker scope"):
         KoreanReviewInventoryReportGenerator().generate((_input(tmp_path),), ticker_scope=("MISSING",))
+
+
+def test_report_rejects_tampered_policy_root(tmp_path: Path) -> None:
+    value = _input(tmp_path)
+    (value.quarterly_policy_root / "quarterly_q4_candidate.jsonl").write_text("{}\n", encoding="utf-8")
+    with pytest.raises(Exception, match="content"):
+        KoreanReviewInventoryReportGenerator().generate((value,))
