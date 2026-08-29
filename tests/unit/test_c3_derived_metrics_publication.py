@@ -64,6 +64,11 @@ def test_c3_metric_pipeline_publishes_m6_m1_m2_and_common_consumer_queries(tmp_p
     assert by_metric["gross_margin"]["metric_value_decimal"] == "50"
     assert by_metric["operating_margin"]["metric_value_decimal"] == "25"
     assert by_metric["revenue_growth"]["calculation_status"] == "UNAVAILABLE"
+    gross = by_metric["gross_margin"]
+    assert gross["input_lineage_status"] == "COMPLETE"
+    assert gross["input_metric_input_candidate_ids"] == gross["ordered_input_candidate_ids"]
+    assert tuple(binding["metric_input_candidate_id"] for binding in gross["input_role_bindings"]) == gross["ordered_input_candidate_ids"]
+    assert tuple(binding["assessment_input_role"] for binding in gross["input_role_bindings"]) == ("GROSS_PROFIT", "REVENUE")
     published = pipeline.publish(upstream, result=result, output_root=tmp_path / "c3", run_version="c3-m4", metric_run_version="c3-m4-m1", metric_output_root=tmp_path / "m1", registry_version="controlled-seed-v1")
     reread = C3MetricCompanionReader().load(published.run_root, upstream=upstream, metric_publication=published.metric_publication)
     assert len(reread.coverage) == 1

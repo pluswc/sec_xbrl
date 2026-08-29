@@ -187,6 +187,34 @@ def test_ineligible_handoff_is_unavailable_and_direct_q4_are_rejected() -> None:
     )
     assert row["calculation_status"] == "UNAVAILABLE"
     assert row["source_type"] == "DERIVED_METRIC"
+    no_input_diagnostic = {
+        **unavailable,
+        "input_metric_input_candidate_ids": (),
+        "input_role_bindings": (),
+        "input_analytical_fact_ids": (),
+        "input_selected_fact_ids": (),
+    }
+    no_input = materializer.materialize(
+        definition_id="gross_margin@1.0.0",
+        candidates=(),
+        compatibility=no_input_diagnostic,
+        selected_observation_values=(),
+        evaluated_at="2026-08-28T00:00:00+00:00",
+    )
+    assert no_input["calculation_status"] == "UNAVAILABLE"
+    assert no_input["input_lineage_status"] == "NO_COMPATIBLE_INPUTS"
+    assert no_input["ordered_input_candidate_ids"] == ()
+    assert no_input["ordered_input_lineage"] == ()
+    assert no_input["metric_input_compatibility_status"] == "UNAVAILABLE"
+    invalid_no_input_diagnostic = {**no_input_diagnostic, "compatibility_status": "ELIGIBLE"}
+    with pytest.raises(DerivedMetricMaterializationError, match="must be M6 UNAVAILABLE"):
+        materializer.materialize(
+            definition_id="gross_margin@1.0.0",
+            candidates=(),
+            compatibility=invalid_no_input_diagnostic,
+            selected_observation_values=(),
+            evaluated_at="2026-08-28T00:00:00+00:00",
+        )
     with pytest.raises(DerivedMetricMaterializationError, match="only DERIVED"):
         materializer.materialize(
             definition_id="eps@1.0.0",

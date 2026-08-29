@@ -108,6 +108,62 @@ def test_unavailable_and_tampered_or_fabricated_publication_fail_closed(tmp_path
         materializer.load_published_candidates(publication.run_root)
 
 
+def test_no_input_unavailable_metric_is_admitted_and_queryable_without_fallback(tmp_path) -> None:
+    record = _record("metric:no-input", period="FY26-Q1", view="AS_FILED", basis="v1", as_of="2026-05-01", value=None)
+    record.update({
+        "ordered_input_candidate_ids": (),
+        "ordered_input_analytical_fact_ids": (),
+        "ordered_input_lineage": (),
+        "input_lineage_status": "NO_COMPATIBLE_INPUTS",
+        "metric_input_compatibility_status": "UNAVAILABLE",
+        "metric_input_diagnostic_reason": "REQUIRED_INPUT_NOT_AVAILABLE",
+        "metric_input_required_roles": ("GROSS_PROFIT", "REVENUE"),
+        "input_metric_input_candidate_ids": (),
+        "input_role_bindings": (),
+    })
+    publication = _published(tmp_path, record)
+    repository = AnalyticalRepository(
+        companies=({"cik": "0000320193", "ticker": "AAPL"},),
+        metric_series_run_roots=(publication.run_root,),
+    )
+
+    selected = repository.get_metric_series(
+        "AAPL", "gross_margin", as_of_date="2026-05-02", view="AS_FILED"
+    )[0]
+    assert selected["calculation_status"] == "UNAVAILABLE"
+    assert selected["metric_value_decimal"] is None
+    assert selected["unavailable_reason"] == "M6_HANDOFF_INVALID:missing input"
+    assert selected["ordered_input_lineage"] == []
+    assert repository.discover_metrics("AAPL", metric_id="gross_margin")[0]["observed_metric_records"][0]["input_lineage_status"] == "NO_COMPATIBLE_INPUTS"
+    assert repository.trace_metric("metric:no-input")["unavailable_reason"] == "M6_HANDOFF_INVALID:missing input"
+
+
+def test_available_metric_without_input_lineage_is_rejected(tmp_path) -> None:
+    record = _record("metric:available-no-input", period="FY26-Q1", view="AS_FILED", basis="v1", as_of="2026-05-01")
+    record.update({
+        "ordered_input_candidate_ids": (),
+        "ordered_input_analytical_fact_ids": (),
+        "ordered_input_lineage": (),
+        "input_lineage_status": "NO_COMPATIBLE_INPUTS",
+    })
+    with pytest.raises(Exception, match="lacks source input lineage"):
+        _published(tmp_path, record)
+
+
+def test_no_input_metric_requires_m6_unavailable_diagnostic_not_default_coercion(tmp_path) -> None:
+    record = _record("metric:forged-no-input", period="FY26-Q1", view="AS_FILED", basis="v1", as_of="2026-05-01", value=None)
+    record.update({
+        "ordered_input_candidate_ids": (),
+        "ordered_input_analytical_fact_ids": (),
+        "ordered_input_lineage": (),
+        "input_lineage_status": "NO_COMPATIBLE_INPUTS",
+        "metric_input_compatibility_status": "ELIGIBLE",
+        "metric_input_diagnostic_reason": "REQUIRED_INPUT_NOT_AVAILABLE",
+    })
+    with pytest.raises(Exception, match="M6 UNAVAILABLE compatibility"):
+        _published(tmp_path, record)
+
+
 def test_current_comparable_requires_recast_evidence_even_from_verified_m1_run(tmp_path) -> None:
     record = _record("metric:current", period="FY26-Q1", view="CURRENT_COMPARABLE", basis="recast-v2", as_of="2026-08-01")
     record["ordered_input_lineage"] = tuple(

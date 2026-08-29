@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 DERIVED_METRIC_SERIES_CONTRACT_VERSION = "derived-metrics-m2-series-v1"
+_NO_COMPATIBLE_INPUT_REASONS = frozenset({"REQUIRED_INPUT_NOT_AVAILABLE"})
 
 
 class DerivedMetricSeriesError(ValueError):
@@ -146,8 +147,40 @@ def _validate_record(row: Mapping[str, Any]) -> None:
             raise DerivedMetricSeriesError("unavailable derived_metric requires reason and no value")
     else:
         raise DerivedMetricSeriesError("derived_metric has unsupported calculation status")
-    if not row["ordered_input_lineage"]:
-        raise DerivedMetricSeriesError("derived_metric lacks source input lineage")
+    lineage = tuple(row["ordered_input_lineage"])
+    candidate_ids = tuple(row["ordered_input_candidate_ids"])
+    fact_ids = tuple(row["ordered_input_analytical_fact_ids"])
+    if len(candidate_ids) != len(lineage) or len(fact_ids) != len(lineage):
+        raise DerivedMetricSeriesError("derived_metric has incomplete source input lineage")
+    if row["calculation_status"] == "AVAILABLE":
+        if not lineage:
+            raise DerivedMetricSeriesError("available derived_metric lacks source input lineage")
+        if row.get("input_lineage_status") not in {None, "COMPLETE"}:
+            raise DerivedMetricSeriesError("available derived_metric has incomplete source input lineage")
+    elif not lineage:
+        # M1 may publish a diagnostic-only UNAVAILABLE evaluation when M6 had
+        # no compatible input candidates. It is a governed result, not a
+        # missing provenance error, and no fallback may be selected.
+        if row.get("input_lineage_status") != "NO_COMPATIBLE_INPUTS":
+            raise DerivedMetricSeriesError(
+                "unavailable derived_metric without inputs lacks no-input diagnostic status"
+            )
+        if candidate_ids or fact_ids:
+            raise DerivedMetricSeriesError(
+                "unavailable no-input derived_metric claims source input IDs"
+            )
+        if row.get("metric_input_compatibility_status") != "UNAVAILABLE":
+            raise DerivedMetricSeriesError(
+                "unavailable no-input derived_metric requires M6 UNAVAILABLE compatibility"
+            )
+        if row.get("metric_input_diagnostic_reason") not in _NO_COMPATIBLE_INPUT_REASONS:
+            raise DerivedMetricSeriesError(
+                "unavailable no-input derived_metric lacks approved no-compatible-input diagnostic"
+            )
+    elif row.get("input_lineage_status") == "NO_COMPATIBLE_INPUTS":
+        raise DerivedMetricSeriesError(
+            "unavailable derived_metric with inputs claims no-input diagnostic status"
+        )
     if row["view"] == "CURRENT_COMPARABLE":
         for input_row in row["ordered_input_lineage"]:
             source_type = input_row.get("source_type")
