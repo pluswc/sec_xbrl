@@ -19,7 +19,6 @@ from sec_xbrl.longitudinal import (
 )
 from sec_xbrl.longitudinal.materialization import VerifiedLayer2Publication
 from sec_xbrl.longitudinal.review_inventory import ReviewInventoryError, ReviewInventoryResult
-from sec_xbrl.longitudinal.quarterly_policy import QuarterlyPolicyResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +29,8 @@ class ReviewInventoryReportInput:
     inventory_root: Path
     upstream: VerifiedLayer2Publication
     release: CorpusRelease
-    quarterly_result: QuarterlyPolicyResult | None = None
+    quarterly_policy_root: Path | None = None
+    q4_policy_registry_root: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +71,10 @@ class KoreanReviewInventoryReportGenerator:
             result = ReviewInventoryPublicationReader().load(
                 Path(item.inventory_root), upstream=item.upstream, release=item.release
             )
-            reports.append(_company_summary(ticker, result, item.upstream, item.quarterly_result, top_n=top_n))
+            if item.quarterly_policy_root is None or item.q4_policy_registry_root is None:
+                raise ReviewInventoryError("report input requires reader-verified quarterly policy and registry roots")
+            quarterly = QuarterlyPolicyV2Reader().load(item.quarterly_policy_root, upstream=item.upstream, release=item.release, registry_root=item.q4_policy_registry_root)
+            reports.append(_company_summary(ticker, result, item.upstream, quarterly, top_n=top_n))
         if requested - seen:
             raise ReviewInventoryError("ticker scope has no supplied report input")
         if not reports:
@@ -89,7 +92,7 @@ class KoreanReviewInventoryReportGenerator:
         return KoreanReviewInventoryReport(_render_markdown(summary), summary)
 
 
-def _company_summary(ticker: str, result: ReviewInventoryResult, upstream: VerifiedLayer2Publication, quarterly: QuarterlyPolicyResult | None, *, top_n: int) -> dict[str, Any]:
+def _company_summary(ticker: str, result: ReviewInventoryResult, upstream: VerifiedLayer2Publication, quarterly: Any, *, top_n: int) -> dict[str, Any]:
     q4 = [dict(row) for row in result.q4_candidates]
     recast = [dict(row) for row in result.recast_candidates]
     artifact = [dict(row) for row in result.artifact_coverage]
@@ -112,7 +115,7 @@ def _company_summary(ticker: str, result: ReviewInventoryResult, upstream: Verif
         "ticker": ticker,
         "cik": q4[0].get("cik") if q4 else None,
         "candidate_counts": {"reported_as_filed": sum(1 for row in upstream.records("analytical_fact") if row.get("view") == "AS_FILED"), "q4_derived": 0 if quarterly is None else len(quarterly.q4_candidates), "q4_technical": len(q4), "recast_evidence_review": len(recast)},
-        "q4_status": {"technical_eligibility": "PENDING_SEMANTIC_REVIEW", "semantic_approval": "NOT_APPROVED"},
+        "q4_status": {"policy_approved_derived_count": 0 if quarterly is None else len(quarterly.q4_candidates), "policy_approval_status": "POLICY_APPROVED_ADDITIVE_AMOUNT" if quarterly and quarterly.q4_candidates else "NOT_AVAILABLE", "pending_semantic_review_count": max(0, len(q4) - (0 if quarterly is None else len(quarterly.q4_candidates))), "pending_semantic_review_status": "PENDING_SEMANTIC_REVIEW"},
         "q4_top_fy_end_concepts": breakdown,
         "q4_lineage_example": example,
         "artifact_coverage": dict(sorted(Counter(str(row.get("artifact_status")) for row in artifact).items())),
@@ -146,7 +149,10 @@ def _render_markdown(summary: Mapping[str, Any]) -> str:
         counts = company["candidate_counts"]
         lines.append(f"| {company['ticker']} | {company['cik'] or 'N/A'} | {counts['reported_as_filed']} | {counts['q4_derived']} | {counts['q4_technical']} | {counts['recast_evidence_review']} |")
     for company in summary["companies"]:
-        lines += ["", f"## {company['ticker']} ({company['cik'] or 'N/A'})", "", "**기술 적합성**: FY/YTD 9M의 기간·단위·차원·통화 조건이 맞는 검토 후보입니다.  **의미 승인**: 아직 `NOT_APPROVED`이며, `PENDING_SEMANTIC_REVIEW`는 Q4 계산 허가가 아닙니다.", "", "상위 FY 종료일 / 기술 Concept (최대 10개):", "", "| FY 종료일 | 기술 Concept ID | 후보 수 |", "| --- | --- | ---: |"]
+        status = company["q4_status"]
+        approval = (f"**정책 승인 Derived Q4**: `{status['policy_approved_derived_count']}`건, `{status['policy_approval_status']}`. " if status["policy_approved_derived_count"] else "**정책 승인 Derived Q4**: 없음. ")
+        pending = f"**Pending Review**: `{status['pending_semantic_review_count']}`건, `{status['pending_semantic_review_status']}`이며 Q4 계산 허가가 아닙니다."
+        lines += ["", f"## {company['ticker']} ({company['cik'] or 'N/A'})", "", "**기술 적합성**: FY/YTD 9M의 기간·단위·차원·통화 조건이 맞는 검토 후보입니다.  " + approval + pending, "", "상위 FY 종료일 / 기술 Concept (최대 10개):", "", "| FY 종료일 | 기술 Concept ID | 후보 수 |", "| --- | --- | ---: |"]
         for row in company["q4_top_fy_end_concepts"]:
             lines.append(f"| {row['fy_end']} | `{row['company_concept_id']}` | {row['technical_candidate_count']} |")
         example = company["q4_lineage_example"]
@@ -183,8 +189,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         release = CorpusReleaseAdapter().load(Path(args.corpus_root), corpus_run_id=args.corpus_run_id,
             ciks=set(upstream.input_ciks), run_version=str(upstream.identity["layer2_run_version"]),
             rules=Layer2RuleVersions("period-v1", "mapping-v1", "recast-v1", "selection-v1"))
-        quarterly = QuarterlyPolicyV2Reader().load(Path(quarterly_policy), upstream=upstream, release=release, registry_root=Path(registry))
-        inputs.append(ReviewInventoryReportInput(ticker, Path(inventory), upstream, release, quarterly))
+        inputs.append(ReviewInventoryReportInput(ticker, Path(inventory), upstream, release, Path(quarterly_policy), Path(registry)))
     report = KoreanReviewInventoryReportGenerator().generate(inputs, ticker_scope=args.ticker)
     report.write(markdown_path=Path(args.output_markdown), json_path=Path(args.output_json))
     return 0
