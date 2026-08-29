@@ -6,14 +6,17 @@ from types import MappingProxyType
 import pytest
 
 from sec_xbrl.analytics import KoreanReviewInventoryReportGenerator, ReviewInventoryReportInput
-from sec_xbrl.longitudinal import ReviewInventoryError, ReviewInventoryPublisher, ReviewInventoryResult
+from sec_xbrl.longitudinal import ReviewInventoryError, ReviewInventoryPublisher, ReviewInventoryResult, Q4PolicyRegistryMaterializer, Q4PolicyRegistryPublisher, QuarterlyPeriodPolicyV2Materializer, QuarterlyPolicyV2Publisher
 from sec_xbrl.longitudinal.materialization import _READER_ATTESTATION_TOKEN, VerifiedLayer2Publication
+from test_c3_review_inventory import _release as real_release, _publication as real_publication
 
 
 class _Release:
     def __init__(self) -> None:
         self.ciks = ("0000000001",)
         self.layer2_run = type("Run", (), {"fingerprint": "f" * 64})()
+    def records(self, _name):
+        return ()
 
 
 def _upstream() -> VerifiedLayer2Publication:
@@ -30,16 +33,21 @@ def _result() -> ReviewInventoryResult:
 
 
 def _input(tmp_path: Path, ticker: str = "TEST") -> ReviewInventoryReportInput:
-    release, upstream = _Release(), _upstream()
+    release = real_release()
+    upstream = real_publication(release)
     published = ReviewInventoryPublisher().publish(_result(), output_root=tmp_path, run_version=ticker.lower(), upstream=upstream, release=release)  # type: ignore[arg-type]
-    return ReviewInventoryReportInput(ticker, published.run_root, upstream, release)  # type: ignore[arg-type]
+    registry = Q4PolicyRegistryMaterializer().materialize(upstream, release=release, effective_from="2026-01-01")  # type: ignore[arg-type]
+    reg = Q4PolicyRegistryPublisher().publish(registry, output_root=tmp_path, run_version=ticker.lower()+"-reg", upstream=upstream, release=release)  # type: ignore[arg-type]
+    policy_result = QuarterlyPeriodPolicyV2Materializer().materialize(upstream, release=release, registry_root=reg.run_root)  # type: ignore[arg-type]
+    policy = QuarterlyPolicyV2Publisher().publish(policy_result, output_root=tmp_path, run_version=ticker.lower()+"-policy", upstream=upstream, release=release, registry_root=reg.run_root)  # type: ignore[arg-type]
+    return ReviewInventoryReportInput(ticker, published.run_root, upstream, release, policy.run_root, reg.run_root)  # type: ignore[arg-type]
 
 
 def test_korean_report_is_generic_and_keeps_zero_recast_interpretation(tmp_path: Path) -> None:
     report = KoreanReviewInventoryReportGenerator().generate((_input(tmp_path, "ALPHA"), _input(tmp_path, "BETA")), ticker_scope=("BETA",))
     assert report.summary["scope"] == ["BETA"]
     assert "기술 적합성" in report.markdown
-    assert "의미 승인" in report.markdown
+    assert "정책 승인 Derived Q4" in report.markdown
     assert "재제시가 없다는 결론이 아닙니다" in report.markdown
     assert "ALPHA" not in report.markdown
     assert "Q4 숫자를 계산하지 않고" in report.markdown
