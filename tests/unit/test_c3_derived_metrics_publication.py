@@ -17,12 +17,17 @@ from sec_xbrl.longitudinal import (
     Layer2RuleVersions,
     Layer2Run,
 )
+from sec_xbrl.longitudinal.metric_input import MetricInputHandoffMaterializer
 from sec_xbrl.metrics import (
+    METRIC_REGISTRY_CONTRACT_VERSION,
     C3MetricCompanionReader,
     C3MetricPublicationError,
     C3MetricPublicationPipeline,
+    DerivedMetricPublisher,
+    DerivedMetricsRun,
     seed_metric_registry,
 )
+from sec_xbrl.metrics.c3_publication import _handoff_fact
 
 
 def _upstream(tmp_path: Path):
@@ -61,7 +66,11 @@ def test_c3_metric_pipeline_publishes_m6_m1_m2_and_common_consumer_queries(tmp_p
     published = pipeline.publish(upstream, result=result, output_root=tmp_path / "c3", run_version="c3-m4", metric_run_version="c3-m4-m1", metric_output_root=tmp_path / "m1", registry_version="controlled-seed-v1")
     reread = C3MetricCompanionReader().load(published.run_root, upstream=upstream, metric_publication=published.metric_publication)
     assert len(reread.coverage) == 1
-    repository = AnalyticalRepository.from_layer2_publications((upstream.run_root,), metric_series_run_roots=(published.metric_publication.run_root,))
+    repository = AnalyticalRepository.from_c3_metric_publication(
+        layer2_publication_root=upstream.run_root,
+        c3_metric_companion_root=published.run_root,
+        metric_series_run_root=published.metric_publication.run_root,
+    )
     discovered = repository.discover_metrics("0000320193", metric_id="gross_margin", view="AS_FILED")
     metric_id = discovered[0]["derived_metric_ids"][0]
     assert repository.get_metric_series("0000320193", "gross_margin", as_of_date="2025-12-31", view="AS_FILED")[0]["metric_value_decimal"] == "50"
@@ -80,3 +89,71 @@ def test_c3_metric_companion_and_current_comparable_input_fail_closed(tmp_path: 
     # A manually constructed row list is not an admitted C3-M1 publication;
     # the pipeline never has a public path to process such a mixed view.
     assert all(row["view"] == "AS_FILED" for row in upstream.records("analytical_fact"))
+
+
+def test_c3_consumer_rejects_unlinked_but_individually_verified_m2_root(tmp_path: Path) -> None:
+    upstream = _upstream(tmp_path)
+    pipeline = C3MetricPublicationPipeline(seed_metric_registry())
+    result = pipeline.materialize(upstream, evaluated_at="2026-08-29T00:00:00+00:00")
+    published = pipeline.publish(upstream, result=result, output_root=tmp_path / "c3", run_version="c3-m4", metric_run_version="c3-m4-m1", metric_output_root=tmp_path / "m1", registry_version="controlled-seed-v1")
+    unrelated = DerivedMetricPublisher(tmp_path / "unrelated-m1").publish(
+        DerivedMetricsRun(
+            "unlinked-m1",
+            upstream.identity["layer2_run_fingerprint"],
+            METRIC_REGISTRY_CONTRACT_VERSION,
+            "controlled-seed-v1",
+        ),
+        result.derived_metrics,
+    )
+    with pytest.raises(C3MetricPublicationError, match="does not match verified metric release"):
+        AnalyticalRepository.from_c3_metric_publication(
+            layer2_publication_root=upstream.run_root,
+            c3_metric_companion_root=published.run_root,
+            metric_series_run_root=unrelated.run_root,
+        )
+
+
+@pytest.mark.parametrize(
+    "mapping_evidence",
+    (
+        {"evidence": {"qname": "us-gaap:Revenue"}},
+        [{"evidence": {"qname": "us-gaap:Revenue"}}],
+    ),
+)
+def test_c3_handoff_accepts_dict_or_list_standard_qname_evidence_only(mapping_evidence: object) -> None:
+    fact = _handoff_fact(_metric_fact("acme:Revenue", mapping_evidence), default_basis="AS_FILED:test")
+    candidates = MetricInputHandoffMaterializer().materialize(analytical_facts=(fact,)).candidates
+    assert fact["raw_concept_id"] is None
+    assert candidates[0]["metric_input_role"] == "REVENUE"
+
+
+def test_c3_handoff_blocks_custom_opaque_local_name_fallback() -> None:
+    fact = _handoff_fact(
+        _metric_fact("acme:Revenue", {"evidence": {"qname": "acme:Revenue"}}),
+        default_basis="AS_FILED:test",
+    )
+    candidates = MetricInputHandoffMaterializer().materialize(analytical_facts=(fact,)).candidates
+    assert fact["raw_concept_id"] is None
+    assert not candidates
+
+
+def _metric_fact(raw_concept_id: str, mapping_evidence: object) -> dict[str, object]:
+    return {
+        "analytical_fact_id": "analytical:one",
+        "cik": "0000320193",
+        "raw_concept_id": raw_concept_id,
+        "mapping_evidence": mapping_evidence,
+        "selected_fact_id": "fact:one",
+        "source_filing_id": "filing:one",
+        "view": "AS_FILED",
+        "as_of_date": "2025-12-31",
+        "basis_version": None,
+        "series_type": "CURRENT",
+        "period_class": "QTD_3M",
+        "period_key": "2025-Q1",
+        "company_canonical_dimension_key": (),
+        "unit_semantics": "USD",
+        "mapping_version": ["map-v1"],
+        "source_type": "REPORTED",
+        "value_numeric": "100",
+    }

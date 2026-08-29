@@ -50,10 +50,14 @@ CIK.  The companion reader verifies both its upstream C3-M1 identity and the
 M1 manifest fingerprint/hash before returning any rows.  It also re-runs M2
 admission, so a changed `derived_metric.jsonl` cannot be used.
 
-Consumers use the existing `AnalyticalRepository` with the verified C3-M1
-root and M1 metric root.  `discover_metrics`, `get_metric_series`, and
-`trace_metric` therefore operate only on M2-admitted records; neither needs
-manual metric rows or re-evaluates a formula.
+Consumers of this **C3 scenario** use
+`AnalyticalRepository.from_c3_metric_publication(...)`, supplying the C3-M1
+root, C3 companion root, and M1 metric root.  That composite admission checks
+the exact C3-M1 manifest identity, the C3 companion hashes, and the M1/M2
+metric root before exposing `discover_metrics`, `get_metric_series`, or
+`trace_metric`.  The existing generic repository constructor remains available
+for non-C3 use; a generic verified M2 root is not thereby claimed to be a C3
+scenario metric release.
 
 ## Known limits
 

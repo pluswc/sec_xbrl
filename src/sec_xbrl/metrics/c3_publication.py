@@ -317,6 +317,30 @@ class C3MetricCompanionReader:
         DerivedMetricSeriesMaterializer().load_published_candidates(metric_publication.run_root)
         return C3MetricResult(rows["metric_input_candidate"], rows["metric_input_compatibility"], (), rows["metric_coverage"])
 
+    def load_metric_publication(self, run_root: Path) -> DerivedMetricPublication:
+        """Attest one M1 root before it can be bound to a C3 companion.
+
+        The generic M2 reader validates the immutable M1 manifest and JSONL
+        contents.  This adapter exposes that verified identity in the shape
+        required by ``load``; it does not make a generic M2 root a C3 root.
+        ``load`` still checks the companion's exact fingerprint and manifest
+        SHA afterwards.
+        """
+        root = Path(run_root)
+        candidates = DerivedMetricSeriesMaterializer().load_published_candidates(root)
+        manifest_path = root / DerivedMetricPublisher.manifest_name
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise C3MetricPublicationError("C3 metric M1 release is unreadable") from exc
+        return DerivedMetricPublication(
+            root,
+            manifest_path,
+            str(manifest["run_fingerprint"]),
+            len(candidates),
+            reused_existing=False,
+        )
+
 
 def _require_as_filed_publication(publication: VerifiedLayer2Publication) -> None:
     if not publication.is_reader_attested:
@@ -371,6 +395,11 @@ def _handoff_fact(source: Mapping[str, Any], *, default_basis: str) -> dict[str,
     role = _standard_role_from_mapping_evidence(row.get("mapping_evidence"))
     if role:
         row["metric_input_role"] = role
+    # M6 also recognises a role from its raw_concept_id convenience field.
+    # C3 raw concept IDs are opaque identities (and a custom ID may end in
+    # ``:Revenue``), so passing it through would create a forbidden local-name
+    # fallback.  The explicit role above is the only semantic bridge here.
+    row["raw_concept_id"] = None
     return row
 
 
@@ -383,15 +412,11 @@ def _freeze(value: Any) -> Any:
 
 
 def _standard_role_from_mapping_evidence(value: object) -> str | None:
-    if not isinstance(value, (list, tuple)):
-        return None
     roles: set[str] = set()
-    for item in value:
-        if not isinstance(item, Mapping):
-            return None
-        evidence = item.get("evidence")
-        if not isinstance(evidence, Mapping):
-            return None
+    items = _mapping_evidence_items(value)
+    if not items:
+        return None
+    for evidence in items:
         qname = evidence.get("qname")
         if not isinstance(qname, str) or not qname.lower().startswith("us-gaap:"):
             return None
@@ -401,6 +426,30 @@ def _standard_role_from_mapping_evidence(value: object) -> str | None:
             return None
         roles.add(role)
     return next(iter(roles)) if len(roles) == 1 else None
+
+
+def _mapping_evidence_items(value: object) -> tuple[Mapping[str, Any], ...]:
+    """Normalize C3's documented mapping-evidence container shapes.
+
+    A mapping entry can be supplied directly as ``{"qname": ...}``, wrapped
+    as ``{"evidence": {"qname": ...}}``, or serialized as a list/tuple of
+    those entries.  Other mappings are deliberately not traversed: accepting
+    arbitrary nested values would turn incidental text into semantic evidence.
+    """
+    if isinstance(value, Mapping):
+        if "qname" in value:
+            return (value,)
+        nested = value.get("evidence")
+        return _mapping_evidence_items(nested) if nested is not None else ()
+    if isinstance(value, (list, tuple)):
+        items: list[Mapping[str, Any]] = []
+        for entry in value:
+            nested = _mapping_evidence_items(entry)
+            if not nested:
+                return ()
+            items.extend(nested)
+        return tuple(items)
+    return ()
 
 
 def _coverage(
