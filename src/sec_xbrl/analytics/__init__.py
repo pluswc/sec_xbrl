@@ -11,6 +11,11 @@ from sec_xbrl.analytics.repository import (
     DerivedMetricNotFoundError,
     FactNotFoundError,
 )
+from sec_xbrl.analytics.review_inventory_report import (
+    KoreanReviewInventoryReport,
+    KoreanReviewInventoryReportGenerator,
+    ReviewInventoryReportInput,
+)
 
 __all__ = [
     "AnalyticalRepository",
@@ -22,4 +27,7 @@ __all__ = [
     "DerivedMetricConflictError",
     "DerivedMetricNotFoundError",
     "FactNotFoundError",
+    "KoreanReviewInventoryReport",
+    "KoreanReviewInventoryReportGenerator",
+    "ReviewInventoryReportInput",
 ]
