@@ -17,13 +17,16 @@ from types import MappingProxyType
 from typing import Any
 
 from sec_xbrl.filing.company_discovery import canonicalize_cik
-from sec_xbrl.filing.layer1_ingestion import Layer1IngestionError, Layer1Ingestor, Layer1SnapshotManifest
+from sec_xbrl.filing.layer1_ingestion import (
+    Layer1IngestionError,
+    Layer1Ingestor,
+    Layer1SnapshotManifest,
+)
 from sec_xbrl.longitudinal.materialization import (
     Layer1SnapshotInput,
     Layer2RuleVersions,
     Layer2Run,
 )
-
 
 RAW_TABLES = Layer1Ingestor.required_table_names
 
@@ -110,12 +113,14 @@ class CorpusReleaseAdapter:
         snapshots: list[CorpusSnapshot] = []
         for cik in requested:
             snapshots.extend(_load_company(root, cik, companies[cik]))
-        snapshots.sort(key=lambda item: (
-            item.input.cik,
-            item.input.filed_date,
-            item.input.accession,
-            item.input.snapshot_id,
-        ))
+        snapshots.sort(
+            key=lambda item: (
+                item.input.cik,
+                item.input.filed_date,
+                item.input.accession,
+                item.input.snapshot_id,
+            )
+        )
         identities = {(item.input.cik, item.input.accession, item.input.snapshot_id) for item in snapshots}
         if len(identities) != len(snapshots):
             raise CorpusReleaseError("duplicate Layer 1 snapshot identity in corpus release")
@@ -140,7 +145,14 @@ def _load_company(root: Path, cik: str, company: Mapping[str, Any]) -> list[Corp
     filing_rows = report.get("filings")
     if not isinstance(filing_rows, list):
         raise CorpusReleaseError(f"corpus summary has no filing records for {cik}")
-    by_accession = {str(row.get("accession")): row for row in filing_rows if isinstance(row, Mapping)}
+    by_accession: dict[str, Mapping[str, Any]] = {}
+    for row in filing_rows:
+        if not isinstance(row, Mapping) or not row.get("accession"):
+            raise CorpusReleaseError(f"invalid filing record for {cik}")
+        accession = str(row["accession"])
+        if accession in by_accession:
+            raise CorpusReleaseError(f"duplicate filing accession in corpus report for {cik}: {accession}")
+        by_accession[accession] = row
     snapshots: list[CorpusSnapshot] = []
     seen_accessions: set[str] = set()
     for item in integrity:
@@ -204,7 +216,8 @@ def _load_snapshot(
         table_hashes[name] = before
         tables[name] = tuple(MappingProxyType(dict(row)) for row in rows)
     _validate_table_counts(manifest, table_counts, integrity, directory)
-    _validate_filing_rows(tables, cik, accession, directory)
+    _validate_filing_rows(tables, cik, accession, filing, manifest, directory)
+    _validate_references(tables, directory)
     manifest_sha = _sha256_file(manifest_path)
     parser_version = manifest.layer1_parser_version or None
     snapshot_id = f"l1:{cik}:{accession.replace('-', '')}:{manifest_sha[:16]}"
@@ -249,15 +262,93 @@ def _validate_table_counts(
 
 
 def _validate_filing_rows(
-    tables: Mapping[str, tuple[Mapping[str, Any], ...]], cik: str, accession: str, directory: Path
+    tables: Mapping[str, tuple[Mapping[str, Any], ...]],
+    cik: str,
+    accession: str,
+    report_filing: Mapping[str, Any],
+    manifest: Layer1SnapshotManifest,
+    directory: Path,
 ) -> None:
     filing = tables["filing"][0]
-    if filing.get("cik") != cik or filing.get("accession") != accession or not filing.get("filing_id"):
+    expected = {
+        "cik": cik,
+        "accession": accession,
+        "form": manifest.form,
+        "filed_date": report_filing.get("filed_date"),
+        "report_date": report_filing.get("report_date"),
+    }
+    if any(not value for value in expected.values()) or any(filing.get(key) != value for key, value in expected.items()):
         raise CorpusReleaseError(f"filing table identity does not match snapshot: {directory}")
+    if report_filing.get("form") != manifest.form or not filing.get("filing_id"):
+        raise CorpusReleaseError(f"filing provenance does not match manifest: {directory}")
     filing_id = str(filing["filing_id"])
     for name in ("concept", "context", "unit", "fact", "role", "relationship"):
         if any(str(row.get("filing_id")) != filing_id for row in tables[name]):
             raise CorpusReleaseError(f"foreign or missing filing identity in {name}: {directory}")
+
+
+def _validate_references(
+    tables: Mapping[str, tuple[Mapping[str, Any], ...]], directory: Path
+) -> None:
+    """Reapply Layer 1's cross-table reference contract before handing off.
+
+    Counts and a valid Parquet byte stream do not prove that a modified record
+    still has the provenance links required by later period, mapping, and
+    hierarchy producers.  Empty optional links remain valid; non-empty links
+    must resolve within this snapshot.
+    """
+    concepts = _unique_ids(tables["concept"], "raw_concept_id", "concept", directory)
+    contexts = _unique_ids(tables["context"], "context_id", "context", directory)
+    units = _unique_ids(tables["unit"], "unit_id", "unit", directory)
+    facts = _unique_ids(tables["fact"], "fact_id", "fact", directory)
+    roles = _unique_ids(tables["role"], "role_id", "role", directory)
+    _unique_ids(tables["relationship"], "relationship_id", "relationship", directory)
+    for row in tables["fact"]:
+        _require_reference(row, "raw_concept_id", concepts, "fact", directory)
+        _optional_reference(row, "context_id", contexts, "fact", directory)
+        _optional_reference(row, "unit_id", units, "fact", directory)
+    for row in tables["dimension_fact"]:
+        _require_reference(row, "fact_id", facts, "dimension_fact", directory)
+        _require_reference(row, "axis_raw_concept_id", concepts, "dimension_fact", directory)
+        dimension_type = row.get("dimension_type")
+        member = row.get("member_raw_concept_id")
+        typed = row.get("typed_member")
+        if dimension_type == "EXPLICIT":
+            _require_reference(row, "member_raw_concept_id", concepts, "dimension_fact", directory)
+        elif dimension_type == "TYPED":
+            if member not in (None, "") or typed in (None, ""):
+                raise CorpusReleaseError(f"invalid typed dimension member reference: {directory}")
+        else:
+            raise CorpusReleaseError(f"unknown dimension type in raw snapshot: {directory}")
+    for row in tables["relationship"]:
+        _require_reference(row, "role_id", roles, "relationship", directory)
+        _require_reference(row, "from_raw_concept_id", concepts, "relationship", directory)
+        _require_reference(row, "to_raw_concept_id", concepts, "relationship", directory)
+
+
+def _unique_ids(
+    rows: tuple[Mapping[str, Any], ...], field: str, table: str, directory: Path
+) -> set[str]:
+    values = [str(row.get(field) or "") for row in rows]
+    if any(not value for value in values) or len(values) != len(set(values)):
+        raise CorpusReleaseError(f"missing or duplicate {field} in {table}: {directory}")
+    return set(values)
+
+
+def _require_reference(
+    row: Mapping[str, Any], field: str, valid: set[str], table: str, directory: Path
+) -> None:
+    value = str(row.get(field) or "")
+    if not value or value not in valid:
+        raise CorpusReleaseError(f"unresolved {field} in {table}: {directory}")
+
+
+def _optional_reference(
+    row: Mapping[str, Any], field: str, valid: set[str], table: str, directory: Path
+) -> None:
+    value = row.get(field)
+    if value not in (None, "") and str(value) not in valid:
+        raise CorpusReleaseError(f"unresolved {field} in {table}: {directory}")
 
 
 def _companies_by_cik(summary: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
@@ -294,7 +385,7 @@ def _read_parquet(path: Path) -> list[dict[str, Any]]:
         raise CorpusReleaseError("polars is required to read a Layer 1 corpus release") from exc
     try:
         return pl.read_parquet(path).to_dicts()
-    except Exception as exc:  # noqa: BLE001 - corrupt raw data must fail closed.
+    except Exception as exc:
         raise CorpusReleaseError(f"invalid raw parquet table: {path}") from exc
 
 

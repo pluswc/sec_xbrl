@@ -9,12 +9,11 @@ import polars as pl
 import pytest
 
 from sec_xbrl.longitudinal import (
+    RAW_TABLES,
     CorpusReleaseAdapter,
     CorpusReleaseError,
     Layer2RuleVersions,
-    RAW_TABLES,
 )
-
 
 RULES = Layer2RuleVersions("period-v1", "mapping-v1", "recast-v1", "selection-v1")
 
@@ -43,14 +42,33 @@ def _write_snapshot(root: Path, cik: str, accession: str, form: str, filed: str,
     directory.mkdir(parents=True)
     filing_id = f"filing-{accession[-6:]}"
     records = {
-        "filing": [{"filing_id": filing_id, "cik": cik, "accession": accession, "form": form}],
+        "filing": [{
+            "filing_id": filing_id,
+            "cik": cik,
+            "accession": accession,
+            "form": form,
+            "filed_date": filed,
+            "report_date": report,
+        }],
         "concept": [{"filing_id": filing_id, "raw_concept_id": "concept"}],
         "context": [{"filing_id": filing_id, "context_id": "context"}],
         "unit": [{"filing_id": filing_id, "unit_id": "unit"}],
-        "fact": [{"filing_id": filing_id, "fact_id": "fact", "raw_concept_id": "concept"}],
+        "fact": [{
+            "filing_id": filing_id,
+            "fact_id": "fact",
+            "raw_concept_id": "concept",
+            "context_id": "context",
+            "unit_id": "unit",
+        }],
         "dimension_fact": [],
         "role": [{"filing_id": filing_id, "role_id": "role"}],
-        "relationship": [{"filing_id": filing_id, "relationship_id": "rel"}],
+        "relationship": [{
+            "filing_id": filing_id,
+            "relationship_id": "rel",
+            "role_id": "role",
+            "from_raw_concept_id": "concept",
+            "to_raw_concept_id": "concept",
+        }],
     }
     for name, values in records.items():
         pl.DataFrame(values).write_parquet(directory / f"{name}.parquet")
@@ -99,7 +117,10 @@ def test_release_preserves_amendment_as_distinct_snapshot(tmp_path: Path) -> Non
     assert len({item.accession for item in release.layer2_run.inputs}) == 2
 
 
-@pytest.mark.parametrize("mutation", ["missing", "extra", "bad_manifest", "foreign_filing", "count", "failed", "wrong_scope"])
+@pytest.mark.parametrize(
+    "mutation",
+    ["missing", "extra", "bad_manifest", "foreign_filing", "count", "failed", "wrong_scope"],
+)
 def test_release_fails_closed_for_invalid_corpus(tmp_path: Path, mutation: str) -> None:
     root = _write_corpus(tmp_path)
     snapshot = next((root / "snapshots").glob("*/*"))
@@ -117,8 +138,20 @@ def test_release_fails_closed_for_invalid_corpus(tmp_path: Path, mutation: str) 
         pl.DataFrame([{"filing_id": "foreign", "unit_id": "unit"}]).write_parquet(snapshot / "unit.parquet")
     elif mutation == "count":
         pl.DataFrame([
-            {"filing_id": "filing-000001", "fact_id": "fact", "raw_concept_id": "concept"},
-            {"filing_id": "filing-000001", "fact_id": "fact2", "raw_concept_id": "concept"},
+            {
+                "filing_id": "filing-000001",
+                "fact_id": "fact",
+                "raw_concept_id": "concept",
+                "context_id": "context",
+                "unit_id": "unit",
+            },
+            {
+                "filing_id": "filing-000001",
+                "fact_id": "fact2",
+                "raw_concept_id": "concept",
+                "context_id": "context",
+                "unit_id": "unit",
+            },
         ]).write_parquet(snapshot / "fact.parquet")
     elif mutation == "failed":
         summary["companies"][0]["integrity"][0]["status"] = "FAILED"
@@ -136,6 +169,68 @@ def test_release_rejects_missing_requested_cik_and_never_uses_latest_path(tmp_pa
         CorpusReleaseAdapter().load(root, corpus_run_id="different", ciks=("320193",), run_version="v", rules=RULES)
     with pytest.raises(CorpusReleaseError):
         CorpusReleaseAdapter().load(root, corpus_run_id=root.name, ciks=("1045810",), run_version="v", rules=RULES)
+
+
+@pytest.mark.parametrize("field", ["form", "filed_date", "report_date"])
+def test_release_rejects_filing_table_provenance_mismatch(tmp_path: Path, field: str) -> None:
+    root = _write_corpus(tmp_path)
+    snapshot = next((root / "snapshots").glob("*/*"))
+    filing = pl.read_parquet(snapshot / "filing.parquet").to_dicts()[0]
+    filing[field] = "mismatch"
+    pl.DataFrame([filing]).write_parquet(snapshot / "filing.parquet")
+    with pytest.raises(CorpusReleaseError, match="filing"):
+        _release(root)
+
+
+@pytest.mark.parametrize(
+    ("table", "field", "value"),
+    [
+        ("fact", "raw_concept_id", "missing-concept"),
+        ("fact", "context_id", "missing-context"),
+        ("fact", "unit_id", "missing-unit"),
+        ("dimension_fact", "fact_id", "missing-fact"),
+        ("dimension_fact", "axis_raw_concept_id", "missing-axis"),
+        ("dimension_fact", "member_raw_concept_id", "missing-member"),
+        ("relationship", "role_id", "missing-role"),
+        ("relationship", "from_raw_concept_id", "missing-from"),
+        ("relationship", "to_raw_concept_id", "missing-to"),
+    ],
+)
+def test_release_rejects_unresolved_raw_references(
+    tmp_path: Path, table: str, field: str, value: str
+) -> None:
+    root = _write_corpus(tmp_path)
+    snapshot = next((root / "snapshots").glob("*/*"))
+    if table == "dimension_fact":
+        rows = [{
+            "fact_id": "fact",
+            "axis_raw_concept_id": "concept",
+            "member_raw_concept_id": "concept",
+            "typed_member": None,
+            "dimension_type": "EXPLICIT",
+            "is_default_member": False,
+        }]
+        manifest = json.loads((snapshot / "layer1_manifest.json").read_text())
+        manifest["dimension_fact_count"] = 1
+        (snapshot / "layer1_manifest.json").write_text(json.dumps(manifest))
+    else:
+        rows = pl.read_parquet(snapshot / f"{table}.parquet").to_dicts()
+    rows[0][field] = value
+    pl.DataFrame(rows).write_parquet(snapshot / f"{table}.parquet")
+    with pytest.raises(CorpusReleaseError, match="unresolved"):
+        _release(root)
+
+
+def test_release_rejects_duplicate_report_filing_entries(tmp_path: Path) -> None:
+    root = _write_corpus(tmp_path)
+    summary_path = root / "run_summary.json"
+    summary = json.loads(summary_path.read_text())
+    summary["companies"][0]["report"]["filings"].append(
+        dict(summary["companies"][0]["report"]["filings"][0])
+    )
+    summary_path.write_text(json.dumps(summary))
+    with pytest.raises(CorpusReleaseError, match="duplicate filing"):
+        _release(root)
 
 
 def test_actual_seven_company_corpus_is_admitted_when_cached() -> None:
