@@ -52,7 +52,13 @@ The caller must state both `view` and `as_of_date`.
   lacks a target period, it emits
   `UNAVAILABLE` with `PERIOD_NOT_AVAILABLE_IN_SELECTED_BASIS`; it never fills
   from another basis.
-- An unavailable M1 record remains unavailable with its reason. If no
+- An unavailable M1 record remains unavailable with its reason. A
+  diagnostic-only unavailable M1 record is admitted only when it explicitly
+  declares `input_lineage_status=NO_COMPATIBLE_INPUTS` and has no claimed
+  source input IDs. It must also retain the upstream M6
+  `UNAVAILABLE`/`REQUIRED_INPUT_NOT_AVAILABLE` diagnostic; M2 never invents
+  inputs or chooses an available fallback.
+  If no
   available comparable basis exists, every observed target period is returned
   unavailable with `NO_AVAILABLE_METRIC_IN_COMPARABLE_BASIS`.
 

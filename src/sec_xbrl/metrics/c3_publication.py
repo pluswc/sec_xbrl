@@ -138,11 +138,7 @@ class C3MetricPublicationPipeline:
             definition = self.registry.resolve(str(definition_id))
             if definition.definition_id != definition_id or definition.output_semantics == "ELIGIBILITY_ONLY":
                 continue
-            selected = tuple(
-                by_candidate[str(candidate_id)]
-                for candidate_id in diagnostic.get("input_metric_input_candidate_ids", ())
-                if str(candidate_id) in by_candidate
-            )
+            selected = _selected_candidates(diagnostic, by_candidate)
             values = tuple(_value_payload(candidate, values_by_fact) for candidate in selected)
             records.append(
                 materializer.materialize(
@@ -421,6 +417,26 @@ def _value_payload(candidate: Mapping[str, Any], facts: Mapping[str, Mapping[str
     ):
         payload[key] = candidate.get(key)
     return payload
+
+
+def _selected_candidates(
+    diagnostic: Mapping[str, Any],
+    by_candidate: Mapping[str, Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Bind precisely the governed M6 candidates named by one diagnostic."""
+    ids = tuple(str(value) for value in diagnostic.get("input_metric_input_candidate_ids") or ())
+    bindings = tuple(diagnostic.get("input_role_bindings") or ())
+    bound_ids: list[str] = []
+    for binding in bindings:
+        if not isinstance(binding, Mapping) or not binding.get("metric_input_candidate_id") or not binding.get("assessment_input_role"):
+            raise C3MetricPublicationError("C3 M6 diagnostic has invalid input role binding")
+        bound_ids.append(str(binding["metric_input_candidate_id"]))
+    if tuple(bound_ids) != ids:
+        raise C3MetricPublicationError("C3 M6 diagnostic role bindings do not match candidate IDs")
+    missing = [candidate_id for candidate_id in ids if candidate_id not in by_candidate]
+    if missing:
+        raise C3MetricPublicationError("C3 M6 diagnostic names unknown candidate IDs")
+    return tuple(dict(by_candidate[candidate_id]) for candidate_id in ids)
 
 
 def _handoff_fact(source: Mapping[str, Any], *, default_basis: str) -> dict[str, Any]:

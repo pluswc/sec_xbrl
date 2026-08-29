@@ -27,8 +27,20 @@ Calculations use finite `Decimal` values.  Both ratios and growth rates are
 stored as percentage points (multiplied by 100), which is part of this formula
 version's output convention.  Zero denominators, absent values, duplicate
 bindings, mismatched provenance, or non-eligible diagnostics fail closed.  M1
-publishes an immutable `UNAVAILABLE` record with the diagnostic, input lineage,
-and explicit reason, but no numeric value.  Available and unavailable records
+publishes an immutable `UNAVAILABLE` record with the diagnostic, input lineage
+when candidates were considered, and an explicit reason, but no numeric value.
+When M6 found **no compatible input candidates**, the record deliberately has
+no source input values or IDs and declares
+`input_lineage_status=NO_COMPATIBLE_INPUTS`. It retains the definition/version,
+full governed scope, M6 compatibility ID/status, required roles, diagnostic
+reason, and publication provenance; it never fabricates raw-Fact lineage.
+This status is admitted only when the upstream M6 diagnostic is
+`compatibility_status=UNAVAILABLE` with the approved
+`REQUIRED_INPUT_NOT_AVAILABLE` reason. An empty `ELIGIBLE` diagnostic is an
+invalid handoff, not an M1 unavailable default.
+Available records declare `input_lineage_status=COMPLETE` and preserve the
+exact M6 candidate IDs and assessment role bindings used in the calculation.
+Available and unavailable records
 are both marked `source_type=DERIVED_METRIC`; an available record has a
 `calculated_at` timestamp while an unavailable evaluation retains
 `evaluated_at` and has `calculated_at=null`.

@@ -24,6 +24,10 @@ from sec_xbrl.metrics.registry import MetricCategory, MetricDefinitionError, Met
 
 DERIVED_METRICS_CONTRACT_VERSION = "derived-metrics-m1-materialization-v1"
 DEFAULT_DERIVED_METRICS_ROOT = Path("data/processed/analytical/derived_metrics")
+# This is intentionally a closed set, not a consumer/C3 default.  It names the
+# only L2-M6 diagnostic which currently proves that no candidate could be
+# bound for a required derived-metric input role.
+_NO_COMPATIBLE_INPUT_REASONS = frozenset({"REQUIRED_INPUT_NOT_AVAILABLE"})
 
 
 class DerivedMetricMaterializationError(RuntimeError):
@@ -96,6 +100,7 @@ class DerivedMetricMaterializer:
                 "eligibility-only definition cannot materialize a numeric metric value"
             )
         candidate_rows = tuple(dict(row) for row in candidates)
+        _validate_no_input_diagnostic(candidate_rows, compatibility)
         try:
             self.registry.validate_handoff(
                 definition_id=definition_id, candidates=candidate_rows, compatibility=compatibility
@@ -324,6 +329,22 @@ def _record_base(
         tuple(row.get("metric_input_candidate_id") for row in candidates),
         scope.get("metric_input_compatibility_id"),
     )
+    input_candidate_ids = tuple(row.get("metric_input_candidate_id") for row in candidates)
+    input_fact_ids = tuple(row.get("analytical_fact_id") for row in candidates)
+    diagnostic_candidate_ids = tuple(
+        str(value) for value in scope.get("input_metric_input_candidate_ids") or ()
+    )
+    diagnostic_bindings = tuple(scope.get("input_role_bindings") or ())
+    # An unavailable diagnostic is permitted to have no selected inputs at
+    # all. This means M6 could not assess the definition for this governed
+    # scope; M1 must not invent a source Fact merely for uniformity.
+    lineage_status = (
+        "COMPLETE"
+        if input_candidate_ids and input_candidate_ids == diagnostic_candidate_ids
+        else "NO_COMPATIBLE_INPUTS"
+        if not input_candidate_ids and not diagnostic_candidate_ids and not diagnostic_bindings
+        else "PARTIAL_DIAGNOSTIC_INPUTS"
+    )
     return {
         "derived_metric_id": _id("derived-metric", identity),
         "metric_definition_id": definition.definition_id,
@@ -346,12 +367,49 @@ def _record_base(
         "mapping_versions": tuple(scope.get("mapping_versions") or ()),
         "metric_input_handoff_version": scope.get("metric_input_handoff_version"),
         "metric_input_compatibility_id": scope.get("metric_input_compatibility_id"),
-        "ordered_input_candidate_ids": tuple(row.get("metric_input_candidate_id") for row in candidates),
-        "ordered_input_analytical_fact_ids": tuple(row.get("analytical_fact_id") for row in candidates),
+        # Retain M6's exact diagnostic envelope. Available rows bind these
+        # candidates and assessment roles; unavailable rows preserve whatever
+        # incomplete evidence M6 actually supplied.
+        "metric_input_compatibility_status": scope.get("compatibility_status"),
+        "metric_input_diagnostic_reason": scope.get("unavailable_reason"),
+        "metric_input_required_roles": tuple(scope.get("required_input_roles") or ()),
+        "input_metric_input_candidate_ids": diagnostic_candidate_ids,
+        "input_role_bindings": diagnostic_bindings,
+        "input_lineage_status": lineage_status,
+        "ordered_input_candidate_ids": input_candidate_ids,
+        "ordered_input_analytical_fact_ids": input_fact_ids,
         "ordered_input_selected_fact_ids": tuple(row.get("selected_fact_id") for row in candidates),
         "ordered_input_lineage": ordered_lineage,
         "derived_metrics_contract_version": DERIVED_METRICS_CONTRACT_VERSION,
     }
+
+
+def _validate_no_input_diagnostic(
+    candidates: Sequence[Mapping[str, Any]], compatibility: Mapping[str, Any]
+) -> None:
+    """Reject an invalid empty handoff rather than coercing it to unavailable.
+
+    An empty input list is safe only when L2-M6 itself recorded an unavailable
+    compatibility diagnostic with its approved no-compatible-input reason.
+    In particular, C3 must not turn an `ELIGIBLE` diagnostic with zero inputs
+    into a convenient M1 `UNAVAILABLE` record.
+    """
+    if candidates:
+        return
+    candidate_ids = tuple(compatibility.get("input_metric_input_candidate_ids") or ())
+    role_bindings = tuple(compatibility.get("input_role_bindings") or ())
+    analytical_ids = tuple(compatibility.get("input_analytical_fact_ids") or ())
+    selected_ids = tuple(compatibility.get("input_selected_fact_ids") or ())
+    if candidate_ids or role_bindings or analytical_ids or selected_ids:
+        return
+    if compatibility.get("compatibility_status") != "UNAVAILABLE":
+        raise DerivedMetricMaterializationError(
+            "zero-input metric diagnostic must be M6 UNAVAILABLE"
+        )
+    if compatibility.get("unavailable_reason") not in _NO_COMPATIBLE_INPUT_REASONS:
+        raise DerivedMetricMaterializationError(
+            "zero-input metric diagnostic lacks approved no-compatible-input reason"
+        )
 
 
 def _ordered_lineage(
@@ -495,13 +553,44 @@ def _validate_records(rows: Sequence[Mapping[str, Any]]) -> None:
                 raise DerivedMetricMaterializationError(
                     "unavailable derived_metric cannot carry calculation timestamp"
                 )
-        if len(row["ordered_input_candidate_ids"]) != len(row["ordered_input_lineage"]):
+        candidate_ids = tuple(row["ordered_input_candidate_ids"])
+        fact_ids = tuple(row.get("ordered_input_analytical_fact_ids") or ())
+        lineage = tuple(row["ordered_input_lineage"])
+        if len(candidate_ids) != len(lineage):
             raise DerivedMetricMaterializationError("derived metric input lineage is incomplete")
-        if status == "AVAILABLE" and not all(
-            item.get("selected_fact_id") or item.get("source_fact_ids")
-            for item in row["ordered_input_lineage"]
-        ):
-            raise DerivedMetricMaterializationError("derived metric input lacks raw Fact lineage")
+        if len(fact_ids) != len(lineage):
+            raise DerivedMetricMaterializationError("derived metric analytical Fact lineage is incomplete")
+        if status == "AVAILABLE":
+            if not lineage:
+                raise DerivedMetricMaterializationError("available derived metric lacks source input lineage")
+            if row.get("input_lineage_status") not in {None, "COMPLETE"}:
+                raise DerivedMetricMaterializationError("available derived metric has incomplete input lineage status")
+            if not all(
+                item.get("selected_fact_id") or item.get("source_fact_ids")
+                for item in lineage
+            ):
+                raise DerivedMetricMaterializationError("derived metric input lacks raw Fact lineage")
+        elif not lineage:
+            if row.get("input_lineage_status") != "NO_COMPATIBLE_INPUTS":
+                raise DerivedMetricMaterializationError(
+                    "unavailable derived metric without inputs requires NO_COMPATIBLE_INPUTS status"
+                )
+            if candidate_ids or fact_ids:
+                raise DerivedMetricMaterializationError(
+                    "unavailable no-input metric cannot claim source input IDs"
+                )
+            if row.get("metric_input_compatibility_status") != "UNAVAILABLE":
+                raise DerivedMetricMaterializationError(
+                    "unavailable no-input metric requires M6 UNAVAILABLE compatibility"
+                )
+            if row.get("metric_input_diagnostic_reason") not in _NO_COMPATIBLE_INPUT_REASONS:
+                raise DerivedMetricMaterializationError(
+                    "unavailable no-input metric lacks approved no-compatible-input diagnostic"
+                )
+        elif row.get("input_lineage_status") == "NO_COMPATIBLE_INPUTS":
+            raise DerivedMetricMaterializationError(
+                "unavailable derived metric with inputs cannot claim NO_COMPATIBLE_INPUTS"
+            )
 
 
 def _validate_written(root: Path, expected_count: int) -> None:
