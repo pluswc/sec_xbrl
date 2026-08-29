@@ -68,6 +68,12 @@ The 102-filing count proves Layer 1 corpus availability only.  It does not
 prove that a concept/member is mapped, comparable, selected, or eligible for a
 metric.
 
+Before an operational Layer 2 run consumes this external corpus, it must use
+the explicit, fail-closed [C3-M0 corpus release adapter](c3-corpus-release-adapter.md).
+That adapter admits only complete atomic snapshots and creates the exact
+`Layer2Run` input declaration; it does not itself materialize any analytical
+dataset.
+
 ## 3. Common delivery rules
 
 Every Layer 2 materialization must:

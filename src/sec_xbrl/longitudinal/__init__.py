@@ -16,6 +16,13 @@ from sec_xbrl.longitudinal.capability import (
     CapabilityInventoryQuery,
     CapabilityInventoryResult,
 )
+from sec_xbrl.longitudinal.corpus_release import (
+    RAW_TABLES,
+    CorpusRelease,
+    CorpusReleaseAdapter,
+    CorpusReleaseError,
+    CorpusSnapshot,
+)
 from sec_xbrl.longitudinal.materialization import (
     DEFAULT_LAYER2_ROOT,
     LAYER2_CONTRACT_VERSION,
@@ -64,6 +71,7 @@ __all__ = [
     "MAPPING_VERSION",
     "METRIC_INPUT_HANDOFF_VERSION",
     "PERIOD_OBSERVATION_RULE_VERSION",
+    "RAW_TABLES",
     "SELECTION_MATERIALIZATION_VERSION",
     "SERIES_RULE_VERSION",
     "AnalyticalFactMaterializer",
@@ -76,6 +84,10 @@ __all__ = [
     "CompanyCanonicalizer",
     "CompanySeriesMaterializer",
     "CompanySeriesResult",
+    "CorpusRelease",
+    "CorpusReleaseAdapter",
+    "CorpusReleaseError",
+    "CorpusSnapshot",
     "CurrentSeries",
     "Layer1SnapshotInput",
     "Layer2MaterializationError",
