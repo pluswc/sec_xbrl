@@ -139,6 +139,14 @@ def _candidate_rows(
              "member_raw_concept_id": None, "dimension_type": None}]
     for dimension in dimensions:
         axis, member, _typed, dimension_type, _default = tuple(dimension)
+        # The durable inventory contract currently exposes only explicit
+        # Axis/Member drill-down rows.  A typed dimension still remains in the
+        # fact and series full-dimension keys, but must not be misrepresented
+        # as a member-less DIMENSION_MEMBER capability (which the publisher
+        # correctly rejects).  Extending typed-dimension discovery is a
+        # separate schema change, not an inference opportunity here.
+        if member is None:
+            continue
         rows.append({**common, "capability_inventory_id": _id("capability", candidate.get("cik"), candidate.get("series_candidate_id"), "DIMENSION_MEMBER", axis, member),
                      "capability_type": "DIMENSION_MEMBER", "axis_raw_concept_id": axis,
                      "member_raw_concept_id": member, "dimension_type": dimension_type})

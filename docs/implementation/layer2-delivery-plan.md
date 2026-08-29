@@ -74,6 +74,14 @@ That adapter admits only complete atomic snapshots and creates the exact
 `Layer2Run` input declaration; it does not itself materialize any analytical
 dataset.
 
+**C3-M1 operational composition.**
+[`AsFiledPublicationPipeline`](c3-as-filed-publication.md) consumes that exact
+release and composes the existing L2-M1 through L2-M5 producers into one
+atomic, Consumer-C2-readable publication. Its initial scope is AS_FILED only:
+it does not enable Q4 residuals, comparable/recast selection, or Derived
+Metrics. Those remain separate governed follow-ons rather than implicit
+pipeline behavior.
+
 ## 3. Common delivery rules
 
 Every Layer 2 materialization must:
