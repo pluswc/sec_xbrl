@@ -1,4 +1,3 @@
-# ruff: noqa: E701, E702
 """C3-M5 reviewed, bounded policy registry for standard Q4 flow declarations.
 
 The registry is a policy artifact: it may generate a declaration only from a
@@ -23,8 +22,23 @@ from sec_xbrl.longitudinal.materialization import VerifiedLayer2Publication
 from sec_xbrl.longitudinal.quarterly_policy import QuarterlySemanticDeclaration
 
 Q4_POLICY_REGISTRY_VERSION = "c3-m5-q4-policy-registry-v1"
-INCOME_ALLOWLIST = frozenset("""RevenueFromContractWithCustomerExcludingAssessedTax Revenues CostOfRevenue CostOfGoodsAndServicesSold CostOfGoodsAndServiceExcludingDepreciationDepletionAndAmortization GrossProfit OperatingExpenses CostsAndExpenses ResearchAndDevelopmentExpense SellingGeneralAndAdministrativeExpense SellingAndMarketingExpense GeneralAndAdministrativeExpense OperatingIncomeLoss NonoperatingIncomeExpense OtherNonoperatingIncomeExpense InvestmentIncomeInterest InterestExpense InterestExpenseNonoperating IncomeLossFromContinuingOperations IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments IncomeTaxExpenseBenefit NetIncomeLoss ProfitLoss""".split())
-CASH_FLOW_ALLOWLIST = frozenset("""NetCashProvidedByUsedInOperatingActivities NetCashProvidedByUsedInInvestingActivities NetCashProvidedByUsedInFinancingActivities PaymentsToAcquirePropertyPlantAndEquipment Depreciation DepreciationDepletionAndAmortization""".split())
+INCOME_ALLOWLIST = frozenset({
+    "RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "CostOfRevenue",
+    "CostOfGoodsAndServicesSold", "CostOfGoodsAndServiceExcludingDepreciationDepletionAndAmortization",
+    "GrossProfit", "OperatingExpenses", "CostsAndExpenses", "ResearchAndDevelopmentExpense",
+    "SellingGeneralAndAdministrativeExpense", "SellingAndMarketingExpense", "GeneralAndAdministrativeExpense",
+    "OperatingIncomeLoss", "NonoperatingIncomeExpense", "OtherNonoperatingIncomeExpense",
+    "InvestmentIncomeInterest", "InterestExpense", "InterestExpenseNonoperating",
+    "IncomeLossFromContinuingOperations",
+    "IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
+    "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
+    "IncomeTaxExpenseBenefit", "NetIncomeLoss", "ProfitLoss",
+})
+CASH_FLOW_ALLOWLIST = frozenset({
+    "NetCashProvidedByUsedInOperatingActivities", "NetCashProvidedByUsedInInvestingActivities",
+    "NetCashProvidedByUsedInFinancingActivities", "PaymentsToAcquirePropertyPlantAndEquipment",
+    "Depreciation", "DepreciationDepletionAndAmortization",
+})
 _DATASETS = ("approved_q4_declaration", "q4_policy_coverage")
 
 

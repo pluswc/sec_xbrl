@@ -1,13 +1,18 @@
 from pathlib import Path
 
 import pytest
+from test_c3_review_inventory import _publication, _release
 
 from sec_xbrl.longitudinal import (
-    Q4PolicyRegistryMaterializer, Q4PolicyRegistryPublisher, Q4PolicyRegistryReader,
-    Q4PolicyRegistryError, QuarterlyPeriodPolicyV2Materializer, QuarterlyPolicyV2Publisher,
-    QuarterlyPolicyV2Reader, QuarterlyPeriodPolicyError,
+    Q4PolicyRegistryError,
+    Q4PolicyRegistryMaterializer,
+    Q4PolicyRegistryPublisher,
+    Q4PolicyRegistryReader,
+    QuarterlyPeriodPolicyError,
+    QuarterlyPeriodPolicyV2Materializer,
+    QuarterlyPolicyV2Publisher,
+    QuarterlyPolicyV2Reader,
 )
-from test_c3_review_inventory import _publication, _release
 
 
 def _published(tmp_path: Path):

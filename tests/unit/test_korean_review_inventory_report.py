@@ -4,11 +4,23 @@ from pathlib import Path
 from types import MappingProxyType
 
 import pytest
+from test_c3_review_inventory import _publication as real_publication
+from test_c3_review_inventory import _release as real_release
 
 from sec_xbrl.analytics import KoreanReviewInventoryReportGenerator, ReviewInventoryReportInput
-from sec_xbrl.longitudinal import ReviewInventoryError, ReviewInventoryPublisher, ReviewInventoryResult, Q4PolicyRegistryMaterializer, Q4PolicyRegistryPublisher, QuarterlyPeriodPolicyV2Materializer, QuarterlyPolicyV2Publisher
-from sec_xbrl.longitudinal.materialization import _READER_ATTESTATION_TOKEN, VerifiedLayer2Publication
-from test_c3_review_inventory import _release as real_release, _publication as real_publication
+from sec_xbrl.longitudinal import (
+    Q4PolicyRegistryMaterializer,
+    Q4PolicyRegistryPublisher,
+    QuarterlyPeriodPolicyV2Materializer,
+    QuarterlyPolicyV2Publisher,
+    ReviewInventoryError,
+    ReviewInventoryPublisher,
+    ReviewInventoryResult,
+)
+from sec_xbrl.longitudinal.materialization import (
+    _READER_ATTESTATION_TOKEN,
+    VerifiedLayer2Publication,
+)
 
 
 class _Release:

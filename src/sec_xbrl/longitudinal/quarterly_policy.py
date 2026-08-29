@@ -1,4 +1,3 @@
-# ruff: noqa: E701, E702
 """C3-M2 governed quarterly-period policy companion release.
 
 This module deliberately sits *after* C3-M1.  It never changes an

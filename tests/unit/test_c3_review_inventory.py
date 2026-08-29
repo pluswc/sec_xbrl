@@ -1,20 +1,27 @@
 from __future__ import annotations
 
+from hashlib import sha256
 from pathlib import Path
 from types import MappingProxyType
-from hashlib import sha256
 
 import pytest
 
+from sec_xbrl.filing.layer1_ingestion import Layer1SnapshotManifest
 from sec_xbrl.longitudinal import (
+    CorpusRelease,
+    CorpusSnapshot,
+    Layer1SnapshotInput,
+    Layer2RuleVersions,
+    Layer2Run,
     ReviewInventoryError,
     ReviewInventoryMaterializer,
     ReviewInventoryPublicationReader,
     ReviewInventoryPublisher,
 )
-from sec_xbrl.longitudinal.materialization import _READER_ATTESTATION_TOKEN, VerifiedLayer2Publication
-from sec_xbrl.filing.layer1_ingestion import Layer1SnapshotManifest
-from sec_xbrl.longitudinal import CorpusRelease, CorpusSnapshot, Layer1SnapshotInput, Layer2RuleVersions, Layer2Run
+from sec_xbrl.longitudinal.materialization import (
+    _READER_ATTESTATION_TOKEN,
+    VerifiedLayer2Publication,
+)
 
 
 def _release() -> CorpusRelease:

@@ -1,4 +1,3 @@
-# ruff: noqa: E701, E702
 """C3-M5 review inventory: evidence to review, never policy to activate.
 
 The companion is intentionally a queue of reader-attested technical matches.
@@ -79,7 +78,7 @@ class ReviewInventoryMaterializer:
             if row.get("period_class") in {"FY", "YTD_9M"}:
                 grouped[_scope(row, include_period=False)].append(row)
         output: list[dict[str, Any]] = []
-        for scope, rows in grouped.items():
+        for rows in grouped.values():
             fy = [r for r in rows if r.get("period_class") == "FY"]
             ytd = [r for r in rows if r.get("period_class") == "YTD_9M"]
             for annual in fy:
