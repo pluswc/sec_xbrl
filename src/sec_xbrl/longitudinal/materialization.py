@@ -17,6 +17,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 LAYER2_CONTRACT_VERSION = "l2-materialization-v1"
@@ -61,6 +62,15 @@ _STRUCTURAL_CHANGE_EVENTS = frozenset(
 
 class Layer2MaterializationError(RuntimeError):
     """Raised when a Layer 2 run cannot pass its publication contract."""
+
+
+class Layer2PublicationValidationError(Layer2MaterializationError):
+    """Raised when an on-disk Layer 2 publication is not safe to consume.
+
+    This is deliberately distinct from producer-time validation so consumer
+    adapters can fail closed when a publication has been copied, altered, or
+    only partially published.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +156,83 @@ class Layer2Publication:
     fingerprint: str
     output_counts: Mapping[str, int]
     reused_existing: bool
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedLayer2Publication:
+    """Immutable, manifest-verified Layer 2 publication for read-only consumers."""
+
+    run_root: Path
+    manifest_path: Path
+    identity: Mapping[str, str]
+    input_ciks: tuple[str, ...]
+    datasets: Mapping[str, tuple[Mapping[str, Any], ...]]
+
+    def records(self, dataset: str) -> tuple[dict[str, Any], ...]:
+        """Return independent copies of one verified logical dataset."""
+        if dataset not in LOGICAL_DATASETS:
+            raise Layer2PublicationValidationError(f"unknown Layer 2 dataset: {dataset}")
+        return tuple(dict(row) for row in self.datasets.get(dataset, ()))
+
+
+class Layer2PublicationReader:
+    """Fail-closed reader for atomically published canonical-JSONL Layer 2 runs.
+
+    This reader validates the same logical rows and canonical content hashes as
+    ``Layer2Publisher`` before exposing records.  It is a JSONL publication
+    adapter, not a future DB or Parquet adapter.
+    """
+
+    manifest_name = "layer2_run_manifest.json"
+
+    def load(self, run_root: Path) -> VerifiedLayer2Publication:
+        root = Path(run_root)
+        if not root.is_dir() or root.is_symlink():
+            raise Layer2PublicationValidationError(f"unpublished or invalid Layer 2 run root: {root}")
+        if root.name == ".staging" or ".partial-" in root.name:
+            raise Layer2PublicationValidationError(f"partial Layer 2 publication is not consumable: {root}")
+        manifest_path = root / self.manifest_name
+        manifest = _read_publication_manifest(manifest_path)
+        run = _run_from_manifest(manifest)
+        if root.name != run.run_version:
+            raise Layer2PublicationValidationError("Layer 2 publication root does not match manifest run_version")
+        if manifest.get("run_fingerprint") != run.fingerprint:
+            raise Layer2PublicationValidationError("Layer 2 manifest fingerprint does not match its declaration")
+        if manifest.get("contract_version") != LAYER2_CONTRACT_VERSION:
+            raise Layer2PublicationValidationError("unsupported Layer 2 materialization contract version")
+        if manifest.get("storage_format") != "canonical-jsonl-v1":
+            raise Layer2PublicationValidationError("unsupported Layer 2 publication storage format")
+        _validate_manifest_shape(manifest)
+        datasets = _read_published_datasets(root, manifest, run)
+        try:
+            counts = _validate_candidate(run, datasets)
+        except Layer2MaterializationError as exc:
+            raise Layer2PublicationValidationError("Layer 2 publication rows fail contract validation") from exc
+        declared_counts = manifest["output_counts"]
+        if counts != declared_counts:
+            raise Layer2PublicationValidationError("Layer 2 publication row counts do not match manifest")
+        hashes = _dataset_hashes(datasets)
+        if hashes != manifest["output_content_sha256"]:
+            raise Layer2PublicationValidationError("Layer 2 publication content hashes do not match manifest")
+        identity = {
+            "layer2_run_version": run.run_version,
+            "layer2_run_fingerprint": run.fingerprint,
+            "layer2_contract_version": run.contract_version,
+            "layer2_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        }
+        copied = MappingProxyType(
+            {
+                name: tuple(MappingProxyType(dict(row)) for row in rows)
+                for name, rows in datasets.items()
+            }
+        )
+        return VerifiedLayer2Publication(
+            run_root=root,
+            manifest_path=manifest_path,
+            identity=MappingProxyType(identity),
+            input_ciks=tuple(sorted(item.cik for item in run.inputs)),
+            datasets=copied,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -812,3 +899,110 @@ def _sha256_json(value: Any) -> str:
 
 def _sorted_dicts(rows: Any) -> list[dict[str, Any]]:
     return sorted((dict(row) for row in rows), key=_canonical_json)
+
+
+def _read_publication_manifest(path: Path) -> dict[str, Any]:
+    if not path.is_file() or path.is_symlink():
+        raise Layer2PublicationValidationError(f"Layer 2 manifest is missing: {path}")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise Layer2PublicationValidationError(f"invalid Layer 2 manifest: {path}") from exc
+    if not isinstance(value, dict):
+        raise Layer2PublicationValidationError("Layer 2 manifest must be a JSON object")
+    return value
+
+
+def _validate_manifest_shape(manifest: Mapping[str, Any]) -> None:
+    expected = {
+        "contract_version", "run_version", "corpus_run_id", "run_fingerprint", "inputs", "rules",
+        "output_counts", "output_content_sha256", "validation", "published_at", "storage_format",
+    }
+    if set(manifest) != expected:
+        raise Layer2PublicationValidationError("Layer 2 manifest has unsupported or missing fields")
+    if not isinstance(manifest["output_counts"], dict) or not isinstance(
+        manifest["output_content_sha256"], dict
+    ):
+        raise Layer2PublicationValidationError("Layer 2 manifest output declarations must be objects")
+    counts = manifest["output_counts"]
+    hashes = manifest["output_content_sha256"]
+    if set(counts) != set(hashes) or not set(counts).issubset(LOGICAL_DATASETS):
+        raise Layer2PublicationValidationError("Layer 2 manifest datasets are unsupported or inconsistent")
+    if any(type(value) is not int or value < 0 for value in counts.values()):
+        raise Layer2PublicationValidationError("Layer 2 manifest has invalid output count")
+    if any(not isinstance(value, str) or len(value) != 64 for value in hashes.values()):
+        raise Layer2PublicationValidationError("Layer 2 manifest has invalid content hash")
+    validation = manifest["validation"]
+    expected_validation = {
+        "ANALYTICAL_FACT_LINEAGE",
+        "RUN_INPUT_AND_VERSION_MANIFEST",
+        "DETERMINISTIC_OUTPUT_IDENTITY",
+        "ATOMIC_PUBLICATION",
+    }
+    if (
+        not isinstance(validation, dict)
+        or set(validation) != expected_validation
+        or any(value != "SUCCESS" for value in validation.values())
+    ):
+        raise Layer2PublicationValidationError("Layer 2 manifest did not declare successful validation")
+
+
+def _run_from_manifest(manifest: Mapping[str, Any]) -> Layer2Run:
+    try:
+        inputs = tuple(Layer1SnapshotInput(**dict(row)) for row in manifest["inputs"])
+        rules = Layer2RuleVersions(**dict(manifest["rules"]))
+        return Layer2Run(
+            run_version=str(manifest["run_version"]),
+            corpus_run_id=str(manifest["corpus_run_id"]),
+            inputs=inputs,
+            rules=rules,
+            contract_version=str(manifest["contract_version"]),
+        )
+    except (KeyError, TypeError, ValueError, Layer2MaterializationError) as exc:
+        raise Layer2PublicationValidationError("Layer 2 manifest run declaration is malformed") from exc
+
+
+def _read_published_datasets(
+    root: Path, manifest: Mapping[str, Any], run: Layer2Run
+) -> dict[str, tuple[dict[str, Any], ...]]:
+    declared = set(manifest["output_counts"])
+    paths: dict[str, list[Path]] = {dataset: [] for dataset in declared}
+    input_ciks = {item.cik for item in run.inputs}
+    for child in root.iterdir():
+        if child.name == Layer2PublicationReader.manifest_name:
+            continue
+        if not child.is_dir() or child.is_symlink() or child.name not in input_ciks:
+            raise Layer2PublicationValidationError(f"unexpected Layer 2 publication entry: {child}")
+        for file_path in child.iterdir():
+            if not file_path.is_file() or file_path.is_symlink() or file_path.suffix != ".jsonl":
+                raise Layer2PublicationValidationError(f"unexpected Layer 2 dataset file: {file_path}")
+            dataset = file_path.stem
+            if dataset not in declared:
+                raise Layer2PublicationValidationError(f"unexpected Layer 2 dataset file: {file_path}")
+            paths[dataset].append(file_path)
+    datasets: dict[str, tuple[dict[str, Any], ...]] = {}
+    for dataset in sorted(declared):
+        rows: list[dict[str, Any]] = []
+        for file_path in sorted(paths[dataset]):
+            try:
+                lines = file_path.read_text(encoding="utf-8").splitlines()
+            except (OSError, UnicodeDecodeError) as exc:
+                raise Layer2PublicationValidationError(f"cannot read Layer 2 dataset: {file_path}") from exc
+            for line_number, line in enumerate(lines, start=1):
+                if not line:
+                    raise Layer2PublicationValidationError(
+                        f"empty JSONL line in Layer 2 dataset: {file_path}:{line_number}"
+                    )
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise Layer2PublicationValidationError(
+                        f"invalid JSONL in Layer 2 dataset: {file_path}:{line_number}"
+                    ) from exc
+                if not isinstance(row, dict):
+                    raise Layer2PublicationValidationError("Layer 2 dataset row must be a JSON object")
+                if str(row.get("cik") or "") != file_path.parent.name:
+                    raise Layer2PublicationValidationError("Layer 2 dataset row CIK does not match its partition")
+                rows.append(row)
+        datasets[dataset] = tuple(rows)
+    return datasets

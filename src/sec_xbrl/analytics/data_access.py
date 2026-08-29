@@ -38,6 +38,18 @@ class ConsumerDataAccess(Protocol):
     ) -> tuple[dict[str, Any], ...]:
         """Return an exact governed fact series without period coalescing."""
 
+    def get_analytical_facts(
+        self,
+        company: str,
+        *,
+        view: str,
+        concept: str | None = None,
+        period_class: str | None = None,
+        period_key: str | None = None,
+        as_of_date: str | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        """Return verified Layer 2 analytical facts for one explicit view."""
+
     def discover_capabilities(
         self,
         company: str,

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from sec_xbrl.longitudinal.capability import CapabilityInventoryQuery
+from sec_xbrl.longitudinal.materialization import Layer2PublicationReader
 from sec_xbrl.metrics.series import DerivedMetricSeriesMaterializer
 
 
@@ -63,6 +64,7 @@ class AnalyticalRepository:
         concepts: Iterable[Mapping[str, Any]] = (),
         facts: Iterable[Mapping[str, Any]] = (),
         series: Iterable[Mapping[str, Any]] = (),
+        analytical_facts: Iterable[Mapping[str, Any]] = (),
         capability_inventory: Iterable[Mapping[str, Any]] = (),
         metric_series_run_roots: Iterable[Path] = (),
         comparisons: Iterable[Mapping[str, Any]] = (),
@@ -72,6 +74,7 @@ class AnalyticalRepository:
         self._concepts = _copy_rows(concepts)
         self._facts = _copy_rows(facts)
         self._series = _copy_rows(series)
+        self._analytical_facts = _copy_rows(analytical_facts)
         self._capability_inventory = _copy_rows(capability_inventory)
         self._capability_query = CapabilityInventoryQuery(self._capability_inventory)
         metric_materializer = DerivedMetricSeriesMaterializer()
@@ -89,6 +92,68 @@ class AnalyticalRepository:
             for row in self._concepts
             if row.get("raw_concept_id")
         }
+
+    @classmethod
+    def from_layer2_publications(
+        cls,
+        layer2_publication_roots: Iterable[Path],
+        *,
+        company_catalog: Iterable[Mapping[str, Any]] = (),
+        metric_series_run_roots: Iterable[Path] = (),
+    ) -> AnalyticalRepository:
+        """Build a consumer repository from manifest-verified L2 publications only.
+
+        This is the current canonical-JSONL publication adapter.  It does not
+        implement a database or Parquet adapter, infer company metadata, or
+        perform any Layer 2 selection.  Each exposed L2 row retains the
+        immutable publication identity that admitted it.
+        """
+        reader = Layer2PublicationReader()
+        publications = tuple(reader.load(Path(root)) for root in layer2_publication_roots)
+        if not publications:
+            raise AnalyticalRepositoryError("at least one verified Layer 2 publication is required")
+        declared_ciks = {
+            cik
+            for publication in publications
+            for cik in publication.input_ciks
+        }
+        catalog_by_cik: dict[str, dict[str, Any]] = {}
+        allowed_catalog_fields = {"cik", "ticker", "name", "company_name", "company_canonical_id"}
+        for catalog_row in company_catalog:
+            row = dict(catalog_row)
+            if set(row) - allowed_catalog_fields or not row.get("cik"):
+                raise AnalyticalRepositoryError("company catalog supports CIK/ticker/name/canonical ID only")
+            cik = _normalize_cik(row["cik"])
+            if cik not in {_normalize_cik(value) for value in declared_ciks}:
+                raise AnalyticalRepositoryError("company catalog CIK is not declared by Layer 2 publication")
+            if cik in catalog_by_cik and catalog_by_cik[cik] != row:
+                raise AnalyticalRepositoryError("company catalog has conflicting metadata for one CIK")
+            copied = deepcopy(row)
+            copied["cik"] = cik
+            catalog_by_cik[cik] = copied
+        companies = []
+        for cik in sorted(declared_ciks):
+            row = {"cik": cik}
+            row.update(catalog_by_cik.get(_normalize_cik(cik), {}))
+            companies.append(row)
+        analytical_facts: list[dict[str, Any]] = []
+        capabilities: list[dict[str, Any]] = []
+        for publication in publications:
+            identity = deepcopy(dict(publication.identity))
+            analytical_facts.extend(
+                _with_publication_identity(row, identity)
+                for row in publication.records("analytical_fact")
+            )
+            capabilities.extend(
+                _with_publication_identity(row, identity)
+                for row in publication.records("capability_inventory")
+            )
+        return cls(
+            companies=companies,
+            analytical_facts=analytical_facts,
+            capability_inventory=capabilities,
+            metric_series_run_roots=metric_series_run_roots,
+        )
 
     def resolve_company(self, selector: str) -> dict[str, Any]:
         """Resolve an exact CIK, ticker, canonical ID, or normalized company name.
@@ -133,6 +198,38 @@ class AnalyticalRepository:
             and _within_period(row, start, end)
         ]
         return tuple(self._with_provenance(row, resolved) for row in _sort_rows(rows))
+
+    def get_analytical_facts(
+        self,
+        company: str,
+        *,
+        view: str,
+        concept: str | None = None,
+        period_class: str | None = None,
+        period_key: str | None = None,
+        as_of_date: str | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        """Read exact governed L2 analytical facts without selection or coalescing.
+
+        ``view`` is required so a consumer cannot silently mix `AS_FILED` and
+        `CURRENT_COMPARABLE`.  Optional filters are exact; an omitted filter
+        preserves every matching basis, source type, dimension, status, and
+        unavailable/evidence/selection lineage in the verified publication.
+        """
+        if view not in {"AS_FILED", "CURRENT_COMPARABLE"}:
+            raise AnalyticalRepositoryError("get_analytical_facts requires a supported explicit view")
+        resolved = self.resolve_company(company)
+        rows = [
+            row
+            for row in self._analytical_facts
+            if _row_is_company(row, resolved)
+            and row.get("view") == view
+            and (concept is None or _concept_matches(row, concept))
+            and (period_class is None or row.get("period_class") == period_class)
+            and (period_key is None or row.get("period_key") == period_key)
+            and (as_of_date is None or row.get("as_of_date") == as_of_date)
+        ]
+        return tuple(self._with_provenance(row, resolved) for row in _sort_analytical_rows(rows))
 
     def compare_companies(
         self,
@@ -316,7 +413,10 @@ class AnalyticalRepository:
     def trace_fact(self, fact_id: str) -> dict[str, Any]:
         """Return one provenance-enriched reported or derived fact by stable ID."""
         target = str(fact_id)
-        rows = [row for row in (*self._facts, *self._series) if str(row.get("fact_id")) == target]
+        rows = [
+            row for row in (*self._facts, *self._series, *self._analytical_facts)
+            if str(row.get("fact_id") or row.get("analytical_fact_id")) == target
+        ]
         if not rows:
             raise FactNotFoundError(f"no fact matches {target!r}")
         # Prefer an explicit fact record; a series row is its analytical view.
@@ -351,6 +451,14 @@ class AnalyticalRepository:
 
 def _copy_rows(rows: Iterable[Mapping[str, Any]]) -> tuple[dict[str, Any], ...]:
     return tuple(deepcopy(dict(row)) for row in rows)
+
+
+def _with_publication_identity(
+    row: Mapping[str, Any], identity: Mapping[str, str]
+) -> dict[str, Any]:
+    copied = deepcopy(dict(row))
+    copied["layer2_publication_identity"] = deepcopy(dict(identity))
+    return copied
 
 
 def _canonical_record(row: Mapping[str, Any]) -> str:
@@ -515,3 +623,15 @@ def _period_range(value: str | tuple[str | None, str | None] | None) -> tuple[st
 
 def _sort_rows(rows: Iterable[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
     return sorted(rows, key=lambda row: (_period_value(row) or "", str(row.get("fact_id") or "")))
+
+
+def _sort_analytical_rows(rows: Iterable[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    return sorted(
+        rows,
+        key=lambda row: (
+            str(row.get("period_class") or ""),
+            str(row.get("period_key") or row.get("period_end") or ""),
+            str(row.get("as_of_date") or ""),
+            str(row.get("analytical_fact_id") or ""),
+        ),
+    )
