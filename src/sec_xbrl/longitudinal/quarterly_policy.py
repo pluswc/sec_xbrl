@@ -315,11 +315,21 @@ def _available_as_filed(source: Mapping[str, Any]) -> dict[str, Any] | None:
         "source_filing_id",
         "unit_semantics",
     )
-    if any(row.get(key) in {None, ""} for key in required):
+    if any(_missing_required_scope_value(row.get(key)) for key in required):
         raise QuarterlyPeriodPolicyError(
             "available AS_FILED fact lacks required raw lineage or semantic scope"
         )
     return row
+
+
+def _missing_required_scope_value(value: Any) -> bool:
+    """Treat only null and an empty scalar string as unavailable.
+
+    Layer 2 serializes dimensional keys and unit semantics as either tuples or
+    JSON lists depending on the publication adapter.  They are valid scope
+    values and must not be placed in a hash/equality membership test.
+    """
+    return value is None or (isinstance(value, str) and not value)
 
 
 def _attach_raw_semantics(

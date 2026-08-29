@@ -144,6 +144,24 @@ def test_q4_is_derived_only_from_declared_reviewed_compatible_monetary_flow() ->
     assert result.q4_candidates[0]["input_source_fact_ids"] == ("fy", "ytd")
 
 
+def test_q4_accepts_list_serialized_dimensions_and_unit_semantics() -> None:
+    release = _release()
+    fy = _fact("fy", "fy", "FY", "100", dimensions=[["axis", "member"]], unit=["iso4217:USD"])
+    ytd = _fact(
+        "ytd",
+        "ytd",
+        "YTD_9M",
+        "70",
+        dimensions=[["axis", "member"]],
+        unit=["iso4217:USD"],
+        bounds=("2024-09-29", "2025-06-29", None),
+    )
+    result = QuarterlyPeriodPolicyMaterializer().materialize(
+        _publication(release, (fy, ytd)), release=release, declarations=(_policy(),)
+    )
+    assert result.q4_candidates[0]["value_numeric"] == "30"
+
+
 @pytest.mark.parametrize(
     ("data_type", "unit"),
     [
