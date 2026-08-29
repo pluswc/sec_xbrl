@@ -78,6 +78,15 @@ from sec_xbrl.longitudinal.recast import (
     RecastObservationError,
     validate_recast_evidence,
 )
+from sec_xbrl.longitudinal.review_inventory import (
+    REVIEW_INVENTORY_VERSION,
+    ReviewInventoryError,
+    ReviewInventoryMaterializer,
+    ReviewInventoryPublication,
+    ReviewInventoryPublicationReader,
+    ReviewInventoryPublisher,
+    ReviewInventoryResult,
+)
 from sec_xbrl.longitudinal.selection import (
     SELECTION_MATERIALIZATION_VERSION,
     AnalyticalFactMaterializer,
@@ -102,6 +111,7 @@ __all__ = [
     "QUARTERLY_POLICY_VERSION",
     "RAW_TABLES",
     "RECAST_REGISTRY_VERSION",
+    "REVIEW_INVENTORY_VERSION",
     "SELECTION_MATERIALIZATION_VERSION",
     "SERIES_RULE_VERSION",
     "AnalyticalFactMaterializer",
@@ -154,6 +164,12 @@ __all__ = [
     "RecastObservationBuilder",
     "RecastObservationError",
     "ReviewedRecastRegistry",
+    "ReviewInventoryError",
+    "ReviewInventoryMaterializer",
+    "ReviewInventoryPublication",
+    "ReviewInventoryPublicationReader",
+    "ReviewInventoryPublisher",
+    "ReviewInventoryResult",
     "SeriesBuilder",
     "validate_recast_evidence",
 ]
