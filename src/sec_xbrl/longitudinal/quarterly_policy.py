@@ -126,6 +126,37 @@ class QuarterlyPolicyPublisher:
         return QuarterlyPolicyPublication(target, target / self.manifest_name, manifest["upstream_layer2_run_fingerprint"], counts)
 
 
+class QuarterlyPolicyPublicationReader:
+    """Fail closed when a companion result no longer matches its C3-M1 input."""
+
+    def load(self, run_root: Path, *, upstream: VerifiedLayer2Publication) -> QuarterlyPolicyResult:
+        root = Path(run_root); manifest_path = root / QuarterlyPolicyPublisher.manifest_name
+        if not root.is_dir() or root.is_symlink() or not manifest_path.is_file() or manifest_path.is_symlink():
+            raise QuarterlyPeriodPolicyError("quarterly policy companion release is missing or unsafe")
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise QuarterlyPeriodPolicyError("quarterly policy companion manifest is invalid") from exc
+        expected = {"contract_version", "run_version", "upstream_layer2_run_fingerprint", "upstream_layer2_manifest_sha256", "output_counts", "output_content_sha256", "validation"}
+        if set(manifest) != expected or manifest.get("contract_version") != QUARTERLY_POLICY_VERSION:
+            raise QuarterlyPeriodPolicyError("quarterly policy companion manifest has unsupported contract")
+        if manifest.get("upstream_layer2_run_fingerprint") != upstream.identity.get("layer2_run_fingerprint"):
+            raise QuarterlyPeriodPolicyError("quarterly policy companion does not match verified C3-M1 publication")
+        rows: dict[str, tuple[dict[str, Any], ...]] = {}
+        for name in _DATASETS:
+            path = root / f"{name}.jsonl"
+            if not path.is_file() or path.is_symlink():
+                raise QuarterlyPeriodPolicyError("quarterly policy companion dataset is missing")
+            try:
+                values = tuple(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines())
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise QuarterlyPeriodPolicyError("quarterly policy companion dataset is invalid") from exc
+            if any(not isinstance(row, dict) for row in values) or _hash_rows(values) != manifest["output_content_sha256"].get(name) or len(values) != manifest["output_counts"].get(name):
+                raise QuarterlyPeriodPolicyError("quarterly policy companion content verification failed")
+            rows[name] = tuple(dict(row) for row in values)
+        return QuarterlyPolicyResult(rows["quarterly_q4_candidate"], rows["quarterly_q4_exclusion"], rows["predecessor_period_linkage"])
+
+
 class QuarterlyPeriodPolicyMaterializer:
     """Apply declared quarterly policy to one verified C3-M1 AS_FILED run."""
 

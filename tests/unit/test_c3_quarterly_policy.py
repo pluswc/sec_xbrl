@@ -15,6 +15,7 @@ from sec_xbrl.longitudinal import (
     Layer2Run,
     QuarterlyPeriodPolicyError,
     QuarterlyPeriodPolicyMaterializer,
+    QuarterlyPolicyPublicationReader,
     QuarterlyPolicyPublisher,
     QuarterlySemanticDeclaration,
 )
@@ -108,3 +109,5 @@ def test_companion_publication_is_atomic_and_linked_to_verified_c3_m1(tmp_path: 
     manifest = (published.run_root / "quarterly_policy_manifest.json").read_text(encoding="utf-8")
     assert release.layer2_run.fingerprint in manifest
     assert published.output_counts["quarterly_q4_candidate"] == 1
+    reread = QuarterlyPolicyPublicationReader().load(published.run_root, upstream=publication)
+    assert reread.q4_candidates[0]["quarterly_policy_candidate_id"] == result.q4_candidates[0]["quarterly_policy_candidate_id"]
