@@ -73,7 +73,9 @@ data, or serve Excel.  It also deliberately does not call the old
 `TrailingFilingCorpus._build_analysis` helper, which was a transient legacy
 analysis path and omitted required raw tables.
 
-C3-M1 may consume `CorpusRelease` to orchestrate the already-governed L2-M1
-through L2-M5 producers and publication boundary.  It must retain this exact
-input declaration and must not bypass the adapter by reading arbitrary raw
-Parquet paths.
+C3-M1 consumes `CorpusRelease` through `AsFiledPublicationPipeline` to
+orchestrate the already-governed L2-M1 through L2-M5 producers and atomic
+publication boundary. It retains this exact input declaration and does not
+bypass the adapter by reading arbitrary raw Parquet paths. Its initial durable
+output is AS_FILED only; comparable/recast, Q4 flow, and Derived Metrics remain
+later controlled work. See [C3-M1 AS_FILED publication](c3-as-filed-publication.md).

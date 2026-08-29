@@ -1,5 +1,11 @@
 """Layer 2 same-company longitudinal canonicalization."""
 
+from sec_xbrl.longitudinal.as_filed_publication import (
+    AsFiledPublicationError,
+    AsFiledPublicationPipeline,
+    AsFiledPublicationResult,
+    CompanyCoverage,
+)
 from sec_xbrl.longitudinal.canonical import (
     MAPPING_VERSION,
     AnnualSeries,
@@ -77,11 +83,15 @@ __all__ = [
     "AnalyticalFactMaterializer",
     "AnalyticalFactSelectionResult",
     "AnnualSeries",
+    "AsFiledPublicationError",
+    "AsFiledPublicationPipeline",
+    "AsFiledPublicationResult",
     "AsOfSeriesSelector",
     "CapabilityInventoryMaterializer",
     "CapabilityInventoryQuery",
     "CapabilityInventoryResult",
     "CompanyCanonicalizer",
+    "CompanyCoverage",
     "CompanySeriesMaterializer",
     "CompanySeriesResult",
     "CorpusRelease",
