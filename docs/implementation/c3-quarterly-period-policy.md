@@ -35,7 +35,8 @@ No concept is Q4-eligible by default.  A `QuarterlySemanticDeclaration` must
 positively declare its company-canonical concept as
 `REVIEWED_ADDITIVE_AMOUNT` / `ADDITIVE_AMOUNT` / additive.  Each source is
 also required to be a directly reported AS_FILED monetary duration Fact with
-a single currency unit and raw lineage.  EPS, weighted shares, ratios,
+exactly one ISO 4217 numerator currency measure, no denominator measure, and
+raw lineage.  Multiple currencies, EPS, weighted shares, ratios,
 margins, averages, instant/balance-sheet values, text, and unknown semantics
 therefore fail closed.
 

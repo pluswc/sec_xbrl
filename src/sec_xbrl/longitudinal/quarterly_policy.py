@@ -345,16 +345,41 @@ def _attach_raw_semantics(
             )
         concept = concepts.get((str(row["source_filing_id"]), str(raw_fact.get("raw_concept_id"))))
         unit = units.get((str(row["source_filing_id"]), str(raw_fact.get("unit_id"))))
+        numerator = _unit_measure_tokens(None if unit is None else unit.get("numerator_measures"))
+        denominator = _unit_measure_tokens(
+            None if unit is None else unit.get("denominator_measures")
+        )
         row["_q4_raw_semantics_safe"] = bool(
             concept
             and unit
             and str(concept.get("period_type") or "").lower() == "duration"
             and "monetary" in str(concept.get("data_type") or "").lower()
-            and unit.get("denominator_measures") in {None, ""}
-            and "iso4217:" in str(unit.get("numerator_measures") or "").lower()
+            and not denominator
+            and len(numerator) == 1
+            and numerator[0].startswith("iso4217:")
         )
         attached.append(row)
     return tuple(attached)
+
+
+def _unit_measure_tokens(value: Any) -> tuple[str, ...]:
+    """Read Layer 1's scalar/list measure representation without broad matching."""
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return ()
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return tuple(token.lower() for token in text.replace(",", " ").split() if token)
+        if not isinstance(parsed, list):
+            return (text.lower(),)
+        return tuple(str(token).strip().lower() for token in parsed if str(token).strip())
+    if isinstance(value, (tuple, list)):
+        return tuple(str(token).strip().lower() for token in value if str(token).strip())
+    return (str(value).strip().lower(),) if str(value).strip() else ()
 
 
 def _scope(row: Mapping[str, Any]) -> tuple[Any, ...]:

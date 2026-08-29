@@ -150,6 +150,7 @@ def test_q4_is_derived_only_from_declared_reviewed_compatible_monetary_flow() ->
         ("sharesItemType", "shares"),
         ("perShareItemType", "iso4217:USD"),
         ("monetaryItemType", "shares"),
+        ("monetaryItemType", "iso4217:USD,iso4217:EUR"),
     ],
 )
 def test_q4_rejects_shares_eps_ratios_and_nonmonetary_units(data_type: str, unit: str) -> None:
