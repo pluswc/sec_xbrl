@@ -11,7 +11,8 @@ from test_c3_review_inventory import _publication, _release
 
 
 def _published(tmp_path: Path):
-    release = _release(); upstream = _publication(release)
+    release = _release()
+    upstream = _publication(release)
     registry = Q4PolicyRegistryMaterializer().materialize(upstream, release=release, effective_from="2026-01-01")
     reg = Q4PolicyRegistryPublisher().publish(registry, output_root=tmp_path, run_version="reg", upstream=upstream, release=release)
     result = QuarterlyPeriodPolicyV2Materializer().materialize(upstream, release=release, registry_root=reg.run_root)
