@@ -69,18 +69,18 @@ class Q4PolicyRegistryMaterializer:
             if relation.get("network_type") == "PRE" and relation.get("to_raw_concept_id"):
                 pre[(str(relation.get("filing_id")), str(relation["to_raw_concept_id"]))].append(relation)
         evidence: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
-        rejected: Counter[str] = Counter()
+        rejected: dict[str, Counter[str]] = defaultdict(Counter)
         for fact in facts:
             if fact.get("period_class") not in {"FY", "YTD_9M"}:
                 continue
             if fact.get("company_canonical_dimension_key") not in ((), [], None):
-                rejected["DIMENSION_SCOPE_NOT_EMPTY"] += 1; continue
+                rejected[str(fact.get("cik"))]["DIMENSION_SCOPE_NOT_EMPTY"] += 1; continue
             source = raw.get((str(fact.get("source_filing_id")), str(fact.get("selected_fact_id"))))
             if not source:
-                rejected["RAW_FACT_NOT_RETAINED"] += 1; continue
+                rejected[str(fact.get("cik"))]["RAW_FACT_NOT_RETAINED"] += 1; continue
             concept = concepts.get((str(fact.get("source_filing_id")), str(source.get("raw_concept_id"))))
             if not concept or not _allowed(concept):
-                rejected["QNAME_NOT_IN_REVIEWED_ALLOWLIST"] += 1; continue
+                rejected[str(fact.get("cik"))]["QNAME_NOT_IN_REVIEWED_ALLOWLIST"] += 1; continue
             links = pre.get((str(fact.get("source_filing_id")), str(source.get("raw_concept_id"))), ())
             matched = []
             for link in links:
@@ -89,7 +89,7 @@ class Q4PolicyRegistryMaterializer:
                 if category:
                     matched.append({"role_id": link.get("role_id"), "role_definition": role.get("role_definition") if role else None, "role_category": category, "relationship_id": link.get("relationship_id")})
             if not matched:
-                rejected["PRIMARY_CONSOLIDATED_PRE_ROLE_REQUIRED"] += 1; continue
+                rejected[str(fact.get("cik"))]["PRIMARY_CONSOLIDATED_PRE_ROLE_REQUIRED"] += 1; continue
             scope = _declaration_scope(fact)
             evidence[scope].append({"fact": fact, "concept": concept, "pre": matched})
         declarations = []
@@ -101,7 +101,7 @@ class Q4PolicyRegistryMaterializer:
             declarations.append({"declaration_id": declaration_id, "registry_version": Q4_POLICY_REGISTRY_VERSION, "cik": cik, "company_canonical_concept_id": concept_id, "company_canonical_dimension_key": dimensions, "basis_version": basis, "unit_semantics": unit, "semantic_review_state": "REVIEWED_ADDITIVE_AMOUNT", "value_kind": "ADDITIVE_AMOUNT", "is_additive": True, "effective_from": effective_from, "effective_to": effective_to, "allowlisted_local_names": names, "pre_evidence": [json.loads(value) for value in roles_seen], "approved_analytical_fact_ids": sorted(str(row["fact"]["analytical_fact_id"]) for row in rows), "policy_provenance": "CONTROLLED_STANDARD_STATEMENT_ALLOWLIST"})
         coverage = []
         for cik in release.ciks:
-            coverage.append({"cik": cik, "approved_declaration_count": sum(row["cik"] == cik for row in declarations), "rejected_fact_counts": dict(sorted(rejected.items())), "registry_version": Q4_POLICY_REGISTRY_VERSION})
+            coverage.append({"cik": cik, "approved_declaration_count": sum(row["cik"] == cik for row in declarations), "rejected_fact_counts": dict(sorted(rejected[cik].items())), "registry_version": Q4_POLICY_REGISTRY_VERSION})
         return Q4PolicyRegistryResult(tuple(declarations), tuple(coverage))
 
 
