@@ -280,6 +280,86 @@ class QuarterlyPeriodPolicyMaterializer:
         )
 
 
+class QuarterlyPeriodPolicyV2Materializer:
+    """M2-v2: consume only a reader-attested, full-scope policy registry.
+
+    The v1 declaration API remains for backwards-compatible historical runs.
+    New governed Q4 activation must enter through this class; concept-only
+    declarations cannot authorize a different dimension, basis, unit, company,
+    or source Fact.
+    """
+
+    def materialize(self, publication: VerifiedLayer2Publication, *, release: CorpusRelease, registry_root: Path) -> QuarterlyPolicyResult:
+        from sec_xbrl.longitudinal.q4_policy_registry import Q4PolicyRegistryReader
+        registry = Q4PolicyRegistryReader().load(registry_root, upstream=publication, release=release)
+        base = QuarterlyPeriodPolicyMaterializer().materialize(publication, release=release, declarations=registry.semantic_declarations())
+        permitted = {
+            (_scope_from_registry(row), frozenset(str(x) for x in row["approved_analytical_fact_ids"]))
+            for row in registry.declarations
+        }
+        accepted = []
+        for candidate in base.q4_candidates:
+            source_ids = frozenset(str(x) for x in candidate["input_analytical_fact_ids"])
+            scope = _candidate_scope(candidate)
+            if any(scope == declared_scope and source_ids <= facts for declared_scope, facts in permitted):
+                accepted.append(candidate)
+        accepted_ids = {str(row["quarterly_policy_candidate_id"]) for row in accepted}
+        # All non-accepted base candidates are deliberately represented as
+        # unavailable because their full scope or source evidence was not in
+        # the reader-attested registry.
+        excluded = list(base.q4_exclusions)
+        for candidate in base.q4_candidates:
+            if str(candidate["quarterly_policy_candidate_id"]) not in accepted_ids:
+                for fact_id in candidate["input_analytical_fact_ids"]:
+                    excluded.append({"quarterly_policy_exclusion_id": _id("quarterly-q4-exclusion", (fact_id, "Q4_V2_EXACT_SCOPE_POLICY_REQUIRED")), "cik": candidate["cik"], "analytical_fact_id": fact_id, "other_analytical_fact_id": None, "period_class": "FY_OR_YTD_9M", "exclusion_reason": "Q4_V2_EXACT_SCOPE_POLICY_REQUIRED", "policy_version": "c3-m5-quarterly-policy-v2"})
+        return QuarterlyPolicyResult(tuple(sorted(accepted, key=lambda x: x["quarterly_policy_candidate_id"])), tuple(sorted({x["quarterly_policy_exclusion_id"]: x for x in excluded}.values(), key=lambda x: x["quarterly_policy_exclusion_id"])), base.predecessor_linkage)
+
+
+class QuarterlyPolicyV2Publisher:
+    """Immutable M2-v2 output bound to one M1, corpus release, and registry."""
+    manifest_name = "quarterly_policy_v2_manifest.json"
+    def publish(self, result: QuarterlyPolicyResult, *, output_root: Path, run_version: str, upstream: VerifiedLayer2Publication, release: CorpusRelease, registry_root: Path) -> QuarterlyPolicyPublication:
+        from sec_xbrl.longitudinal.q4_policy_registry import Q4PolicyRegistryReader
+        Q4PolicyRegistryReader().load(registry_root, upstream=upstream, release=release)
+        if not run_version or "/" in run_version or "\\" in run_version: raise QuarterlyPeriodPolicyError("quarterly policy v2 run_version must be a non-path identifier")
+        datasets=result.as_datasets(); rows={k:tuple(sorted((dict(x) for x in v),key=_canonical_json)) for k,v in datasets.items()}; counts={k:len(v) for k,v in rows.items()}; hashes={k:_hash_rows(v) for k,v in rows.items()}
+        registry_manifest=Path(registry_root)/"q4_policy_registry_manifest.json"
+        manifest={"contract_version":"c3-m5-quarterly-policy-v2","run_version":run_version,"upstream_layer2_run_fingerprint":upstream.identity["layer2_run_fingerprint"],"upstream_layer2_manifest_sha256":upstream.identity["layer2_manifest_sha256"],"corpus_release_fingerprint":release.layer2_run.fingerprint,"registry_manifest_sha256":hashlib.sha256(registry_manifest.read_bytes()).hexdigest(),"registry_version":"c3-m5-q4-policy-registry-v1","output_counts":counts,"output_content_sha256":hashes}
+        root,target=Path(output_root),Path(output_root)/run_version; root.mkdir(parents=True,exist_ok=True)
+        if target.exists():
+            path=target/self.manifest_name
+            if not path.is_file() or json.loads(path.read_text())!=manifest: raise QuarterlyPeriodPolicyError("quarterly policy v2 run_version already exists with different content")
+            return QuarterlyPolicyPublication(target,path,manifest["upstream_layer2_run_fingerprint"],counts)
+        staging=Path(tempfile.mkdtemp(prefix=f".partial-{run_version}-",dir=root))
+        try:
+            for name,values in rows.items(): (staging/f"{name}.jsonl").write_text("".join(_canonical_json(x)+"\n" for x in values))
+            (staging/self.manifest_name).write_text(_canonical_json(manifest)+"\n"); os.replace(staging,target)
+        except Exception: shutil.rmtree(staging,ignore_errors=True); raise
+        return QuarterlyPolicyPublication(target,target/self.manifest_name,manifest["upstream_layer2_run_fingerprint"],counts)
+
+
+class QuarterlyPolicyV2Reader:
+    def load(self, run_root: Path, *, upstream: VerifiedLayer2Publication, release: CorpusRelease, registry_root: Path) -> QuarterlyPolicyResult:
+        from sec_xbrl.longitudinal.q4_policy_registry import Q4PolicyRegistryReader
+        Q4PolicyRegistryReader().load(registry_root,upstream=upstream,release=release)
+        root=Path(run_root); path=root/QuarterlyPolicyV2Publisher.manifest_name
+        if not root.is_dir() or root.is_symlink() or not path.is_file() or path.is_symlink(): raise QuarterlyPeriodPolicyError("quarterly policy v2 release is missing or unsafe")
+        try: manifest=json.loads(path.read_text())
+        except (OSError,UnicodeDecodeError,json.JSONDecodeError) as exc: raise QuarterlyPeriodPolicyError("quarterly policy v2 manifest is invalid") from exc
+        required={"contract_version","run_version","upstream_layer2_run_fingerprint","upstream_layer2_manifest_sha256","corpus_release_fingerprint","registry_manifest_sha256","registry_version","output_counts","output_content_sha256"}
+        if set(manifest)!=required or manifest.get("contract_version")!="c3-m5-quarterly-policy-v2": raise QuarterlyPeriodPolicyError("quarterly policy v2 manifest has unsupported contract")
+        if manifest.get("upstream_layer2_run_fingerprint")!=upstream.identity.get("layer2_run_fingerprint") or manifest.get("upstream_layer2_manifest_sha256")!=upstream.identity.get("layer2_manifest_sha256") or manifest.get("corpus_release_fingerprint")!=release.layer2_run.fingerprint or manifest.get("registry_manifest_sha256")!=hashlib.sha256((Path(registry_root)/"q4_policy_registry_manifest.json").read_bytes()).hexdigest(): raise QuarterlyPeriodPolicyError("quarterly policy v2 does not match verified inputs")
+        files={x.name for x in root.iterdir() if x.is_file() and not x.is_symlink()}; expected={self_name for self_name in [QuarterlyPolicyV2Publisher.manifest_name,*(f"{x}.jsonl" for x in _DATASETS)]}
+        if files!=expected or any(x.is_dir() or x.is_symlink() for x in root.iterdir()): raise QuarterlyPeriodPolicyError("quarterly policy v2 layout is incomplete or unexpected")
+        values={}
+        for name in _DATASETS:
+            try: rows=tuple(json.loads(x) for x in (root/f"{name}.jsonl").read_text().splitlines())
+            except (OSError,UnicodeDecodeError,json.JSONDecodeError) as exc: raise QuarterlyPeriodPolicyError("quarterly policy v2 dataset is invalid") from exc
+            if any(not isinstance(x,dict) for x in rows) or len(rows)!=manifest["output_counts"].get(name) or _hash_rows(rows)!=manifest["output_content_sha256"].get(name): raise QuarterlyPeriodPolicyError("quarterly policy v2 content verification failed")
+            values[name]=tuple(dict(x) for x in rows)
+        return QuarterlyPolicyResult(values["quarterly_q4_candidate"],values["quarterly_q4_exclusion"],values["predecessor_period_linkage"])
+
+
 def _declarations(
     rows: Iterable[QuarterlySemanticDeclaration],
 ) -> dict[str, QuarterlySemanticDeclaration]:
@@ -400,6 +480,18 @@ def _scope(row: Mapping[str, Any]) -> tuple[Any, ...]:
         row.get("basis_version"),
         repr(row.get("unit_semantics")),
     )
+
+
+def _scope_from_registry(row: Mapping[str, Any]) -> tuple[Any, ...]:
+    return (str(row.get("cik") or ""), str(row.get("company_canonical_concept_id") or ""),
+            repr(row.get("company_canonical_dimension_key")), row.get("basis_version"),
+            repr(row.get("unit_semantics")))
+
+
+def _candidate_scope(row: Mapping[str, Any]) -> tuple[Any, ...]:
+    return (str(row.get("cik") or ""), str(row.get("company_canonical_concept_id") or ""),
+            repr(row.get("company_canonical_dimension_key")), row.get("basis_version"),
+            repr(row.get("unit_semantics")))
 
 
 def _q4(
