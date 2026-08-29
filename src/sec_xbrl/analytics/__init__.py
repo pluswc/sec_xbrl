@@ -1,5 +1,6 @@
 """Stable in-process analytical query boundary."""
 
+from sec_xbrl.analytics.data_access import ConsumerDataAccess
 from sec_xbrl.analytics.repository import (
     AnalyticalRepository,
     AnalyticalRepositoryError,
@@ -10,7 +11,6 @@ from sec_xbrl.analytics.repository import (
     DerivedMetricNotFoundError,
     FactNotFoundError,
 )
-from sec_xbrl.analytics.data_access import ConsumerDataAccess
 
 __all__ = [
     "AnalyticalRepository",

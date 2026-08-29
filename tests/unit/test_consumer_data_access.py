@@ -158,6 +158,33 @@ def test_discover_metrics_filters_exactly_and_returns_scoped_not_reported(tmp_pa
     assert repository.discover_metrics("NVDA", metric_id="gross_margin")[0]["cik"] == "0001045810"
 
 
+def test_discover_metrics_never_groups_qtd_and_fy_variants(tmp_path) -> None:
+    repository = _repository(
+        tmp_path,
+        _metric(
+            "gross_margin",
+            "metric:aapl:qtd",
+            period_key="FY26-Q1",
+            period_class="QTD_3M",
+        ),
+        _metric(
+            "gross_margin",
+            "metric:aapl:fy",
+            period_key="FY25",
+            period_class="FY",
+        ),
+    )
+
+    rows = repository.discover_metrics("AAPL", metric_id="gross_margin")
+
+    assert len(rows) == 2
+    assert [row["observed_period_classes"] for row in rows] == [("FY",), ("QTD_3M",)]
+    assert {row["derived_metric_ids"][0] for row in rows} == {
+        "metric:aapl:qtd",
+        "metric:aapl:fy",
+    }
+
+
 def test_discover_metrics_is_deterministic_and_returns_deep_copies(tmp_path) -> None:
     records = (
         _metric("gross_margin", "metric:aapl:q2", period_key="FY26-Q2"),

@@ -63,7 +63,7 @@ M2 candidate만 탐색한다. 요청 필터는 모두 정확 일치다.
 - CIK, Metric ID, Metric definition ID와 version, formula/version
 - view와 `basis_version`
 - full company canonical dimension key
-- input/output unit semantics와 series type
+- input/output unit semantics, series type와 period class
 - calculation status, unavailable reason, source type, mapping versions
 
 동일한 variant의 여러 기간·as-of revision은 `observed_period_classes`,

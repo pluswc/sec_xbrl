@@ -437,6 +437,7 @@ def _metric_discovery_group_key(row: Mapping[str, Any]) -> str:
             "input_unit_semantics",
             "metric_unit_semantics",
             "series_type",
+            "period_class",
             "calculation_status",
             "unavailable_reason",
             "source_type",
