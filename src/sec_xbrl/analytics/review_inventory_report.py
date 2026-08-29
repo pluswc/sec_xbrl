@@ -14,6 +14,7 @@ from sec_xbrl.longitudinal import (
     CorpusReleaseAdapter,
     Layer2PublicationReader,
     Layer2RuleVersions,
+    QuarterlyPolicyV2Reader,
     ReviewInventoryPublicationReader,
 )
 from sec_xbrl.longitudinal.materialization import VerifiedLayer2Publication
@@ -166,21 +167,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Reader-verified C3-M5 Korean review inventory report")
     parser.add_argument("--inventory-root", action="append", required=True)
     parser.add_argument("--layer2-root", action="append", required=True)
+    parser.add_argument("--quarterly-policy-root", action="append", required=True)
+    parser.add_argument("--q4-policy-registry-root", action="append", required=True)
     parser.add_argument("--ticker", action="append", required=True)
     parser.add_argument("--corpus-root", required=True)
     parser.add_argument("--corpus-run-id", required=True)
     parser.add_argument("--output-markdown", required=True)
     parser.add_argument("--output-json", required=True)
     args = parser.parse_args(argv)
-    if not (len(args.inventory_root) == len(args.layer2_root) == len(args.ticker)):
-        parser.error("inventory-root, layer2-root, and ticker must have matching counts")
+    if not (len(args.inventory_root) == len(args.layer2_root) == len(args.quarterly_policy_root) == len(args.q4_policy_registry_root) == len(args.ticker)):
+        parser.error("inventory-root, layer2-root, quarterly-policy-root, q4-policy-registry-root, and ticker must have matching counts")
     inputs = []
-    for inventory, layer2, ticker in zip(args.inventory_root, args.layer2_root, args.ticker, strict=True):
+    for inventory, layer2, quarterly_policy, registry, ticker in zip(args.inventory_root, args.layer2_root, args.quarterly_policy_root, args.q4_policy_registry_root, args.ticker, strict=True):
         upstream = Layer2PublicationReader().load(Path(layer2))
         release = CorpusReleaseAdapter().load(Path(args.corpus_root), corpus_run_id=args.corpus_run_id,
             ciks=set(upstream.input_ciks), run_version=str(upstream.identity["layer2_run_version"]),
             rules=Layer2RuleVersions("period-v1", "mapping-v1", "recast-v1", "selection-v1"))
-        inputs.append(ReviewInventoryReportInput(ticker, Path(inventory), upstream, release))
+        quarterly = QuarterlyPolicyV2Reader().load(Path(quarterly_policy), upstream=upstream, release=release, registry_root=Path(registry))
+        inputs.append(ReviewInventoryReportInput(ticker, Path(inventory), upstream, release, quarterly))
     report = KoreanReviewInventoryReportGenerator().generate(inputs, ticker_scope=args.ticker)
     report.write(markdown_path=Path(args.output_markdown), json_path=Path(args.output_json))
     return 0
