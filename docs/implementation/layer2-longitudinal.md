@@ -104,6 +104,14 @@ and prior raw Fact IDs so both histories remain traceable.
 ## Mapping QA
 Every automatic mapping above a materiality threshold must be explainable by stored evidence. Low-confidence mappings remain separate until reviewed or corroborated.
 
+## Consumer exploration order
+
+Mechanical candidates are not a consumer selection rule.  To form a usable
+analysis group, traverse from a financial-statement anchor through retained
+Presentation/Definition evidence, then the exact Axis/Member facts, and then
+the related disclosure/detail.  This produces a discoverable group without
+turning a QName allowlist into a limitation on company-specific concepts.
+
 ## L2-M2 canonical-mapping materialization
 
 `CompanyCanonicalizer` is the L2-M2 producer.  Its `MappingTables.as_datasets()`

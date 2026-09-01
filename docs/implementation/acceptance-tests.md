@@ -109,6 +109,15 @@ executable/inspection checklist is maintained in
 - QTD_3M and YTD_6M/YTD_9M are distinct.
 - Cash Flow YTD values are not mislabeled quarter-alone.
 - derived Q4 stores source IDs and never overwrites reported FY/YTD.
+
+- the separate M8 mechanical Q4 companion admits a reader-attested AS_FILED,
+  numeric duration pair with a numerator-only Unit and exact CIK/concept/full
+  dimensions/basis/unit/fiscal-boundary scope, including custom and
+  dimensioned concepts; it stores review flags rather than a semantic approval.
+- denominator-bearing units, non-duration concepts, incompatible inputs, and
+  duplicate compatible input pairs remain excluded with preserved raw/filing
+  lineage.  The companion is hash-attested to the exact Layer 2 publication and
+  CorpusRelease and does not modify the reviewed Q4-policy result.
 - missing disclosure != resolved.
 
 ## M7 — Layer 2
