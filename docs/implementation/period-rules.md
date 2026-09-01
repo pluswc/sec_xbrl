@@ -29,7 +29,7 @@ A Q2 3M revenue and Q2 6M YTD revenue are distinct observations.
 10-Q cash-flow facts are often YTD. A quarterly flow may be derived only by subtraction of compatible additive facts.
 
 ## PR-007 — Derived Q4
-Potentially `FY - YTD_9M`, but only when:
+The reviewed Q4 policy may use `FY - YTD_9M` only when:
 - same canonical concept
 - same dimensional context
 - compatible units
@@ -37,6 +37,36 @@ Potentially `FY - YTD_9M`, but only when:
 - no structural/recast incompatibility
 
 Never use simple subtraction for EPS, margins, ratios, averages or non-additive metrics.
+
+### M8 mechanical Q4 companion
+
+Layer 2 also publishes a separate **mechanical candidate** companion.  Its
+purpose is to make broad, company-specific analysis material available; it is
+not a semantic approval and it never changes a Raw Fact, `analytical_fact`, or
+the reviewed Q4-policy companion.
+
+It admits an `AS_FILED` / `REPORTED` FY and YTD-9M pair when each raw source is
+numeric, its Concept is `duration`, its Unit has at least one numerator measure
+and no denominator measure, and the following full scope is exact:
+
+```text
+CIK + company canonical Concept + full Dimension signature + basis version
++ unit semantics + actual fiscal-year start/end boundaries
+```
+
+The FY and YTD-9M must have the same actual start date, the YTD end must be
+before the FY end, and exactly one compatible pair may exist for the actual FY
+end.  The output is `QTD_3M = FY - YTD_9M`, with every input analytical Fact,
+raw Fact, filing ID, formula, rule version, and a `MECHANICAL_CANDIDATE_REVIEW_REQUIRED`
+selection status.  Duplicate compatible inputs fail closed as
+`Q4_AMBIGUOUS_COMPATIBLE_INPUT_PAIR` with full implicated lineage.
+
+No standard QName allowlist or PRE role gate applies here.  Custom Concepts and
+dimensioned facts are admitted.  Instead, the companion retains flags such as
+`CUSTOM_CONCEPT`, `DIMENSIONED`, `PURE_UNIT`, `SHARES_UNIT`,
+`PRIMARY_STATEMENT_PRE_ABSENT`, and `RECAST_SENSITIVE`; consumers decide whether
+to use a candidate.  A denominator-bearing Unit (for example USD/shares) is not
+a mechanical candidate.
 
 ## PR-008 — Provenance
 Derived facts store:
