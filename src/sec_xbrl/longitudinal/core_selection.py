@@ -48,7 +48,7 @@ class CoreQuarterlyFactSelector:
             return CoreFactSelection(None, "CORE_FACT_SELECTION_AMENDMENT_ONLY")
         direct = tuple(row for row in eligible if _is_direct_10q(row))
         filing_pool = direct or eligible
-        latest_filing = max((_filing_rank(row) for row in filing_pool))
+        latest_filing = max(_filing_rank(row) for row in filing_pool)
         same_filing = tuple(row for row in filing_pool if _filing_rank(row) == latest_filing)
         undimensioned = tuple(row for row in same_filing if _is_undimensioned(row))
         winners = undimensioned or same_filing
