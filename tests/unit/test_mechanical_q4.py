@@ -8,22 +8,21 @@ import pytest
 
 from sec_xbrl.filing.layer1_ingestion import Layer1SnapshotManifest
 from sec_xbrl.longitudinal import (
+    MECHANICAL_Q4_VERSION,
     CorpusRelease,
     CorpusSnapshot,
     Layer1SnapshotInput,
     Layer2RuleVersions,
     Layer2Run,
-    MECHANICAL_Q4_VERSION,
     MechanicalQ4Error,
     MechanicalQ4Materializer,
     MechanicalQ4Publisher,
     MechanicalQ4Reader,
 )
 from sec_xbrl.longitudinal.materialization import (
-    VerifiedLayer2Publication,
     _READER_ATTESTATION_TOKEN,
+    VerifiedLayer2Publication,
 )
-
 
 RULES = Layer2RuleVersions("period", "mapping", "recast", "selection")
 

@@ -53,11 +53,6 @@ from sec_xbrl.longitudinal.materialization import (
     Layer2RuleVersions,
     Layer2Run,
 )
-from sec_xbrl.longitudinal.metric_input import (
-    METRIC_INPUT_HANDOFF_VERSION,
-    MetricInputHandoffMaterializer,
-    MetricInputHandoffResult,
-)
 from sec_xbrl.longitudinal.mechanical_q4 import (
     MECHANICAL_Q4_VERSION,
     MechanicalQ4Error,
@@ -66,6 +61,11 @@ from sec_xbrl.longitudinal.mechanical_q4 import (
     MechanicalQ4Publisher,
     MechanicalQ4Reader,
     MechanicalQ4Result,
+)
+from sec_xbrl.longitudinal.metric_input import (
+    METRIC_INPUT_HANDOFF_VERSION,
+    MetricInputHandoffMaterializer,
+    MetricInputHandoffResult,
 )
 from sec_xbrl.longitudinal.period_observation import (
     PERIOD_OBSERVATION_RULE_VERSION,
@@ -127,8 +127,8 @@ __all__ = [
     "LAYER2_CONTRACT_VERSION",
     "LOGICAL_DATASETS",
     "MAPPING_VERSION",
-    "METRIC_INPUT_HANDOFF_VERSION",
     "MECHANICAL_Q4_VERSION",
+    "METRIC_INPUT_HANDOFF_VERSION",
     "PERIOD_OBSERVATION_RULE_VERSION",
     "Q4_POLICY_REGISTRY_VERSION",
     "QUARTERLY_POLICY_VERSION",
@@ -172,15 +172,15 @@ __all__ = [
     "Layer2Run",
     "MappingRelation",
     "MappingTables",
-    "MemberOrderingView",
-    "MetricInputHandoffMaterializer",
-    "MetricInputHandoffResult",
     "MechanicalQ4Error",
     "MechanicalQ4Materializer",
     "MechanicalQ4Publication",
     "MechanicalQ4Publisher",
     "MechanicalQ4Reader",
     "MechanicalQ4Result",
+    "MemberOrderingView",
+    "MetricInputHandoffMaterializer",
+    "MetricInputHandoffResult",
     "PeriodObservationMaterializer",
     "PeriodObservationResult",
     "Q4PolicyRegistryError",
