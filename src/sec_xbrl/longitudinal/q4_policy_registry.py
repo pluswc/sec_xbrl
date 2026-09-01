@@ -21,7 +21,7 @@ from sec_xbrl.longitudinal.corpus_release import CorpusRelease
 from sec_xbrl.longitudinal.materialization import VerifiedLayer2Publication
 from sec_xbrl.longitudinal.quarterly_policy import QuarterlySemanticDeclaration
 
-Q4_POLICY_REGISTRY_VERSION = "c3-m5-q4-policy-registry-v1"
+Q4_POLICY_REGISTRY_VERSION = "l2-m7-dimensional-q4-policy-registry-v1"
 INCOME_ALLOWLIST = frozenset({
     "RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "CostOfRevenue",
     "CostOfGoodsAndServicesSold", "CostOfGoodsAndServiceExcludingDepreciationDepletionAndAmortization",
@@ -55,7 +55,22 @@ class Q4PolicyRegistryResult:
         return {"approved_q4_declaration": self.declarations, "q4_policy_coverage": self.coverage}
 
     def semantic_declarations(self) -> tuple[QuarterlySemanticDeclaration, ...]:
-        return tuple(QuarterlySemanticDeclaration(row["company_canonical_concept_id"], "REVIEWED_ADDITIVE_AMOUNT", "ADDITIVE_AMOUNT", True, row["declaration_id"], Q4_POLICY_REGISTRY_VERSION) for row in self.declarations)
+        return tuple(
+            QuarterlySemanticDeclaration(
+                row["company_canonical_concept_id"],
+                "REVIEWED_ADDITIVE_AMOUNT",
+                "ADDITIVE_AMOUNT",
+                True,
+                row["declaration_id"],
+                Q4_POLICY_REGISTRY_VERSION,
+                cik=str(row["cik"]),
+                company_canonical_dimension_key=row.get("company_canonical_dimension_key"),
+                basis_version=row.get("basis_version"),
+                unit_semantics=row.get("unit_semantics"),
+                scope_is_exact=True,
+            )
+            for row in self.declarations
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,8 +102,6 @@ class Q4PolicyRegistryMaterializer:
         for fact in facts:
             if fact.get("period_class") not in {"FY", "YTD_9M"}:
                 continue
-            if fact.get("company_canonical_dimension_key") not in ((), [], None):
-                rejected[str(fact.get("cik"))]["DIMENSION_SCOPE_NOT_EMPTY"] += 1; continue
             source = raw.get((str(fact.get("source_filing_id")), str(fact.get("selected_fact_id"))))
             if not source:
                 rejected[str(fact.get("cik"))]["RAW_FACT_NOT_RETAINED"] += 1; continue

@@ -28,9 +28,11 @@ def _release() -> CorpusRelease:
     cik, filing_id = "0000320193", "f1"
     tables = {"filing": ({"filing_id": filing_id, "cik": cik},),
               "fact": tuple({"filing_id": filing_id, "fact_id": x, "raw_concept_id": "rev", "unit_id": "usd"} for x in ("fy", "ytd")),
-              "concept": ({"filing_id": filing_id, "raw_concept_id": "rev", "period_type": "duration", "data_type": "monetaryItemType"},),
+              "concept": ({"filing_id": filing_id, "raw_concept_id": "rev", "period_type": "duration", "data_type": "monetaryItemType", "namespace_uri": "http://fasb.org/us-gaap/2024", "local_name": "Revenues"},),
               "unit": ({"filing_id": filing_id, "unit_id": "usd", "numerator_measures": "iso4217:USD", "denominator_measures": None},),
-              "context": (), "dimension_fact": (), "role": (), "relationship": ()}
+              "context": (), "dimension_fact": (),
+              "role": ({"filing_id": filing_id, "role_id": "operations", "role_definition": "Consolidated Statements of Operations"},),
+              "relationship": ({"filing_id": filing_id, "network_type": "PRE", "role_id": "operations", "to_raw_concept_id": "rev", "relationship_id": "pre-revenues"},)}
     manifest = Layer1SnapshotManifest(1, cik, "a", "10-K", "x", "a" * 64, "x", 2, 1, 0, 1, 1, 0, 0, 0, "x", "x")
     inp = Layer1SnapshotInput(cik, "a", "10-K", "2025-11-01", "2025-09-30", "snap", sha256(b"x").hexdigest())
     snapshot = CorpusSnapshot(inp, manifest, Path("/fixture/manifest"), MappingProxyType({}), MappingProxyType({k: len(v) for k, v in tables.items()}), MappingProxyType({k: tuple(MappingProxyType(dict(x)) for x in v) for k, v in tables.items()}))
@@ -45,11 +47,12 @@ def _fact(identifier: str, raw: str, period: str, value: str, *, bounds: tuple[s
             "selected_fact_id": raw, "source_filing_id": "f1"}
 
 
-def _publication(release, *, changed_cik: str | None = None) -> VerifiedLayer2Publication:
+def _publication(release, *, changed_cik: str | None = None, dimensions: object = ()) -> VerifiedLayer2Publication:
     cik = changed_cik or "0000320193"
     fy = _fact("fy", "fy", "FY", "100", bounds=("2024-09-29", "2025-09-28", None))
     ytd = _fact("ytd", "ytd", "YTD_9M", "70", bounds=("2024-09-29", "2025-06-29", None))
     fy["cik"] = ytd["cik"] = cik
+    fy["company_canonical_dimension_key"] = ytd["company_canonical_dimension_key"] = dimensions
     candidate = {"series_candidate_id": "later", "cik": cik, "company_canonical_concept_id": "revenue",
                  "company_canonical_dimension_key": (), "period_class": "FY", "actual_period_key": fy["period_key"],
                  "basis_version": None, "unit_semantics": "USD", "source_filing_id": "later-filing",

@@ -109,6 +109,12 @@ executable/inspection checklist is maintained in
 - QTD_3M and YTD_6M/YTD_9M are distinct.
 - Cash Flow YTD values are not mislabeled quarter-alone.
 - derived Q4 stores source IDs and never overwrites reported FY/YTD.
+- a dimensional Q4 is derived only within one exact canonical Axis/Member,
+  basis, unit, and company scope; it cannot cross Product/Service, segment, or
+  geography Members.
+- EPS, shares, ratios, margins, averages, instant values, non-additive facts,
+  custom concepts without reviewed evidence, and incomplete FY/YTD inputs
+  remain excluded from dimensional Q4 subtraction.
 - missing disclosure != resolved.
 
 ## M7 — Layer 2

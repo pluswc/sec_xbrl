@@ -74,6 +74,7 @@ from sec_xbrl.longitudinal.q4_policy_registry import (
 )
 from sec_xbrl.longitudinal.quarterly_policy import (
     QUARTERLY_POLICY_VERSION,
+    QUARTERLY_POLICY_V2_VERSION,
     QuarterlyPeriodPolicyError,
     QuarterlyPeriodPolicyMaterializer,
     QuarterlyPeriodPolicyV2Materializer,
@@ -122,6 +123,7 @@ __all__ = [
     "PERIOD_OBSERVATION_RULE_VERSION",
     "Q4_POLICY_REGISTRY_VERSION",
     "QUARTERLY_POLICY_VERSION",
+    "QUARTERLY_POLICY_V2_VERSION",
     "RAW_TABLES",
     "RECAST_REGISTRY_VERSION",
     "REVIEW_INVENTORY_VERSION",

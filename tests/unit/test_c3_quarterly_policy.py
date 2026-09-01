@@ -162,6 +162,68 @@ def test_q4_accepts_list_serialized_dimensions_and_unit_semantics() -> None:
     assert result.q4_candidates[0]["value_numeric"] == "30"
 
 
+def test_exact_declarations_keep_same_concept_members_separate() -> None:
+    release = _release()
+    product_dimensions = (("ProductOrServiceAxis", "ProductMember"),)
+    service_dimensions = (("ProductOrServiceAxis", "ServiceMember"),)
+    facts = (
+        _fact("product-fy", "fy", "FY", "100", dimensions=product_dimensions),
+        _fact(
+            "product-ytd",
+            "ytd",
+            "YTD_9M",
+            "70",
+            dimensions=product_dimensions,
+            bounds=("2024-09-29", "2025-06-29", None),
+        ),
+        _fact("service-fy", "q1", "FY", "50", dimensions=service_dimensions),
+        _fact(
+            "service-ytd",
+            "q2",
+            "YTD_9M",
+            "40",
+            dimensions=service_dimensions,
+            bounds=("2024-09-29", "2025-06-29", None),
+        ),
+    )
+    declarations = (
+        QuarterlySemanticDeclaration(
+            "revenue",
+            "REVIEWED_ADDITIVE_AMOUNT",
+            "ADDITIVE_AMOUNT",
+            True,
+            "review:product",
+            cik="0000320193",
+            company_canonical_dimension_key=product_dimensions,
+            basis_version=None,
+            unit_semantics="USD",
+            scope_is_exact=True,
+        ),
+        QuarterlySemanticDeclaration(
+            "revenue",
+            "REVIEWED_ADDITIVE_AMOUNT",
+            "ADDITIVE_AMOUNT",
+            True,
+            "review:service",
+            cik="0000320193",
+            company_canonical_dimension_key=service_dimensions,
+            basis_version=None,
+            unit_semantics="USD",
+            scope_is_exact=True,
+        ),
+    )
+
+    result = QuarterlyPeriodPolicyMaterializer().materialize(
+        _publication(release, facts), release=release, declarations=declarations
+    )
+
+    assert {row["value_numeric"] for row in result.q4_candidates} == {"10", "30"}
+    assert {
+        tuple(tuple(item) for item in row["company_canonical_dimension_key"])
+        for row in result.q4_candidates
+    } == {product_dimensions, service_dimensions}
+
+
 @pytest.mark.parametrize(
     ("data_type", "unit"),
     [

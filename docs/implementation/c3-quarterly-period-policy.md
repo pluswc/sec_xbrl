@@ -41,9 +41,12 @@ margins, averages, instant/balance-sheet values, text, and unknown semantics
 therefore fail closed.
 
 Both sources must have identical company, canonical concept, complete
-dimension key, basis version, and unit semantics.  Their fiscal start date
-must match and the YTD_9M endpoint must precede the FY endpoint.  The output
-is `FY - YTD_9M`, never an overwrite of reported data.
+dimension key, basis version, and unit semantics.  In the scoped-policy path,
+the reviewed declaration is itself bound to that full scope, so a declaration
+for `ProductMember` cannot authorize `ServiceMember` or an undimensioned
+amount. Their fiscal start date must match and the YTD_9M endpoint must
+precede the FY endpoint. The output is `FY - YTD_9M`, never an overwrite of
+reported data.
 
 ## Predecessor policy
 

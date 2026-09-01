@@ -25,6 +25,9 @@ from sec_xbrl.longitudinal.corpus_release import CorpusRelease
 from sec_xbrl.longitudinal.materialization import VerifiedLayer2Publication
 
 QUARTERLY_POLICY_VERSION = "c3-m2-quarterly-period-policy-v1"
+# Dimensioned Q4 is a new governed companion contract.  Consumers must not
+# treat a former undimensioned-only companion as if it had passed this policy.
+QUARTERLY_POLICY_V2_VERSION = "l2-m7-dimensional-q4-policy-v1"
 _DATASETS = ("quarterly_q4_candidate", "quarterly_q4_exclusion", "predecessor_period_linkage")
 
 
@@ -47,6 +50,14 @@ class QuarterlySemanticDeclaration:
     is_additive: bool
     declaration_id: str
     declaration_version: str = QUARTERLY_POLICY_VERSION
+    # Legacy declarations are concept-wide.  Registry declarations set this
+    # flag and bind an exact full scope; ``None`` is then an exact value rather
+    # than a wildcard (for example, an unversioned AS_FILED basis).
+    cik: str | None = None
+    company_canonical_dimension_key: Any = None
+    basis_version: Any = None
+    unit_semantics: Any = None
+    scope_is_exact: bool = False
 
     @property
     def q4_allowed(self) -> bool:
@@ -311,7 +322,7 @@ class QuarterlyPeriodPolicyV2Materializer:
         for candidate in base.q4_candidates:
             if str(candidate["quarterly_policy_candidate_id"]) not in accepted_ids:
                 for fact_id in candidate["input_analytical_fact_ids"]:
-                    excluded.append({"quarterly_policy_exclusion_id": _id("quarterly-q4-exclusion", (fact_id, "Q4_V2_EXACT_SCOPE_POLICY_REQUIRED")), "cik": candidate["cik"], "analytical_fact_id": fact_id, "other_analytical_fact_id": None, "period_class": "FY_OR_YTD_9M", "exclusion_reason": "Q4_V2_EXACT_SCOPE_POLICY_REQUIRED", "policy_version": "c3-m5-quarterly-policy-v2"})
+                    excluded.append({"quarterly_policy_exclusion_id": _id("quarterly-q4-exclusion", (fact_id, "Q4_V2_EXACT_SCOPE_POLICY_REQUIRED")), "cik": candidate["cik"], "analytical_fact_id": fact_id, "other_analytical_fact_id": None, "period_class": "FY_OR_YTD_9M", "exclusion_reason": "Q4_V2_EXACT_SCOPE_POLICY_REQUIRED", "policy_version": QUARTERLY_POLICY_V2_VERSION})
         return QuarterlyPolicyResult(tuple(sorted(accepted, key=lambda x: x["quarterly_policy_candidate_id"])), tuple(sorted({x["quarterly_policy_exclusion_id"]: x for x in excluded}.values(), key=lambda x: x["quarterly_policy_exclusion_id"])), base.predecessor_linkage)
 
 
@@ -324,7 +335,7 @@ class QuarterlyPolicyV2Publisher:
         if not run_version or "/" in run_version or "\\" in run_version: raise QuarterlyPeriodPolicyError("quarterly policy v2 run_version must be a non-path identifier")
         datasets=result.as_datasets(); rows={k:tuple(sorted((dict(x) for x in v),key=_canonical_json)) for k,v in datasets.items()}; counts={k:len(v) for k,v in rows.items()}; hashes={k:_hash_rows(v) for k,v in rows.items()}
         registry_manifest=Path(registry_root)/"q4_policy_registry_manifest.json"
-        manifest={"contract_version":"c3-m5-quarterly-policy-v2","run_version":run_version,"upstream_layer2_run_fingerprint":upstream.identity["layer2_run_fingerprint"],"upstream_layer2_manifest_sha256":upstream.identity["layer2_manifest_sha256"],"corpus_release_fingerprint":release.layer2_run.fingerprint,"registry_manifest_sha256":hashlib.sha256(registry_manifest.read_bytes()).hexdigest(),"registry_version":"c3-m5-q4-policy-registry-v1","output_counts":counts,"output_content_sha256":hashes}
+        manifest={"contract_version":QUARTERLY_POLICY_V2_VERSION,"run_version":run_version,"upstream_layer2_run_fingerprint":upstream.identity["layer2_run_fingerprint"],"upstream_layer2_manifest_sha256":upstream.identity["layer2_manifest_sha256"],"corpus_release_fingerprint":release.layer2_run.fingerprint,"registry_manifest_sha256":hashlib.sha256(registry_manifest.read_bytes()).hexdigest(),"registry_version":"l2-m7-dimensional-q4-policy-registry-v1","output_counts":counts,"output_content_sha256":hashes}
         root,target=Path(output_root),Path(output_root)/run_version; root.mkdir(parents=True,exist_ok=True)
         if target.exists():
             path=target/self.manifest_name
@@ -347,7 +358,7 @@ class QuarterlyPolicyV2Reader:
         try: manifest=json.loads(path.read_text())
         except (OSError,UnicodeDecodeError,json.JSONDecodeError) as exc: raise QuarterlyPeriodPolicyError("quarterly policy v2 manifest is invalid") from exc
         required={"contract_version","run_version","upstream_layer2_run_fingerprint","upstream_layer2_manifest_sha256","corpus_release_fingerprint","registry_manifest_sha256","registry_version","output_counts","output_content_sha256"}
-        if set(manifest)!=required or manifest.get("contract_version")!="c3-m5-quarterly-policy-v2": raise QuarterlyPeriodPolicyError("quarterly policy v2 manifest has unsupported contract")
+        if set(manifest)!=required or manifest.get("contract_version")!=QUARTERLY_POLICY_V2_VERSION: raise QuarterlyPeriodPolicyError("quarterly policy v2 manifest has unsupported contract")
         if manifest.get("upstream_layer2_run_fingerprint")!=upstream.identity.get("layer2_run_fingerprint") or manifest.get("upstream_layer2_manifest_sha256")!=upstream.identity.get("layer2_manifest_sha256") or manifest.get("corpus_release_fingerprint")!=release.layer2_run.fingerprint or manifest.get("registry_manifest_sha256")!=hashlib.sha256((Path(registry_root)/"q4_policy_registry_manifest.json").read_bytes()).hexdigest(): raise QuarterlyPeriodPolicyError("quarterly policy v2 does not match verified inputs")
         files={x.name for x in root.iterdir() if x.is_file() and not x.is_symlink()}; expected={self_name for self_name in [QuarterlyPolicyV2Publisher.manifest_name,*(f"{x}.jsonl" for x in _DATASETS)]}
         if files!=expected or any(x.is_dir() or x.is_symlink() for x in root.iterdir()): raise QuarterlyPeriodPolicyError("quarterly policy v2 layout is incomplete or unexpected")
@@ -362,8 +373,10 @@ class QuarterlyPolicyV2Reader:
 
 def _declarations(
     rows: Iterable[QuarterlySemanticDeclaration],
-) -> dict[str, QuarterlySemanticDeclaration]:
-    result: dict[str, QuarterlySemanticDeclaration] = {}
+) -> tuple[QuarterlySemanticDeclaration, ...]:
+    result: list[QuarterlySemanticDeclaration] = []
+    seen_ids: set[str] = set()
+    seen_exact_scopes: set[tuple[Any, ...]] = set()
     for row in rows:
         if (
             not isinstance(row, QuarterlySemanticDeclaration)
@@ -373,10 +386,45 @@ def _declarations(
             raise QuarterlyPeriodPolicyError(
                 "quarterly declaration requires canonical concept and identity"
             )
-        if row.company_canonical_concept_id in result:
-            raise QuarterlyPeriodPolicyError("duplicate quarterly semantic declaration")
-        result[row.company_canonical_concept_id] = row
-    return result
+        if row.declaration_id in seen_ids:
+            raise QuarterlyPeriodPolicyError("duplicate quarterly semantic declaration identity")
+        seen_ids.add(row.declaration_id)
+        if row.scope_is_exact:
+            scope = _declaration_scope(row)
+            if scope in seen_exact_scopes:
+                raise QuarterlyPeriodPolicyError("duplicate exact quarterly semantic declaration")
+            seen_exact_scopes.add(scope)
+        result.append(row)
+    return tuple(result)
+
+
+def _declaration_scope(row: QuarterlySemanticDeclaration) -> tuple[Any, ...]:
+    return (
+        row.cik,
+        row.company_canonical_concept_id,
+        _freeze_scope_value(row.company_canonical_dimension_key),
+        _freeze_scope_value(row.basis_version),
+        _freeze_scope_value(row.unit_semantics),
+    )
+
+
+def _declaration_for_scope(
+    declarations: tuple[QuarterlySemanticDeclaration, ...], scope: tuple[Any, ...]
+) -> QuarterlySemanticDeclaration | None:
+    """Prefer one exact governed declaration; legacy scope is fallback only."""
+    exact = [row for row in declarations if row.scope_is_exact and _declaration_scope(row) == scope]
+    if len(exact) > 1:
+        raise QuarterlyPeriodPolicyError("ambiguous exact quarterly semantic declaration")
+    if exact:
+        return exact[0]
+    legacy = [
+        row
+        for row in declarations
+        if not row.scope_is_exact and row.company_canonical_concept_id == scope[1]
+    ]
+    if len(legacy) > 1:
+        raise QuarterlyPeriodPolicyError("ambiguous legacy quarterly semantic declaration")
+    return legacy[0] if legacy else None
 
 
 def _available_as_filed(source: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -476,26 +524,39 @@ def _scope(row: Mapping[str, Any]) -> tuple[Any, ...]:
     return (
         row["cik"],
         row["company_canonical_concept_id"],
-        repr(row.get("company_canonical_dimension_key")),
-        row.get("basis_version"),
-        repr(row.get("unit_semantics")),
+        _freeze_scope_value(row.get("company_canonical_dimension_key")),
+        _freeze_scope_value(row.get("basis_version")),
+        _freeze_scope_value(row.get("unit_semantics")),
     )
 
 
 def _scope_from_registry(row: Mapping[str, Any]) -> tuple[Any, ...]:
-    return (str(row.get("cik") or ""), str(row.get("company_canonical_concept_id") or ""),
-            repr(row.get("company_canonical_dimension_key")), row.get("basis_version"),
-            repr(row.get("unit_semantics")))
+    return (
+        str(row.get("cik") or ""),
+        str(row.get("company_canonical_concept_id") or ""),
+        _freeze_scope_value(row.get("company_canonical_dimension_key")),
+        _freeze_scope_value(row.get("basis_version")),
+        _freeze_scope_value(row.get("unit_semantics")),
+    )
 
 
 def _candidate_scope(row: Mapping[str, Any]) -> tuple[Any, ...]:
-    return (str(row.get("cik") or ""), str(row.get("company_canonical_concept_id") or ""),
-            repr(row.get("company_canonical_dimension_key")), row.get("basis_version"),
-            repr(row.get("unit_semantics")))
+    return _scope_from_registry(row)
+
+
+def _freeze_scope_value(value: Any) -> Any:
+    """Normalize serialization while preserving the full exact scope."""
+    if isinstance(value, (tuple, list)):
+        return tuple(_freeze_scope_value(item) for item in value)
+    if isinstance(value, dict):
+        return tuple(
+            sorted((str(key), _freeze_scope_value(item)) for key, item in value.items())
+        )
+    return value
 
 
 def _q4(
-    facts: tuple[dict[str, Any], ...], policy: Mapping[str, QuarterlySemanticDeclaration]
+    facts: tuple[dict[str, Any], ...], policy: tuple[QuarterlySemanticDeclaration, ...]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     groups: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
     for row in facts:
@@ -504,8 +565,7 @@ def _q4(
     candidates: list[dict[str, Any]] = []
     exclusions: list[dict[str, Any]] = []
     for scope, rows in sorted(groups.items(), key=repr):
-        concept = str(scope[1])
-        declaration = policy.get(concept)
+        declaration = _declaration_for_scope(policy, scope)
         fy = [row for row in rows if row["period_class"] == "FY"]
         ytd = [row for row in rows if row["period_class"] == "YTD_9M"]
         if not declaration or not declaration.q4_allowed:
