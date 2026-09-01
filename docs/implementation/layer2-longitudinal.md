@@ -112,6 +112,13 @@ Presentation/Definition evidence, then the exact Axis/Member facts, and then
 the related disclosure/detail.  This produces a discoverable group without
 turning a QName allowlist into a limitation on company-specific concepts.
 
+The consumer must retain the anchor, relationship-path, complete dimension
+signature, detail-Fact and derived-candidate provenance while making that
+group.  `MECHANICAL_CANDIDATE_REVIEW_REQUIRED` is period-arithmetic status,
+not a claim that the value is semantically approved or selected for a metric.
+See `consumer-exploration-contract.md` for the required group fields and
+consumer responsibilities.
+
 ## L2-M2 canonical-mapping materialization
 
 `CompanyCanonicalizer` is the L2-M2 producer.  Its `MappingTables.as_datasets()`

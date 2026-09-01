@@ -36,14 +36,17 @@ mappings over Raw identity.
 
 See `docs/architecture/analytical-data-model.md` for the durable logical model
 and `docs/implementation/m0-data-contract.md` for quality and release policy.
+For evidence-based discovery of company-specific products, segments, regions
+and related details, see `docs/implementation/consumer-exploration-contract.md`.
 
 ## Excel status
 
 Excel is one consumer of the analytical model.  The current direct-ZIP Excel
 builders are legacy/prototype paths retained for comparison while governed
 analytical data is built.  They must not become a second parser or an implicit
-period/recast/calculation policy engine.  The target workbook reads governed
-Analytical Facts and Derived Metrics only.
+period/recast/calculation policy engine.  In particular, Excel never derives
+Q4; the target workbook reads governed Analytical Facts and Layer 2-derived
+candidates/Metrics only.
 
 ## Existing accession process
 This project assumes accession discovery already exists. The downstream pipeline consumes that output via an adapter contract rather than reimplementing discovery. See `docs/implementation/accession-contract.md`.
