@@ -24,7 +24,7 @@ def _candidate(
     }
 
 
-def test_prefers_direct_10q_then_latest_raw_filing_then_undimensioned() -> None:
+def test_prefers_direct_10q_then_same_filing_undimensioned_then_latest_raw_filing() -> None:
     result = CoreQuarterlyFactSelector().select(
         (
             _candidate("10k-comparative", form="10-K", filed_date="2025-02-26"),
@@ -55,6 +55,28 @@ def test_undimensioned_preference_applies_only_within_the_selected_filing() -> N
     assert result is not None
     assert result.selected is not None
     assert result.selected["selected_fact_id"] == "newer-dimensioned"
+
+
+def test_prefers_undimensioned_fact_within_the_same_latest_filing() -> None:
+    result = CoreQuarterlyFactSelector().select(
+        (
+            _candidate("newer-dimensioned", dimensions=(("axis", "member"),)),
+            _candidate("newer-undimensioned"),
+        ),
+        core_canonical_concept_ids=(CORE_ID,),
+    )
+    assert result is not None
+    assert result.selected is not None
+    assert result.selected["selected_fact_id"] == "newer-undimensioned"
+
+
+def test_same_filing_preferred_fact_tie_remains_unavailable() -> None:
+    result = CoreQuarterlyFactSelector().select(
+        (_candidate("first"), _candidate("second")), core_canonical_concept_ids=(CORE_ID,)
+    )
+    assert result is not None
+    assert result.selected is None
+    assert result.unavailable_reason == "CORE_FACT_SELECTION_TIE_REVIEW_REQUIRED"
 
 
 def test_excludes_amendments_from_default_selection_but_keeps_ties_unavailable() -> None:

@@ -60,8 +60,10 @@ neither view changes a Layer 1 Fact.
 For a caller-declared common-core concept collision at the same analytical
 period, `CoreQuarterlyFactSelector` may make the basic `AS_FILED` choice
 deterministic: direct `10-Q` reporting ranks first; among that eligible set it
-chooses the latest non-amendment raw filing by `(filed_date, accession)`; and
-within that same filing an undimensioned Fact ranks first.  Amendments remain
+first reduces every raw filing to its preferred Fact, with an undimensioned
+Fact ranking ahead only of dimensioned Facts in that same filing; it then
+chooses the latest non-amendment raw filing by `(filed_date, accession)`.
+Amendments remain
 immutable raw/series lineage but
 are not inputs to this basic selection.  Any exact rank tie (or an
 amendment-only group) remains `UNAVAILABLE` and review-required.  This is a

@@ -133,9 +133,9 @@ executable/inspection checklist is maintained in
   US-GAAP aliases and a Mechanical Q4 companion can satisfy only Q4 as
   `DERIVED`.
 - for a selected common-core same-period collision, direct reported `10-Q`
-  ranks ahead of later comparative filings; the latest non-amendment raw
-  filing then ranks ahead; within that selected filing an undimensioned Fact
-  ranks ahead of a dimensioned Fact.  Amendments remain raw lineage and an exact rank tie or
+  ranks ahead of later comparative filings; within each eligible filing an
+  undimensioned Fact ranks ahead of a dimensioned Fact; the latest
+  non-amendment raw filing then ranks ahead.  Amendments remain raw lineage and an exact rank tie or
   amendment-only group stays explicit `UNAVAILABLE` / review-required.
 - segment recast can create a new mapping/version rather than corrupt old history.
 - `AS_FILED` preserves the first directly reported version available at an

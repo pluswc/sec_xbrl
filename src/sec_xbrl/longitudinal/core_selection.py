@@ -48,10 +48,9 @@ class CoreQuarterlyFactSelector:
             return CoreFactSelection(None, "CORE_FACT_SELECTION_AMENDMENT_ONLY")
         direct = tuple(row for row in eligible if _is_direct_10q(row))
         filing_pool = direct or eligible
-        latest_filing = max(_filing_rank(row) for row in filing_pool)
-        same_filing = tuple(row for row in filing_pool if _filing_rank(row) == latest_filing)
-        undimensioned = tuple(row for row in same_filing if _is_undimensioned(row))
-        winners = undimensioned or same_filing
+        representatives = _filing_representatives(filing_pool)
+        latest_filing = max(representatives)
+        winners = representatives[latest_filing]
         if len(winners) != 1:
             return CoreFactSelection(None, "CORE_FACT_SELECTION_TIE_REVIEW_REQUIRED")
         return CoreFactSelection(winners[0], None)
@@ -68,6 +67,26 @@ def _filing_rank(row: Mapping[str, Any]) -> tuple[str, str]:
 
 def _is_undimensioned(row: Mapping[str, Any]) -> bool:
     return row.get("raw_dimension_signature") in (None, (), [])
+
+
+def _filing_representatives(
+    rows: Iterable[Mapping[str, Any]],
+) -> dict[tuple[str, str], tuple[dict[str, Any], ...]]:
+    """Keep only each filing's preferred Fact before comparing filing recency.
+
+    This gives the phrase "within the same filing" literal force: dimensions
+    decide only between Facts that share a raw filing.  A tied preferred set is
+    deliberately retained so a later filing cannot be replaced by an older
+    one merely to escape review.
+    """
+    by_filing: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        by_filing.setdefault(_filing_rank(row), []).append(dict(row))
+    result: dict[tuple[str, str], tuple[dict[str, Any], ...]] = {}
+    for filing, candidates in by_filing.items():
+        undimensioned = tuple(row for row in candidates if _is_undimensioned(row))
+        result[filing] = undimensioned or tuple(candidates)
+    return result
 
 
 def _is_amendment(row: Mapping[str, Any]) -> bool:
