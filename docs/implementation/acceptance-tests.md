@@ -115,6 +115,9 @@ executable/inspection checklist is maintained in
 - EPS, shares, ratios, margins, averages, instant values, non-additive facts,
   custom concepts without reviewed evidence, and incomplete FY/YTD inputs
   remain excluded from dimensional Q4 subtraction.
+- duplicate compatible FY/YTD_9M pairs for one exact scope and fiscal-year end
+  emit `Q4_AMBIGUOUS_COMPATIBLE_INPUT_PAIR` with all implicated lineage and no
+  derived Q4 value.
 - missing disclosure != resolved.
 
 ## M7 — Layer 2

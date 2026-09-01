@@ -15,6 +15,7 @@ from sec_xbrl.longitudinal import (
     Layer2Run,
     QuarterlyPeriodPolicyError,
     QuarterlyPeriodPolicyMaterializer,
+    QUARTERLY_POLICY_V2_VERSION,
     QuarterlyPolicyPublicationReader,
     QuarterlyPolicyPublisher,
     QuarterlySemanticDeclaration,
@@ -142,6 +143,7 @@ def test_q4_is_derived_only_from_declared_reviewed_compatible_monetary_flow() ->
     assert result.q4_candidates[0]["value_numeric"] == "30"
     assert result.q4_candidates[0]["formula"] == "FY - YTD_9M"
     assert result.q4_candidates[0]["input_source_fact_ids"] == ("fy", "ytd")
+    assert result.q4_candidates[0]["derivation_rule_version"] == QUARTERLY_POLICY_V2_VERSION
 
 
 def test_q4_accepts_list_serialized_dimensions_and_unit_semantics() -> None:
@@ -222,6 +224,51 @@ def test_exact_declarations_keep_same_concept_members_separate() -> None:
         tuple(tuple(item) for item in row["company_canonical_dimension_key"])
         for row in result.q4_candidates
     } == {product_dimensions, service_dimensions}
+
+
+def test_q4_fails_closed_for_multiple_compatible_pairs_in_one_fiscal_year() -> None:
+    release = _release()
+    facts = (
+        _fact("fy-a", "fy", "FY", "100"),
+        _fact(
+            "ytd-a",
+            "ytd",
+            "YTD_9M",
+            "70",
+            bounds=("2024-09-29", "2025-06-29", None),
+        ),
+        _fact("fy-b", "q1", "FY", "100"),
+        _fact(
+            "ytd-b",
+            "q2",
+            "YTD_9M",
+            "70",
+            bounds=("2024-09-29", "2025-06-29", None),
+        ),
+    )
+
+    result = QuarterlyPeriodPolicyMaterializer().materialize(
+        _publication(release, facts), release=release, declarations=(_policy(),)
+    )
+
+    assert not result.q4_candidates
+    ambiguous = [
+        row
+        for row in result.q4_exclusions
+        if row["exclusion_reason"] == "Q4_AMBIGUOUS_COMPATIBLE_INPUT_PAIR"
+    ]
+    assert {row["analytical_fact_id"] for row in ambiguous} == {
+        "fy-a",
+        "fy-b",
+        "ytd-a",
+        "ytd-b",
+    }
+    assert {
+        row["implicated_analytical_fact_ids"] for row in ambiguous
+    } == {("fy-a", "fy-b", "ytd-a", "ytd-b")}
+    assert {
+        row["implicated_source_fact_ids"] for row in ambiguous
+    } == {("fy", "q1", "ytd", "q2")}
 
 
 @pytest.mark.parametrize(

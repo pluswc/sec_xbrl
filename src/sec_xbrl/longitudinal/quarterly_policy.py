@@ -582,7 +582,7 @@ def _q4(
             for row in rows:
                 exclusions.append(_q4_exclusion(row, "Q4_COMPATIBLE_FY_AND_YTD9M_REQUIRED"))
             continue
-        matched = False
+        compatible_pairs: dict[tuple[Any, ...], list[tuple[dict[str, Any], dict[str, Any], str]]] = defaultdict(list)
         for annual in fy:
             for nine_month in ytd:
                 reason = _q4_compatibility(annual, nine_month)
@@ -595,9 +595,16 @@ def _q4(
                         _q4_exclusion(annual, "Q4_NON_NUMERIC_SOURCE", other=nine_month)
                     )
                     continue
-                matched = True
-                candidates.append(_q4_candidate(annual, nine_month, declaration, value))
-        if not matched and not any(
+                compatible_pairs[_q4_fiscal_year_scope(annual)].append(
+                    (annual, nine_month, value)
+                )
+        for pairs in compatible_pairs.values():
+            if len(pairs) > 1:
+                exclusions.extend(_q4_ambiguous_pair_exclusions(pairs))
+                continue
+            annual, nine_month, value = pairs[0]
+            candidates.append(_q4_candidate(annual, nine_month, declaration, value))
+        if not compatible_pairs and not any(
             row["exclusion_reason"] == "Q4_NON_NUMERIC_SOURCE"
             for row in exclusions
             if row["analytical_fact_id"] in {item["analytical_fact_id"] for item in rows}
@@ -612,6 +619,31 @@ def _q4(
     return sorted(candidates, key=lambda row: row["quarterly_policy_candidate_id"]), sorted(
         exclusions, key=lambda row: row["quarterly_policy_exclusion_id"]
     )
+
+
+def _q4_fiscal_year_scope(row: Mapping[str, Any]) -> tuple[Any, ...]:
+    """Keep independent fiscal years separate while rejecting duplicate pairs."""
+    bounds = row.get("actual_period_boundaries") or ()
+    return (row.get("period_key"), bounds[1] if len(bounds) > 1 else None)
+
+
+def _q4_ambiguous_pair_exclusions(
+    pairs: list[tuple[dict[str, Any], dict[str, Any], str]],
+) -> list[dict[str, Any]]:
+    involved = {
+        str(row["analytical_fact_id"]): row
+        for pair in pairs
+        for row in pair[:2]
+    }
+    ordered = tuple(involved[key] for key in sorted(involved))
+    return [
+        _q4_exclusion(
+            row,
+            "Q4_AMBIGUOUS_COMPATIBLE_INPUT_PAIR",
+            implicated=ordered,
+        )
+        for row in ordered
+    ]
 
 
 def _q4_compatibility(fy: Mapping[str, Any], ytd: Mapping[str, Any]) -> str | None:
@@ -663,19 +695,23 @@ def _q4_candidate(
         "input_source_filing_ids": (fy["source_filing_id"], ytd["source_filing_id"]),
         "declaration_id": declaration.declaration_id,
         "declaration_version": declaration.declaration_version,
-        "derivation_rule_version": QUARTERLY_POLICY_VERSION,
+        "derivation_rule_version": QUARTERLY_POLICY_V2_VERSION,
     }
 
 
 def _q4_exclusion(
-    row: Mapping[str, Any], reason: str, *, other: Mapping[str, Any] | None = None
+    row: Mapping[str, Any],
+    reason: str,
+    *,
+    other: Mapping[str, Any] | None = None,
+    implicated: tuple[Mapping[str, Any], ...] = (),
 ) -> dict[str, Any]:
     identity = (
         row["analytical_fact_id"],
         None if other is None else other["analytical_fact_id"],
         reason,
     )
-    return {
+    result = {
         "quarterly_policy_exclusion_id": _id("quarterly-q4-exclusion", identity),
         "cik": row["cik"],
         "analytical_fact_id": row["analytical_fact_id"],
@@ -684,6 +720,21 @@ def _q4_exclusion(
         "exclusion_reason": reason,
         "policy_version": QUARTERLY_POLICY_VERSION,
     }
+    if implicated:
+        result.update(
+            {
+                "implicated_analytical_fact_ids": tuple(
+                    str(item["analytical_fact_id"]) for item in implicated
+                ),
+                "implicated_source_fact_ids": tuple(
+                    str(item["selected_fact_id"]) for item in implicated
+                ),
+                "implicated_source_filing_ids": tuple(
+                    str(item["source_filing_id"]) for item in implicated
+                ),
+            }
+        )
+    return result
 
 
 def _predecessors(facts: tuple[dict[str, Any], ...]) -> list[dict[str, Any]]:

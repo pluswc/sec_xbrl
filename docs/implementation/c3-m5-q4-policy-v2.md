@@ -24,6 +24,12 @@ monetary duration Facts. The output remains a separate `DERIVED` candidate
 with `FY - YTD_9M`, both analytical/raw Fact IDs, filing IDs, declaration ID,
 and rule version.
 
+For one exact scope and fiscal-year end there must be exactly one compatible
+FY/YTD_9M pair. If retained source data leaves multiple compatible pairs, the
+policy emits `Q4_AMBIGUOUS_COMPATIBLE_INPUT_PAIR` exclusions with every
+implicated analytical Fact ID, raw Fact ID, and filing ID; it publishes no Q4
+number and never selects one pair by filing order or display position.
+
 The extension intentionally does **not** derive a Q4 when a Product, Service,
 segment, or geography label is only a custom-company concept or lacks the
 retained standard-concept/PRE evidence required by the registry. It also does
