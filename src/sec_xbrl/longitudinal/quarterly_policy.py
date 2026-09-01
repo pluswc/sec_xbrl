@@ -269,6 +269,7 @@ class QuarterlyPeriodPolicyMaterializer:
         *,
         release: CorpusRelease,
         declarations: Iterable[QuarterlySemanticDeclaration],
+        governing_policy_version: str = QUARTERLY_POLICY_VERSION,
     ) -> QuarterlyPolicyResult:
         if not isinstance(publication, VerifiedLayer2Publication) or not isinstance(
             release, CorpusRelease
@@ -284,9 +285,12 @@ class QuarterlyPeriodPolicyMaterializer:
         facts = tuple(_available_as_filed(row) for row in publication.records("analytical_fact"))
         facts = tuple(row for row in facts if row is not None)
         facts = _attach_raw_semantics(facts, release)
+        q4_candidates, q4_exclusions = _q4(
+            facts, policy, governing_policy_version=governing_policy_version
+        )
         return QuarterlyPolicyResult(
-            q4_candidates=tuple(_q4(facts, policy)[0]),
-            q4_exclusions=tuple(_q4(facts, policy)[1]),
+            q4_candidates=tuple(q4_candidates),
+            q4_exclusions=tuple(q4_exclusions),
             predecessor_linkage=tuple(_predecessors(facts)),
         )
 
@@ -303,7 +307,12 @@ class QuarterlyPeriodPolicyV2Materializer:
     def materialize(self, publication: VerifiedLayer2Publication, *, release: CorpusRelease, registry_root: Path) -> QuarterlyPolicyResult:
         from sec_xbrl.longitudinal.q4_policy_registry import Q4PolicyRegistryReader
         registry = Q4PolicyRegistryReader().load(registry_root, upstream=publication, release=release)
-        base = QuarterlyPeriodPolicyMaterializer().materialize(publication, release=release, declarations=registry.semantic_declarations())
+        base = QuarterlyPeriodPolicyMaterializer().materialize(
+            publication,
+            release=release,
+            declarations=registry.semantic_declarations(),
+            governing_policy_version=QUARTERLY_POLICY_V2_VERSION,
+        )
         permitted = {
             (_scope_from_registry(row), frozenset(str(x) for x in row["approved_analytical_fact_ids"]))
             for row in registry.declarations
@@ -556,7 +565,10 @@ def _freeze_scope_value(value: Any) -> Any:
 
 
 def _q4(
-    facts: tuple[dict[str, Any], ...], policy: tuple[QuarterlySemanticDeclaration, ...]
+    facts: tuple[dict[str, Any], ...],
+    policy: tuple[QuarterlySemanticDeclaration, ...],
+    *,
+    governing_policy_version: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     groups: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
     for row in facts:
@@ -570,29 +582,57 @@ def _q4(
         ytd = [row for row in rows if row["period_class"] == "YTD_9M"]
         if not declaration or not declaration.q4_allowed:
             for row in rows:
-                exclusions.append(_q4_exclusion(row, "Q4_SEMANTIC_DECLARATION_REQUIRED"))
+                exclusions.append(
+                    _q4_exclusion(
+                        row,
+                        "Q4_SEMANTIC_DECLARATION_REQUIRED",
+                        governing_policy_version=governing_policy_version,
+                    )
+                )
             continue
         if any(not row.get("_q4_raw_semantics_safe") for row in rows):
             for row in rows:
                 exclusions.append(
-                    _q4_exclusion(row, "Q4_REVIEWED_MONETARY_ADDITIVE_SEMANTICS_REQUIRED")
+                    _q4_exclusion(
+                        row,
+                        "Q4_REVIEWED_MONETARY_ADDITIVE_SEMANTICS_REQUIRED",
+                        governing_policy_version=governing_policy_version,
+                    )
                 )
             continue
         if not fy or not ytd:
             for row in rows:
-                exclusions.append(_q4_exclusion(row, "Q4_COMPATIBLE_FY_AND_YTD9M_REQUIRED"))
+                exclusions.append(
+                    _q4_exclusion(
+                        row,
+                        "Q4_COMPATIBLE_FY_AND_YTD9M_REQUIRED",
+                        governing_policy_version=governing_policy_version,
+                    )
+                )
             continue
         compatible_pairs: dict[tuple[Any, ...], list[tuple[dict[str, Any], dict[str, Any], str]]] = defaultdict(list)
         for annual in fy:
             for nine_month in ytd:
                 reason = _q4_compatibility(annual, nine_month)
                 if reason:
-                    exclusions.append(_q4_exclusion(annual, reason, other=nine_month))
+                    exclusions.append(
+                        _q4_exclusion(
+                            annual,
+                            reason,
+                            other=nine_month,
+                            governing_policy_version=governing_policy_version,
+                        )
+                    )
                     continue
                 value = _subtract(annual["value_numeric"], nine_month["value_numeric"])
                 if value is None:
                     exclusions.append(
-                        _q4_exclusion(annual, "Q4_NON_NUMERIC_SOURCE", other=nine_month)
+                        _q4_exclusion(
+                            annual,
+                            "Q4_NON_NUMERIC_SOURCE",
+                            other=nine_month,
+                            governing_policy_version=governing_policy_version,
+                        )
                     )
                     continue
                 compatible_pairs[_q4_fiscal_year_scope(annual)].append(
@@ -600,10 +640,22 @@ def _q4(
                 )
         for pairs in compatible_pairs.values():
             if len(pairs) > 1:
-                exclusions.extend(_q4_ambiguous_pair_exclusions(pairs))
+                exclusions.extend(
+                    _q4_ambiguous_pair_exclusions(
+                        pairs, governing_policy_version=governing_policy_version
+                    )
+                )
                 continue
             annual, nine_month, value = pairs[0]
-            candidates.append(_q4_candidate(annual, nine_month, declaration, value))
+            candidates.append(
+                _q4_candidate(
+                    annual,
+                    nine_month,
+                    declaration,
+                    value,
+                    governing_policy_version=governing_policy_version,
+                )
+            )
         if not compatible_pairs and not any(
             row["exclusion_reason"] == "Q4_NON_NUMERIC_SOURCE"
             for row in exclusions
@@ -615,7 +667,13 @@ def _q4(
                 if not any(
                     item["analytical_fact_id"] == row["analytical_fact_id"] for item in exclusions
                 ):
-                    exclusions.append(_q4_exclusion(row, "Q4_COMPATIBLE_FY_AND_YTD9M_REQUIRED"))
+                    exclusions.append(
+                        _q4_exclusion(
+                            row,
+                            "Q4_COMPATIBLE_FY_AND_YTD9M_REQUIRED",
+                            governing_policy_version=governing_policy_version,
+                        )
+                    )
     return sorted(candidates, key=lambda row: row["quarterly_policy_candidate_id"]), sorted(
         exclusions, key=lambda row: row["quarterly_policy_exclusion_id"]
     )
@@ -624,11 +682,13 @@ def _q4(
 def _q4_fiscal_year_scope(row: Mapping[str, Any]) -> tuple[Any, ...]:
     """Keep independent fiscal years separate while rejecting duplicate pairs."""
     bounds = row.get("actual_period_boundaries") or ()
-    return (row.get("period_key"), bounds[1] if len(bounds) > 1 else None)
+    return (bounds[1] if len(bounds) > 1 else None,)
 
 
 def _q4_ambiguous_pair_exclusions(
     pairs: list[tuple[dict[str, Any], dict[str, Any], str]],
+    *,
+    governing_policy_version: str,
 ) -> list[dict[str, Any]]:
     involved = {
         str(row["analytical_fact_id"]): row
@@ -641,6 +701,7 @@ def _q4_ambiguous_pair_exclusions(
             row,
             "Q4_AMBIGUOUS_COMPATIBLE_INPUT_PAIR",
             implicated=ordered,
+            governing_policy_version=governing_policy_version,
         )
         for row in ordered
     ]
@@ -672,6 +733,8 @@ def _q4_candidate(
     ytd: Mapping[str, Any],
     declaration: QuarterlySemanticDeclaration,
     value: str,
+    *,
+    governing_policy_version: str,
 ) -> dict[str, Any]:
     source_ids = (str(fy["analytical_fact_id"]), str(ytd["analytical_fact_id"]))
     identity = (source_ids, declaration.declaration_id, declaration.declaration_version)
@@ -695,7 +758,7 @@ def _q4_candidate(
         "input_source_filing_ids": (fy["source_filing_id"], ytd["source_filing_id"]),
         "declaration_id": declaration.declaration_id,
         "declaration_version": declaration.declaration_version,
-        "derivation_rule_version": QUARTERLY_POLICY_V2_VERSION,
+        "derivation_rule_version": governing_policy_version,
     }
 
 
@@ -705,6 +768,7 @@ def _q4_exclusion(
     *,
     other: Mapping[str, Any] | None = None,
     implicated: tuple[Mapping[str, Any], ...] = (),
+    governing_policy_version: str,
 ) -> dict[str, Any]:
     identity = (
         row["analytical_fact_id"],
@@ -718,7 +782,7 @@ def _q4_exclusion(
         "other_analytical_fact_id": None if other is None else other["analytical_fact_id"],
         "period_class": row["period_class"],
         "exclusion_reason": reason,
-        "policy_version": QUARTERLY_POLICY_VERSION,
+        "policy_version": governing_policy_version,
     }
     if implicated:
         result.update(

@@ -15,6 +15,7 @@ from sec_xbrl.longitudinal import (
     Layer2Run,
     QuarterlyPeriodPolicyError,
     QuarterlyPeriodPolicyMaterializer,
+    QUARTERLY_POLICY_VERSION,
     QUARTERLY_POLICY_V2_VERSION,
     QuarterlyPolicyPublicationReader,
     QuarterlyPolicyPublisher,
@@ -143,7 +144,7 @@ def test_q4_is_derived_only_from_declared_reviewed_compatible_monetary_flow() ->
     assert result.q4_candidates[0]["value_numeric"] == "30"
     assert result.q4_candidates[0]["formula"] == "FY - YTD_9M"
     assert result.q4_candidates[0]["input_source_fact_ids"] == ("fy", "ytd")
-    assert result.q4_candidates[0]["derivation_rule_version"] == QUARTERLY_POLICY_V2_VERSION
+    assert result.q4_candidates[0]["derivation_rule_version"] == QUARTERLY_POLICY_VERSION
 
 
 def test_q4_accepts_list_serialized_dimensions_and_unit_semantics() -> None:
@@ -269,6 +270,7 @@ def test_q4_fails_closed_for_multiple_compatible_pairs_in_one_fiscal_year() -> N
     assert {
         row["implicated_source_fact_ids"] for row in ambiguous
     } == {("fy", "q1", "ytd", "q2")}
+    assert {row["policy_version"] for row in ambiguous} == {QUARTERLY_POLICY_VERSION}
 
 
 @pytest.mark.parametrize(

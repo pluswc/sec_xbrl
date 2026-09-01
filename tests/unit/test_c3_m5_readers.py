@@ -12,6 +12,7 @@ from sec_xbrl.longitudinal import (
     QuarterlyPeriodPolicyV2Materializer,
     QuarterlyPolicyV2Publisher,
     QuarterlyPolicyV2Reader,
+    QUARTERLY_POLICY_V2_VERSION,
 )
 
 
@@ -70,6 +71,7 @@ def test_v2_derives_a_dimensioned_q4_only_from_the_same_exact_scope(tmp_path: Pa
     assert candidate["company_canonical_dimension_key"] == dimensions
     assert candidate["formula"] == "FY - YTD_9M"
     assert candidate["input_source_fact_ids"] == ("fy", "ytd")
+    assert candidate["derivation_rule_version"] == QUARTERLY_POLICY_V2_VERSION
 
 
 def test_v2_does_not_cross_derive_between_dimension_members(tmp_path: Path) -> None:
@@ -100,3 +102,46 @@ def test_v2_does_not_cross_derive_between_dimension_members(tmp_path: Path) -> N
         incompatible, release=release, registry_root=reg.run_root
     )
     assert not result.q4_candidates
+
+
+def test_v2_ambiguity_exclusions_preserve_the_v2_policy_version(tmp_path: Path) -> None:
+    release = _release()
+    dimensions = [["ProductOrServiceAxis", "ProductMember"]]
+    upstream = _publication(release, dimensions=dimensions)
+    duplicated = []
+    for row in upstream.records("analytical_fact"):
+        duplicated.append(dict(row))
+        duplicate = dict(row)
+        duplicate["analytical_fact_id"] = f"{row['analytical_fact_id']}-duplicate"
+        duplicated.append(duplicate)
+    ambiguous_upstream = type(upstream)(
+        upstream.run_root,
+        upstream.manifest_path,
+        upstream.identity,
+        upstream.input_ciks,
+        {"analytical_fact": tuple(duplicated)},
+        upstream._reader_attestation,
+    )
+    registry = Q4PolicyRegistryMaterializer().materialize(
+        ambiguous_upstream, release=release, effective_from="2026-01-01"
+    )
+    reg = Q4PolicyRegistryPublisher().publish(
+        registry,
+        output_root=tmp_path,
+        run_version="ambiguous-dimensioned",
+        upstream=ambiguous_upstream,
+        release=release,
+    )
+
+    result = QuarterlyPeriodPolicyV2Materializer().materialize(
+        ambiguous_upstream, release=release, registry_root=reg.run_root
+    )
+
+    assert not result.q4_candidates
+    ambiguous = [
+        row
+        for row in result.q4_exclusions
+        if row["exclusion_reason"] == "Q4_AMBIGUOUS_COMPATIBLE_INPUT_PAIR"
+    ]
+    assert ambiguous
+    assert {row["policy_version"] for row in ambiguous} == {QUARTERLY_POLICY_V2_VERSION}
