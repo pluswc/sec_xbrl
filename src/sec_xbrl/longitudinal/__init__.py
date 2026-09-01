@@ -30,6 +30,12 @@ from sec_xbrl.longitudinal.core_coverage import (
     CoverageStatus,
     QuarterlyCoverageCell,
     QuarterlyCoverageResult,
+    core_canonical_concept_ids,
+)
+from sec_xbrl.longitudinal.core_selection import (
+    CORE_FACT_SELECTION_VERSION,
+    CoreFactSelection,
+    CoreQuarterlyFactSelector,
 )
 from sec_xbrl.longitudinal.corpus_release import (
     RAW_TABLES,
@@ -133,6 +139,7 @@ __all__ = [
     "CAPABILITY_INVENTORY_VERSION",
     "CORE_CONCEPTS",
     "CORE_CONCEPTS_BY_KEY",
+    "CORE_FACT_SELECTION_VERSION",
     "CURRENT_COMPARABLE_VERSION",
     "DEFAULT_LAYER2_ROOT",
     "LAYER2_CONTRACT_VERSION",
@@ -163,7 +170,9 @@ __all__ = [
     "CompanySeriesMaterializer",
     "CompanySeriesResult",
     "CoreConceptDefinition",
+    "CoreFactSelection",
     "CoreQuarterlyCoverageValidator",
+    "CoreQuarterlyFactSelector",
     "CorpusRelease",
     "CorpusReleaseAdapter",
     "CorpusReleaseError",
@@ -225,5 +234,6 @@ __all__ = [
     "ReviewInventoryResult",
     "ReviewedRecastRegistry",
     "SeriesBuilder",
+    "core_canonical_concept_ids",
     "validate_recast_evidence",
 ]

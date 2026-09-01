@@ -18,7 +18,9 @@ from sec_xbrl.longitudinal import (
     Layer2PublicationReader,
     Layer2RuleVersions,
     Layer2Run,
+    core_canonical_concept_ids,
 )
+from sec_xbrl.longitudinal.as_filed_publication import _resolve_as_filed_identity_collisions
 
 RULES = Layer2RuleVersions("period-v1", "mapping-v1", "recast-v1", "selection-v1")
 
@@ -79,6 +81,39 @@ def test_c3_m1_publishes_only_as_filed_and_is_admitted_by_consumer_c2(tmp_path: 
     assert (amendment["form"], amendment["accession"]) == ("10-Q/A", "0000320193-25-000002")
 
 
+def test_core_revenue_collision_selects_direct_undimensioned_10q_and_keeps_amendment_out() -> None:
+    common = {
+        "analytical_fact_id": "revenue-q1",
+        "company_canonical_concept_id": "company:revenue",
+        "source_type": "REPORTED",
+        "value_numeric": "100",
+        "value_text": None,
+        "source_filing_id": "filing:original",
+        "selected_fact_id": "fact:original",
+        "filed_date": "2024-05-22",
+        "accession": "0001045810-24-000100",
+        "form": "10-Q",
+        "raw_dimension_signature": (),
+    }
+    selected = _resolve_as_filed_identity_collisions(
+        (
+            common,
+            {
+                **common,
+                "source_filing_id": "filing:amendment",
+                "selected_fact_id": "fact:amendment",
+                "filed_date": "2024-06-01",
+                "accession": "0001045810-24-000101",
+                "form": "10-Q/A",
+            },
+        ),
+        core_canonical_ids=("company:revenue",),
+    )
+    assert selected[0]["source_type"] == "REPORTED"
+    assert selected[0]["selected_fact_id"] == "fact:original"
+    assert selected[0]["basic_selection_reason"] == "CORE_FACT_POLICY_RANKED"
+
+
 def test_c3_m1_actual_seven_company_corpus_when_cached(tmp_path: Path) -> None:
     root = Path(os.environ.get("SEC_XBRL_CORPUS_ROOT", "data/processed/trailing_corpus_runs/20260827T051322Z"))
     if not root.is_dir():
@@ -99,4 +134,33 @@ def test_c3_m1_actual_seven_company_corpus_when_cached(tmp_path: Path) -> None:
         and row.get("report_date")
         and row.get("context_id")
         for row in aapl
+    )
+
+
+def test_cached_nvda_fy2024_q1_revenue_selects_direct_10q_when_available(tmp_path: Path) -> None:
+    """Regression check over an explicit local cache; it never downloads SEC data."""
+    root = Path(os.environ.get("SEC_XBRL_CORPUS_ROOT", "data/processed/trailing_corpus_runs/20260827T051322Z"))
+    if not root.is_dir():
+        pytest.skip("cached NVDA corpus is not available")
+    release = CorpusReleaseAdapter().load(
+        root,
+        corpus_run_id=root.name,
+        ciks=("1045810",),
+        run_version="core-selection-nvda-regression-v1",
+        rules=RULES,
+    )
+    result = AsFiledPublicationPipeline().publish(
+        release, output_root=tmp_path / "nvda", as_of_date="2026-08-29"
+    )
+    published = Layer2PublicationReader().load(result.publication.run_root)
+    revenue_ids = core_canonical_concept_ids(published.records("company_concept_map"))
+    assert any(
+        row["company_canonical_concept_id"] in revenue_ids
+        and row.get("period_class") == "QTD_3M"
+        and row.get("fiscal_year") == 2024
+        and row.get("fiscal_quarter") == 1
+        and row.get("source_type") == "REPORTED"
+        and row.get("form") == "10-Q"
+        and row.get("company_canonical_dimension_key") in ((), [])
+        for row in published.records("analytical_fact")
     )

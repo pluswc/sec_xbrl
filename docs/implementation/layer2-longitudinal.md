@@ -56,6 +56,16 @@ neither view changes a Layer 1 Fact.
 - `AS_FILED`: for each target period, retain the first directly reported
   observation available on or before the requested `as_of_date`.  A later
   comparative value never overwrites that historical result.
+
+For a caller-declared common-core concept collision at the same analytical
+period, `CoreQuarterlyFactSelector` may make the basic `AS_FILED` choice
+deterministic: direct `10-Q` reporting ranks first; among that eligible set it
+chooses the latest non-amendment raw filing by `(filed_date, accession)`; and
+within that same filing an undimensioned Fact ranks first.  Amendments remain
+immutable raw/series lineage but
+are not inputs to this basic selection.  Any exact rank tie (or an
+amendment-only group) remains `UNAVAILABLE` and review-required.  This is a
+mechanical common-core preference, not a recast policy or a semantic approval.
 - `LATEST_RECAST`: select the latest eligible `basis_version` available on or
   before `as_of_date` for a complete comparable period family.  Every selected
   quarter in that family must use that same basis.  A target period that is

@@ -48,6 +48,14 @@ CORE_CONCEPTS: tuple[CoreConceptDefinition, ...] = (
 CORE_CONCEPTS_BY_KEY = {definition.key: definition for definition in CORE_CONCEPTS}
 
 
+def core_canonical_concept_ids(
+    company_concept_map: Iterable[Mapping[str, Any]],
+    core_concepts: Iterable[CoreConceptDefinition] = CORE_CONCEPTS,
+) -> frozenset[str]:
+    """Return canonical IDs for a caller-selected standard common-core registry."""
+    return frozenset().union(*_canonical_ids(tuple(core_concepts), company_concept_map).values())
+
+
 @dataclass(frozen=True, slots=True)
 class QuarterlyCoverageCell:
     cik: str

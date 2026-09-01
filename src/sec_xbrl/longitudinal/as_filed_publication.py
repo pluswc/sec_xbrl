@@ -16,6 +16,11 @@ from typing import Any
 
 from sec_xbrl.longitudinal.canonical import CompanyCanonicalizer, MappingTables
 from sec_xbrl.longitudinal.capability import CapabilityInventoryMaterializer
+from sec_xbrl.longitudinal.core_coverage import core_canonical_concept_ids
+from sec_xbrl.longitudinal.core_selection import (
+    CORE_FACT_SELECTION_VERSION,
+    CoreQuarterlyFactSelector,
+)
 from sec_xbrl.longitudinal.corpus_release import CorpusRelease
 from sec_xbrl.longitudinal.materialization import Layer2Publication, Layer2Publisher
 from sec_xbrl.longitudinal.period_observation import PeriodObservationMaterializer
@@ -174,7 +179,8 @@ class AsFiledPublicationPipeline:
                 as_of_date=as_of_date,
             )
             as_filed = _resolve_as_filed_identity_collisions(
-                row for row in selected.analytical_facts if row.get("view") == "AS_FILED"
+                (row for row in selected.analytical_facts if row.get("view") == "AS_FILED"),
+                core_canonical_ids=core_canonical_concept_ids(mappings.company_concept_map),
             )
             as_filed = _with_selected_raw_provenance(as_filed, raw_provenance_by_fact)
             if any(row.get("view") != "AS_FILED" for row in as_filed):
@@ -288,6 +294,8 @@ def _with_selected_raw_provenance(
 
 def _resolve_as_filed_identity_collisions(
     rows: Iterable[Mapping[str, Any]],
+    *,
+    core_canonical_ids: Iterable[str] = (),
 ) -> tuple[dict[str, Any], ...]:
     """Fail closed when the existing M4 identity cannot distinguish candidates.
 
@@ -302,6 +310,7 @@ def _resolve_as_filed_identity_collisions(
     for row in rows:
         grouped[str(row.get("analytical_fact_id") or "")].append(dict(row))
     result: list[dict[str, Any]] = []
+    selector = CoreQuarterlyFactSelector()
     for identity, candidates in sorted(grouped.items()):
         if not identity:
             raise AsFiledPublicationError("AS_FILED materializer returned a fact without identity")
@@ -309,6 +318,23 @@ def _resolve_as_filed_identity_collisions(
         if len(candidates) == 1:
             result.append(canonical)
             continue
+        core_selection = selector.select(
+            candidates, core_canonical_concept_ids=core_canonical_ids
+        )
+        if core_selection is not None and core_selection.selected is not None:
+            result.append(
+                {
+                    **dict(core_selection.selected),
+                    "basic_selection_rule_version": CORE_FACT_SELECTION_VERSION,
+                    "basic_selection_reason": "CORE_FACT_POLICY_RANKED",
+                }
+            )
+            continue
+        unavailable_reason = (
+            core_selection.unavailable_reason
+            if core_selection is not None
+            else "AMBIGUOUS_AS_FILED_SELECTION_IDENTITY"
+        )
         result.append(
             {
                 **canonical,
@@ -318,7 +344,10 @@ def _resolve_as_filed_identity_collisions(
                 "selected_fact_id": None,
                 "source_filing_id": None,
                 "filed_date": None,
-                "unavailable_reason": "AMBIGUOUS_AS_FILED_SELECTION_IDENTITY",
+                "unavailable_reason": unavailable_reason,
+                "basic_selection_rule_version": (
+                    CORE_FACT_SELECTION_VERSION if core_selection is not None else None
+                ),
             }
         )
     return tuple(result)
