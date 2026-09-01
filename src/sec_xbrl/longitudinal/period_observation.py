@@ -212,6 +212,7 @@ def _observation(
         for row in dimension_signature
     )
     fiscal_year = _fiscal_year(filing, context)
+    fiscal_quarter = _fiscal_quarter(filing)
     source_fact_id = str(fact["fact_id"])
     result = {
         "period_observation_id": _stable_id("period-observation", source_fact_id, PERIOD_OBSERVATION_RULE_VERSION),
@@ -248,6 +249,7 @@ def _observation(
         "period_key": _period_key(context, period_class),
         "comparative_type": fact.get("comparative_type"),
         "fiscal_year": fiscal_year,
+        "fiscal_quarter": fiscal_quarter,
         # Class is deliberately inside this identity: QTD/YTD/FY/instant
         # candidates cannot coalesce before later mapping/series policy.
         "raw_series_identity": (
@@ -438,6 +440,16 @@ def _fiscal_year(filing: Mapping[str, Any], context: Mapping[str, Any]) -> int |
             return date.fromisoformat(str(endpoint)).year
         except (TypeError, ValueError):
             return None
+
+
+def _fiscal_quarter(filing: Mapping[str, Any]) -> int | None:
+    """Copy the filing's declared fiscal focus; do not infer from calendar dates."""
+    focus = str(filing.get("document_fiscal_period_focus") or "").upper()
+    if focus in {"FY", "Q4"}:
+        return 4
+    if len(focus) == 2 and focus.startswith("Q") and focus[1] in "123":
+        return int(focus[1])
+    return None
 
 
 def _stable_id(*parts: Any) -> str:

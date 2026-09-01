@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-MAPPING_VERSION = "l2-m2-company-canonical-v1"
+MAPPING_VERSION = "l2-m2-company-canonical-v2"
 
 
 class MappingRelation(StrEnum):
@@ -647,6 +647,25 @@ def _best_candidate(
             }
     for item in reversed(tuple(established)):
         source = item["source"]
+        if _standard_us_gaap_namespace_continuity(row, source):
+            return item["mapping"], {
+                "confirmed": True,
+                "relation": MappingRelation.SAME,
+                "method": "STANDARD_US_GAAP_NAMESPACE_CONTINUITY",
+                "confidence": 1.0,
+                "evidence": {
+                    "taxonomy_family": "us-gaap",
+                    "local_name": _standard_local_name(row),
+                    "qname": row.get("qname"),
+                    "namespace_uri": row.get("namespace_uri"),
+                    "prior_qname": source.get("qname"),
+                    "prior_namespace_uri": source.get("namespace_uri"),
+                    "prior_raw_id": _raw_id(source),
+                    "semantic_fingerprint": _semantic_fingerprint(row),
+                    "prior_semantic_fingerprint": _semantic_fingerprint(source),
+                },
+                "continuity_break": False,
+            }
         if _exact_standard_identity(row, source):
             return item["mapping"], {
                 "confirmed": True,
@@ -715,6 +734,54 @@ def _exact_standard_identity(left: Mapping[str, Any], right: Mapping[str, Any]) 
     )
 
 
+def _standard_us_gaap_namespace_continuity(
+    left: Mapping[str, Any], right: Mapping[str, Any]
+) -> bool:
+    """Recognize a stable US-GAAP concept across annual taxonomy namespaces.
+
+    Layer 1 retains each filing's QName and namespace.  This is an additive
+    Layer 2 rule for *standard* US-GAAP concepts only; extension concepts never
+    qualify merely because a local name repeats.  The semantic fingerprint is
+    deliberately complete enough to reject duration/instant, type, balance,
+    and abstractness changes.
+    """
+    return bool(
+        left.get("is_standard")
+        and right.get("is_standard")
+        and _taxonomy_family(left) == _taxonomy_family(right) == "us-gaap"
+        and _standard_local_name(left)
+        and _standard_local_name(left) == _standard_local_name(right)
+        and left.get("namespace_uri") != right.get("namespace_uri")
+        and _compatible_context_semantics(left, right)
+        and left.get("abstract") == right.get("abstract")
+    )
+
+
+def _taxonomy_family(row: Mapping[str, Any]) -> str:
+    """Use Layer 1 family when present, with namespace as a safe legacy adapter."""
+    family = str(row.get("taxonomy_family") or "").casefold()
+    if family:
+        return family
+    return "us-gaap" if "us-gaap" in str(row.get("namespace_uri") or "").casefold() else ""
+
+
+def _standard_local_name(row: Mapping[str, Any]) -> str:
+    local = row.get("local_name")
+    if local:
+        return str(local)
+    qname = str(row.get("qname") or "")
+    return qname.rsplit(":", 1)[-1] if ":" in qname else ""
+
+
+def _semantic_fingerprint(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "period_type": row.get("period_type"),
+        "data_type": row.get("data_type"),
+        "balance": row.get("balance"),
+        "abstract": row.get("abstract"),
+    }
+
+
 def _compatible_context_semantics(
     left: Mapping[str, Any], right: Mapping[str, Any]
 ) -> bool:
@@ -734,9 +801,14 @@ def _compatible_context_semantics(
     # Balance is relevant only where one side declares it.  A missing balance
     # on both is valid for duration concepts; a one-sided or changed balance is
     # a semantic incompatibility.
-    if left.get("balance") is not None or right.get("balance") is not None:
-        return left.get("balance") == right.get("balance")
-    return True
+    if (
+        (left.get("balance") is not None or right.get("balance") is not None)
+        and left.get("balance") != right.get("balance")
+    ):
+        return False
+    # Abstractness is semantic metadata too: a presentation-only abstract
+    # node must never join a reportable numeric concept.
+    return left.get("abstract") == right.get("abstract")
 
 
 def _well_supported_namespace_change(
@@ -856,6 +928,8 @@ def _mapping_row(
         "source_qname": source.get("qname"),
         "source_namespace_uri": source.get("namespace_uri"),
         "source_local_name": source.get("local_name"),
+        "source_taxonomy_family": source.get("taxonomy_family"),
+        "source_is_standard": source.get("is_standard"),
         "company_canonical_id": canonical_id,
         "canonical_entity_type": entity_type,
         "valid_from_filing_id": valid_from_filing_id,

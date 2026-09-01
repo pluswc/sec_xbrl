@@ -294,6 +294,44 @@ def test_exact_standard_qname_with_compatible_period_and_type_is_same() -> None:
     assert rows[1]["company_canonical_id"] == rows[0]["company_canonical_id"]
 
 
+def test_standard_us_gaap_concept_continues_across_annual_namespaces() -> None:
+    rows = CompanyCanonicalizer().build(
+        filings=_filings(),
+        concepts=(
+            _concept(
+                "revenue-2024", "k24", is_standard=True, qname="us-gaap:Revenues",
+                taxonomy_family="us-gaap", namespace_uri="http://fasb.org/us-gaap/2024",
+            ),
+            _concept(
+                "revenue-2025", "q25", is_standard=True, qname="us-gaap:Revenues",
+                taxonomy_family="us-gaap", namespace_uri="http://fasb.org/us-gaap/2025",
+            ),
+            _concept(
+                "revenue-2026", "k25", is_standard=True, qname="us-gaap:Revenues",
+                taxonomy_family="us-gaap", namespace_uri="http://fasb.org/us-gaap/2026",
+            ),
+        ),
+    ).company_concept_map
+    assert [row["relation"] for row in rows] == ["SAME", "SAME", "SAME"]
+    assert len({row["company_canonical_id"] for row in rows}) == 1
+    assert rows[1]["method"] == "STANDARD_US_GAAP_NAMESPACE_CONTINUITY"
+    assert rows[1]["evidence"]["prior_namespace_uri"].endswith("/2024")
+    assert rows[1]["evidence"]["namespace_uri"].endswith("/2025")
+
+
+def test_custom_concept_with_same_name_across_namespaces_remains_review_required() -> None:
+    rows = CompanyCanonicalizer().build(
+        filings=_filings(),
+        concepts=(
+            _concept("custom-2024", "k24", qname="nvda:Revenue", namespace_uri="https://nvda.test/2024"),
+            _concept("custom-2025", "k25", qname="nvda:Revenue", namespace_uri="https://nvda.test/2025"),
+        ),
+    ).company_concept_map
+    assert rows[1]["relation"] == "UNCERTAIN"
+    assert rows[1]["review_required"] is True
+    assert rows[1]["company_canonical_id"] != rows[0]["company_canonical_id"]
+
+
 def test_mapping_tables_are_publisher_ready_with_l2_m0_contract(tmp_path: Path) -> None:
     tables = CompanyCanonicalizer().build(filings=_filings(), concepts=(_concept("revenue", "k24"),))
     run = Layer2Run(

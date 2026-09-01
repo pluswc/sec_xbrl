@@ -22,6 +22,15 @@ from sec_xbrl.longitudinal.capability import (
     CapabilityInventoryQuery,
     CapabilityInventoryResult,
 )
+from sec_xbrl.longitudinal.core_coverage import (
+    CORE_CONCEPTS,
+    CORE_CONCEPTS_BY_KEY,
+    CoreConceptDefinition,
+    CoreQuarterlyCoverageValidator,
+    CoverageStatus,
+    QuarterlyCoverageCell,
+    QuarterlyCoverageResult,
+)
 from sec_xbrl.longitudinal.corpus_release import (
     RAW_TABLES,
     CorpusRelease,
@@ -122,6 +131,8 @@ from sec_xbrl.longitudinal.series import (
 
 __all__ = [
     "CAPABILITY_INVENTORY_VERSION",
+    "CORE_CONCEPTS",
+    "CORE_CONCEPTS_BY_KEY",
     "CURRENT_COMPARABLE_VERSION",
     "DEFAULT_LAYER2_ROOT",
     "LAYER2_CONTRACT_VERSION",
@@ -151,10 +162,13 @@ __all__ = [
     "CompanyCoverage",
     "CompanySeriesMaterializer",
     "CompanySeriesResult",
+    "CoreConceptDefinition",
+    "CoreQuarterlyCoverageValidator",
     "CorpusRelease",
     "CorpusReleaseAdapter",
     "CorpusReleaseError",
     "CorpusSnapshot",
+    "CoverageStatus",
     "CurrentComparableError",
     "CurrentComparableMaterializer",
     "CurrentComparablePublication",
@@ -189,6 +203,8 @@ __all__ = [
     "Q4PolicyRegistryPublisher",
     "Q4PolicyRegistryReader",
     "Q4PolicyRegistryResult",
+    "QuarterlyCoverageCell",
+    "QuarterlyCoverageResult",
     "QuarterlyPeriodPolicyError",
     "QuarterlyPeriodPolicyMaterializer",
     "QuarterlyPeriodPolicyV2Materializer",

@@ -123,6 +123,15 @@ executable/inspection checklist is maintained in
 ## M7 — Layer 2
 - same-company mappings are additive to Raw.
 - namespace changes do not break a well-supported canonical series.
+- standard US-GAAP concepts with the same local name and compatible
+  period/type/balance/abstract fingerprint continue across annual taxonomy
+  namespaces, with old/new raw namespaces retained as mapping evidence;
+  custom concepts do not use this automatic continuity rule.
+- a caller-selected common-core registry can produce a repeatable
+  undimensioned quarterly diagnostic with explicit `REPORTED`, `DERIVED`,
+  `UNAVAILABLE`, and `MISSING` cells; Revenue accepts both supported standard
+  US-GAAP aliases and a Mechanical Q4 companion can satisfy only Q4 as
+  `DERIVED`.
 - segment recast can create a new mapping/version rather than corrupt old history.
 - `AS_FILED` preserves the first directly reported version available at an
   `as_of_date`; later comparative/recast observations do not overwrite it.

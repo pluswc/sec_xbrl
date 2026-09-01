@@ -131,9 +131,14 @@ earlier mapping.
 The automatic confirmation boundary is intentionally narrow:
 
 - exact standard QName and namespace identity is `SAME` only when declared
-  `period_type` and `data_type` are both present and equal (and `balance` is
-  compatible when declared); an incomplete or duration-versus-instant/type
-  conflict remains `UNCERTAIN`;
+  `period_type` and `data_type` are both present and equal (and `balance` and
+  `abstract` are compatible when declared); an incomplete or
+  duration-versus-instant/type conflict remains `UNCERTAIN`;
+- a standard `us-gaap` concept may also be `SAME` across annual taxonomy
+  namespaces when its taxonomy family, local name, and full semantic
+  fingerprint (`period_type`, `data_type`, `balance`, `abstract`) agree.  The
+  mapping records both as-filed namespaces and QNames as evidence.  This rule
+  never applies to a custom concept;
 - a company extension namespace change is `RENAMED` only when local name,
   label, and role/axis/domain structural signatures agree;
 - a recast, split, or merge requires a supplied documented-change record that
@@ -176,6 +181,20 @@ silently joining an existing canonical series.
 A documented segment recast is additive: it emits a new `RECAST` mapping
 version, new canonical member ID, and `continuity_break=true`, while the prior
 mapping keeps its original validity and identity.
+
+### Core quarterly coverage diagnostics
+
+`CoreQuarterlyCoverageValidator` is a reusable, read-only quality gate for a
+caller-selected registry of common standard concepts.  The bundled registry
+includes Revenue aliases (`Revenues` and
+`RevenueFromContractWithCustomerExcludingAssessedTax`) and basic statement
+anchors, but it is not a claim that each entry is mandatory for every issuer.
+For the selected core set and fiscal years, it emits one undimensioned cell per
+concept/quarter as `REPORTED`, `DERIVED`, `UNAVAILABLE`, or `MISSING`.  A
+Mechanical Q4 companion row may satisfy Q4 as `DERIVED`; an unavailable
+AS_FILED selection remains visible with its reason.  The validator never
+selects a replacement fact, collapses dimensions, or changes Layer 1/Layer 2
+records.
 
 ## L2-M3 company-series materialization
 
