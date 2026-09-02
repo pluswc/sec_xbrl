@@ -154,6 +154,14 @@ executable/inspection checklist is maintained in
   and analytical facts as Parquet; it does not run comparable/recast selection,
   create capability inventory or intermediate series outputs, or compute
   row-content hashes.
+- T3 exploration publication accepts only reader-verified T1 observations and
+  T2 relationship edges with the same declared Layer 1 input run. It keeps
+  raw fact/context/unit/dimension and raw QName/taxonomy/mapping lineage on
+  every navigation node.
+- exploration distinguishes `STATEMENT_COMPONENT` PRE/CAL evidence,
+  `DIMENSION_LENS`, `FACT_SCOPE`, and DEF-only `MEMBER_HIERARCHY`. It preserves
+  independent Axis lenses as alternative paths, terminates cycles per path,
+  and never selects a filing, aggregates values, or infers an economic driver.
 
 ## M8 — Layer 3
 - analytical grouping preserves raw/company IDs.

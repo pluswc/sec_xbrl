@@ -28,6 +28,8 @@ LOGICAL_DATASETS = frozenset(
         "period_observation_exclusion",
         "reported_period_observation",
         "filing_relationship_edge",
+        "analysis_exploration_node",
+        "analysis_exploration_edge",
         "company_concept_map",
         "company_axis_map",
         "company_member_map",
@@ -463,7 +465,7 @@ def _normalize_datasets(
     unknown = set(datasets) - LOGICAL_DATASETS
     if unknown:
         raise Layer2MaterializationError(f"unknown Layer 2 logical datasets: {sorted(unknown)}")
-    if "analytical_fact" not in datasets and "reported_period_observation" not in datasets and "filing_relationship_edge" not in datasets and not (
+    if "analytical_fact" not in datasets and "reported_period_observation" not in datasets and "filing_relationship_edge" not in datasets and not ({"analysis_exploration_node", "analysis_exploration_edge"} <= set(datasets)) and not (
         {
             "annual_series_candidate",
             "current_series_candidate",
@@ -537,6 +539,10 @@ def _validate_candidate(
                 _validate_reported_period_observation(row)
             elif dataset == "filing_relationship_edge":
                 _validate_filing_relationship_edge(row, run)
+            elif dataset == "analysis_exploration_node":
+                _validate_analysis_exploration_node(row, run)
+            elif dataset == "analysis_exploration_edge":
+                _validate_analysis_exploration_edge(row, run)
             try:
                 _canonical_json(row)
             except (TypeError, ValueError) as exc:
@@ -968,7 +974,52 @@ def _validate_filing_relationship_edge(row: Mapping[str, Any], run: Layer2Run) -
         raise Layer2MaterializationError("filing_relationship_edge filing provenance disagrees with input")
     if bool(row.get("source_is_amendment")) != str(row.get("form")).endswith("/A"):
         raise Layer2MaterializationError("filing_relationship_edge amendment state is inconsistent")
+
+
+def _validate_analysis_exploration_node(row: Mapping[str, Any], run: Layer2Run) -> None:
+    """Require every exploration node to retain raw identity and source scope."""
+    required = ("analysis_exploration_node_id", "node_kind", "origin", "raw_id", "raw_qname")
+    missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
+    if missing:
+        raise Layer2MaterializationError("analysis_exploration_node missing provenance: " + ", ".join(missing))
+    if row["node_kind"] not in {"CONCEPT", "FACT", "AXIS", "MEMBER"}:
+        raise Layer2MaterializationError("analysis_exploration_node has unsupported node_kind")
+    if row["origin"] not in {
+        "STANDARD_CONCEPT", "CUSTOM_CONCEPT", "STANDARD_AXIS", "CUSTOM_AXIS",
+        "STANDARD_MEMBER", "CUSTOM_MEMBER",
+    }:
+        raise Layer2MaterializationError("analysis_exploration_node has unsupported origin")
+    if row["node_kind"] == "FACT":
+        required_fact = ("source_fact_id", "source_filing_id", "accession", "filed_date", "context_id")
+        if any(row.get(key) is None or row.get(key) == "" for key in required_fact):
+            raise Layer2MaterializationError("FACT exploration node lacks raw Fact lineage")
+    accession = row.get("accession")
+    if accession is not None and (str(row.get("cik")), str(accession)) not in {(item.cik, item.accession) for item in run.inputs}:
+        raise Layer2MaterializationError("analysis_exploration_node does not resolve to declared input")
+
+
+def _validate_analysis_exploration_edge(row: Mapping[str, Any], run: Layer2Run) -> None:
+    """Keep graph links descriptive; they must never be calculation instructions."""
+    required = ("analysis_exploration_edge_id", "edge_kind", "from_node_id", "to_node_id")
+    missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
+    if missing:
+        raise Layer2MaterializationError("analysis_exploration_edge missing provenance: " + ", ".join(missing))
+    if row["edge_kind"] not in {
+        "STATEMENT_COMPONENT", "DIMENSION_LENS", "FACT_SCOPE", "MEMBER_HIERARCHY",
+    }:
+        raise Layer2MaterializationError("analysis_exploration_edge has unsupported edge_kind")
+    if row["edge_kind"] == "STATEMENT_COMPONENT" and row.get("source_network_type") not in {"PRE", "CAL"}:
+        raise Layer2MaterializationError("STATEMENT_COMPONENT must retain PRE or CAL evidence")
+    if row["edge_kind"] == "MEMBER_HIERARCHY" and row.get("source_network_type") != "DEF":
+        raise Layer2MaterializationError("MEMBER_HIERARCHY must retain DEF evidence")
+    accession = row.get("accession")
+    if accession is not None and (str(row.get("cik")), str(accession)) not in {(item.cik, item.accession) for item in run.inputs}:
+        raise Layer2MaterializationError("analysis_exploration_edge does not resolve to declared input")
 def _record_id(dataset: str, row: Mapping[str, Any]) -> str:
+    if dataset == "analysis_exploration_node":
+        return str(row.get("analysis_exploration_node_id") or "")
+    if dataset == "analysis_exploration_edge":
+        return str(row.get("analysis_exploration_edge_id") or "")
     if dataset == "filing_relationship_edge":
         return str(row.get("filing_relationship_edge_id") or "")
     if dataset == "reported_period_observation":
@@ -1082,7 +1133,9 @@ def _write_operational_parquet_datasets(
             # first hundred arcs and populated later in the same filing.
             # Infer the one edge table completely so optional XBRL attributes
             # are not rejected by Polars' bounded default sample.
-            infer_schema_length = None if dataset == "filing_relationship_edge" else 100
+            infer_schema_length = None if dataset in {
+                "filing_relationship_edge", "analysis_exploration_node", "analysis_exploration_edge"
+            } else 100
             frame = pl.DataFrame(rows, strict=False, infer_schema_length=infer_schema_length)
             if dataset == "filing_relationship_edge":
                 # A filing is the immutable relationship snapshot boundary.

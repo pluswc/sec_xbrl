@@ -59,6 +59,13 @@ from sec_xbrl.longitudinal.current_comparable import (
     CurrentComparableResult,
     ReviewedRecastRegistry,
 )
+from sec_xbrl.longitudinal.exploration_graph import (
+    EXPLORATION_GRAPH_RULE_VERSION,
+    ExplorationGraphError,
+    ExplorationGraphPipeline,
+    ExplorationGraphReader,
+    ExplorationGraphResult,
+)
 from sec_xbrl.longitudinal.materialization import (
     DEFAULT_LAYER2_ROOT,
     LAYER2_CONTRACT_VERSION,
@@ -161,6 +168,7 @@ __all__ = [
     "CORE_FACT_SELECTION_VERSION",
     "CURRENT_COMPARABLE_VERSION",
     "DEFAULT_LAYER2_ROOT",
+    "EXPLORATION_GRAPH_RULE_VERSION",
     "FLOW_CORE_CONCEPTS",
     "LAYER2_CONTRACT_VERSION",
     "LOGICAL_DATASETS",
@@ -208,6 +216,10 @@ __all__ = [
     "CurrentComparablePublisher",
     "CurrentComparableResult",
     "CurrentSeries",
+    "ExplorationGraphError",
+    "ExplorationGraphPipeline",
+    "ExplorationGraphReader",
+    "ExplorationGraphResult",
     "FilingRelationshipIndexError",
     "FilingRelationshipIndexPipeline",
     "FilingRelationshipIndexReader",
