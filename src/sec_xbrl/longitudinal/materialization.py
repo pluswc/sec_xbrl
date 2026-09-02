@@ -26,6 +26,7 @@ LOGICAL_DATASETS = frozenset(
     {
         "period_observation",
         "period_observation_exclusion",
+        "reported_period_observation",
         "company_concept_map",
         "company_axis_map",
         "company_member_map",
@@ -461,7 +462,7 @@ def _normalize_datasets(
     unknown = set(datasets) - LOGICAL_DATASETS
     if unknown:
         raise Layer2MaterializationError(f"unknown Layer 2 logical datasets: {sorted(unknown)}")
-    if "analytical_fact" not in datasets and not (
+    if "analytical_fact" not in datasets and "reported_period_observation" not in datasets and not (
         {
             "annual_series_candidate",
             "current_series_candidate",
@@ -531,6 +532,8 @@ def _validate_candidate(
                 _validate_metric_input_candidate(row)
             elif dataset == "metric_input_compatibility":
                 _validate_metric_input_compatibility(row)
+            elif dataset == "reported_period_observation":
+                _validate_reported_period_observation(row)
             try:
                 _canonical_json(row)
             except (TypeError, ValueError) as exc:
@@ -887,10 +890,7 @@ def _validate_metric_input_compatibility(row: Mapping[str, Any]) -> None:
             f"metric_input_compatibility missing provenance: {missing}"
         )
     if row["metric_assessment_id"] not in {
-        "GROSS_MARGIN",
-        "OPERATING_MARGIN",
-        "REVENUE_GROWTH",
-        "Q4_FLOW",
+        "GROSS_MARGIN", "OPERATING_MARGIN", "REVENUE_GROWTH", "Q4_FLOW",
     }:
         raise Layer2MaterializationError("metric_input_compatibility has unsupported assessment")
     if row["compatibility_status"] not in {"ELIGIBLE", "UNAVAILABLE"}:
@@ -908,7 +908,31 @@ def _validate_metric_input_compatibility(row: Mapping[str, Any]) -> None:
         )
 
 
+def _validate_reported_period_observation(row: Mapping[str, Any]) -> None:
+    """Contract for the pre-selection, version-preserving L2 fact panel."""
+    required = (
+        "reported_period_observation_id", "source_fact_id", "source_filing_id",
+        "source_snapshot_id", "accession", "form", "filed_date", "context_id",
+        "raw_concept_id", "raw_concept_qname", "period_class", "period_key",
+        "fiscal_year", "classification_rule_version", "source_version", "source_is_amendment",
+        "raw_dimension_signature",
+    )
+    missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
+    if missing:
+        raise Layer2MaterializationError(
+            "reported_period_observation missing required lineage: " + ", ".join(missing)
+        )
+    if row.get("reported_or_derived") != "REPORTED":
+        raise Layer2MaterializationError("reported_period_observation must retain only reported Facts")
+    if row.get("source_version") not in {"ORIGINAL", "AMENDMENT"}:
+        raise Layer2MaterializationError("reported_period_observation has unsupported source_version")
+    if row.get("period_class") not in {
+        "QTD_3M", "YTD_6M", "YTD_9M", "FY", "INSTANT", "OTHER_DURATION"
+    }:
+        raise Layer2MaterializationError("reported_period_observation has unsupported period_class")
 def _record_id(dataset: str, row: Mapping[str, Any]) -> str:
+    if dataset == "reported_period_observation":
+        return str(row.get("reported_period_observation_id") or "")
     if dataset == "analytical_fact":
         return str(row.get("analytical_fact_id") or "")
     if dataset in {"annual_series_candidate", "current_series_candidate"}:
@@ -1026,6 +1050,8 @@ def _validate_operational_manifest_shape(manifest: Mapping[str, Any]) -> None:
         raise Layer2PublicationValidationError("operational Layer 2 manifest is malformed")
     if any(type(value) is not int or value < 0 for value in manifest["output_counts"].values()):
         raise Layer2PublicationValidationError("operational Layer 2 manifest has invalid output counts")
+    if not set(manifest["output_counts"]).issubset(LOGICAL_DATASETS):
+        raise Layer2PublicationValidationError("operational Layer 2 manifest has unsupported datasets")
     expected_validation = {
         "ANALYTICAL_FACT_LINEAGE", "RUN_INPUT_AND_VERSION_MANIFEST", "ATOMIC_PUBLICATION"
     }

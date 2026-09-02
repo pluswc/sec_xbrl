@@ -3,6 +3,19 @@
 ## Purpose
 Connect the same company's economic concepts, axes and members across 10-K/10-Q filings without changing Layer 1 raw identity.
 
+## T1 versioned reported-period panel
+
+Before any as-of or comparable selection, T1 publishes every eligible directly
+reported Layer 1 Fact as `reported_period_observation`.  Its grain is one raw
+Fact in one immutable filing snapshot: FY/Q, actual Context boundaries,
+QTD/YTD/FY/instant class, raw Fact/Context/Unit/full dimensions, accession,
+form, filed date, amendment state, and raw QName are all retained.  Later
+comparative presentations and amendments are additional rows, never updates.
+Company canonical concept/axis/member mapping is additive lineage on the row;
+an absent or uncertain mapping remains review-required rather than being
+silently joined.  T1 deliberately performs no AS_FILED selection, recast
+selection, Q4 derivation, or calculation.
+
 ## Mapping entities
 - `company_concept_map`
 - `company_axis_map`

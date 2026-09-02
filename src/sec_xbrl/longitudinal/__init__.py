@@ -139,6 +139,13 @@ from sec_xbrl.longitudinal.series import (
     CompanySeriesResult,
     MemberOrderingView,
 )
+from sec_xbrl.longitudinal.versioned_observation_panel import (
+    VERSIONED_PANEL_RULE_VERSION,
+    VersionedObservationPanelError,
+    VersionedObservationPanelPipeline,
+    VersionedObservationPanelReader,
+    VersionedObservationPanelResult,
+)
 
 __all__ = [
     "CAPABILITY_INVENTORY_VERSION",
@@ -161,6 +168,7 @@ __all__ = [
     "REVIEW_INVENTORY_VERSION",
     "SELECTION_MATERIALIZATION_VERSION",
     "SERIES_RULE_VERSION",
+    "VERSIONED_PANEL_RULE_VERSION",
     "AnalyticalFactMaterializer",
     "AnalyticalFactSelectionResult",
     "AnnualSeries",
@@ -244,6 +252,10 @@ __all__ = [
     "ReviewInventoryResult",
     "ReviewedRecastRegistry",
     "SeriesBuilder",
+    "VersionedObservationPanelError",
+    "VersionedObservationPanelPipeline",
+    "VersionedObservationPanelReader",
+    "VersionedObservationPanelResult",
     "core_canonical_concept_ids",
     "validate_recast_evidence",
 ]
