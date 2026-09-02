@@ -27,6 +27,7 @@ LOGICAL_DATASETS = frozenset(
         "period_observation",
         "period_observation_exclusion",
         "reported_period_observation",
+        "filing_relationship_edge",
         "company_concept_map",
         "company_axis_map",
         "company_member_map",
@@ -462,7 +463,7 @@ def _normalize_datasets(
     unknown = set(datasets) - LOGICAL_DATASETS
     if unknown:
         raise Layer2MaterializationError(f"unknown Layer 2 logical datasets: {sorted(unknown)}")
-    if "analytical_fact" not in datasets and "reported_period_observation" not in datasets and not (
+    if "analytical_fact" not in datasets and "reported_period_observation" not in datasets and "filing_relationship_edge" not in datasets and not (
         {
             "annual_series_candidate",
             "current_series_candidate",
@@ -534,6 +535,8 @@ def _validate_candidate(
                 _validate_metric_input_compatibility(row)
             elif dataset == "reported_period_observation":
                 _validate_reported_period_observation(row)
+            elif dataset == "filing_relationship_edge":
+                _validate_filing_relationship_edge(row, run)
             try:
                 _canonical_json(row)
             except (TypeError, ValueError) as exc:
@@ -930,7 +933,44 @@ def _validate_reported_period_observation(row: Mapping[str, Any]) -> None:
         "QTD_3M", "YTD_6M", "YTD_9M", "FY", "INSTANT", "OTHER_DURATION"
     }:
         raise Layer2MaterializationError("reported_period_observation has unsupported period_class")
+
+
+def _validate_filing_relationship_edge(row: Mapping[str, Any], run: Layer2Run) -> None:
+    """Contract for an additive, filing-versioned raw relationship index.
+
+    This is an index over immutable PRE/CAL/DEF edges, not a unified graph or
+    a calculation instruction.  Both raw endpoints and the exact base-set
+    identity remain mandatory even when a canonical endpoint map is absent.
+    """
+    required = (
+        "filing_relationship_edge_id", "relationship_id", "source_filing_id",
+        "source_snapshot_id", "accession", "form", "filed_date", "source_is_amendment",
+        "network_type", "role_id", "role_uri", "arcrole", "link_qname", "arc_qname",
+        "from_raw_concept_id", "to_raw_concept_id", "from_raw_concept_qname",
+        "to_raw_concept_qname", "from_taxonomy_family", "to_taxonomy_family",
+    )
+    missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
+    if missing:
+        raise Layer2MaterializationError(
+            "filing_relationship_edge missing required lineage: " + ", ".join(missing)
+        )
+    if row.get("network_type") not in {"PRE", "CAL", "DEF"}:
+        raise Layer2MaterializationError("filing_relationship_edge has unsupported network_type")
+    input_by_identity = {(item.cik, item.accession): item for item in run.inputs}
+    input_row = input_by_identity.get((str(row.get("cik")), str(row.get("accession"))))
+    if input_row is None:
+        raise Layer2MaterializationError("filing_relationship_edge does not resolve to a declared input")
+    if (
+        row.get("source_snapshot_id") != input_row.snapshot_id
+        or row.get("form") != input_row.form
+        or row.get("filed_date") != input_row.filed_date
+    ):
+        raise Layer2MaterializationError("filing_relationship_edge filing provenance disagrees with input")
+    if bool(row.get("source_is_amendment")) != str(row.get("form")).endswith("/A"):
+        raise Layer2MaterializationError("filing_relationship_edge amendment state is inconsistent")
 def _record_id(dataset: str, row: Mapping[str, Any]) -> str:
+    if dataset == "filing_relationship_edge":
+        return str(row.get("filing_relationship_edge_id") or "")
     if dataset == "reported_period_observation":
         return str(row.get("reported_period_observation_id") or "")
     if dataset == "analytical_fact":
@@ -1038,7 +1078,25 @@ def _write_operational_parquet_datasets(
         company_root = root / cik
         company_root.mkdir(parents=True, exist_ok=True)
         for dataset, rows in tables.items():
-            pl.DataFrame(rows, strict=False).write_parquet(company_root / f"{dataset}.parquet")
+            # Relationship attributes such as targetRole may be null in the
+            # first hundred arcs and populated later in the same filing.
+            # Infer the one edge table completely so optional XBRL attributes
+            # are not rejected by Polars' bounded default sample.
+            infer_schema_length = None if dataset == "filing_relationship_edge" else 100
+            frame = pl.DataFrame(rows, strict=False, infer_schema_length=infer_schema_length)
+            if dataset == "filing_relationship_edge":
+                # A filing is the immutable relationship snapshot boundary.
+                # This extra partition makes a single filing graph lookup
+                # independent of every other filing retained for the CIK.
+                dataset_root = company_root / dataset
+                dataset_root.mkdir(parents=True, exist_ok=True)
+                for accession, group in frame.partition_by("accession", as_dict=True).items():
+                    accession_key = accession[0] if isinstance(accession, tuple) else accession
+                    if not isinstance(accession_key, str) or not accession_key:
+                        raise Layer2MaterializationError("relationship edge requires accession partition")
+                    group.write_parquet(dataset_root / f"{accession_key}.parquet")
+            else:
+                frame.write_parquet(company_root / f"{dataset}.parquet")
 
 
 def _validate_operational_manifest_shape(manifest: Mapping[str, Any]) -> None:
@@ -1075,18 +1133,26 @@ def _read_operational_parquet_datasets(
         if not child.is_dir() or child.is_symlink() or child.name not in input_ciks:
             raise Layer2PublicationValidationError(f"unexpected operational Layer 2 entry: {child}")
         for file_path in child.iterdir():
-            if not file_path.is_file() or file_path.is_symlink() or file_path.suffix != ".parquet":
-                raise Layer2PublicationValidationError(f"unexpected operational Layer 2 dataset: {file_path}")
-            dataset = file_path.stem
-            if dataset not in declared:
-                raise Layer2PublicationValidationError(f"unexpected operational Layer 2 dataset: {file_path}")
-            try:
-                rows = pl.read_parquet(file_path).to_dicts()
-            except Exception as exc:
-                raise Layer2PublicationValidationError(f"cannot read operational Layer 2 dataset: {file_path}") from exc
-            if any(str(row.get("cik") or "") != child.name for row in rows):
-                raise Layer2PublicationValidationError("operational Layer 2 row CIK does not match partition")
-            datasets[dataset].extend(rows)
+            if file_path.is_dir() and not file_path.is_symlink() and file_path.name == "filing_relationship_edge":
+                if "filing_relationship_edge" not in declared:
+                    raise Layer2PublicationValidationError(f"unexpected operational Layer 2 dataset: {file_path}")
+                candidates = tuple(file_path.iterdir())
+                dataset = "filing_relationship_edge"
+            else:
+                candidates = (file_path,)
+                dataset = file_path.stem
+            for parquet_path in candidates:
+                if not parquet_path.is_file() or parquet_path.is_symlink() or parquet_path.suffix != ".parquet":
+                    raise Layer2PublicationValidationError(f"unexpected operational Layer 2 dataset: {parquet_path}")
+                if dataset not in declared:
+                    raise Layer2PublicationValidationError(f"unexpected operational Layer 2 dataset: {parquet_path}")
+                try:
+                    rows = pl.read_parquet(parquet_path).to_dicts()
+                except Exception as exc:
+                    raise Layer2PublicationValidationError(f"cannot read operational Layer 2 dataset: {parquet_path}") from exc
+                if any(str(row.get("cik") or "") != child.name for row in rows):
+                    raise Layer2PublicationValidationError("operational Layer 2 row CIK does not match partition")
+                datasets[dataset].extend(rows)
     return {name: tuple(rows) for name, rows in datasets.items()}
 
 

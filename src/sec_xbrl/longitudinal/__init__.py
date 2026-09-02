@@ -119,6 +119,13 @@ from sec_xbrl.longitudinal.recast import (
     RecastObservationError,
     validate_recast_evidence,
 )
+from sec_xbrl.longitudinal.relationship_index import (
+    RELATIONSHIP_INDEX_RULE_VERSION,
+    FilingRelationshipIndexError,
+    FilingRelationshipIndexPipeline,
+    FilingRelationshipIndexReader,
+    FilingRelationshipIndexResult,
+)
 from sec_xbrl.longitudinal.review_inventory import (
     REVIEW_INVENTORY_VERSION,
     ReviewInventoryError,
@@ -165,6 +172,7 @@ __all__ = [
     "QUARTERLY_POLICY_VERSION",
     "RAW_TABLES",
     "RECAST_REGISTRY_VERSION",
+    "RELATIONSHIP_INDEX_RULE_VERSION",
     "REVIEW_INVENTORY_VERSION",
     "SELECTION_MATERIALIZATION_VERSION",
     "SERIES_RULE_VERSION",
@@ -200,6 +208,10 @@ __all__ = [
     "CurrentComparablePublisher",
     "CurrentComparableResult",
     "CurrentSeries",
+    "FilingRelationshipIndexError",
+    "FilingRelationshipIndexPipeline",
+    "FilingRelationshipIndexReader",
+    "FilingRelationshipIndexResult",
     "Layer1SnapshotInput",
     "Layer2MaterializationError",
     "Layer2Publication",

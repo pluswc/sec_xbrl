@@ -16,6 +16,16 @@ an absent or uncertain mapping remains review-required rather than being
 silently joined.  T1 deliberately performs no AS_FILED selection, recast
 selection, Q4 derivation, or calculation.
 
+## T2 filing-versioned relationship index
+
+T2 publishes every Layer 1 PRE/CAL/DEF relationship as a separate
+`filing_relationship_edge` row. It makes filing-specific statement and
+dimension structure fast to find while retaining the filing/accession/version,
+role, fully specified base-set identity, raw endpoints, and all edge
+attributes. Canonical endpoint maps are additive only. T2 never merges network
+types, traverses a graph, infers a subtotal or driver, or selects a filing
+version.
+
 ## Mapping entities
 - `company_concept_map`
 - `company_axis_map`
