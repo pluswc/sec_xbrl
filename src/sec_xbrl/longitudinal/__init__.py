@@ -45,6 +45,8 @@ from sec_xbrl.longitudinal.corpus_release import (
     CorpusReleaseAdapter,
     CorpusReleaseError,
     CorpusSnapshot,
+    RawFilingIndex,
+    RawFilingReference,
 )
 from sec_xbrl.longitudinal.current_comparable import (
     CURRENT_COMPARABLE_VERSION,
@@ -228,6 +230,8 @@ __all__ = [
     "QuarterlyPolicyV2Publisher",
     "QuarterlyPolicyV2Reader",
     "QuarterlySemanticDeclaration",
+    "RawFilingIndex",
+    "RawFilingReference",
     "RecastObservationBuilder",
     "RecastObservationError",
     "ReviewInventoryError",

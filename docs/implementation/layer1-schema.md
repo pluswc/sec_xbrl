@@ -6,6 +6,16 @@ Raw Fact collection scope—including all top-level reported Facts, explicit
 exclusions, and the boundary with later analytical selection—is defined in
 [M1 Inline XBRL complete Layer 1 ingestion](m1-inline-xbrl-completeness.md#raw-layer-1-collection-scope--raw-layer-1-수집-범위).
 
+## Raw filing discovery and point access
+
+`RawFilingIndex` is the Layer 1 provider interface for a point lookup within
+an explicitly named immutable corpus. It reads filing metadata only, returning
+all exact raw candidates by CIK, issuer fiscal year/period, form, or report
+date. A returned reference can then be opened as one fully verified Layer 1
+snapshot. It never chooses between a 10-Q and 10-Q/A, treats a filing as an
+analytical result, or applies an as-of/recast policy; those are Layer 2
+responsibilities.
+
 ## M2 materialization boundary
 
 `sec_xbrl.facts.layer1.Layer1Extractor` is the M2 boundary from an already
