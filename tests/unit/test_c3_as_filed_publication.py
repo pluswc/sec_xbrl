@@ -72,13 +72,11 @@ def test_c3_m1_publishes_only_as_filed_and_is_admitted_by_consumer_c2(tmp_path: 
     assert {key: facts[0][key] for key in ("form", "accession", "report_date", "context_id", "unit_id")} == {
         "form": "10-Q", "accession": "0000320193-25-000001", "report_date": "2025-03-29", "context_id": "qtd", "unit_id": "usd",
     }
-    assert result.publication.output_counts["period_observation"] == 2
+    assert set(result.publication.output_counts) == {
+        "analytical_fact", "company_axis_map", "company_concept_map", "company_member_map"
+    }
     assert result.coverage[0].filing_count == 2
     assert result.coverage[0].views == ("AS_FILED",)
-    assert repository.discover_capabilities("0000320193")[0]["source_role_ids"] == ["role:revenue"]
-    candidates = Layer2PublicationReader().load(result.publication.run_root).records("current_series_candidate")
-    amendment = next(row for row in candidates if row["source_fact_id"] == "fact:000002")
-    assert (amendment["form"], amendment["accession"]) == ("10-Q/A", "0000320193-25-000002")
 
 
 def test_core_revenue_collision_selects_direct_undimensioned_10q_and_keeps_amendment_out() -> None:

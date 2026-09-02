@@ -150,6 +150,10 @@ executable/inspection checklist is maintained in
   explicit reason, never an earlier-basis value.
 - selected or unavailable outputs preserve period, source Fact/filing,
   canonical/mapping lineage, basis/source type, rule version, and `as_of_date`.
+- the operational AS_FILED publication writes only required company mappings
+  and analytical facts as Parquet; it does not run comparable/recast selection,
+  create capability inventory or intermediate series outputs, or compute
+  row-content hashes.
 
 ## M8 — Layer 3
 - analytical grouping preserves raw/company IDs.

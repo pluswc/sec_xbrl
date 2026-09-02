@@ -210,6 +210,16 @@ class Layer2PublicationReader:
             raise Layer2PublicationValidationError("Layer 2 manifest fingerprint does not match its declaration")
         if manifest.get("contract_version") != LAYER2_CONTRACT_VERSION:
             raise Layer2PublicationValidationError("unsupported Layer 2 materialization contract version")
+        if manifest.get("storage_format") == "parquet-operational-v1":
+            _validate_operational_manifest_shape(manifest)
+            datasets = _read_operational_parquet_datasets(root, manifest, run)
+            try:
+                counts = _validate_candidate(run, datasets)
+            except Layer2MaterializationError as exc:
+                raise Layer2PublicationValidationError("Layer 2 publication rows fail contract validation") from exc
+            if counts != manifest["output_counts"]:
+                raise Layer2PublicationValidationError("Layer 2 publication row counts do not match manifest")
+            return _verified_publication(root, manifest_path, run, datasets)
         if manifest.get("storage_format") != "canonical-jsonl-v1":
             raise Layer2PublicationValidationError("unsupported Layer 2 publication storage format")
         _validate_manifest_shape(manifest)
@@ -224,26 +234,7 @@ class Layer2PublicationReader:
         hashes = _dataset_hashes(datasets)
         if hashes != manifest["output_content_sha256"]:
             raise Layer2PublicationValidationError("Layer 2 publication content hashes do not match manifest")
-        identity = {
-            "layer2_run_version": run.run_version,
-            "layer2_run_fingerprint": run.fingerprint,
-            "layer2_contract_version": run.contract_version,
-            "layer2_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
-        }
-        copied = MappingProxyType(
-            {
-                name: tuple(MappingProxyType(dict(row)) for row in rows)
-                for name, rows in datasets.items()
-            }
-        )
-        return VerifiedLayer2Publication(
-            run_root=root,
-            manifest_path=manifest_path,
-            identity=MappingProxyType(identity),
-            input_ciks=tuple(sorted(item.cik for item in run.inputs)),
-            datasets=copied,
-            _reader_attestation=_READER_ATTESTATION_TOKEN,
-        )
+        return _verified_publication(root, manifest_path, run, datasets)
 
 
 @dataclass(frozen=True, slots=True)
@@ -374,6 +365,90 @@ class Layer2Publisher:
         return Layer2Publication(
             run_root=destination,
             manifest_path=manifest_path,
+            fingerprint=run.fingerprint,
+            output_counts=counts,
+            reused_existing=True,
+        )
+
+
+class OperationalLayer2Publisher:
+    """Write the minimal governed Layer 2 panel as Parquet.
+
+    Unlike the legacy JSONL contract fixture, this operational writer validates
+    rows once, writes each logical dataset once, and records only lightweight
+    run metadata and row counts. It intentionally has no row-content hash or
+    JSONL read-back pass.
+    """
+
+    manifest_name = "layer2_run_manifest.json"
+    storage_format = "parquet-operational-v1"
+
+    def __init__(self, root: Path = DEFAULT_LAYER2_ROOT) -> None:
+        self.root = Path(root)
+
+    def publish(
+        self, run: Layer2Run, datasets: Mapping[str, Sequence[Mapping[str, Any]]]
+    ) -> Layer2Publication:
+        normalized = _normalize_datasets(datasets)
+        counts = _validate_candidate(run, normalized)
+        destination = self.root / run.run_version
+        if destination.exists():
+            return self._existing_publication(destination, run, counts)
+
+        self.root.mkdir(parents=True, exist_ok=True)
+        staging_root = self.root / ".staging"
+        staging_root.mkdir(parents=True, exist_ok=True)
+        temporary = Path(tempfile.mkdtemp(prefix=f".{run.run_version}.partial-", dir=staging_root))
+        try:
+            _write_operational_parquet_datasets(temporary, normalized)
+            manifest = {
+                "contract_version": run.contract_version,
+                "run_version": run.run_version,
+                "corpus_run_id": run.corpus_run_id,
+                "run_fingerprint": run.fingerprint,
+                "inputs": _sorted_dicts(asdict(item) for item in run.inputs),
+                "rules": asdict(run.rules),
+                "output_counts": dict(sorted(counts.items())),
+                "validation": {
+                    "ANALYTICAL_FACT_LINEAGE": "SUCCESS",
+                    "RUN_INPUT_AND_VERSION_MANIFEST": "SUCCESS",
+                    "ATOMIC_PUBLICATION": "SUCCESS",
+                },
+                "published_at": datetime.now(UTC).isoformat(),
+                "storage_format": self.storage_format,
+            }
+            (temporary / self.manifest_name).write_text(
+                json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            if destination.exists():
+                return self._existing_publication(destination, run, counts)
+            os.replace(temporary, destination)
+            return Layer2Publication(
+                run_root=destination,
+                manifest_path=destination / self.manifest_name,
+                fingerprint=run.fingerprint,
+                output_counts=counts,
+                reused_existing=False,
+            )
+        except Exception:
+            shutil.rmtree(temporary, ignore_errors=True)
+            raise
+
+    def _existing_publication(
+        self, destination: Path, run: Layer2Run, counts: Mapping[str, int]
+    ) -> Layer2Publication:
+        manifest = _read_publication_manifest(destination / self.manifest_name)
+        if (
+            manifest.get("storage_format") != self.storage_format
+            or manifest.get("run_fingerprint") != run.fingerprint
+            or manifest.get("output_counts") != dict(sorted(counts.items()))
+        ):
+            raise Layer2MaterializationError(
+                f"run_version already belongs to a different operational publication: {destination}"
+            )
+        return Layer2Publication(
+            run_root=destination,
+            manifest_path=destination / self.manifest_name,
             fingerprint=run.fingerprint,
             output_counts=counts,
             reused_existing=True,
@@ -922,6 +997,93 @@ def _read_publication_manifest(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise Layer2PublicationValidationError("Layer 2 manifest must be a JSON object")
     return value
+
+
+def _write_operational_parquet_datasets(
+    root: Path, datasets: Mapping[str, Sequence[Mapping[str, Any]]]
+) -> None:
+    try:
+        import polars as pl
+    except ImportError as exc:  # pragma: no cover - project dependency
+        raise Layer2MaterializationError("polars is required for operational Layer 2 Parquet") from exc
+    by_cik: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for dataset, rows in datasets.items():
+        for row in rows:
+            by_cik.setdefault(str(row["cik"]), {}).setdefault(dataset, []).append(dict(row))
+    for cik, tables in by_cik.items():
+        company_root = root / cik
+        company_root.mkdir(parents=True, exist_ok=True)
+        for dataset, rows in tables.items():
+            pl.DataFrame(rows, strict=False).write_parquet(company_root / f"{dataset}.parquet")
+
+
+def _validate_operational_manifest_shape(manifest: Mapping[str, Any]) -> None:
+    expected = {
+        "contract_version", "run_version", "corpus_run_id", "run_fingerprint", "inputs", "rules",
+        "output_counts", "validation", "published_at", "storage_format",
+    }
+    if set(manifest) != expected or not isinstance(manifest.get("output_counts"), dict):
+        raise Layer2PublicationValidationError("operational Layer 2 manifest is malformed")
+    if any(type(value) is not int or value < 0 for value in manifest["output_counts"].values()):
+        raise Layer2PublicationValidationError("operational Layer 2 manifest has invalid output counts")
+    expected_validation = {
+        "ANALYTICAL_FACT_LINEAGE", "RUN_INPUT_AND_VERSION_MANIFEST", "ATOMIC_PUBLICATION"
+    }
+    if manifest.get("validation") != {key: "SUCCESS" for key in expected_validation}:
+        raise Layer2PublicationValidationError("operational Layer 2 manifest did not declare success")
+
+
+def _read_operational_parquet_datasets(
+    root: Path, manifest: Mapping[str, Any], run: Layer2Run
+) -> dict[str, tuple[dict[str, Any], ...]]:
+    try:
+        import polars as pl
+    except ImportError as exc:  # pragma: no cover - project dependency
+        raise Layer2PublicationValidationError("polars is required for operational Layer 2 Parquet") from exc
+    declared = set(manifest["output_counts"])
+    input_ciks = {item.cik for item in run.inputs}
+    datasets: dict[str, list[dict[str, Any]]] = {name: [] for name in declared}
+    for child in root.iterdir():
+        if child.name == Layer2PublicationReader.manifest_name:
+            continue
+        if not child.is_dir() or child.is_symlink() or child.name not in input_ciks:
+            raise Layer2PublicationValidationError(f"unexpected operational Layer 2 entry: {child}")
+        for file_path in child.iterdir():
+            if not file_path.is_file() or file_path.is_symlink() or file_path.suffix != ".parquet":
+                raise Layer2PublicationValidationError(f"unexpected operational Layer 2 dataset: {file_path}")
+            dataset = file_path.stem
+            if dataset not in declared:
+                raise Layer2PublicationValidationError(f"unexpected operational Layer 2 dataset: {file_path}")
+            try:
+                rows = pl.read_parquet(file_path).to_dicts()
+            except Exception as exc:
+                raise Layer2PublicationValidationError(f"cannot read operational Layer 2 dataset: {file_path}") from exc
+            if any(str(row.get("cik") or "") != child.name for row in rows):
+                raise Layer2PublicationValidationError("operational Layer 2 row CIK does not match partition")
+            datasets[dataset].extend(rows)
+    return {name: tuple(rows) for name, rows in datasets.items()}
+
+
+def _verified_publication(
+    root: Path, manifest_path: Path, run: Layer2Run, datasets: Mapping[str, Sequence[Mapping[str, Any]]]
+) -> VerifiedLayer2Publication:
+    identity = {
+        "layer2_run_version": run.run_version,
+        "layer2_run_fingerprint": run.fingerprint,
+        "layer2_contract_version": run.contract_version,
+        "layer2_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+    }
+    copied = MappingProxyType(
+        {name: tuple(MappingProxyType(dict(row)) for row in rows) for name, rows in datasets.items()}
+    )
+    return VerifiedLayer2Publication(
+        run_root=root,
+        manifest_path=manifest_path,
+        identity=MappingProxyType(identity),
+        input_ciks=tuple(sorted(item.cik for item in run.inputs)),
+        datasets=copied,
+        _reader_attestation=_READER_ATTESTATION_TOKEN,
+    )
 
 
 def _validate_manifest_shape(manifest: Mapping[str, Any]) -> None:

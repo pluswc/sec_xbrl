@@ -9,12 +9,10 @@ API나 MCP 서버를 뜻하지 않으며, Excel 전용 인터페이스도 아니
 
 현재의 구현체는 `sec_xbrl.analytics.ConsumerDataAccess` 계약과 이를 구현한
 `AnalyticalRepository`다. C2에서는 `Layer2PublicationReader`가 원자적으로
-발행된 canonical JSONL Layer 2 run을 manifest·run fingerprint·row count·canonical
-content SHA-256까지 검증한 뒤 Repository를 구성한다. 각 row에는 run version,
-fingerprint, contract version, manifest SHA-256로 이루어진 publication identity가
-남는다. 이는 JSONL publication adapter이며 DB 또는 Parquet adapter는 아직
-구현되지 않았다. 이후 DB 또는 Parquet 구현체도 이 계약을
-충족하면 소비자는 저장 위치를 알 필요가 없다.
+발행된 operational Parquet 또는 legacy canonical JSONL Layer 2 run을 manifest,
+run fingerprint, row count, 그리고 row-level 계약으로 확인한 뒤 Repository를
+구성한다. 운영 Parquet 경로는 content hash와 JSONL read-back을 수행하지 않는다.
+이후 DB 구현체도 이 계약을 충족하면 소비자는 저장 위치를 알 필요가 없다.
 
 ```text
 Raw Layer 1 → Analytical plane → Derived Metrics plane
@@ -103,8 +101,8 @@ DB adapter는 SQL을 사용할 수 있고 Parquet adapter는 파일을 읽을 �
 
 ## Current boundary and future work / 현재 범위와 후속 작업
 
-현재 `AnalyticalRepository`는 publication-backed in-process 구현체다. DB,
-Parquet, HTTP, MCP는 아직 이 계약의 구현체가 아니다. 실제 Excel migration은
+현재 `AnalyticalRepository`는 publication-backed in-process 구현체이며 operational
+Parquet publication을 읽는다. DB, HTTP, MCP는 아직 이 계약의 구현체가 아니다. 실제 Excel migration은
 이 계약을 읽는 표시 consumer를 만드는 별도 작업이며, Excel만의 계산 또는
 selection rule을 추가하는 작업이 아니다.
 

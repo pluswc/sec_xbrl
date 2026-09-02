@@ -53,46 +53,38 @@ class AnalyticalFactMaterializer:
         current_candidates: Iterable[Mapping[str, Any]] = (),
         recast_evidence: Iterable[Mapping[str, Any]] = (),
         as_of_date: str,
+        views: Iterable[str] = ("AS_FILED", "CURRENT_COMPARABLE"),
     ) -> AnalyticalFactSelectionResult:
+        requested_views = frozenset(views)
+        unsupported_views = requested_views - {"AS_FILED", "CURRENT_COMPARABLE"}
+        if not requested_views or unsupported_views:
+            raise ValueError(f"unsupported analytical selection views: {sorted(unsupported_views)}")
         candidates = tuple(_selection_candidate(row) for row in (*annual_candidates, *current_candidates))
-        evidence = tuple(validate_recast_evidence(row) for row in recast_evidence)
         self._validate_candidates(candidates)
-        cik_by_raw_fact: dict[str, Any] = {}
-        for row in candidates:
-            cik = row.get("cik")
-            for source_id in (
-                row.get("source_raw_fact_id"), row.get("source_fact_id"),
-                *(row.get("source_fact_ids") or ()),
-            ):
-                if source_id:
-                    cik_by_raw_fact[str(source_id)] = cik
-        evidence = tuple(
-            {
-                **row,
-                "cik": cik_by_raw_fact.get(str(row["source_raw_fact_id"])),
-            }
-            for row in evidence
-        )
-        if any(not row.get("cik") for row in evidence):
-            raise RecastObservationError("recast evidence source raw Fact has no candidate CIK")
-        bound = RecastObservationBuilder().build(candidates, evidence=evidence)
-
-        as_filed = AsOfSeriesSelector().select(bound, as_of_date=as_of_date, view="AS_FILED")
-        comparable_inputs = tuple(row for row in bound if _comparable_input(row))
-        comparable = self._select_comparable(
-            all_rows=bound, comparable_rows=comparable_inputs, as_of_date=as_of_date
-        )
-        facts = tuple(sorted(
-            tuple(_analytical_fact(row, durable_view="AS_FILED") for row in as_filed)
-            + tuple(_analytical_fact(row, durable_view="CURRENT_COMPARABLE") for row in comparable),
-            key=lambda row: str(row["analytical_fact_id"]),
-        ))
+        facts: list[dict[str, Any]] = []
+        evidence: tuple[dict[str, Any], ...] = ()
+        if "AS_FILED" in requested_views:
+            facts.extend(
+                _analytical_fact(row, durable_view="AS_FILED")
+                for row in AsOfSeriesSelector().select(candidates, as_of_date=as_of_date, view="AS_FILED")
+            )
+        if "CURRENT_COMPARABLE" in requested_views:
+            evidence = _bound_recast_evidence(candidates, recast_evidence)
+            bound = RecastObservationBuilder().build(candidates, evidence=evidence)
+            comparable_inputs = tuple(row for row in bound if _comparable_input(row))
+            facts.extend(
+                _analytical_fact(row, durable_view="CURRENT_COMPARABLE")
+                for row in self._select_comparable(
+                    all_rows=bound, comparable_rows=comparable_inputs, as_of_date=as_of_date
+                )
+            )
         return AnalyticalFactSelectionResult(
-            analytical_facts=facts,
+            analytical_facts=tuple(sorted(facts, key=lambda row: str(row["analytical_fact_id"]))),
             recast_evidence=tuple(sorted(evidence, key=lambda row: (
                 str(row["recast_evidence_id"]), str(row["source_raw_fact_id"])
             ))),
         )
+
 
     def _select_comparable(
         self,
@@ -152,6 +144,26 @@ class AnalyticalFactMaterializer:
                 # It is kept in AS_FILED only as an explicit unavailable row,
                 # never selected as a canonical/current-comparable value.
                 row["selection_unavailable_reason"] = "MAPPING_REVIEW_REQUIRED"
+
+
+def _bound_recast_evidence(
+    candidates: Iterable[Mapping[str, Any]], recast_evidence: Iterable[Mapping[str, Any]]
+) -> tuple[dict[str, Any], ...]:
+    evidence = tuple(validate_recast_evidence(row) for row in recast_evidence)
+    cik_by_raw_fact: dict[str, Any] = {}
+    for row in candidates:
+        cik = row.get("cik")
+        for source_id in (
+            row.get("source_raw_fact_id"), row.get("source_fact_id"), *(row.get("source_fact_ids") or ()),
+        ):
+            if source_id:
+                cik_by_raw_fact[str(source_id)] = cik
+    bound = tuple(
+        {**row, "cik": cik_by_raw_fact.get(str(row["source_raw_fact_id"]))} for row in evidence
+    )
+    if any(not row.get("cik") for row in bound):
+        raise RecastObservationError("recast evidence source raw Fact has no candidate CIK")
+    return bound
 
 
 def _comparable_input(row: Mapping[str, Any]) -> bool:

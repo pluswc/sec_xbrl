@@ -71,6 +71,7 @@ from sec_xbrl.longitudinal.materialization import (
     Layer2Publisher,
     Layer2RuleVersions,
     Layer2Run,
+    OperationalLayer2Publisher,
 )
 from sec_xbrl.longitudinal.mechanical_q4 import (
     MECHANICAL_Q4_VERSION,
@@ -210,6 +211,7 @@ __all__ = [
     "MemberOrderingView",
     "MetricInputHandoffMaterializer",
     "MetricInputHandoffResult",
+    "OperationalLayer2Publisher",
     "PeriodObservationMaterializer",
     "PeriodObservationResult",
     "Q4PolicyRegistryError",
