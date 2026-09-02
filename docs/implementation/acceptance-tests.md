@@ -128,10 +128,13 @@ executable/inspection checklist is maintained in
   namespaces, with old/new raw namespaces retained as mapping evidence;
   custom concepts do not use this automatic continuity rule.
 - a caller-selected common-core registry can produce a repeatable
-  undimensioned quarterly diagnostic with explicit `REPORTED`, `DERIVED`,
-  `UNAVAILABLE`, and `MISSING` cells; Revenue accepts both supported standard
-  US-GAAP aliases and a Mechanical Q4 companion can satisfy only Q4 as
-  `DERIVED`.
+  undimensioned quarterly and cumulative diagnostic with explicit `REPORTED`,
+  `DERIVED`, `UNAVAILABLE`, and `MISSING` cells. For the core flow-completion
+  gate, Revenue (both supported aliases), Gross Profit, Operating Income
+  (Loss), and Net Income (Loss) each produce Q1–Q4 cells on both bases:
+  quarterly `QTD_3M` and cumulative `QTD_3M`/`YTD_6M`/`YTD_9M`/`FY`. A
+  Mechanical Q4 companion can satisfy only the quarterly Q4 cell as `DERIVED`,
+  never the cumulative FY cell.
 - for a selected common-core same-period collision, direct reported `10-Q`
   ranks ahead of later comparative filings; within each eligible filing an
   undimensioned Fact ranks ahead of a dimensioned Fact; the latest

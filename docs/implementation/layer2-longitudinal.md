@@ -202,11 +202,15 @@ includes Revenue aliases (`Revenues` and
 `RevenueFromContractWithCustomerExcludingAssessedTax`) and basic statement
 anchors, but it is not a claim that each entry is mandatory for every issuer.
 For the selected core set and fiscal years, it emits one undimensioned cell per
-concept/quarter as `REPORTED`, `DERIVED`, `UNAVAILABLE`, or `MISSING`.  A
-Mechanical Q4 companion row may satisfy Q4 as `DERIVED`; an unavailable
-AS_FILED selection remains visible with its reason.  The validator never
-selects a replacement fact, collapses dimensions, or changes Layer 1/Layer 2
-records.
+concept/quarter/basis as `REPORTED`, `DERIVED`, `UNAVAILABLE`, or `MISSING`.
+`QUARTERLY` requires `QTD_3M` for Q1–Q4. `CUMULATIVE` requires `QTD_3M`,
+`YTD_6M`, `YTD_9M`, and `FY` for Q1–Q4 respectively. A Mechanical Q4 companion
+row may satisfy only quarterly Q4 as `DERIVED`; it never substitutes for the
+FY cumulative cell. An unavailable AS_FILED selection remains visible with its
+reason. `validate_core_flow_completion()` applies both bases to the bundled
+Revenue, Gross Profit, Operating Income (Loss), and Net Income (Loss) registry.
+The validator never selects a replacement fact, collapses dimensions, or
+changes Layer 1/Layer 2 records.
 
 ## L2-M3 company-series materialization
 

@@ -22,6 +22,13 @@ class CoverageStatus(StrEnum):
     MISSING = "MISSING"
 
 
+class CoverageBasis(StrEnum):
+    """Whether a cell represents a quarter-alone or fiscal-year-to-date value."""
+
+    QUARTERLY = "QUARTERLY"
+    CUMULATIVE = "CUMULATIVE"
+
+
 @dataclass(frozen=True, slots=True)
 class CoreConceptDefinition:
     """A standard-taxonomy concept family a caller may elect to validate."""
@@ -46,6 +53,11 @@ CORE_CONCEPTS: tuple[CoreConceptDefinition, ...] = (
     CoreConceptDefinition("cash_and_cash_equivalents", "Cash and cash equivalents", ("CashAndCashEquivalentsAtCarryingValue",), "instant", "INSTANT"),
 )
 CORE_CONCEPTS_BY_KEY = {definition.key: definition for definition in CORE_CONCEPTS}
+FLOW_CORE_CONCEPTS: tuple[CoreConceptDefinition, ...] = tuple(
+    definition
+    for definition in CORE_CONCEPTS
+    if definition.period_type == "duration" and definition.required_period_class == "QTD_3M"
+)
 
 
 def core_canonical_concept_ids(
@@ -62,6 +74,8 @@ class QuarterlyCoverageCell:
     concept_key: str
     fiscal_year: int
     fiscal_quarter: int
+    coverage_basis: CoverageBasis
+    required_period_class: str
     status: CoverageStatus
     company_canonical_concept_id: str | None
     source_id: str | None
@@ -91,6 +105,8 @@ class QuarterlyCoverageResult:
                 "concept_key": cell.concept_key,
                 "fiscal_year": cell.fiscal_year,
                 "fiscal_quarter": cell.fiscal_quarter,
+                "coverage_basis": cell.coverage_basis.value,
+                "required_period_class": cell.required_period_class,
                 "status": cell.status.value,
                 "company_canonical_concept_id": cell.company_canonical_concept_id,
                 "source_id": cell.source_id,
@@ -101,7 +117,13 @@ class QuarterlyCoverageResult:
 
 
 class CoreQuarterlyCoverageValidator:
-    """Compare selected AS_FILED rows and optional derived Q4 rows to a registry."""
+    """Build a read-only core flow coverage matrix from governed observations.
+
+    ``QUARTERLY`` cells require QTD_3M for every quarter.  ``CUMULATIVE``
+    cells require QTD_3M, YTD_6M, YTD_9M, and FY for Q1 through Q4.  A
+    mechanical derived fact may fill only a quarterly Q4 cell; it is never a
+    substitute for the FY cumulative cell.
+    """
 
     def validate(
         self,
@@ -112,9 +134,11 @@ class CoreQuarterlyCoverageValidator:
         fiscal_years: Iterable[int],
         core_concepts: Iterable[CoreConceptDefinition] = (CORE_CONCEPTS_BY_KEY["revenue"],),
         derived_facts: Iterable[Mapping[str, Any]] = (),
+        coverage_bases: Iterable[CoverageBasis] = (CoverageBasis.QUARTERLY,),
     ) -> QuarterlyCoverageResult:
         definitions = tuple(core_concepts)
         years = tuple(sorted({int(year) for year in fiscal_years}))
+        bases = tuple(dict.fromkeys(CoverageBasis(basis) for basis in coverage_bases))
         canonical_by_definition = _canonical_ids(definitions, company_concept_map)
         reported = _reported_by_cell(analytical_facts)
         derived = _derived_by_cell(derived_facts)
@@ -123,34 +147,65 @@ class CoreQuarterlyCoverageValidator:
             canonical_ids = canonical_by_definition[definition.key]
             for year in years:
                 for quarter in range(1, 5):
-                    key = (year, quarter)
-                    selected = _first_for_concepts(
-                        reported.get(key, ()), canonical_ids, period_class=definition.required_period_class
-                    )
-                    if selected is not None:
-                        cells.append(_cell(cik, definition, year, quarter, selected, CoverageStatus.REPORTED))
-                        continue
-                    selected = _first_for_concepts(
-                        derived.get(key, ()), canonical_ids, period_class=definition.required_period_class
-                    )
-                    if selected is not None:
-                        cells.append(_cell(cik, definition, year, quarter, selected, CoverageStatus.DERIVED))
-                        continue
-                    unavailable = _first_for_concepts(
-                        reported.get(key, ()), canonical_ids,
-                        unavailable=True, period_class=definition.required_period_class,
-                    )
-                    cells.append(
-                        _cell(
-                            cik,
-                            definition,
-                            year,
-                            quarter,
-                            unavailable,
-                            CoverageStatus.UNAVAILABLE if unavailable else CoverageStatus.MISSING,
+                    for basis in bases:
+                        required_period_class = _required_period_class(definition, basis, quarter)
+                        key = (year, quarter)
+                        selected = _first_for_concepts(
+                            reported.get(key, ()), canonical_ids, period_class=required_period_class
                         )
-                    )
+                        if selected is not None:
+                            cells.append(_cell(
+                                cik, definition, year, quarter, basis, required_period_class,
+                                selected, CoverageStatus.REPORTED,
+                            ))
+                            continue
+                        if basis == CoverageBasis.QUARTERLY and quarter == 4:
+                            selected = _first_for_concepts(
+                                derived.get(key, ()), canonical_ids, period_class=required_period_class
+                            )
+                            if selected is not None:
+                                cells.append(_cell(
+                                    cik, definition, year, quarter, basis, required_period_class,
+                                    selected, CoverageStatus.DERIVED,
+                                ))
+                                continue
+                        unavailable = _first_for_concepts(
+                            reported.get(key, ()), canonical_ids,
+                            unavailable=True, period_class=required_period_class,
+                        )
+                        cells.append(
+                            _cell(
+                                cik,
+                                definition,
+                                year,
+                                quarter,
+                                basis,
+                                required_period_class,
+                                unavailable,
+                                CoverageStatus.UNAVAILABLE if unavailable else CoverageStatus.MISSING,
+                            )
+                        )
         return QuarterlyCoverageResult(tuple(cells))
+
+    def validate_core_flow_completion(
+        self,
+        *,
+        cik: str,
+        analytical_facts: Iterable[Mapping[str, Any]],
+        company_concept_map: Iterable[Mapping[str, Any]],
+        fiscal_years: Iterable[int],
+        derived_facts: Iterable[Mapping[str, Any]] = (),
+    ) -> QuarterlyCoverageResult:
+        """Validate the requested four GAAP flow anchors on both bases."""
+        return self.validate(
+            cik=cik,
+            analytical_facts=analytical_facts,
+            company_concept_map=company_concept_map,
+            fiscal_years=fiscal_years,
+            core_concepts=FLOW_CORE_CONCEPTS,
+            derived_facts=derived_facts,
+            coverage_bases=(CoverageBasis.QUARTERLY, CoverageBasis.CUMULATIVE),
+        )
 
 
 def _canonical_ids(
@@ -227,8 +282,19 @@ def _first_for_concepts(
     return None
 
 
+def _required_period_class(
+    definition: CoreConceptDefinition, basis: CoverageBasis, quarter: int,
+) -> str:
+    if basis == CoverageBasis.QUARTERLY:
+        return definition.required_period_class
+    if definition.period_type != "duration":
+        raise ValueError("cumulative coverage is defined only for duration concepts")
+    return {1: "QTD_3M", 2: "YTD_6M", 3: "YTD_9M", 4: "FY"}[quarter]
+
+
 def _cell(
     cik: str, definition: CoreConceptDefinition, year: int, quarter: int,
+    basis: CoverageBasis, required_period_class: str,
     source: Mapping[str, Any] | None, status: CoverageStatus,
 ) -> QuarterlyCoverageCell:
     source_id = None
@@ -238,7 +304,10 @@ def _cell(
         canonical_id = str(source.get("company_canonical_concept_id") or "") or None
         source_id = str(source.get("analytical_fact_id") or source.get("mechanical_q4_id") or "") or None
         reason = source.get("unavailable_reason")
-    return QuarterlyCoverageCell(cik, definition.key, year, quarter, status, canonical_id, source_id, reason)
+    return QuarterlyCoverageCell(
+        cik, definition.key, year, quarter, basis, required_period_class,
+        status, canonical_id, source_id, reason,
+    )
 
 
 def _is_us_gaap(row: Mapping[str, Any]) -> bool:

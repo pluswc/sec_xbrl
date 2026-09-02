@@ -51,6 +51,19 @@ candidates/Metrics only.
 ## Existing accession process
 This project assumes accession discovery already exists. The downstream pipeline consumes that output via an adapter contract rather than reimplementing discovery. See `docs/implementation/accession-contract.md`.
 
+## Development and test environment
+
+Use the repository's Python 3.12 environment managed by `uv`, matching CI.
+It installs `arelle-release`, which is required by parser and Inline-transform
+tests. Do not substitute an arbitrary system or Conda environment merely
+because it has `pytest` installed.
+
+```bash
+uv sync --extra dev
+uv run ruff check .
+uv run pytest -q
+```
+
 ## Milestones
 - M0: data-plane contract and release governance
 - M1: Filing package resolver + Arelle loading
