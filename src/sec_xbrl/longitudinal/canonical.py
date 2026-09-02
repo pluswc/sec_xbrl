@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -728,8 +729,9 @@ def _exact_standard_identity(left: Mapping[str, Any], right: Mapping[str, Any]) 
     return (
         bool(left.get("is_standard"))
         and bool(right.get("is_standard"))
-        and left.get("qname") == right.get("qname")
         and left.get("namespace_uri") == right.get("namespace_uri")
+        and _standard_local_name(left)
+        and _standard_local_name(left) == _standard_local_name(right)
         and _compatible_context_semantics(left, right)
     )
 
@@ -748,7 +750,8 @@ def _standard_us_gaap_namespace_continuity(
     return bool(
         left.get("is_standard")
         and right.get("is_standard")
-        and _taxonomy_family(left) == _taxonomy_family(right) == "us-gaap"
+        and _is_annual_fasb_us_gaap_namespace(left.get("namespace_uri"))
+        and _is_annual_fasb_us_gaap_namespace(right.get("namespace_uri"))
         and _standard_local_name(left)
         and _standard_local_name(left) == _standard_local_name(right)
         and left.get("namespace_uri") != right.get("namespace_uri")
@@ -757,12 +760,20 @@ def _standard_us_gaap_namespace_continuity(
     )
 
 
-def _taxonomy_family(row: Mapping[str, Any]) -> str:
-    """Use Layer 1 family when present, with namespace as a safe legacy adapter."""
-    family = str(row.get("taxonomy_family") or "").casefold()
-    if family:
-        return family
-    return "us-gaap" if "us-gaap" in str(row.get("namespace_uri") or "").casefold() else ""
+_ANNUAL_FASB_US_GAAP_NAMESPACE = re.compile(
+    r"^https?://fasb\.org/us-gaap/[0-9]{4}$", re.IGNORECASE
+)
+
+
+def _is_annual_fasb_us_gaap_namespace(namespace_uri: object) -> bool:
+    """Accept only official, year-versioned FASB US-GAAP namespace URIs.
+
+    A QName prefix is an XML alias, so neither ``us-gaap`` nor ``gaap`` is a
+    trustworthy taxonomy classification by itself. This narrow rule permits
+    annual FASB namespace changes while leaving unversioned, look-alike, and
+    company-extension namespaces outside automatic continuity.
+    """
+    return bool(_ANNUAL_FASB_US_GAAP_NAMESPACE.fullmatch(str(namespace_uri or "")))
 
 
 def _standard_local_name(row: Mapping[str, Any]) -> str:

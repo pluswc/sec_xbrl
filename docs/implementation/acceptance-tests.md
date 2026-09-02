@@ -123,9 +123,11 @@ executable/inspection checklist is maintained in
 ## M7 — Layer 2
 - same-company mappings are additive to Raw.
 - namespace changes do not break a well-supported canonical series.
-- standard US-GAAP concepts with the same local name and compatible
-  period/type/balance/abstract fingerprint continue across annual taxonomy
-  namespaces, with old/new raw namespaces retained as mapping evidence;
+- only official FASB annual `http(s)://fasb.org/us-gaap/YYYY` namespaces with
+  the same local name and compatible period/type/balance/abstract fingerprint
+  continue automatically; taxonomy labels, QName prefixes, unversioned URIs,
+  and look-alike/company URIs do not qualify. Old/new raw namespaces remain
+  mapping evidence;
   custom concepts do not use this automatic continuity rule.
 - a caller-selected common-core registry can produce a repeatable
   undimensioned quarterly and cumulative diagnostic with explicit `REPORTED`,

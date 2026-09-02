@@ -319,6 +319,64 @@ def test_standard_us_gaap_concept_continues_across_annual_namespaces() -> None:
     assert rows[1]["evidence"]["namespace_uri"].endswith("/2025")
 
 
+def test_us_gaap_continuity_requires_official_versioned_namespace() -> None:
+    rows = CompanyCanonicalizer().build(
+        filings=_filings(),
+        concepts=(
+            _concept(
+                "revenue-2024", "k24", is_standard=True, qname="us-gaap:Revenues",
+                taxonomy_family="us-gaap", namespace_uri="http://fasb.org/us-gaap/2024",
+            ),
+            _concept(
+                "lookalike-2025", "q25", is_standard=True, qname="gaap:Revenues",
+                taxonomy_family="us-gaap", namespace_uri="https://example.test/us-gaap/2025",
+            ),
+        ),
+    ).company_concept_map
+
+    assert rows[1]["relation"] == MappingRelation.UNCERTAIN
+    assert rows[1]["company_canonical_id"] != rows[0]["company_canonical_id"]
+
+
+def test_us_gaap_continuity_does_not_depend_on_qname_prefix() -> None:
+    rows = CompanyCanonicalizer().build(
+        filings=_filings(),
+        concepts=(
+            _concept(
+                "revenue-2024", "k24", is_standard=True, qname="us-gaap:Revenues",
+                namespace_uri="http://fasb.org/us-gaap/2024",
+            ),
+            _concept(
+                "revenue-2025", "q25", is_standard=True, qname="alternate:Revenues",
+                namespace_uri="http://fasb.org/us-gaap/2025",
+            ),
+        ),
+    ).company_concept_map
+
+    assert rows[1]["relation"] == MappingRelation.SAME
+    assert rows[1]["company_canonical_id"] == rows[0]["company_canonical_id"]
+
+
+def test_exact_standard_identity_does_not_depend_on_qname_prefix() -> None:
+    rows = CompanyCanonicalizer().build(
+        filings=_filings(),
+        concepts=(
+            _concept(
+                "revenue-k", "k24", is_standard=True, qname="us-gaap:Revenues",
+                namespace_uri="http://fasb.org/us-gaap/2025",
+            ),
+            _concept(
+                "revenue-q", "q25", is_standard=True, qname="alternate:Revenues",
+                namespace_uri="http://fasb.org/us-gaap/2025",
+            ),
+        ),
+    ).company_concept_map
+
+    assert rows[1]["relation"] == MappingRelation.SAME
+    assert rows[1]["method"] == "EXACT_STANDARD_TAXONOMY"
+    assert rows[1]["company_canonical_id"] == rows[0]["company_canonical_id"]
+
+
 def test_custom_concept_with_same_name_across_namespaces_remains_review_required() -> None:
     rows = CompanyCanonicalizer().build(
         filings=_filings(),

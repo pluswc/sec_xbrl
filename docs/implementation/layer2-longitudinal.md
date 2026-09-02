@@ -142,15 +142,15 @@ earlier mapping.
 
 The automatic confirmation boundary is intentionally narrow:
 
-- exact standard QName and namespace identity is `SAME` only when declared
+- exact standard namespace URI and local-name identity is `SAME` only when declared
   `period_type` and `data_type` are both present and equal (and `balance` and
   `abstract` are compatible when declared); an incomplete or
   duration-versus-instant/type conflict remains `UNCERTAIN`;
-- a standard `us-gaap` concept may also be `SAME` across annual taxonomy
-  namespaces when its taxonomy family, local name, and full semantic
-  fingerprint (`period_type`, `data_type`, `balance`, `abstract`) agree.  The
-  mapping records both as-filed namespaces and QNames as evidence.  This rule
-  never applies to a custom concept;
+- the sole automatic cross-version standard-taxonomy rule is for an official
+  FASB annual URI matching `http(s)://fasb.org/us-gaap/YYYY`: equal local names
+  with compatible semantics are `SAME` across those years. The QName prefix is
+  not a comparison key; a generic `gaap` label, an unversioned URI, or a
+  look-alike/company URI containing `us-gaap` does not qualify;
 - a company extension namespace change is `RENAMED` only when local name,
   label, and role/axis/domain structural signatures agree;
 - a recast, split, or merge requires a supplied documented-change record that
