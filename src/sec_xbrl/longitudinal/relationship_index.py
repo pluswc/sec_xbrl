@@ -167,6 +167,8 @@ class FilingRelationshipIndexReader:
         if cik not in {item.cik for item in run.inputs}:
             raise FilingRelationshipIndexError("requested CIK is outside the declared publication")
         if accession is not None:
+            if accession not in {item.accession for item in run.inputs if item.cik == cik}:
+                raise FilingRelationshipIndexError("requested accession is outside the declared CIK inputs")
             paths = (root / cik / self.dataset / f"{accession}.parquet",)
         else:
             partition = root / cik / self.dataset
