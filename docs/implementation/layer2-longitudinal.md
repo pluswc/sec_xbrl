@@ -140,6 +140,12 @@ publisher.  A mapping preserves its source filing and raw identity alongside
 the company canonical ID; it does not update a Layer 1 record or replace an
 earlier mapping.
 
+Candidate discovery is indexed by raw ID, local name, and normalized
+label-or-name.  Each index keeps filing order, so matching still uses the most
+recent eligible prior row.  The index only narrows the rows passed to the same
+confirmation predicates; it does not relax mapping evidence or change emitted
+mapping results.
+
 The automatic confirmation boundary is intentionally narrow:
 
 - exact standard namespace URI and local-name identity is `SAME` only when declared

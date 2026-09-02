@@ -152,6 +152,34 @@ def test_documented_recast_is_persisted_without_rewriting_prior_mapping() -> Non
     assert tables.structural_change[-1]["event_type"] == "SEGMENT_RECAST"
 
 
+def test_documented_change_uses_the_latest_named_prior_mapping() -> None:
+    tables = CompanyCanonicalizer().build(
+        filings=_filings(),
+        concepts=(
+            _concept("old-1", "k24", local_name="OldOne", label="Old One"),
+            _concept("old-2", "q25", local_name="OldTwo", label="Old Two"),
+            _concept("new", "k25", local_name="New", label="New"),
+        ),
+        documented_changes=(
+            {
+                "source_raw_id": "new",
+                "prior_raw_ids": ("old-1", "old-2"),
+                "relation": "SAME",
+            },
+        ),
+    )
+
+    assert tables.company_concept_map[-1]["evidence"]["prior_raw_ids"] == ["old-1", "old-2"]
+    assert tables.company_concept_map[-1]["evidence"]["documented_change"]["prior_raw_ids"] == (
+        "old-1",
+        "old-2",
+    )
+    assert (
+        tables.company_concept_map[-1]["company_canonical_id"]
+        == tables.company_concept_map[1]["company_canonical_id"]
+    )
+
+
 def test_dimension_facts_classify_raw_concepts_into_additive_axis_and_member_maps() -> None:
     tables = CompanyCanonicalizer().build(
         filings=_filings(),
