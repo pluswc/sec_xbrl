@@ -140,6 +140,13 @@ from sec_xbrl.longitudinal.relationship_index import (
     FilingRelationshipIndexReader,
     FilingRelationshipIndexResult,
 )
+from sec_xbrl.longitudinal.reported_selection import (
+    REPORTED_SELECTION_RULE_VERSION,
+    ReportedObservationIdentity,
+    ReportedObservationSelectionError,
+    ReportedObservationSelectionResult,
+    ReportedObservationSelector,
+)
 from sec_xbrl.longitudinal.review_inventory import (
     REVIEW_INVENTORY_VERSION,
     ReviewInventoryError,
@@ -189,6 +196,7 @@ __all__ = [
     "RAW_TABLES",
     "RECAST_REGISTRY_VERSION",
     "RELATIONSHIP_INDEX_RULE_VERSION",
+    "REPORTED_SELECTION_RULE_VERSION",
     "REVIEW_INVENTORY_VERSION",
     "SELECTION_MATERIALIZATION_VERSION",
     "SERIES_RULE_VERSION",
@@ -280,6 +288,10 @@ __all__ = [
     "RawFilingReference",
     "RecastObservationBuilder",
     "RecastObservationError",
+    "ReportedObservationIdentity",
+    "ReportedObservationSelectionError",
+    "ReportedObservationSelectionResult",
+    "ReportedObservationSelector",
     "ReviewInventoryError",
     "ReviewInventoryMaterializer",
     "ReviewInventoryPublication",
