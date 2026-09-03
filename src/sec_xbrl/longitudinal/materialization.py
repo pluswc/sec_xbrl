@@ -30,6 +30,7 @@ LOGICAL_DATASETS = frozenset(
         "filing_relationship_edge",
         "analysis_exploration_node",
         "analysis_exploration_edge",
+        "accession_version_ledger",
         "company_concept_map",
         "company_axis_map",
         "company_member_map",
@@ -465,7 +466,7 @@ def _normalize_datasets(
     unknown = set(datasets) - LOGICAL_DATASETS
     if unknown:
         raise Layer2MaterializationError(f"unknown Layer 2 logical datasets: {sorted(unknown)}")
-    if "analytical_fact" not in datasets and "reported_period_observation" not in datasets and "filing_relationship_edge" not in datasets and not ({"analysis_exploration_node", "analysis_exploration_edge"} <= set(datasets)) and not (
+    if "analytical_fact" not in datasets and "reported_period_observation" not in datasets and "filing_relationship_edge" not in datasets and "accession_version_ledger" not in datasets and not ({"analysis_exploration_node", "analysis_exploration_edge"} <= set(datasets)) and not (
         {
             "annual_series_candidate",
             "current_series_candidate",
@@ -543,6 +544,8 @@ def _validate_candidate(
                 _validate_analysis_exploration_node(row, run)
             elif dataset == "analysis_exploration_edge":
                 _validate_analysis_exploration_edge(row, run)
+            elif dataset == "accession_version_ledger":
+                _validate_accession_version_ledger(row, run)
             try:
                 _canonical_json(row)
             except (TypeError, ValueError) as exc:
@@ -1015,6 +1018,64 @@ def _validate_analysis_exploration_edge(row: Mapping[str, Any], run: Layer2Run) 
     accession = row.get("accession")
     if accession is not None and (str(row.get("cik")), str(accession)) not in {(item.cik, item.accession) for item in run.inputs}:
         raise Layer2MaterializationError("analysis_exploration_edge does not resolve to declared input")
+
+
+def _validate_accession_version_ledger(row: Mapping[str, Any], run: Layer2Run) -> None:
+    """Validate a filing-version ledger without turning it into a selector.
+
+    A candidate relation is deliberately not a confirmed amendment link.  The
+    row therefore retains both its evidence method and an explicit review
+    state; later selection policy must not mistake filing order for proof.
+    """
+    required = (
+        "accession_version_ledger_id", "source_filing_id", "source_snapshot_id",
+        "accession", "form", "filed_date", "report_date", "is_amendment",
+        "amendment_flag_state", "amendment_linkage_state", "amendment_linkage_method",
+        "amendment_linkage_review_status", "reported_amendment_ordinal_state",
+    )
+    missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
+    if missing:
+        raise Layer2MaterializationError(
+            "accession_version_ledger missing required provenance: " + ", ".join(missing)
+        )
+    input_by_identity = {(item.cik, item.accession): item for item in run.inputs}
+    input_row = input_by_identity.get((str(row.get("cik")), str(row.get("accession"))))
+    if input_row is None:
+        raise Layer2MaterializationError("accession_version_ledger does not resolve to a declared input")
+    if (
+        row.get("source_snapshot_id") != input_row.snapshot_id
+        or row.get("form") != input_row.form
+        or row.get("filed_date") != input_row.filed_date
+        or row.get("report_date") != input_row.report_date
+    ):
+        raise Layer2MaterializationError("accession_version_ledger filing provenance disagrees with input")
+    if bool(row.get("is_amendment")) != str(row.get("form")).endswith("/A"):
+        raise Layer2MaterializationError("accession_version_ledger amendment state is inconsistent")
+    if row["amendment_flag_state"] not in {"REPORTED_TRUE", "REPORTED_FALSE", "NOT_REPORTED"}:
+        raise Layer2MaterializationError("accession_version_ledger has unsupported amendment flag state")
+    if row["amendment_linkage_state"] not in {"LINKED", "CANDIDATE", "UNKNOWN", "NOT_APPLICABLE"}:
+        raise Layer2MaterializationError("accession_version_ledger has unsupported linkage state")
+    if row["amendment_linkage_review_status"] not in {"NOT_REQUIRED", "REVIEW_REQUIRED", "UNKNOWN"}:
+        raise Layer2MaterializationError("accession_version_ledger has unsupported linkage review status")
+    if row["reported_amendment_ordinal_state"] not in {"REPORTED", "NOT_REPORTED"}:
+        raise Layer2MaterializationError("accession_version_ledger has unsupported ordinal state")
+    if row["reported_amendment_ordinal_state"] == "REPORTED" and not row.get("reported_amendment_ordinal"):
+        raise Layer2MaterializationError("reported amendment ordinal needs its source value")
+    if row["reported_amendment_ordinal_state"] == "NOT_REPORTED" and row.get("reported_amendment_ordinal") is not None:
+        raise Layer2MaterializationError("unreported amendment ordinal cannot be populated")
+    if row["amendment_linkage_state"] == "LINKED" and (
+        not row.get("amends_accession")
+        or row["amendment_linkage_review_status"] != "NOT_REQUIRED"
+    ):
+        raise Layer2MaterializationError("linked amendment requires direct target and non-review evidence")
+    if row["amendment_linkage_state"] == "CANDIDATE" and (
+        not row.get("amends_accession")
+        or row["amendment_linkage_review_status"] != "REVIEW_REQUIRED"
+    ):
+        raise Layer2MaterializationError("candidate amendment link requires target and review")
+    if row["amendment_linkage_state"] in {"UNKNOWN", "NOT_APPLICABLE"} and row.get("amends_accession") is not None:
+        raise Layer2MaterializationError("unknown/non-applicable amendment link cannot name a target")
+
 def _record_id(dataset: str, row: Mapping[str, Any]) -> str:
     if dataset == "analysis_exploration_node":
         return str(row.get("analysis_exploration_node_id") or "")
@@ -1022,6 +1083,8 @@ def _record_id(dataset: str, row: Mapping[str, Any]) -> str:
         return str(row.get("analysis_exploration_edge_id") or "")
     if dataset == "filing_relationship_edge":
         return str(row.get("filing_relationship_edge_id") or "")
+    if dataset == "accession_version_ledger":
+        return str(row.get("accession_version_ledger_id") or "")
     if dataset == "reported_period_observation":
         return str(row.get("reported_period_observation_id") or "")
     if dataset == "analytical_fact":
@@ -1148,6 +1211,13 @@ def _write_operational_parquet_datasets(
                     if not isinstance(accession_key, str) or not accession_key:
                         raise Layer2MaterializationError("relationship edge requires accession partition")
                     group.write_parquet(dataset_root / f"{accession_key}.parquet")
+            elif dataset == "accession_version_ledger":
+                # One CIK ledger is the serving boundary.  It is intentionally
+                # not partitioned by an alleged amendment family because an
+                # unreviewed candidate must not become a storage assertion.
+                dataset_root = company_root / dataset
+                dataset_root.mkdir(parents=True, exist_ok=True)
+                frame.write_parquet(dataset_root / "ledger.parquet")
             else:
                 frame.write_parquet(company_root / f"{dataset}.parquet")
 
@@ -1186,11 +1256,13 @@ def _read_operational_parquet_datasets(
         if not child.is_dir() or child.is_symlink() or child.name not in input_ciks:
             raise Layer2PublicationValidationError(f"unexpected operational Layer 2 entry: {child}")
         for file_path in child.iterdir():
-            if file_path.is_dir() and not file_path.is_symlink() and file_path.name == "filing_relationship_edge":
-                if "filing_relationship_edge" not in declared:
+            if file_path.is_dir() and not file_path.is_symlink() and file_path.name in {
+                "filing_relationship_edge", "accession_version_ledger"
+            }:
+                if file_path.name not in declared:
                     raise Layer2PublicationValidationError(f"unexpected operational Layer 2 dataset: {file_path}")
                 candidates = tuple(file_path.iterdir())
-                dataset = "filing_relationship_edge"
+                dataset = file_path.name
             else:
                 candidates = (file_path,)
                 dataset = file_path.stem
