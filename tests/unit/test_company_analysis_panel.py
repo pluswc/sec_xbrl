@@ -25,17 +25,17 @@ MEMBER = "node:data-center"
 DETAIL_NODE = "node:detail"
 
 
-def _graph(tmp_path):
+def _graph(tmp_path, *, snapshot_id: str = "snap:q3"):
     run = Layer2Run(
         "t5-fixture", "fixture",
         (Layer1SnapshotInput(CIK, "0001045810-23-000227", "10-Q", "2023-11-21", "2023-10-30", "snap:q3", "a" * 64),),
         Layer2RuleVersions("period", "mapping", "recast", "selection"),
     )
     nodes = (
-        {"cik": CIK, "analysis_exploration_node_id": ROOT, "node_kind": "FACT", "origin": "STANDARD_CONCEPT", "raw_id": TOTAL, "source_filing_id": FILING, "source_fact_id": TOTAL, "accession": "0001045810-23-000227", "filed_date": "2023-11-21", "context_id": "ctx:total", "raw_qname": "us-gaap:Revenues"},
+        {"cik": CIK, "analysis_exploration_node_id": ROOT, "node_kind": "FACT", "origin": "STANDARD_CONCEPT", "raw_id": TOTAL, "source_filing_id": FILING, "source_fact_id": TOTAL, "source_snapshot_id": snapshot_id, "accession": "0001045810-23-000227", "filed_date": "2023-11-21", "context_id": f"ctx:{TOTAL}", "unit_id": "unit:usd", "raw_qname": "us-gaap:Revenues"},
         {"cik": CIK, "analysis_exploration_node_id": AXIS, "node_kind": "AXIS", "origin": "STANDARD_AXIS", "raw_id": "axis:product", "source_filing_id": FILING, "raw_qname": "srt:ProductOrServiceAxis"},
         {"cik": CIK, "analysis_exploration_node_id": MEMBER, "node_kind": "MEMBER", "origin": "CUSTOM_MEMBER", "raw_id": "member:data-center", "source_filing_id": FILING, "raw_qname": "nvda:DataCenterMember"},
-        {"cik": CIK, "analysis_exploration_node_id": DETAIL_NODE, "node_kind": "FACT", "origin": "STANDARD_CONCEPT", "raw_id": DETAIL, "source_filing_id": FILING, "source_fact_id": DETAIL, "accession": "0001045810-23-000227", "filed_date": "2023-11-21", "context_id": "ctx:detail", "raw_qname": "us-gaap:Revenues"},
+        {"cik": CIK, "analysis_exploration_node_id": DETAIL_NODE, "node_kind": "FACT", "origin": "STANDARD_CONCEPT", "raw_id": DETAIL, "source_filing_id": FILING, "source_fact_id": DETAIL, "source_snapshot_id": "snap:q3", "accession": "0001045810-23-000227", "filed_date": "2023-11-21", "context_id": f"ctx:{DETAIL}", "unit_id": "unit:usd", "raw_qname": "us-gaap:Revenues"},
     )
     edges = (
         {"cik": CIK, "analysis_exploration_edge_id": "edge:lens", "edge_kind": "DIMENSION_LENS", "from_node_id": ROOT, "to_node_id": AXIS, "scope_kind": "TOTAL_FACT_AXIS_LENS", "order": None},
@@ -94,6 +94,15 @@ def test_panel_rejects_derived_or_wrong_as_of_selection(tmp_path) -> None:
         _build(tmp_path, ({**_selected(TOTAL), "source_type": "DERIVED"},))
     with pytest.raises(CompanyAnalysisPanelError, match="view/as-of"):
         _build(tmp_path, ({**_selected(TOTAL), "selection_as_of_date": "2024-01-01"},))
+
+
+def test_panel_fails_closed_when_t3_fact_lineage_disagrees(tmp_path) -> None:
+    with pytest.raises(CompanyAnalysisPanelError, match="source_snapshot_id"):
+        CompanyAnalysisPanelBuilder().build(
+            selected_rows=(_selected(TOTAL),), exploration=_graph(tmp_path, snapshot_id="snap:other"),
+            cik=CIK, fiscal_year=2024, fiscal_quarter=3, period_class="QTD_3M",
+            view="LATEST_REPORTED", as_of_date="2023-11-21",
+        )
 
 
 def test_query_returns_defensive_copies_and_does_not_calculate_metrics(tmp_path) -> None:

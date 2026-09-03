@@ -35,6 +35,10 @@ long-form 객체를 분리한다.
 `UNAVAILABLE`도 definition/binding/value로 남는다. 값은 채우지 않으며,
 `NO_ELIGIBLE_DIRECT_REPORTED_OBSERVATION` 같은 T4-B reason을 유지한다.
 
+T3 Fact와 T4-B 선택 행의 join은 CIK, filing ID, Fact ID뿐 아니라 snapshot ID,
+accession, context ID, unit ID도 모두 같아야 한다. 하나라도 다르면 패널은
+fail closed 한다.
+
 ## 탐색과 계층 경계
 
 총액 Fact를 root로 하여 T3의 실제 경로를 따른다. 선택된 detail Fact만 패널

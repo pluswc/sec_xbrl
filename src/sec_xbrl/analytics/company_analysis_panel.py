@@ -91,6 +91,7 @@ class CompanyAnalysisPanelBuilder:
             root = facts.get(fact_key)
             if root is None:
                 raise CompanyAnalysisPanelError("selected direct fact is not present in the attested exploration graph")
+            _require_graph_fact_match(selection, root)
             root_id = str(root["analysis_exploration_node_id"])
             paths = ExplorationGraphReader().traverse(exploration, root_node_ids=(root_id,))
             for path in paths:
@@ -104,6 +105,7 @@ class CompanyAnalysisPanelBuilder:
                 source = selected_by_fact.get(path_fact_key)
                 if source is None:
                     continue
+                _require_graph_fact_match(source, node)
                 definition, binding, value = _reported_line(
                     source, selection, path, nodes, analysis_view_id, analysis_view_version
                 )
@@ -194,6 +196,28 @@ def _root_selections(selected: list[dict[str, Any]]) -> tuple[dict[str, Any], ..
         if (row.get("source_filing_id"), row.get("raw_concept_id")) not in total_concepts
     ]
     return tuple(unavailable + totals + orphans)
+
+
+def _require_graph_fact_match(selection: Mapping[str, Any], graph_fact: Mapping[str, Any]) -> None:
+    """Reject a same-ID join that carries different immutable fact lineage."""
+    fields = (
+        ("cik", "cik"),
+        ("source_filing_id", "source_filing_id"),
+        ("selected_source_fact_id", "source_fact_id"),
+        ("source_snapshot_id", "source_snapshot_id"),
+        ("accession", "accession"),
+        ("context_id", "context_id"),
+        ("unit_id", "unit_id"),
+    )
+    mismatches = [
+        selection_name
+        for selection_name, graph_name in fields
+        if str(selection.get(selection_name) or "") != str(graph_fact.get(graph_name) or "")
+    ]
+    if mismatches:
+        raise CompanyAnalysisPanelError(
+            "selected observation and exploration FACT lineage disagree: " + ", ".join(mismatches)
+        )
 
 
 def _reported_line(source: Mapping[str, Any], root_source: Mapping[str, Any], path: Mapping[str, Any], nodes: Mapping[str, Mapping[str, Any]], view_id: str, view_version: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
