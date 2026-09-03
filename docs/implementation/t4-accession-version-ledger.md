@@ -32,6 +32,11 @@ accession의 숫자 순서, fact 값의 차이, label 변화는 수정 연결이
 근거가 아니다. 따라서 이 ledger는 amendment selection, as-of selection, recast,
 Q4 파생, 또는 분석 피벗을 수행하지 않는다.
 
+DEI 근거는 local name만으로 인식하지 않는다. `taxonomy_family=dei` 또는 SEC
+DEI namespace여야 한다. 따라서 기업 extension이 우연히 `AmendmentFlag` 또는
+`AmendmentDescription`이라는 local name을 사용해도 cover-page 수정 근거로
+오인하지 않는다.
+
 ## 정렬과 조회
 
 `AccessionVersionLedgerReader`는 `filed_date`를 우선 정렬하고 accession은 같은

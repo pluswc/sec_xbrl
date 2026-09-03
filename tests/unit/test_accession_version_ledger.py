@@ -48,8 +48,8 @@ def _snapshot(
     facts = ()
     if description is not None:
         concepts = (
-            {"filing_id": filing_id, "raw_concept_id": "dei:flag", "local_name": "AmendmentFlag"},
-            {"filing_id": filing_id, "raw_concept_id": "dei:description", "local_name": "AmendmentDescription"},
+            {"filing_id": filing_id, "raw_concept_id": "dei:flag", "local_name": "AmendmentFlag", "taxonomy_family": "dei"},
+            {"filing_id": filing_id, "raw_concept_id": "dei:description", "local_name": "AmendmentDescription", "taxonomy_family": "dei"},
         )
         facts = (
             {"filing_id": filing_id, "fact_id": "fact:flag", "raw_concept_id": "dei:flag", "value_text": "true", "is_nil": False},
@@ -128,4 +128,47 @@ def test_t4_compatible_filing_is_candidate_not_a_confirmed_amendment(tmp_path: P
     assert row["amends_accession"] == "0000789019-25-000010"
     assert row["amendment_linkage_state"] == "CANDIDATE"
     assert row["amendment_linkage_review_status"] == "REVIEW_REQUIRED"
+    assert row["reported_amendment_ordinal_state"] == "NOT_REPORTED"
+
+
+def test_t4_does_not_treat_custom_same_local_name_as_dei_evidence(tmp_path: Path) -> None:
+    cik = "0001652044"
+    amendment = _snapshot(cik, "0001652044-25-000011", "10-Q/A", "2025-06-01")
+    filing_id = str(amendment.records("filing")[0]["filing_id"])
+    tables = {name: amendment.records(name) for name in amendment.tables}
+    tables["concept"] = (
+        {
+            "filing_id": filing_id,
+            "raw_concept_id": "custom:flag",
+            "local_name": "AmendmentFlag",
+            "taxonomy_family": "company-extension",
+            "namespace_uri": "http://example.com/custom/2025",
+        },
+        {
+            "filing_id": filing_id,
+            "raw_concept_id": "custom:description",
+            "local_name": "AmendmentDescription",
+            "taxonomy_family": "company-extension",
+            "namespace_uri": "http://example.com/custom/2025",
+        },
+    )
+    tables["fact"] = (
+        {"filing_id": filing_id, "fact_id": "custom:flag", "raw_concept_id": "custom:flag", "value_text": "true", "is_nil": False},
+        {"filing_id": filing_id, "fact_id": "custom:description", "raw_concept_id": "custom:description", "value_text": "Amendment Number 99", "is_nil": False},
+    )
+    custom_snapshot = CorpusSnapshot(
+        amendment.input, amendment.manifest, amendment.manifest_path, amendment.table_sha256,
+        MappingProxyType({name: len(rows) for name, rows in tables.items()}),
+        MappingProxyType({name: tuple(MappingProxyType(dict(row)) for row in rows) for name, rows in tables.items()}),
+    )
+    rules = Layer2RuleVersions("period-v1", "mapping-v1", "recast-v1", "selection-v1")
+    release = CorpusRelease(
+        Path("/fixture"), "fixture", (cik,), (custom_snapshot,),
+        Layer2Run("t4-accession-ledger-custom-qname-v1", "fixture", (custom_snapshot.input,), rules),
+    )
+    result = AccessionVersionLedgerPipeline().publish(release, output_root=tmp_path / "layer2")
+    row = AccessionVersionLedgerReader().query_parquet(result.publication.run_root, cik=cik)[0]
+
+    assert row["amendment_flag_state"] == "NOT_REPORTED"
+    assert row["dei_amendment_description_raw"] is None
     assert row["reported_amendment_ordinal_state"] == "NOT_REPORTED"

@@ -195,6 +195,7 @@ def _amendment_evidence(
     local_by_concept = {
         str(row.get("raw_concept_id") or ""): str(row.get("local_name") or "")
         for row in concepts
+        if _is_dei_concept(row)
     }
     flag: Mapping[str, Any] | None = None
     description: Mapping[str, Any] | None = None
@@ -220,6 +221,13 @@ def _amendment_evidence(
         "amendment_description": _raw_fact_text(description),
         "amendment_description_fact_id": description.get("fact_id") if description else None,
     }
+
+
+def _is_dei_concept(concept: Mapping[str, Any]) -> bool:
+    """Accept only an actual DEI taxonomy concept, never a same-named extension."""
+    if str(concept.get("taxonomy_family") or "").casefold() == "dei":
+        return True
+    return str(concept.get("namespace_uri") or "").startswith("http://xbrl.sec.gov/dei/")
 
 
 def _raw_fact_text(fact: Mapping[str, Any] | None) -> str | None:
