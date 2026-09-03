@@ -32,6 +32,7 @@ class CompanyAnalysisPanelResult:
     definitions: tuple[dict[str, Any], ...]
     bindings: tuple[dict[str, Any], ...]
     values: tuple[dict[str, Any], ...]
+    scope: dict[str, Any]
 
 
 class CompanyAnalysisPanelBuilder:
@@ -61,7 +62,9 @@ class CompanyAnalysisPanelBuilder:
         _validate_query(cik, fiscal_year, fiscal_quarter, period_class, view, as_of_date)
         _validate_graph(exploration, cik)
         selected = [dict(row) for row in selected_rows]
-        _validate_selection_scope(selected, cik, fiscal_year, fiscal_quarter, period_class, view, as_of_date)
+        _validate_selection_scope(
+            selected, cik, fiscal_year, fiscal_quarter, period_class, view, as_of_date
+        )
         nodes = {
             str(row["analysis_exploration_node_id"]): dict(row)
             for row in exploration.records(ExplorationGraphReader.node_dataset)
@@ -76,7 +79,8 @@ class CompanyAnalysisPanelBuilder:
         values: list[dict[str, Any]] = []
         selected_by_fact = {
             (str(row.get("source_filing_id")), str(row.get("selected_source_fact_id"))): row
-            for row in selected if row["selection_status"] == "SELECTED"
+            for row in selected
+            if row["selection_status"] == "SELECTED"
         }
         for selection in _root_selections(selected):
             if selection["selection_status"] == "UNAVAILABLE":
@@ -87,10 +91,15 @@ class CompanyAnalysisPanelBuilder:
                 bindings.append(binding)
                 values.append(value)
                 continue
-            fact_key = (str(selection.get("source_filing_id")), str(selection.get("selected_source_fact_id")))
+            fact_key = (
+                str(selection.get("source_filing_id")),
+                str(selection.get("selected_source_fact_id")),
+            )
             root = facts.get(fact_key)
             if root is None:
-                raise CompanyAnalysisPanelError("selected direct fact is not present in the attested exploration graph")
+                raise CompanyAnalysisPanelError(
+                    "selected direct fact is not present in the attested exploration graph"
+                )
             _require_graph_fact_match(selection, root)
             root_id = str(root["analysis_exploration_node_id"])
             paths = ExplorationGraphReader().traverse(exploration, root_node_ids=(root_id,))
@@ -114,11 +123,37 @@ class CompanyAnalysisPanelBuilder:
                 values.append(value)
         _reject_duplicates(definitions, bindings, values)
         ordered_definitions = tuple(sorted(definitions, key=_definition_order))
-        definition_order = {row["analysis_line_id"]: index for index, row in enumerate(ordered_definitions)}
+        definition_order = {
+            row["analysis_line_id"]: index for index, row in enumerate(ordered_definitions)
+        }
         return CompanyAnalysisPanelResult(
             definitions=ordered_definitions,
-            bindings=tuple(sorted(bindings, key=lambda row: (definition_order[row["analysis_line_id"]], row["analysis_binding_id"]))),
-            values=tuple(sorted(values, key=lambda row: (definition_order[row["analysis_line_id"]], row["analysis_line_value_id"]))),
+            bindings=tuple(
+                sorted(
+                    bindings,
+                    key=lambda row: (
+                        definition_order[row["analysis_line_id"]],
+                        row["analysis_binding_id"],
+                    ),
+                )
+            ),
+            values=tuple(
+                sorted(
+                    values,
+                    key=lambda row: (
+                        definition_order[row["analysis_line_id"]],
+                        row["analysis_line_value_id"],
+                    ),
+                )
+            ),
+            scope={
+                "cik": cik,
+                "fiscal_year": fiscal_year,
+                "fiscal_quarter": fiscal_quarter,
+                "period_class": period_class,
+                "selection_view": view,
+                "selection_as_of_date": as_of_date,
+            },
         )
 
 
@@ -139,18 +174,39 @@ class CompanyAnalysisPanelQuery:
         for definition in self._definitions:
             if line_class is not None and definition["line_class"] != line_class:
                 continue
-            result.append({
-                "definition": deepcopy(definition),
-                "binding": deepcopy(next(row for row in self._bindings if row["analysis_line_id"] == definition["analysis_line_id"])),
-                "value": deepcopy(values[definition["analysis_line_id"]]),
-                "parent_definition": deepcopy(by_line.get(definition.get("parent_analysis_line_id"))) if definition.get("parent_analysis_line_id") else None,
-            })
+            result.append(
+                {
+                    "definition": deepcopy(definition),
+                    "binding": deepcopy(
+                        next(
+                            row
+                            for row in self._bindings
+                            if row["analysis_line_id"] == definition["analysis_line_id"]
+                        )
+                    ),
+                    "value": deepcopy(values[definition["analysis_line_id"]]),
+                    "parent_definition": deepcopy(
+                        by_line.get(definition.get("parent_analysis_line_id"))
+                    )
+                    if definition.get("parent_analysis_line_id")
+                    else None,
+                }
+            )
         return tuple(result)
 
 
-def _validate_query(cik: str, fiscal_year: int, fiscal_quarter: int | None, period_class: str, view: str, as_of_date: str) -> None:
+def _validate_query(
+    cik: str,
+    fiscal_year: int,
+    fiscal_quarter: int | None,
+    period_class: str,
+    view: str,
+    as_of_date: str,
+) -> None:
     if not cik or fiscal_year < 1 or not period_class or not view or not as_of_date:
-        raise CompanyAnalysisPanelError("panel requires a complete company, period, view, and as-of scope")
+        raise CompanyAnalysisPanelError(
+            "panel requires a complete company, period, view, and as-of scope"
+        )
     if fiscal_quarter is not None and fiscal_quarter not in {1, 2, 3, 4}:
         raise CompanyAnalysisPanelError("fiscal_quarter must be 1 through 4 when supplied")
 
@@ -159,24 +215,61 @@ def _validate_graph(exploration: VerifiedLayer2Publication, cik: str) -> None:
     ExplorationGraphReader()._check(exploration, cik)
 
 
-def _validate_selection_scope(rows: list[dict[str, Any]], cik: str, fiscal_year: int, fiscal_quarter: int | None, period_class: str, view: str, as_of_date: str) -> None:
+def _validate_selection_scope(
+    rows: list[dict[str, Any]],
+    cik: str,
+    fiscal_year: int,
+    fiscal_quarter: int | None,
+    period_class: str,
+    view: str,
+    as_of_date: str,
+) -> None:
     for row in rows:
-        required = ("selection_status", "selection_view", "selection_as_of_date", "selection_rule_version", "source_type")
+        required = (
+            "selection_status",
+            "selection_view",
+            "selection_as_of_date",
+            "selection_rule_version",
+            "source_type",
+        )
         missing = [field for field in required if row.get(field) in (None, "")]
         if missing:
             raise CompanyAnalysisPanelError("T4-B selection row missing: " + ", ".join(missing))
-        if (str(row.get("cik")), row.get("fiscal_year"), row.get("fiscal_quarter"), row.get("period_class")) != (cik, fiscal_year, fiscal_quarter, period_class):
-            raise CompanyAnalysisPanelError("T4-B selection row is outside the requested company/period scope")
+        if (
+            str(row.get("cik")),
+            row.get("fiscal_year"),
+            row.get("fiscal_quarter"),
+            row.get("period_class"),
+        ) != (cik, fiscal_year, fiscal_quarter, period_class):
+            raise CompanyAnalysisPanelError(
+                "T4-B selection row is outside the requested company/period scope"
+            )
         if row["selection_view"] != view or row["selection_as_of_date"] != as_of_date:
-            raise CompanyAnalysisPanelError("T4-B selection row is outside the requested view/as-of scope")
+            raise CompanyAnalysisPanelError(
+                "T4-B selection row is outside the requested view/as-of scope"
+            )
         if row["selection_status"] not in {"SELECTED", "UNAVAILABLE"}:
             raise CompanyAnalysisPanelError("unsupported T4-B selection status")
         if row["selection_status"] == "SELECTED":
-            _require(row, ("selected_source_fact_id", "source_filing_id", "accession", "context_id", "raw_concept_id", "raw_concept_qname", "source_snapshot_id"), "selected direct observation")
+            _require(
+                row,
+                (
+                    "selected_source_fact_id",
+                    "source_filing_id",
+                    "accession",
+                    "context_id",
+                    "raw_concept_id",
+                    "raw_concept_qname",
+                    "source_snapshot_id",
+                ),
+                "selected direct observation",
+            )
             if row["source_type"] != "REPORTED":
                 raise CompanyAnalysisPanelError("T5 accepts directly reported selection rows only")
         elif row.get("source_type") != "UNAVAILABLE":
-            raise CompanyAnalysisPanelError("unavailable selection must have source_type UNAVAILABLE")
+            raise CompanyAnalysisPanelError(
+                "unavailable selection must have source_type UNAVAILABLE"
+            )
 
 
 def _root_selections(selected: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
@@ -192,7 +285,8 @@ def _root_selections(selected: list[dict[str, Any]]) -> tuple[dict[str, Any], ..
     totals = [row for row in reported if not tuple(row.get("raw_dimension_signature") or ())]
     total_concepts = {(row.get("source_filing_id"), row.get("raw_concept_id")) for row in totals}
     orphans = [
-        row for row in reported
+        row
+        for row in reported
         if (row.get("source_filing_id"), row.get("raw_concept_id")) not in total_concepts
     ]
     return tuple(unavailable + totals + orphans)
@@ -220,78 +314,161 @@ def _require_graph_fact_match(selection: Mapping[str, Any], graph_fact: Mapping[
         )
 
 
-def _reported_line(source: Mapping[str, Any], root_source: Mapping[str, Any], path: Mapping[str, Any], nodes: Mapping[str, Mapping[str, Any]], view_id: str, view_version: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+def _reported_line(
+    source: Mapping[str, Any],
+    root_source: Mapping[str, Any],
+    path: Mapping[str, Any],
+    nodes: Mapping[str, Mapping[str, Any]],
+    view_id: str,
+    view_version: str,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     path_ids = tuple(path["path_node_ids"])
     nav = tuple(deepcopy(edge) for edge in path["path_edges"])
     path_edge_ids = tuple(edge["analysis_exploration_edge_id"] for edge in nav)
     source_fact_id = str(source["selected_source_fact_id"])
-    line_id = _id("line", view_id, view_version, source.get("source_filing_id"), source_fact_id, path_ids, path_edge_ids)
+    line_id = _id(
+        "line",
+        view_id,
+        view_version,
+        source.get("source_filing_id"),
+        source_fact_id,
+        path_ids,
+        path_edge_ids,
+    )
     parent_id = _parent_line_id(view_id, view_version, root_source, path_ids)
     detail_member = _last_member(path_ids, nodes)
     line_class, origin = _classify(source, path_ids, nodes)
     scope = "STATEMENT" if len(path_ids) == 1 else "EXPLORATION_DETAIL"
-    label = str(detail_member.get("raw_qname")) if detail_member is not None else str(source["raw_concept_qname"])
+    label = (
+        str(detail_member.get("raw_qname"))
+        if detail_member is not None
+        else str(source["raw_concept_qname"])
+    )
     definition = {
-        "analysis_line_id": line_id, "analysis_view_id": view_id, "analysis_view_version": view_version,
-        "company_cik": source["cik"], "label": label, "line_class": line_class, "line_kind": "REPORTED",
-        "line_scope": scope, "parent_analysis_line_id": parent_id, "navigation_path_node_ids": path_ids,
-        "relationship_navigation": nav, "display_order_key": _path_order(path_ids, nav),
+        "analysis_line_id": line_id,
+        "analysis_view_id": view_id,
+        "analysis_view_version": view_version,
+        "company_cik": source["cik"],
+        "label": label,
+        "line_class": line_class,
+        "line_kind": "REPORTED",
+        "line_scope": scope,
+        "parent_analysis_line_id": parent_id,
+        "navigation_path_node_ids": path_ids,
+        "relationship_navigation": nav,
+        "display_order_key": _path_order(path_ids, nav),
         "company_analysis_panel_version": COMPANY_ANALYSIS_PANEL_VERSION,
     }
     binding = {
-        "analysis_binding_id": _id("binding", line_id, source_fact_id), "analysis_line_id": line_id,
-        "binding_kind": "SELECTED_DIRECT_REPORTED_FACT", "concept_origin": origin,
-        "raw_concept_id": source["raw_concept_id"], "raw_concept_qname": source["raw_concept_qname"],
+        "analysis_binding_id": _id("binding", line_id, source_fact_id),
+        "analysis_line_id": line_id,
+        "binding_kind": "SELECTED_DIRECT_REPORTED_FACT",
+        "concept_origin": origin,
+        "raw_concept_id": source["raw_concept_id"],
+        "raw_concept_qname": source["raw_concept_qname"],
+        "raw_concept_taxonomy_family": source.get("raw_concept_taxonomy_family"),
+        "raw_concept_namespace_uri": source.get("raw_concept_namespace_uri"),
+        "raw_concept_is_standard": source.get("raw_concept_is_standard"),
         "raw_dimension_signature": deepcopy(source.get("raw_dimension_signature")),
-        "navigation_path_node_ids": path_ids, "relationship_navigation": deepcopy(nav),
-        "source_fact_id": source_fact_id, "source_filing_id": source["source_filing_id"],
+        "navigation_path_node_ids": path_ids,
+        "relationship_navigation": deepcopy(nav),
+        "source_fact_id": source_fact_id,
+        "source_filing_id": source["source_filing_id"],
     }
     value = {
-        "analysis_line_value_id": _id("value", line_id, source_fact_id), "analysis_line_id": line_id,
-        "value_status": "REPORTED", "value_numeric": source.get("value_numeric"), "value_text": source.get("value_text"),
-        "source_type": source["source_type"], "selected_source_fact_id": source_fact_id,
-        "source_filing_id": source["source_filing_id"], "accession": source["accession"], "filed_date": source.get("filed_date"),
-        "report_date": source.get("report_date"), "source_snapshot_id": source["source_snapshot_id"],
-        "context_id": source["context_id"], "unit_id": source.get("unit_id"),
-        "raw_concept_id": source["raw_concept_id"], "raw_concept_qname": source["raw_concept_qname"],
+        "analysis_line_value_id": _id("value", line_id, source_fact_id),
+        "analysis_line_id": line_id,
+        "value_status": "REPORTED",
+        "value_numeric": source.get("value_numeric"),
+        "value_text": source.get("value_text"),
+        "source_type": source["source_type"],
+        "selected_source_fact_id": source_fact_id,
+        "source_filing_id": source["source_filing_id"],
+        "accession": source["accession"],
+        "filed_date": source.get("filed_date"),
+        "report_date": source.get("report_date"),
+        "source_snapshot_id": source["source_snapshot_id"],
+        "context_id": source["context_id"],
+        "unit_id": source.get("unit_id"),
+        "unit_numerator_measures": deepcopy(source.get("unit_numerator_measures")),
+        "unit_denominator_measures": deepcopy(source.get("unit_denominator_measures")),
+        "context_start_date": source.get("context_start_date"),
+        "context_end_date": source.get("context_end_date"),
+        "context_instant_date": source.get("context_instant_date"),
+        "raw_concept_id": source["raw_concept_id"],
+        "raw_concept_qname": source["raw_concept_qname"],
+        "raw_concept_taxonomy_family": source.get("raw_concept_taxonomy_family"),
+        "raw_concept_namespace_uri": source.get("raw_concept_namespace_uri"),
+        "raw_concept_is_standard": source.get("raw_concept_is_standard"),
         "raw_dimension_signature": deepcopy(source.get("raw_dimension_signature")),
         "canonical_dimension_signature": deepcopy(source.get("canonical_dimension_signature")),
         "dimension_mapping_ids": deepcopy(source.get("dimension_mapping_ids")),
-        "concept_mapping_id": source.get("concept_mapping_id"), "concept_mapping_version": source.get("concept_mapping_version"),
+        "concept_mapping_id": source.get("concept_mapping_id"),
+        "concept_mapping_version": source.get("concept_mapping_version"),
         "company_canonical_concept_id": source.get("company_canonical_concept_id"),
-        "mapping_review_required": source.get("mapping_review_required"), "selection_view": source["selection_view"],
-        "selection_as_of_date": source["selection_as_of_date"], "selection_rule_version": source["selection_rule_version"],
-        "selection_reason": source.get("selection_reason"), "comparability_status": source.get("comparability_status"),
+        "mapping_review_required": source.get("mapping_review_required"),
+        "selection_view": source["selection_view"],
+        "selection_as_of_date": source["selection_as_of_date"],
+        "selection_rule_version": source["selection_rule_version"],
+        "selection_reason": source.get("selection_reason"),
+        "comparability_status": source.get("comparability_status"),
         "accession_version_ledger_id": source.get("accession_version_ledger_id"),
-        "ledger_lineage": {key: deepcopy(value) for key, value in source.items() if key.startswith("ledger_")},
+        "ledger_lineage": {
+            key: deepcopy(value) for key, value in source.items() if key.startswith("ledger_")
+        },
     }
     return definition, binding, value
 
 
-def _unavailable_line(source: Mapping[str, Any], view_id: str, view_version: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+def _unavailable_line(
+    source: Mapping[str, Any], view_id: str, view_version: str
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     identity = repr(source.get("selection_identity"))
     line_id = _id("unavailable", view_id, view_version, identity)
     definition = {
-        "analysis_line_id": line_id, "analysis_view_id": view_id, "analysis_view_version": view_version,
-        "company_cik": source.get("cik"), "label": str(source.get("raw_concept_qname") or "Unavailable selected observation"),
+        "analysis_line_id": line_id,
+        "analysis_view_id": view_id,
+        "analysis_view_version": view_version,
+        "company_cik": source.get("cik"),
+        "label": str(source.get("raw_concept_qname") or "Unavailable selected observation"),
         "line_class": "COMMON_GAAP" if source.get("raw_concept_is_standard") else "COMPANY_CUSTOM",
-        "line_kind": "REPORTED", "line_scope": "UNAVAILABLE", "parent_analysis_line_id": None,
-        "navigation_path_node_ids": (), "relationship_navigation": (), "display_order_key": ("~", line_id),
+        "line_kind": "REPORTED",
+        "line_scope": "UNAVAILABLE",
+        "parent_analysis_line_id": None,
+        "navigation_path_node_ids": (),
+        "relationship_navigation": (),
+        "display_order_key": ("~", line_id),
         "company_analysis_panel_version": COMPANY_ANALYSIS_PANEL_VERSION,
     }
-    binding = {"analysis_binding_id": _id("unavailable-binding", line_id), "analysis_line_id": line_id, "binding_kind": "UNAVAILABLE_SELECTION", "concept_origin": None, "selection_identity": deepcopy(source.get("selection_identity"))}
+    binding = {
+        "analysis_binding_id": _id("unavailable-binding", line_id),
+        "analysis_line_id": line_id,
+        "binding_kind": "UNAVAILABLE_SELECTION",
+        "concept_origin": None,
+        "selection_identity": deepcopy(source.get("selection_identity")),
+    }
     value = {
-        "analysis_line_value_id": _id("unavailable-value", line_id), "analysis_line_id": line_id,
-        "value_status": "UNAVAILABLE", "source_type": "UNAVAILABLE", "value_numeric": None, "value_text": None,
-        "selected_source_fact_id": None, "selection_view": source["selection_view"],
-        "selection_as_of_date": source["selection_as_of_date"], "selection_rule_version": source["selection_rule_version"],
-        "selection_reason": source.get("selection_reason"), "selection_unavailable_reason": source.get("selection_unavailable_reason"),
-        "comparability_status": source.get("comparability_status"), "accession_version_ledger_id": source.get("accession_version_ledger_id"),
+        "analysis_line_value_id": _id("unavailable-value", line_id),
+        "analysis_line_id": line_id,
+        "value_status": "UNAVAILABLE",
+        "source_type": "UNAVAILABLE",
+        "value_numeric": None,
+        "value_text": None,
+        "selected_source_fact_id": None,
+        "selection_view": source["selection_view"],
+        "selection_as_of_date": source["selection_as_of_date"],
+        "selection_rule_version": source["selection_rule_version"],
+        "selection_reason": source.get("selection_reason"),
+        "selection_unavailable_reason": source.get("selection_unavailable_reason"),
+        "comparability_status": source.get("comparability_status"),
+        "accession_version_ledger_id": source.get("accession_version_ledger_id"),
     }
     return definition, binding, value
 
 
-def _classify(source: Mapping[str, Any], path_ids: tuple[str, ...], nodes: Mapping[str, Mapping[str, Any]]) -> tuple[str, str]:
+def _classify(
+    source: Mapping[str, Any], path_ids: tuple[str, ...], nodes: Mapping[str, Mapping[str, Any]]
+) -> tuple[str, str]:
     standard = bool(source.get("raw_concept_is_standard"))
     custom_dimension = any(
         nodes[node_id].get("node_kind") in {"AXIS", "MEMBER"}
@@ -305,7 +482,9 @@ def _classify(source: Mapping[str, Any], path_ids: tuple[str, ...], nodes: Mappi
     return "COMMON_GAAP", "STANDARD_CONCEPT"
 
 
-def _last_member(path_ids: tuple[str, ...], nodes: Mapping[str, Mapping[str, Any]]) -> Mapping[str, Any] | None:
+def _last_member(
+    path_ids: tuple[str, ...], nodes: Mapping[str, Mapping[str, Any]]
+) -> Mapping[str, Any] | None:
     for node_id in reversed(path_ids[:-1]):
         node = nodes[node_id]
         if node.get("node_kind") == "MEMBER":
@@ -313,27 +492,49 @@ def _last_member(path_ids: tuple[str, ...], nodes: Mapping[str, Mapping[str, Any
     return None
 
 
-def _parent_line_id(view_id: str, view_version: str, root_source: Mapping[str, Any], path_ids: tuple[str, ...]) -> str | None:
+def _parent_line_id(
+    view_id: str, view_version: str, root_source: Mapping[str, Any], path_ids: tuple[str, ...]
+) -> str | None:
     if len(path_ids) == 1:
         return None
     root_path = (path_ids[0],)
     # Detail values attach to their statement root, not to another independent
     # dimensional lens.  The complete edge path remains on the binding/value.
     return _id(
-        "line", view_id, view_version, root_source.get("source_filing_id"),
-        root_source.get("selected_source_fact_id"), root_path, (),
+        "line",
+        view_id,
+        view_version,
+        root_source.get("source_filing_id"),
+        root_source.get("selected_source_fact_id"),
+        root_path,
+        (),
     )
 
 
-def _path_order(path_ids: tuple[str, ...], navigation: tuple[Mapping[str, Any], ...]) -> tuple[Any, ...]:
-    return tuple((edge.get("order") is None, str(edge.get("order") or ""), edge.get("analysis_exploration_edge_id")) for edge in navigation) + (path_ids,)
+def _path_order(
+    path_ids: tuple[str, ...], navigation: tuple[Mapping[str, Any], ...]
+) -> tuple[Any, ...]:
+    return tuple(
+        (
+            edge.get("order") is None,
+            str(edge.get("order") or ""),
+            edge.get("analysis_exploration_edge_id"),
+        )
+        for edge in navigation
+    ) + (path_ids,)
 
 
 def _definition_order(row: Mapping[str, Any]) -> tuple[Any, ...]:
-    return (str(row.get("line_scope")) != "STATEMENT", row.get("display_order_key"), row["analysis_line_id"])
+    return (
+        str(row.get("line_scope")) != "STATEMENT",
+        row.get("display_order_key"),
+        row["analysis_line_id"],
+    )
 
 
-def _reject_duplicates(definitions: list[dict[str, Any]], bindings: list[dict[str, Any]], values: list[dict[str, Any]]) -> None:
+def _reject_duplicates(
+    definitions: list[dict[str, Any]], bindings: list[dict[str, Any]], values: list[dict[str, Any]]
+) -> None:
     for name, rows, key in (
         ("definition", definitions, "analysis_line_id"),
         ("binding", bindings, "analysis_binding_id"),
