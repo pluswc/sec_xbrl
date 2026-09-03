@@ -37,9 +37,11 @@ CIK + line scope/kind + concept identity + complete canonical dimensions
 없어도 `STANDARD + taxonomy family + QName`이 완전하게 있는 경우에만 qualified
 standard fallback을 쓴다. local name 단독 비교는 하지 않는다.
 
-기업 고유 행은 concept mapping ID/version, complete canonical axis/member/typed
-dimension signature, 필요한 dimension mapping ID가 모두 확인되고 review flag가
-없을 때만 분기 간에 연결한다. 불확실·미매핑·불완전 unit은
+기업 고유 행은 concept mapping ID/version, complete canonical axis/member
+signature, **각 dimension의 axis mapping ID와 explicit member mapping ID**가 모두
+확인되고 review flag가 없을 때만 분기 간에 연결한다. 현재 contract에는 typed
+member의 company-canonical mapping entity가 없으므로 typed dimension은 raw literal이
+같아도 연결하지 않고 검토 범위에 남긴다. 불확실·미매핑·불완전 unit은
 `MAPPING_REVIEW_REQUIRED` 또는 `MISSING_COMPATIBLE_UNIT_SEMANTICS`로 표시하고,
 `filing + fact + period` scoped row로 남긴다. 레이블이 같아도 연결하지 않는다.
 

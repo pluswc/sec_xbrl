@@ -218,13 +218,15 @@ def _row_key(
         and value.get("concept_mapping_version")
         and not review
     )
-    complete_dimensions = _complete_dimensions(dimensions)
     raw_dimensions = _freeze(value.get("raw_dimension_signature") or ())
-    confirmed_dimensions = not raw_dimensions or (
-        complete_dimensions and bool(value.get("dimension_mapping_ids")) and not review
+    confirmed_dimensions = _confirmed_dimensions(
+        dimensions,
+        raw_dimensions,
+        value.get("dimension_mapping_ids"),
+        review=review,
     )
     common = definition.get("line_class") == "COMMON_GAAP"
-    if common and standard and unit is not None and complete_dimensions and not review:
+    if common and standard and unit is not None and confirmed_dimensions and not review:
         # Standard identity is QName + family, never a local name.  A confirmed
         # canonical ID is preferred, while exact standard identity remains a
         # permitted qualified fallback under the L2 mapping contract.
@@ -362,6 +364,49 @@ def _complete_dimensions(dimensions: Any) -> bool:
         and (item[1] is not None or item[2] is not None)
         for item in dimensions
     )
+
+
+def _confirmed_dimensions(
+    canonical_dimensions: Any,
+    raw_dimensions: Any,
+    mapping_ids: Any,
+    *,
+    review: bool,
+) -> bool:
+    """Require a mapping for every axis/member before a dimensional join.
+
+    T1 currently has company maps for explicit axes and members, but not a
+    company-canonical typed-member mapping entity.  A typed dimension is thus
+    deliberately review-scoped until that contract exists; matching its raw
+    literal would create a false semantic continuity claim.
+    """
+    if review:
+        return False
+    if not raw_dimensions:
+        return True
+    if not _complete_dimensions(canonical_dimensions):
+        return False
+    if not isinstance(mapping_ids, (tuple, list)) or len(mapping_ids) != len(raw_dimensions):
+        return False
+    for canonical, raw, mappings in zip(
+        canonical_dimensions, raw_dimensions, mapping_ids, strict=True
+    ):
+        if not isinstance(canonical, tuple) or not isinstance(raw, tuple):
+            return False
+        if len(canonical) < 3 or len(raw) < 3:
+            return False
+        canonical_axis, canonical_member, canonical_typed = canonical[:3]
+        raw_member, raw_typed = raw[1], raw[2]
+        if not isinstance(mappings, (tuple, list)) or len(mappings) != 2:
+            return False
+        axis_mapping, member_mapping = mappings
+        if canonical_axis is None or axis_mapping in (None, ""):
+            return False
+        if raw_typed is not None or canonical_typed is not None:
+            return False
+        if raw_member is None or canonical_member is None or member_mapping in (None, ""):
+            return False
+    return True
 
 
 def _freeze(value: Any) -> Any:

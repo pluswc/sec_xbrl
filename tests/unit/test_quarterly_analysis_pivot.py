@@ -24,6 +24,7 @@ def _panel(
     as_of: str = "2024-12-01",
     unavailable: bool = False,
     suffix: str = "",
+    dimension_mapping_ids=None,
 ) -> CompanyAnalysisPanelResult:
     fact = f"fact:{quarter}:{suffix}"
     line = f"line:{quarter}:{suffix}"
@@ -60,7 +61,13 @@ def _panel(
         "concept_mapping_version": "v1",
         "raw_dimension_signature": dimensions,
         "canonical_dimension_signature": dimensions,
-        "dimension_mapping_ids": ("map:dimension",) if dimensions else (),
+        "dimension_mapping_ids": (
+            dimension_mapping_ids
+            if dimension_mapping_ids is not None
+            else (("map:axis", "map:member"),)
+            if dimensions
+            else ()
+        ),
         "mapping_review_required": mapping_review,
         "unit_numerator_measures": unit,
         "unit_denominator_measures": None if unit is None else (),
@@ -109,6 +116,30 @@ def test_custom_mapping_uncertainty_stays_period_scoped_and_marked_for_review() 
         panels=(
             _panel(1, custom=True, mapping_review=True),
             _panel(2, custom=True, mapping_review=True),
+        )
+    )
+    assert len(result.rows) == 2
+    assert {row["review_reason"] for row in result.rows} == {"MAPPING_REVIEW_REQUIRED"}
+
+
+def test_custom_dimension_with_missing_axis_or_member_map_cannot_join() -> None:
+    dims = (("company:axis:product", "company:member:data-center", None, "EXPLICIT", False),)
+    result = QuarterlyAnalysisPivotBuilder().build(
+        panels=(
+            _panel(1, custom=True, dimensions=dims, dimension_mapping_ids=(("map:axis", None),)),
+            _panel(2, custom=True, dimensions=dims, dimension_mapping_ids=((None, "map:member"),)),
+        )
+    )
+    assert len(result.rows) == 2
+    assert {row["review_reason"] for row in result.rows} == {"MAPPING_REVIEW_REQUIRED"}
+
+
+def test_typed_dimension_remains_review_scoped_without_a_canonical_typed_mapping() -> None:
+    dims = (("company:axis:customer", None, "customer-1", "TYPED", False),)
+    result = QuarterlyAnalysisPivotBuilder().build(
+        panels=(
+            _panel(1, custom=True, dimensions=dims, dimension_mapping_ids=(("map:axis", None),)),
+            _panel(2, custom=True, dimensions=dims, dimension_mapping_ids=(("map:axis", None),)),
         )
     )
     assert len(result.rows) == 2
