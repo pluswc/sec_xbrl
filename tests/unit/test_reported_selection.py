@@ -21,6 +21,9 @@ def _ledger(*observations: dict[str, object]) -> list[dict[str, object]]:
         "cik": row["cik"], "accession": row["accession"], "source_snapshot_id": row["source_snapshot_id"], "source_filing_id": row["source_filing_id"], "form": row["form"], "filed_date": row["filed_date"], "report_date": row["report_date"], "accession_version_ledger_id": f"ledger:{row['accession']}",
         "is_amendment": str(row["form"]).endswith("/A"), "amends_accession": "0000320193-25-000001" if str(row["form"]).endswith("/A") else None,
         "amendment_linkage_state": "LINKED" if str(row["form"]).endswith("/A") else "NOT_APPLICABLE", "amendment_linkage_method": "RAW_FILING_AMENDS_ACCESSION", "amendment_linkage_review_status": "NOT_REQUIRED", "reported_amendment_ordinal": None, "reported_amendment_ordinal_state": "NOT_REPORTED",
+        "amendment_linkage_evidence": {"source_field": "filing.amends_accession"}, "amendment_flag_state": "REPORTED_TRUE" if str(row["form"]).endswith("/A") else "NOT_REPORTED",
+        "dei_amendment_flag_raw": "true" if str(row["form"]).endswith("/A") else None, "dei_amendment_flag_fact_id": f"fact:amendment-flag:{row['accession']}",
+        "dei_amendment_description_raw": "Amendment Number 1" if str(row["form"]).endswith("/A") else None, "dei_amendment_description_fact_id": f"fact:amendment-description:{row['accession']}",
     } for row in observations]
 
 
@@ -35,6 +38,9 @@ def test_as_filed_and_latest_reported_are_distinct_direct_views() -> None:
     latest = _select([original, amendment], "LATEST_REPORTED")[0]
     assert latest["value_numeric"] == "120"
     assert latest["ledger_amendment_linkage_state"] == "LINKED"
+    assert latest["ledger_amendment_linkage_evidence"] == {"source_field": "filing.amends_accession"}
+    assert latest["ledger_dei_amendment_flag_fact_id"] == "fact:amendment-flag:0000320193-25-000002"
+    assert latest["ledger_dei_amendment_description_fact_id"] == "fact:amendment-description:0000320193-25-000002"
     assert latest["comparability_status"] == "NOT_ASSESSED"
 
 
@@ -65,6 +71,18 @@ def test_dimensions_and_unit_semantics_are_selection_boundaries() -> None:
     assert len(_select([original, dimensioned, shares], "LATEST_REPORTED")) == 3
 
 
+def test_nested_list_dimensions_from_parquet_are_hashable_and_match_exactly() -> None:
+    original = _observation("0000320193-25-000001", "2025-05-01", "100")
+    amendment = _observation("0000320193-25-000002", "2025-06-01", "120")
+    decoded_signature = [["axis:a", "member:a", None, "EXPLICIT", False]]
+    original["canonical_dimension_signature"] = decoded_signature
+    amendment["canonical_dimension_signature"] = decoded_signature
+    original["raw_dimension_signature"] = decoded_signature
+    amendment["raw_dimension_signature"] = decoded_signature
+    selected = _select([original, amendment], "LATEST_REPORTED")[0]
+    assert selected["value_numeric"] == "120"
+
+
 def test_no_numeric_change_recast_inference_and_absence_is_explicit() -> None:
     original = _observation("0000320193-25-000001", "2025-05-01", "100")
     identity = ReportedObservationIdentity.from_observation(original)
@@ -75,3 +93,4 @@ def test_no_numeric_change_recast_inference_and_absence_is_explicit() -> None:
     unavailable = selector.select_identity(observations=[], ledger=[], identity=identity, as_of_date="2025-05-01", view="AS_FILED").rows[0]
     assert unavailable["selection_status"] == "UNAVAILABLE"
     assert unavailable["selection_unavailable_reason"] == "NO_ELIGIBLE_DIRECT_REPORTED_OBSERVATION"
+    assert unavailable["ledger_amendment_linkage_evidence"] is None

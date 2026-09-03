@@ -9,11 +9,20 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
 REPORTED_SELECTION_RULE_VERSION = "l2-t4b-direct-reported-selection-v1"
 _VIEWS = frozenset({"AS_FILED", "LATEST_REPORTED"})
+_LEDGER_LINEAGE_FIELDS = (
+    "is_amendment", "amends_accession", "amendment_linkage_state",
+    "amendment_linkage_method", "amendment_linkage_review_status",
+    "amendment_linkage_evidence", "reported_amendment_ordinal",
+    "reported_amendment_ordinal_state", "amendment_flag_state",
+    "dei_amendment_flag_raw", "dei_amendment_flag_fact_id",
+    "dei_amendment_description_raw", "dei_amendment_description_fact_id",
+)
 
 
 class ReportedObservationSelectionError(RuntimeError):
@@ -123,6 +132,7 @@ class ReportedObservationSelector:
                 "selection_unavailable_reason": "NO_ELIGIBLE_DIRECT_REPORTED_OBSERVATION",
                 "source_type": "UNAVAILABLE", "selected_source_fact_id": None,
                 "selected_accession": None, "comparability_status": "NOT_ASSESSED",
+                **_empty_ledger_lineage(),
             }
         ordered = sorted(dated, key=_chronology_key)
         selected = ordered[0] if view == "AS_FILED" else ordered[-1]
@@ -164,10 +174,17 @@ def _lookup_ledger(observation: Mapping[str, Any], index: Mapping[tuple[str, str
 
 
 def _ledger_lineage(ledger: Mapping[str, Any]) -> dict[str, Any]:
-    return {f"ledger_{key}": ledger.get(key) for key in (
-        "is_amendment", "amends_accession", "amendment_linkage_state", "amendment_linkage_method",
-        "amendment_linkage_review_status", "reported_amendment_ordinal", "reported_amendment_ordinal_state",
-    )} | {"accession_version_ledger_id": ledger.get("accession_version_ledger_id")}
+    # Evidence payloads may be nested JSON-like values.  The result must retain
+    # them for audit without exposing mutable ledger-owned objects to callers.
+    return {
+        **{f"ledger_{key}": deepcopy(ledger.get(key)) for key in _LEDGER_LINEAGE_FIELDS},
+        "accession_version_ledger_id": deepcopy(ledger.get("accession_version_ledger_id")),
+    }
+
+
+def _empty_ledger_lineage() -> dict[str, Any]:
+    """Keep unavailable results schema-compatible without inventing evidence."""
+    return {**{f"ledger_{key}": None for key in _LEDGER_LINEAGE_FIELDS}, "accession_version_ledger_id": None}
 
 
 def _is_direct_observation(row: Mapping[str, Any]) -> bool:
@@ -192,10 +209,12 @@ def _concept_identity(row: Mapping[str, Any]) -> tuple[Any, ...]:
 
 
 def _dimension_identity(row: Mapping[str, Any]) -> tuple[Any, ...]:
-    canonical = tuple(row.get("canonical_dimension_signature") or ())
+    # Parquet readers can reconstruct tuple-shaped signatures as nested lists.
+    # Freeze recursively before using them in the selection dictionary key.
+    canonical = _freeze(row.get("canonical_dimension_signature") or ())
     if canonical and all(axis is not None and (member is not None or typed is not None) for axis, member, typed, *_ in canonical):
         return ("CANONICAL", canonical)
-    return ("RAW_FALLBACK", tuple(row.get("raw_dimension_signature") or row.get("dimension_signature") or ()))
+    return ("RAW_FALLBACK", _freeze(row.get("raw_dimension_signature") or row.get("dimension_signature") or ()))
 
 
 def _unit_semantics(row: Mapping[str, Any]) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -208,6 +227,17 @@ def _measures(value: Any) -> tuple[str, ...]:
     if isinstance(value, str):
         return tuple(sorted(part.strip() for part in value.split() if part.strip()))
     return tuple(sorted(str(part) for part in value))
+
+
+def _freeze(value: Any) -> Any:
+    """Turn decoded Parquet JSON/list signatures into stable hashable keys."""
+    if isinstance(value, Mapping):
+        return tuple(sorted((str(key), _freeze(item)) for key, item in value.items()))
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(item) for item in value)
+    if isinstance(value, set):
+        return tuple(sorted((_freeze(item) for item in value), key=repr))
+    return value
 
 
 def _period_boundaries(row: Mapping[str, Any]) -> tuple[str | None, str | None, str | None]:
