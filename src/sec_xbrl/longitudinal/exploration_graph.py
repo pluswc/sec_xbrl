@@ -217,21 +217,21 @@ class ExplorationGraphReader:
         for edge in publication.records(self.edge_dataset):
             outgoing[str(edge["from_node_id"])].append(dict(edge))
         result: list[dict[str, Any]] = []
-        queue: deque[tuple[str, tuple[str, ...], int, dict[str, Any] | None]] = deque()
+        queue: deque[tuple[str, tuple[str, ...], tuple[dict[str, Any], ...], int, dict[str, Any] | None]] = deque()
         for root in root_node_ids:
             if root not in nodes:
                 raise ExplorationGraphError("root node is outside the verified exploration graph")
-            queue.append((root, (root,), 0, None))
+            queue.append((root, (root,), (), 0, None))
         while queue:
-            node_id, path, depth, incoming = queue.popleft()
-            result.append({"depth": depth, "path_node_ids": path, "node": nodes[node_id], "incoming_edge": incoming})
+            node_id, path, path_edges, depth, incoming = queue.popleft()
+            result.append({"depth": depth, "path_node_ids": path, "path_edges": path_edges, "node": nodes[node_id], "incoming_edge": incoming})
             if max_depth is not None and depth >= max_depth:
                 continue
             for edge in sorted(outgoing.get(node_id, ()), key=lambda item: str(item["analysis_exploration_edge_id"])):
                 target = str(edge["to_node_id"])
                 if target in path:  # semantic/cyclic DEF or presentation paths terminate safely.
                     continue
-                queue.append((target, path + (target,), depth + 1, edge))
+                queue.append((target, path + (target,), path_edges + (edge,), depth + 1, edge))
         return tuple(result)
 
     def _check(self, publication: VerifiedLayer2Publication, cik: str | None) -> None:
