@@ -15,6 +15,11 @@ from sec_xbrl.analytics.quarterly_analysis_pivot import (
     QuarterlyAnalysisPivotQuery,
     QuarterlyAnalysisPivotResult,
 )
+from sec_xbrl.analytics.quarterly_derived_metrics import (
+    QUARTERLY_DERIVED_METRICS_VERSION,
+    QuarterlyDerivedMetricsBuilder,
+    QuarterlyDerivedMetricsResult,
+)
 from sec_xbrl.analytics.repository import (
     AnalyticalRepository,
     AnalyticalRepositoryError,
@@ -34,6 +39,7 @@ from sec_xbrl.analytics.review_inventory_report import (
 __all__ = [
     "COMPANY_ANALYSIS_PANEL_VERSION",
     "QUARTERLY_ANALYSIS_PIVOT_VERSION",
+    "QUARTERLY_DERIVED_METRICS_VERSION",
     "AnalyticalRepository",
     "AnalyticalRepositoryError",
     "CapabilityInventoryNotFoundError",
@@ -53,5 +59,7 @@ __all__ = [
     "QuarterlyAnalysisPivotError",
     "QuarterlyAnalysisPivotQuery",
     "QuarterlyAnalysisPivotResult",
+    "QuarterlyDerivedMetricsBuilder",
+    "QuarterlyDerivedMetricsResult",
     "ReviewInventoryReportInput",
 ]
