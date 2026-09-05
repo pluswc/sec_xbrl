@@ -68,6 +68,13 @@ dimensioned facts are admitted.  Instead, the companion retains flags such as
 to use a candidate.  A denominator-bearing Unit (for example USD/shares) is not
 a mechanical candidate.
 
+This broad companion is the current Layer 2 direction for period candidates;
+it does not adopt the experimental narrow M7 reviewed-allowlist/PRE-gate
+approach.  `FY - (Q1_3M + Q2_3M + Q3_3M)` is also deferred: the NVDA full-corpus
+check found no extra eligible scope beyond direct `FY - YTD_9M`.  Reconsider it
+only when a future-company corpus supplies a concrete case and dedicated
+provenance/compatibility tests.
+
 ## PR-008 — Provenance
 Derived facts store:
 - `reported_or_derived = DERIVED`

@@ -190,6 +190,8 @@ def _candidate(
         "actual_period_boundaries": boundaries,
         "actual_period_key": row.get("period_key"),
         "period_class": period_class,
+        "fiscal_year": row.get("fiscal_year"),
+        "fiscal_quarter": row.get("fiscal_quarter"),
         "series_key": identity,
         "series_family_key": (
             str(row["cik"]),

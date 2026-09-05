@@ -3,17 +3,17 @@
 ## Purpose
 
 `AsFiledPublicationPipeline` turns one explicit, already verified
-`CorpusRelease` into one atomic Layer 2 publication that Consumer C2 can read.
-It composes existing L2-M1 period classification, L2-M2 mapping, L2-M3 series,
-L2-M4 AS_FILED selection, L2-M5 capability inventory, and the L2-M0 publisher.
-It adds no analytical policy.
+`CorpusRelease` into one atomic operational Layer 2 publication that Consumer
+C2 can read. It composes L2-M1 period classification, L2-M2 mapping, L2-M3
+in-memory candidates, and L2-M4 AS_FILED selection. It adds no analytical
+policy.
 
 ```text
 explicit CorpusRelease + explicit as_of_date + explicit output root
   -> period observations and explicit exclusions
   -> same-company maps and pre-selection candidates
-  -> AS_FILED facts only + observed capability inventory
-  -> atomic Layer2Publisher publication
+  -> AS_FILED facts + required company maps only
+  -> atomic Parquet operational publication
   -> Consumer C2 / Consumer Data Access Layer
 ```
 
@@ -44,10 +44,11 @@ selection. It is not a consumer-side display filter.
 
 ## Published datasets and safety boundary
 
-The atomic run includes period observations and their exclusions, mapping and
-structural-change records, Annual/Current series candidates and exclusions,
-`analytical_fact`, and `capability_inventory`. `analytical_fact` contains only
-`AS_FILED` rows.
+The operational run includes company concept/axis/member mappings and
+`analytical_fact` only. `analytical_fact` contains only `AS_FILED` rows.
+Period observations, series candidates, structural-change events, capability
+inventory, and comparable/recast outputs are separate diagnostic or feature
+builds rather than mandatory point-query publication data.
 
 - A later comparative value cannot overwrite the first directly reported
   AS_FILED observation.
@@ -68,18 +69,13 @@ structural-change records, Annual/Current series candidates and exclusions,
   becomes an `UNAVAILABLE` AS_FILED fact with
   `AMBIGUOUS_AS_FILED_SELECTION_IDENTITY`; competing raw candidates stay in
   the publication rather than being selected by order.
-- Capability rows are based only on observed candidates. Direct relationship
-  role IDs are copied when present; a disclosure is never inferred. Typed
-  dimensions remain in the full fact/series key and are not falsely emitted as
-  member capabilities under the current Axis/Member inventory schema.
 
 ## Coverage report
 
 The result exposes one `CompanyCoverage` per requested CIK: filing count,
-analytical fact count, explicit exclusion counts, capability count, observed
-period classes/views, source-type counts, and capability-status counts. It is
-coverage metadata, not a `NOT_REPORTED` statement. `NOT_REPORTED` remains a
-query-time result of the capability contract only.
+analytical fact count, explicit exclusion counts, observed period classes and
+views, and source-type counts. It is coverage metadata, not a `NOT_REPORTED`
+statement. Capability discovery is a separate build.
 
 ## Deliberate limitations and next steps
 

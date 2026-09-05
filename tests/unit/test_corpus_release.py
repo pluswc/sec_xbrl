@@ -13,6 +13,7 @@ from sec_xbrl.longitudinal import (
     CorpusReleaseAdapter,
     CorpusReleaseError,
     Layer2RuleVersions,
+    RawFilingIndex,
 )
 
 RULES = Layer2RuleVersions("period-v1", "mapping-v1", "recast-v1", "selection-v1")
@@ -115,6 +116,29 @@ def test_release_preserves_amendment_as_distinct_snapshot(tmp_path: Path) -> Non
     release = _release(_write_corpus(tmp_path, amendment=True))
     assert [item.form for item in release.layer2_run.inputs] == ["10-Q", "10-Q/A"]
     assert len({item.accession for item in release.layer2_run.inputs}) == 2
+
+
+def test_raw_filing_index_returns_all_exact_period_candidates_and_loads_one_snapshot(
+    tmp_path: Path,
+) -> None:
+    root = _write_corpus(tmp_path, amendment=True)
+    for snapshot in (root / "snapshots" / "0000320193").iterdir():
+        filing = pl.read_parquet(snapshot / "filing.parquet").to_dicts()[0]
+        filing["document_fiscal_year_focus"] = "2025"
+        filing["document_fiscal_period_focus"] = "Q3"
+        pl.DataFrame([filing]).write_parquet(snapshot / "filing.parquet")
+
+    index = RawFilingIndex.from_corpus(root, corpus_run_id=root.name, ciks=("320193",))
+    matches = index.find(cik="0000320193", issuer_fiscal_year=2025, issuer_fiscal_period="Q3")
+
+    assert [item.accession for item in matches] == [
+        "0000320193-25-000001",
+        "0000320193-25-000002",
+    ]
+    assert {item.form for item in matches} == {"10-Q", "10-Q/A"}
+    snapshot = index.load_snapshot(matches[0])
+    assert snapshot.input.accession == "0000320193-25-000001"
+    assert snapshot.records("fact")[0]["fact_id"] == "fact"
 
 
 @pytest.mark.parametrize(

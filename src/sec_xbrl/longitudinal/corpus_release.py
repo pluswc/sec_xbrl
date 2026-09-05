@@ -54,6 +54,108 @@ class CorpusSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class RawFilingReference:
+    """One discovered, as-filed Layer 1 snapshot without analytical selection."""
+
+    cik: str
+    accession: str
+    form: str
+    filed_date: str
+    report_date: str
+    issuer_fiscal_year: str | None
+    issuer_fiscal_period: str | None
+    snapshot_directory: Path
+    _filing: Mapping[str, Any]
+    _integrity: Mapping[str, Any]
+
+
+class RawFilingIndex:
+    """Fast provider-side discovery of raw filings within one immutable corpus.
+
+    This deliberately returns every exact raw filing match, including
+    amendments.  It does not decide which filing is analytically preferable;
+    Layer 2 owns that as-of and basis-selection policy.  Loading a returned
+    reference verifies and reads exactly one complete Layer 1 snapshot.
+    """
+
+    def __init__(self, corpus_root: Path, corpus_run_id: str, references: Iterable[RawFilingReference]):
+        self._corpus_root = Path(corpus_root)
+        self._corpus_run_id = corpus_run_id
+        self._references = tuple(
+            sorted(references, key=lambda row: (row.cik, row.filed_date, row.accession))
+        )
+
+    @classmethod
+    def from_corpus(
+        cls, corpus_root: Path, *, corpus_run_id: str, ciks: Iterable[str] | None = None
+    ) -> RawFilingIndex:
+        root = Path(corpus_root)
+        if not root.is_dir() or root.is_symlink() or root.name != corpus_run_id:
+            raise CorpusReleaseError("corpus_root must be an explicit non-symlink corpus_run_id directory")
+        metadata = _read_json(root / CorpusReleaseAdapter.metadata_name, "corpus metadata")
+        if metadata.get("run_id") != corpus_run_id:
+            raise CorpusReleaseError("corpus metadata run_id does not match requested corpus_run_id")
+        summary = _read_json(root / CorpusReleaseAdapter.summary_name, "corpus summary")
+        companies = _companies_by_cik(summary)
+        requested = (
+            tuple(sorted({canonicalize_cik(cik) for cik in ciks}))
+            if ciks is not None
+            else tuple(sorted(companies))
+        )
+        missing = sorted(set(requested) - set(companies))
+        if missing:
+            raise CorpusReleaseError(f"requested CIKs are absent from corpus summary: {missing}")
+        references: list[RawFilingReference] = []
+        for cik in requested:
+            for filing, integrity, directory in _company_filing_inputs(root, cik, companies[cik]):
+                raw_filing = _read_index_filing(directory, cik, filing)
+                references.append(
+                    RawFilingReference(
+                        cik=cik,
+                        accession=str(filing["accession"]),
+                        form=str(filing["form"]),
+                        filed_date=str(filing["filed_date"]),
+                        report_date=str(filing["report_date"]),
+                        issuer_fiscal_year=_optional_text(raw_filing.get("document_fiscal_year_focus")),
+                        issuer_fiscal_period=_optional_text(raw_filing.get("document_fiscal_period_focus")),
+                        snapshot_directory=directory,
+                        _filing=filing,
+                        _integrity=integrity,
+                    )
+                )
+        return cls(root, corpus_run_id, references)
+
+    def find(
+        self,
+        *,
+        cik: str,
+        issuer_fiscal_year: str | int | None = None,
+        issuer_fiscal_period: str | None = None,
+        form: str | None = None,
+        report_date: str | None = None,
+    ) -> tuple[RawFilingReference, ...]:
+        """Return all exact raw candidates; omitted fields are not inferred."""
+        normalized_cik = canonicalize_cik(cik)
+        return tuple(
+            row
+            for row in self._references
+            if row.cik == normalized_cik
+            and (issuer_fiscal_year is None or row.issuer_fiscal_year == str(issuer_fiscal_year))
+            and (issuer_fiscal_period is None or row.issuer_fiscal_period == issuer_fiscal_period)
+            and (form is None or row.form == form)
+            and (report_date is None or row.report_date == report_date)
+        )
+
+    def load_snapshot(self, reference: RawFilingReference) -> CorpusSnapshot:
+        """Verify and read exactly the selected complete raw snapshot."""
+        if reference not in self._references:
+            raise CorpusReleaseError("raw filing reference does not belong to this index")
+        return _load_snapshot(
+            reference.snapshot_directory, reference.cik, reference._filing, reference._integrity
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class CorpusRelease:
     """A deterministic, complete raw corpus selected for one Layer 2 run."""
 
@@ -134,6 +236,15 @@ class CorpusReleaseAdapter:
 
 
 def _load_company(root: Path, cik: str, company: Mapping[str, Any]) -> list[CorpusSnapshot]:
+    return [
+        _load_snapshot(directory, cik, filing, integrity)
+        for filing, integrity, directory in _company_filing_inputs(root, cik, company)
+    ]
+
+
+def _company_filing_inputs(
+    root: Path, cik: str, company: Mapping[str, Any]
+) -> tuple[tuple[Mapping[str, Any], Mapping[str, Any], Path], ...]:
     report = company.get("report")
     integrity = company.get("integrity")
     if not isinstance(report, Mapping) or report.get("cik") != cik:
@@ -153,7 +264,7 @@ def _load_company(root: Path, cik: str, company: Mapping[str, Any]) -> list[Corp
         if accession in by_accession:
             raise CorpusReleaseError(f"duplicate filing accession in corpus report for {cik}: {accession}")
         by_accession[accession] = row
-    snapshots: list[CorpusSnapshot] = []
+    inputs: list[tuple[Mapping[str, Any], Mapping[str, Any], Path]] = []
     seen_accessions: set[str] = set()
     for item in integrity:
         if not isinstance(item, Mapping):
@@ -174,10 +285,41 @@ def _load_company(root: Path, cik: str, company: Mapping[str, Any]) -> list[Corp
         directory = root / relative
         # The summary's saved path is diagnostic only; a corpus release is
         # relocatable and must not trust an arbitrary external path.
-        snapshots.append(_load_snapshot(directory, cik, filing, item))
+        inputs.append((filing, item, directory))
     if set(by_accession) != seen_accessions:
         raise CorpusReleaseError(f"corpus filing/integrity coverage mismatch for {cik}")
-    return snapshots
+    return tuple(inputs)
+
+
+def _read_index_filing(
+    directory: Path, cik: str, report_filing: Mapping[str, Any]
+) -> Mapping[str, Any]:
+    """Read only filing metadata while building a point-query index.
+
+    Full table hashes and cross-table references are revalidated only when a
+    caller opens the selected snapshot through ``load_snapshot``.
+    """
+    path = directory / "filing.parquet"
+    if not directory.is_dir() or directory.is_symlink() or not path.is_file() or path.is_symlink():
+        raise CorpusReleaseError(f"raw filing index cannot read safe filing metadata: {directory}")
+    rows = _read_parquet(path)
+    if len(rows) != 1:
+        raise CorpusReleaseError(f"raw filing index requires exactly one filing row: {directory}")
+    row = rows[0]
+    expected = {
+        "cik": cik,
+        "accession": report_filing.get("accession"),
+        "form": report_filing.get("form"),
+        "filed_date": report_filing.get("filed_date"),
+        "report_date": report_filing.get("report_date"),
+    }
+    if any(not value for value in expected.values()) or any(row.get(key) != value for key, value in expected.items()):
+        raise CorpusReleaseError(f"raw filing index filing provenance mismatch: {directory}")
+    return row
+
+
+def _optional_text(value: object) -> str | None:
+    return str(value) if value not in (None, "") else None
 
 
 def _load_snapshot(

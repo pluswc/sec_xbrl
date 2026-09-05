@@ -18,6 +18,12 @@ explicit corpus root + corpus_run_id + exact CIK scope
 The caller supplies the root, `corpus_run_id`, CIK set, `run_version`, and all
 Layer 2 rule versions.  The adapter never selects a “latest” run.
 
+For a raw point lookup, `RawFilingIndex.from_corpus(...)` is the separate
+provider-side entry point. It indexes filing metadata for the requested CIK
+scope and returns all exact issuer-fiscal-period candidates; opening one
+candidate runs the normal complete snapshot verification. Layer 2 may consume
+that reference, but retains ownership of amendment, as-of, and basis choice.
+
 ## What is verified and retained
 
 For each selected CIK, the adapter requires an `AVAILABLE` corpus report and

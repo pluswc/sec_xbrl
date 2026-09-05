@@ -3,6 +3,29 @@
 ## Purpose
 Connect the same company's economic concepts, axes and members across 10-K/10-Q filings without changing Layer 1 raw identity.
 
+## T1 versioned reported-period panel
+
+Before any as-of or comparable selection, T1 publishes every eligible directly
+reported Layer 1 Fact as `reported_period_observation`.  Its grain is one raw
+Fact in one immutable filing snapshot: FY/Q, actual Context boundaries,
+QTD/YTD/FY/instant class, raw Fact/Context/Unit/full dimensions, accession,
+form, filed date, amendment state, and raw QName are all retained.  Later
+comparative presentations and amendments are additional rows, never updates.
+Company canonical concept/axis/member mapping is additive lineage on the row;
+an absent or uncertain mapping remains review-required rather than being
+silently joined.  T1 deliberately performs no AS_FILED selection, recast
+selection, Q4 derivation, or calculation.
+
+## T2 filing-versioned relationship index
+
+T2 publishes every Layer 1 PRE/CAL/DEF relationship as a separate
+`filing_relationship_edge` row. It makes filing-specific statement and
+dimension structure fast to find while retaining the filing/accession/version,
+role, fully specified base-set identity, raw endpoints, and all edge
+attributes. Canonical endpoint maps are additive only. T2 never merges network
+types, traverses a graph, infers a subtotal or driver, or selects a filing
+version.
+
 ## Mapping entities
 - `company_concept_map`
 - `company_axis_map`
@@ -56,6 +79,18 @@ neither view changes a Layer 1 Fact.
 - `AS_FILED`: for each target period, retain the first directly reported
   observation available on or before the requested `as_of_date`.  A later
   comparative value never overwrites that historical result.
+
+For a caller-declared common-core concept collision at the same analytical
+period, `CoreQuarterlyFactSelector` may make the basic `AS_FILED` choice
+deterministic: direct `10-Q` reporting ranks first; among that eligible set it
+first reduces every raw filing to its preferred Fact, with an undimensioned
+Fact ranking ahead only of dimensioned Facts in that same filing; it then
+chooses the latest non-amendment raw filing by `(filed_date, accession)`.
+Amendments remain
+immutable raw/series lineage but
+are not inputs to this basic selection.  Any exact rank tie (or an
+amendment-only group) remains `UNAVAILABLE` and review-required.  This is a
+mechanical common-core preference, not a recast policy or a semantic approval.
 - `LATEST_RECAST`: select the latest eligible `basis_version` available on or
   before `as_of_date` for a complete comparable period family.  Every selected
   quarter in that family must use that same basis.  A target period that is
@@ -112,6 +147,13 @@ Presentation/Definition evidence, then the exact Axis/Member facts, and then
 the related disclosure/detail.  This produces a discoverable group without
 turning a QName allowlist into a limitation on company-specific concepts.
 
+The consumer must retain the anchor, relationship-path, complete dimension
+signature, detail-Fact and derived-candidate provenance while making that
+group.  `MECHANICAL_CANDIDATE_REVIEW_REQUIRED` is period-arithmetic status,
+not a claim that the value is semantically approved or selected for a metric.
+See `consumer-exploration-contract.md` for the required group fields and
+consumer responsibilities.
+
 ## L2-M2 canonical-mapping materialization
 
 `CompanyCanonicalizer` is the L2-M2 producer.  Its `MappingTables.as_datasets()`
@@ -121,12 +163,23 @@ publisher.  A mapping preserves its source filing and raw identity alongside
 the company canonical ID; it does not update a Layer 1 record or replace an
 earlier mapping.
 
+Candidate discovery is indexed by raw ID, local name, and normalized
+label-or-name.  Each index keeps filing order, so matching still uses the most
+recent eligible prior row.  The index only narrows the rows passed to the same
+confirmation predicates; it does not relax mapping evidence or change emitted
+mapping results.
+
 The automatic confirmation boundary is intentionally narrow:
 
-- exact standard QName and namespace identity is `SAME` only when declared
-  `period_type` and `data_type` are both present and equal (and `balance` is
-  compatible when declared); an incomplete or duration-versus-instant/type
-  conflict remains `UNCERTAIN`;
+- exact standard namespace URI and local-name identity is `SAME` only when declared
+  `period_type` and `data_type` are both present and equal (and `balance` and
+  `abstract` are compatible when declared); an incomplete or
+  duration-versus-instant/type conflict remains `UNCERTAIN`;
+- the sole automatic cross-version standard-taxonomy rule is for an official
+  FASB annual URI matching `http(s)://fasb.org/us-gaap/YYYY`: equal local names
+  with compatible semantics are `SAME` across those years. The QName prefix is
+  not a comparison key; a generic `gaap` label, an unversioned URI, or a
+  look-alike/company URI containing `us-gaap` does not qualify;
 - a company extension namespace change is `RENAMED` only when local name,
   label, and role/axis/domain structural signatures agree;
 - a recast, split, or merge requires a supplied documented-change record that
@@ -169,6 +222,24 @@ silently joining an existing canonical series.
 A documented segment recast is additive: it emits a new `RECAST` mapping
 version, new canonical member ID, and `continuity_break=true`, while the prior
 mapping keeps its original validity and identity.
+
+### Core quarterly coverage diagnostics
+
+`CoreQuarterlyCoverageValidator` is a reusable, read-only quality gate for a
+caller-selected registry of common standard concepts.  The bundled registry
+includes Revenue aliases (`Revenues` and
+`RevenueFromContractWithCustomerExcludingAssessedTax`) and basic statement
+anchors, but it is not a claim that each entry is mandatory for every issuer.
+For the selected core set and fiscal years, it emits one undimensioned cell per
+concept/quarter/basis as `REPORTED`, `DERIVED`, `UNAVAILABLE`, or `MISSING`.
+`QUARTERLY` requires `QTD_3M` for Q1–Q4. `CUMULATIVE` requires `QTD_3M`,
+`YTD_6M`, `YTD_9M`, and `FY` for Q1–Q4 respectively. A Mechanical Q4 companion
+row may satisfy only quarterly Q4 as `DERIVED`; it never substitutes for the
+FY cumulative cell. An unavailable AS_FILED selection remains visible with its
+reason. `validate_core_flow_completion()` applies both bases to the bundled
+Revenue, Gross Profit, Operating Income (Loss), and Net Income (Loss) registry.
+The validator never selects a replacement fact, collapses dimensions, or
+changes Layer 1/Layer 2 records.
 
 ## L2-M3 company-series materialization
 

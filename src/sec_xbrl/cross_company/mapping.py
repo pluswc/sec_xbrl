@@ -96,7 +96,13 @@ class CrossCompanyMapper:
             if not (
                 row.get("is_standard") is True
                 and qname
-                and taxonomy_family in {"us-gaap", "dei", "srt"}
+                # ``is_standard`` is the Layer 1-qualified taxonomy signal.
+                # Layer 3 must not arbitrarily restrict that identity to a
+                # short US taxonomy allowlist: IFRS and other standard
+                # qualified taxonomies can be exactly identical too.  Exact
+                # QName + family + type + period remains the whole automatic
+                # identity; no namespace version is guessed or required.
+                and taxonomy_family
                 and data_type
                 and period_type
                 and company_id
@@ -141,6 +147,25 @@ class CrossCompanyMapper:
                             for row in company_rows
                             if _source_raw_id(row, "concept")
                         }
+                    ),
+                    # Namespace/version are raw audit provenance.  They do
+                    # not participate in the exact semantic identity key:
+                    # annual standard taxonomy versions can legitimately
+                    # change while QName/family/type/period stay identical.
+                    "source_taxonomy_provenance_for_company": sorted(
+                        (
+                            {
+                                "source_raw_id": _source_raw_id(row, "concept"),
+                                "namespace_uri": row.get("namespace_uri"),
+                                "taxonomy_version": row.get("taxonomy_version"),
+                            }
+                            for row in company_rows
+                        ),
+                        key=lambda item: (
+                            str(item["source_raw_id"]),
+                            str(item["namespace_uri"]),
+                            str(item["taxonomy_version"]),
+                        ),
                     ),
                 }
                 mappings.append(

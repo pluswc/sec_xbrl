@@ -123,6 +123,25 @@ executable/inspection checklist is maintained in
 ## M7 — Layer 2
 - same-company mappings are additive to Raw.
 - namespace changes do not break a well-supported canonical series.
+- only official FASB annual `http(s)://fasb.org/us-gaap/YYYY` namespaces with
+  the same local name and compatible period/type/balance/abstract fingerprint
+  continue automatically; taxonomy labels, QName prefixes, unversioned URIs,
+  and look-alike/company URIs do not qualify. Old/new raw namespaces remain
+  mapping evidence;
+  custom concepts do not use this automatic continuity rule.
+- a caller-selected common-core registry can produce a repeatable
+  undimensioned quarterly and cumulative diagnostic with explicit `REPORTED`,
+  `DERIVED`, `UNAVAILABLE`, and `MISSING` cells. For the core flow-completion
+  gate, Revenue (both supported aliases), Gross Profit, Operating Income
+  (Loss), and Net Income (Loss) each produce Q1–Q4 cells on both bases:
+  quarterly `QTD_3M` and cumulative `QTD_3M`/`YTD_6M`/`YTD_9M`/`FY`. A
+  Mechanical Q4 companion can satisfy only the quarterly Q4 cell as `DERIVED`,
+  never the cumulative FY cell.
+- for a selected common-core same-period collision, direct reported `10-Q`
+  ranks ahead of later comparative filings; within each eligible filing an
+  undimensioned Fact ranks ahead of a dimensioned Fact; the latest
+  non-amendment raw filing then ranks ahead.  Amendments remain raw lineage and an exact rank tie or
+  amendment-only group stays explicit `UNAVAILABLE` / review-required.
 - segment recast can create a new mapping/version rather than corrupt old history.
 - `AS_FILED` preserves the first directly reported version available at an
   `as_of_date`; later comparative/recast observations do not overwrite it.
@@ -131,6 +150,18 @@ executable/inspection checklist is maintained in
   explicit reason, never an earlier-basis value.
 - selected or unavailable outputs preserve period, source Fact/filing,
   canonical/mapping lineage, basis/source type, rule version, and `as_of_date`.
+- the operational AS_FILED publication writes only required company mappings
+  and analytical facts as Parquet; it does not run comparable/recast selection,
+  create capability inventory or intermediate series outputs, or compute
+  row-content hashes.
+- T3 exploration publication accepts only reader-verified T1 observations and
+  T2 relationship edges with the same declared Layer 1 input run. It keeps
+  raw fact/context/unit/dimension and raw QName/taxonomy/mapping lineage on
+  every navigation node.
+- exploration distinguishes `STATEMENT_COMPONENT` PRE/CAL evidence,
+  `DIMENSION_LENS`, `FACT_SCOPE`, and DEF-only `MEMBER_HIERARCHY`. It preserves
+  independent Axis lenses as alternative paths, terminates cycles per path,
+  and never selects a filing, aggregates values, or infers an economic driver.
 
 ## M8 — Layer 3
 - analytical grouping preserves raw/company IDs.

@@ -152,6 +152,34 @@ def test_documented_recast_is_persisted_without_rewriting_prior_mapping() -> Non
     assert tables.structural_change[-1]["event_type"] == "SEGMENT_RECAST"
 
 
+def test_documented_change_uses_the_latest_named_prior_mapping() -> None:
+    tables = CompanyCanonicalizer().build(
+        filings=_filings(),
+        concepts=(
+            _concept("old-1", "k24", local_name="OldOne", label="Old One"),
+            _concept("old-2", "q25", local_name="OldTwo", label="Old Two"),
+            _concept("new", "k25", local_name="New", label="New"),
+        ),
+        documented_changes=(
+            {
+                "source_raw_id": "new",
+                "prior_raw_ids": ("old-1", "old-2"),
+                "relation": "SAME",
+            },
+        ),
+    )
+
+    assert tables.company_concept_map[-1]["evidence"]["prior_raw_ids"] == ["old-1", "old-2"]
+    assert tables.company_concept_map[-1]["evidence"]["documented_change"]["prior_raw_ids"] == (
+        "old-1",
+        "old-2",
+    )
+    assert (
+        tables.company_concept_map[-1]["company_canonical_id"]
+        == tables.company_concept_map[1]["company_canonical_id"]
+    )
+
+
 def test_dimension_facts_classify_raw_concepts_into_additive_axis_and_member_maps() -> None:
     tables = CompanyCanonicalizer().build(
         filings=_filings(),
@@ -292,6 +320,102 @@ def test_exact_standard_qname_with_compatible_period_and_type_is_same() -> None:
     ).company_concept_map
     assert rows[1]["relation"] == "SAME"
     assert rows[1]["company_canonical_id"] == rows[0]["company_canonical_id"]
+
+
+def test_standard_us_gaap_concept_continues_across_annual_namespaces() -> None:
+    rows = CompanyCanonicalizer().build(
+        filings=_filings(),
+        concepts=(
+            _concept(
+                "revenue-2024", "k24", is_standard=True, qname="us-gaap:Revenues",
+                taxonomy_family="us-gaap", namespace_uri="http://fasb.org/us-gaap/2024",
+            ),
+            _concept(
+                "revenue-2025", "q25", is_standard=True, qname="us-gaap:Revenues",
+                taxonomy_family="us-gaap", namespace_uri="http://fasb.org/us-gaap/2025",
+            ),
+            _concept(
+                "revenue-2026", "k25", is_standard=True, qname="us-gaap:Revenues",
+                taxonomy_family="us-gaap", namespace_uri="http://fasb.org/us-gaap/2026",
+            ),
+        ),
+    ).company_concept_map
+    assert [row["relation"] for row in rows] == ["SAME", "SAME", "SAME"]
+    assert len({row["company_canonical_id"] for row in rows}) == 1
+    assert rows[1]["method"] == "STANDARD_US_GAAP_NAMESPACE_CONTINUITY"
+    assert rows[1]["evidence"]["prior_namespace_uri"].endswith("/2024")
+    assert rows[1]["evidence"]["namespace_uri"].endswith("/2025")
+
+
+def test_us_gaap_continuity_requires_official_versioned_namespace() -> None:
+    rows = CompanyCanonicalizer().build(
+        filings=_filings(),
+        concepts=(
+            _concept(
+                "revenue-2024", "k24", is_standard=True, qname="us-gaap:Revenues",
+                taxonomy_family="us-gaap", namespace_uri="http://fasb.org/us-gaap/2024",
+            ),
+            _concept(
+                "lookalike-2025", "q25", is_standard=True, qname="gaap:Revenues",
+                taxonomy_family="us-gaap", namespace_uri="https://example.test/us-gaap/2025",
+            ),
+        ),
+    ).company_concept_map
+
+    assert rows[1]["relation"] == MappingRelation.UNCERTAIN
+    assert rows[1]["company_canonical_id"] != rows[0]["company_canonical_id"]
+
+
+def test_us_gaap_continuity_does_not_depend_on_qname_prefix() -> None:
+    rows = CompanyCanonicalizer().build(
+        filings=_filings(),
+        concepts=(
+            _concept(
+                "revenue-2024", "k24", is_standard=True, qname="us-gaap:Revenues",
+                namespace_uri="http://fasb.org/us-gaap/2024",
+            ),
+            _concept(
+                "revenue-2025", "q25", is_standard=True, qname="alternate:Revenues",
+                namespace_uri="http://fasb.org/us-gaap/2025",
+            ),
+        ),
+    ).company_concept_map
+
+    assert rows[1]["relation"] == MappingRelation.SAME
+    assert rows[1]["company_canonical_id"] == rows[0]["company_canonical_id"]
+
+
+def test_exact_standard_identity_does_not_depend_on_qname_prefix() -> None:
+    rows = CompanyCanonicalizer().build(
+        filings=_filings(),
+        concepts=(
+            _concept(
+                "revenue-k", "k24", is_standard=True, qname="us-gaap:Revenues",
+                namespace_uri="http://fasb.org/us-gaap/2025",
+            ),
+            _concept(
+                "revenue-q", "q25", is_standard=True, qname="alternate:Revenues",
+                namespace_uri="http://fasb.org/us-gaap/2025",
+            ),
+        ),
+    ).company_concept_map
+
+    assert rows[1]["relation"] == MappingRelation.SAME
+    assert rows[1]["method"] == "EXACT_STANDARD_TAXONOMY"
+    assert rows[1]["company_canonical_id"] == rows[0]["company_canonical_id"]
+
+
+def test_custom_concept_with_same_name_across_namespaces_remains_review_required() -> None:
+    rows = CompanyCanonicalizer().build(
+        filings=_filings(),
+        concepts=(
+            _concept("custom-2024", "k24", qname="nvda:Revenue", namespace_uri="https://nvda.test/2024"),
+            _concept("custom-2025", "k25", qname="nvda:Revenue", namespace_uri="https://nvda.test/2025"),
+        ),
+    ).company_concept_map
+    assert rows[1]["relation"] == "UNCERTAIN"
+    assert rows[1]["review_required"] is True
+    assert rows[1]["company_canonical_id"] != rows[0]["company_canonical_id"]
 
 
 def test_mapping_tables_are_publisher_ready_with_l2_m0_contract(tmp_path: Path) -> None:

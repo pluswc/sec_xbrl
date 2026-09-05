@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-MAPPING_VERSION = "l2-m2-company-canonical-v1"
+MAPPING_VERSION = "l2-m2-company-canonical-v2"
 
 
 class MappingRelation(StrEnum):
@@ -49,6 +50,45 @@ class MappingTables:
             "company_member_map": self.company_member_map,
             "structural_change": self.structural_change,
         }
+
+
+@dataclass(slots=True)
+class _EstablishedCandidateIndex:
+    """Restrict canonical-mapping comparisons to evidence-compatible rows.
+
+    Every list retains insertion order, so a reverse lookup keeps the original
+    newest-prior-row preference.  The index changes candidate discovery only;
+    all confirmation predicates and emitted mapping evidence are unchanged.
+    """
+
+    by_raw_id: dict[str, list[dict[str, Any]]] = field(default_factory=lambda: defaultdict(list))
+    by_name: dict[str, list[dict[str, Any]]] = field(default_factory=lambda: defaultdict(list))
+    by_local_name: dict[str, list[dict[str, Any]]] = field(
+        default_factory=lambda: defaultdict(list)
+    )
+    by_label_or_name: dict[str, list[dict[str, Any]]] = field(
+        default_factory=lambda: defaultdict(list)
+    )
+
+    def add(self, item: dict[str, Any]) -> None:
+        source = item["source"]
+        self.by_raw_id[_raw_id(source)].append(item)
+        self.by_name[_standard_local_name(source)].append(item)
+        self.by_local_name[str(source.get("local_name") or "")].append(item)
+        self.by_label_or_name[_label_or_name(source)].append(item)
+
+    def latest_raw_id(self, raw_ids: set[str]) -> Mapping[str, Any] | None:
+        candidates = [rows[-1] for raw_id, rows in self.by_raw_id.items() if raw_id in raw_ids]
+        return max(candidates, key=lambda item: item["_position"], default=None)
+
+    def reverse_name(self, name: str) -> Iterable[dict[str, Any]]:
+        return reversed(self.by_name.get(name, ()))
+
+    def reverse_local_name(self, local_name: str) -> Iterable[dict[str, Any]]:
+        return reversed(self.by_local_name.get(local_name, ()))
+
+    def reverse_label_or_name(self, value: str) -> Iterable[dict[str, Any]]:
+        return reversed(self.by_label_or_name.get(value, ()))
 
 
 class CompanyCanonicalizer:
@@ -169,7 +209,7 @@ class CompanyCanonicalizer:
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         result: list[dict[str, Any]] = []
         events: list[dict[str, Any]] = []
-        established: list[dict[str, Any]] = []
+        established = _EstablishedCandidateIndex()
         for row in sorted(
             rows,
             key=lambda item: (filing_order.get(str(item.get("filing_id")), 10**9), _raw_id(item)),
@@ -283,7 +323,7 @@ class CompanyCanonicalizer:
                         )
                     )
             result.append(mapping)
-            established.append({"source": row, "mapping": mapping})
+            established.add({"source": row, "mapping": mapping, "_position": len(result) - 1})
         return result, events
 
 
@@ -612,7 +652,7 @@ def _selection_sort_key(row: Mapping[str, Any]) -> tuple[str, str, str, str]:
 
 def _best_candidate(
     row: Mapping[str, Any],
-    established: Iterable[Mapping[str, Any]],
+    established: _EstablishedCandidateIndex,
     relationships: Mapping[str, tuple[dict[str, Any], ...]],
     changes: Mapping[str, Mapping[str, Any]],
 ) -> tuple[Mapping[str, Any] | None, dict[str, Any]]:
@@ -620,14 +660,7 @@ def _best_candidate(
     documented = changes.get(raw_id)
     if documented:
         relation = _documented_relation(documented)
-        prior = next(
-            (
-                item
-                for item in reversed(tuple(established))
-                if _raw_id(item["source"]) in _documented_prior_raw_ids(documented)
-            ),
-            None,
-        )
+        prior = established.latest_raw_id(_documented_prior_raw_ids(documented))
         if prior:
             return prior["mapping"], {
                 "confirmed": True,
@@ -645,8 +678,27 @@ def _best_candidate(
                     MappingRelation.MERGED,
                 },
             }
-    for item in reversed(tuple(established)):
+    for item in established.reverse_name(_standard_local_name(row)):
         source = item["source"]
+        if _standard_us_gaap_namespace_continuity(row, source):
+            return item["mapping"], {
+                "confirmed": True,
+                "relation": MappingRelation.SAME,
+                "method": "STANDARD_US_GAAP_NAMESPACE_CONTINUITY",
+                "confidence": 1.0,
+                "evidence": {
+                    "taxonomy_family": "us-gaap",
+                    "local_name": _standard_local_name(row),
+                    "qname": row.get("qname"),
+                    "namespace_uri": row.get("namespace_uri"),
+                    "prior_qname": source.get("qname"),
+                    "prior_namespace_uri": source.get("namespace_uri"),
+                    "prior_raw_id": _raw_id(source),
+                    "semantic_fingerprint": _semantic_fingerprint(row),
+                    "prior_semantic_fingerprint": _semantic_fingerprint(source),
+                },
+                "continuity_break": False,
+            }
         if _exact_standard_identity(row, source):
             return item["mapping"], {
                 "confirmed": True,
@@ -662,7 +714,7 @@ def _best_candidate(
                 },
                 "continuity_break": False,
             }
-    for item in reversed(tuple(established)):
+    for item in established.reverse_local_name(str(row.get("local_name") or "")):
         source = item["source"]
         if _well_supported_namespace_change(row, source, relationships):
             return item["mapping"], {
@@ -673,7 +725,7 @@ def _best_candidate(
                 "evidence": _continuity_evidence(row, source, relationships),
                 "continuity_break": False,
             }
-    for item in reversed(tuple(established)):
+    for item in established.reverse_label_or_name(_label_or_name(row)):
         source = item["source"]
         if _same_text(row, source):
             return item["mapping"], {
@@ -709,10 +761,68 @@ def _exact_standard_identity(left: Mapping[str, Any], right: Mapping[str, Any]) 
     return (
         bool(left.get("is_standard"))
         and bool(right.get("is_standard"))
-        and left.get("qname") == right.get("qname")
         and left.get("namespace_uri") == right.get("namespace_uri")
+        and _standard_local_name(left)
+        and _standard_local_name(left) == _standard_local_name(right)
         and _compatible_context_semantics(left, right)
     )
+
+
+def _standard_us_gaap_namespace_continuity(
+    left: Mapping[str, Any], right: Mapping[str, Any]
+) -> bool:
+    """Recognize a stable US-GAAP concept across annual taxonomy namespaces.
+
+    Layer 1 retains each filing's QName and namespace.  This is an additive
+    Layer 2 rule for *standard* US-GAAP concepts only; extension concepts never
+    qualify merely because a local name repeats.  The semantic fingerprint is
+    deliberately complete enough to reject duration/instant, type, balance,
+    and abstractness changes.
+    """
+    return bool(
+        left.get("is_standard")
+        and right.get("is_standard")
+        and _is_annual_fasb_us_gaap_namespace(left.get("namespace_uri"))
+        and _is_annual_fasb_us_gaap_namespace(right.get("namespace_uri"))
+        and _standard_local_name(left)
+        and _standard_local_name(left) == _standard_local_name(right)
+        and left.get("namespace_uri") != right.get("namespace_uri")
+        and _compatible_context_semantics(left, right)
+        and left.get("abstract") == right.get("abstract")
+    )
+
+
+_ANNUAL_FASB_US_GAAP_NAMESPACE = re.compile(
+    r"^https?://fasb\.org/us-gaap/[0-9]{4}$", re.IGNORECASE
+)
+
+
+def _is_annual_fasb_us_gaap_namespace(namespace_uri: object) -> bool:
+    """Accept only official, year-versioned FASB US-GAAP namespace URIs.
+
+    A QName prefix is an XML alias, so neither ``us-gaap`` nor ``gaap`` is a
+    trustworthy taxonomy classification by itself. This narrow rule permits
+    annual FASB namespace changes while leaving unversioned, look-alike, and
+    company-extension namespaces outside automatic continuity.
+    """
+    return bool(_ANNUAL_FASB_US_GAAP_NAMESPACE.fullmatch(str(namespace_uri or "")))
+
+
+def _standard_local_name(row: Mapping[str, Any]) -> str:
+    local = row.get("local_name")
+    if local:
+        return str(local)
+    qname = str(row.get("qname") or "")
+    return qname.rsplit(":", 1)[-1] if ":" in qname else ""
+
+
+def _semantic_fingerprint(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "period_type": row.get("period_type"),
+        "data_type": row.get("data_type"),
+        "balance": row.get("balance"),
+        "abstract": row.get("abstract"),
+    }
 
 
 def _compatible_context_semantics(
@@ -734,9 +844,14 @@ def _compatible_context_semantics(
     # Balance is relevant only where one side declares it.  A missing balance
     # on both is valid for duration concepts; a one-sided or changed balance is
     # a semantic incompatibility.
-    if left.get("balance") is not None or right.get("balance") is not None:
-        return left.get("balance") == right.get("balance")
-    return True
+    if (
+        (left.get("balance") is not None or right.get("balance") is not None)
+        and left.get("balance") != right.get("balance")
+    ):
+        return False
+    # Abstractness is semantic metadata too: a presentation-only abstract
+    # node must never join a reportable numeric concept.
+    return left.get("abstract") == right.get("abstract")
 
 
 def _well_supported_namespace_change(
@@ -856,6 +971,8 @@ def _mapping_row(
         "source_qname": source.get("qname"),
         "source_namespace_uri": source.get("namespace_uri"),
         "source_local_name": source.get("local_name"),
+        "source_taxonomy_family": source.get("taxonomy_family"),
+        "source_is_standard": source.get("is_standard"),
         "company_canonical_id": canonical_id,
         "canonical_entity_type": entity_type,
         "valid_from_filing_id": valid_from_filing_id,
