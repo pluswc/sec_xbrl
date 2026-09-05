@@ -96,7 +96,13 @@ class CrossCompanyMapper:
             if not (
                 row.get("is_standard") is True
                 and qname
-                and taxonomy_family in {"us-gaap", "dei", "srt"}
+                # ``is_standard`` is the Layer 1-qualified taxonomy signal.
+                # Layer 3 must not arbitrarily restrict that identity to a
+                # short US taxonomy allowlist: IFRS and other standard
+                # qualified taxonomies can be exactly identical too.  Exact
+                # QName + family + type + period remains the whole automatic
+                # identity; no namespace version is guessed or required.
+                and taxonomy_family
                 and data_type
                 and period_type
                 and company_id

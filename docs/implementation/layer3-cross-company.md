@@ -85,7 +85,11 @@ relation in the panel even when it shares an analytical category with an
 standard QName and the same non-empty taxonomy family, data type, and period
 type. It records all supporting filing IDs in the mapping evidence and uses
 `EXACT_STANDARD_TAXONOMY_IDENTITY` as the method. This is a narrow identity
-rule, not label matching. Repeated filings for one company canonical concept
+rule, not label matching. A qualified standard concept is not limited to a
+hard-coded US taxonomy-family list: for example, the same qualified
+`ifrs-full` QName may meet this rule. Taxonomy namespace/version is preserved
+as provenance but is neither guessed nor made an undocumented identity gate.
+Repeated filings for one company canonical concept
 produce one mapping row with consolidated company-specific filing and raw-ID
 evidence, rather than duplicate mapping rows.
 

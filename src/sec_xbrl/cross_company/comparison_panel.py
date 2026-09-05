@@ -317,10 +317,20 @@ def _validate_reviewed_mappings(rows: tuple[dict[str, Any], ...]) -> None:
             raise CrossCompanyComparisonPanelError(
                 "T8 reviewed mappings may only express subcategory, superset, or analytical similarity"
             )
-        if not str(row.get("mapping_version") or "") or not isinstance(row.get("evidence"), Mapping):
+        if not str(row.get("mapping_version") or "") or not _meaningful_evidence(row.get("evidence")):
             raise CrossCompanyComparisonPanelError("reviewed Layer 3 mapping requires evidence and version")
         if row.get("review_state") != "REVIEWED":
             raise CrossCompanyComparisonPanelError("reviewed Layer 3 mapping requires review_state REVIEWED")
+
+
+def _meaningful_evidence(value: Any) -> bool:
+    """Reject empty shells; a reviewed semantic assertion needs actual support."""
+    if not isinstance(value, Mapping) or not value:
+        return False
+    return any(
+        bool(item.strip()) if isinstance(item, str) else item not in (None, (), [], {}, "")
+        for item in value.values()
+    )
 
 
 def _comparison_key(source: Mapping[str, Any], mapping: Mapping[str, Any]) -> tuple[str, ...]:

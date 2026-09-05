@@ -25,6 +25,11 @@ semantic tuple plus consolidated filing/raw-ID evidence for every company.
 Labels, local names, values and superficially similar extension concepts never
 produce a relation.
 
+The rule is not a hard-coded US taxonomy allowlist: any Layer 1-qualified
+standard family (for example `ifrs-full`) may qualify if its full exact
+identity is shared. Taxonomy namespace/version remains provenance and is not
+an undocumented matching gate.
+
 Company extensions, dimensioned facts, missing type metadata and
 measurement-incompatible standard concepts remain individual `UNRESOLVED`
 rows. They are retained rather than filtered out.
@@ -33,7 +38,7 @@ rows. They are retained rather than filtered out.
 
 Reviewed inputs may add only `SUBCATEGORY_OF`, `SUPERSET_OF`, or
 `ANALYTICALLY_SIMILAR`; each requires `review_state=REVIEWED`, evidence,
-method and mapping version. Similarity remains similarity in every output
+method and mapping version. An empty evidence object is rejected. Similarity remains similarity in every output
 cell. Mapping-key collision validation rejects an explicit mapping that would
 replace an automatic standard identity map.
 

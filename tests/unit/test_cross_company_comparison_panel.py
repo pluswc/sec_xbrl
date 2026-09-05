@@ -178,7 +178,7 @@ def test_reviewed_similarity_is_not_promoted_to_equivalent() -> None:
     assert CrossCompanyRelation.EQUIVALENT not in {cell["mapping_relation"] for cell in panel.cells}
 
 
-def test_review_mapping_requires_review_evidence_and_version() -> None:
+def test_review_mapping_requires_nonempty_evidence_version_and_review_state() -> None:
     first, second = _pivot("0001045810", standard=False), _pivot("0000320193", standard=False)
     bad = {
         "company_canonical_id": first.cells[0]["value_lineage"]["company_canonical_concept_id"],
@@ -188,8 +188,9 @@ def test_review_mapping_requires_review_evidence_and_version() -> None:
         "evidence": {},
         "method": "REVIEW",
         "mapping_version": "v1",
+        "review_state": "REVIEWED",
     }
-    with pytest.raises(CrossCompanyComparisonPanelError, match="review_state"):
+    with pytest.raises(CrossCompanyComparisonPanelError, match="evidence"):
         _build(first, second, reviewed_concept_mappings=(bad,))
 
 
