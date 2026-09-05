@@ -206,6 +206,8 @@ def _source(cik: str, row: Mapping[str, Any], cell: Mapping[str, Any], scope: Ma
         "company_canonical_id": company_id,
         "raw_concept_is_standard": value.get("raw_concept_is_standard"),
         "raw_concept_taxonomy_family": value.get("raw_concept_taxonomy_family"),
+        "raw_concept_taxonomy_version": value.get("raw_concept_taxonomy_version"),
+        "raw_concept_namespace_uri": value.get("raw_concept_namespace_uri"),
         "raw_concept_data_type": value.get("raw_concept_data_type"),
         "raw_concept_period_type": value.get("raw_concept_period_type"),
         "raw_dimension_signature": deepcopy(value.get("raw_dimension_signature")),
@@ -259,6 +261,11 @@ def _automatic_standard_observation(source: Mapping[str, Any]) -> dict[str, Any]
         "period_type": source["raw_concept_period_type"],
         "is_standard": True,
         "measurement_scope": _unit_scope(source),
+        # Versioned taxonomy provenance is carried as evidence only.  It is
+        # intentionally outside the equivalence key so annual standard
+        # taxonomy namespace changes do not break same-QName continuity.
+        "taxonomy_version": source.get("raw_concept_taxonomy_version"),
+        "namespace_uri": source.get("raw_concept_namespace_uri"),
     }
 
 
@@ -367,6 +374,9 @@ def _cell(row_id: str, source: Mapping[str, Any], mapping: Mapping[str, Any]) ->
         "cik": source["cik"],
         "source_raw_id": source.get("raw_concept_id") or source["raw_concept_qname"],
         "raw_concept_qname": source["raw_concept_qname"],
+        "raw_concept_taxonomy_family": source.get("raw_concept_taxonomy_family"),
+        "raw_concept_taxonomy_version": source.get("raw_concept_taxonomy_version"),
+        "raw_concept_namespace_uri": source.get("raw_concept_namespace_uri"),
         "company_canonical_id": source["company_canonical_id"],
         "analytical_id": mapping.get("analytical_id"),
         "mapping_relation": mapping["relation"],

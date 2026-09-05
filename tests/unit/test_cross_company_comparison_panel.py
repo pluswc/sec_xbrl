@@ -20,6 +20,8 @@ def _pivot(
     family: str | None = "us-gaap",
     data_type: str | None = "xbrli:monetaryItemType",
     period_type: str | None = "duration",
+    taxonomy_version: str | None = "2024",
+    namespace_uri: str | None = "http://fasb.org/us-gaap/2024",
     unit: tuple[str, ...] | None = ("iso4217:USD",),
     dimensions: tuple[object, ...] = (),
     value: str | None = "100",
@@ -45,6 +47,8 @@ def _pivot(
         "raw_concept_qname": qname,
         "raw_concept_is_standard": standard,
         "raw_concept_taxonomy_family": family,
+        "raw_concept_taxonomy_version": taxonomy_version,
+        "raw_concept_namespace_uri": namespace_uri,
         "raw_concept_data_type": data_type,
         "raw_concept_period_type": period_type,
         "company_canonical_concept_id": canonical,
@@ -111,6 +115,18 @@ def test_exact_standard_revenue_builds_one_equivalent_row_and_preserves_lineage(
     assert {cell["mapping_method"] for cell in panel.cells} == {"EXACT_STANDARD_TAXONOMY_IDENTITY"}
     assert panel.cells[0]["t5_value_lineage"]["accession_version_ledger_id"].startswith("ledger:")
     assert panel.cells[0]["t6_cell_lineage"]["binding"]["analysis_binding_id"].startswith("binding:")
+
+
+def test_standard_taxonomy_version_is_auditable_not_an_equivalence_gate() -> None:
+    panel = _build(
+        _pivot("0001045810", taxonomy_version="2024", namespace_uri="http://fasb.org/us-gaap/2024"),
+        _pivot("0000320193", taxonomy_version="2025", namespace_uri="http://fasb.org/us-gaap/2025"),
+    )
+
+    assert {cell["mapping_relation"] for cell in panel.cells} == {CrossCompanyRelation.EQUIVALENT}
+    assert {cell["raw_concept_taxonomy_version"] for cell in panel.cells} == {"2024", "2025"}
+    evidence = panel.cells[0]["mapping_evidence"]["source_taxonomy_provenance_for_company"]
+    assert evidence[0]["taxonomy_version"] in {"2024", "2025"}
 
 
 @pytest.mark.parametrize(

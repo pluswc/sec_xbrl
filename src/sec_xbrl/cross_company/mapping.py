@@ -148,6 +148,25 @@ class CrossCompanyMapper:
                             if _source_raw_id(row, "concept")
                         }
                     ),
+                    # Namespace/version are raw audit provenance.  They do
+                    # not participate in the exact semantic identity key:
+                    # annual standard taxonomy versions can legitimately
+                    # change while QName/family/type/period stay identical.
+                    "source_taxonomy_provenance_for_company": sorted(
+                        (
+                            {
+                                "source_raw_id": _source_raw_id(row, "concept"),
+                                "namespace_uri": row.get("namespace_uri"),
+                                "taxonomy_version": row.get("taxonomy_version"),
+                            }
+                            for row in company_rows
+                        ),
+                        key=lambda item: (
+                            str(item["source_raw_id"]),
+                            str(item["namespace_uri"]),
+                            str(item["taxonomy_version"]),
+                        ),
+                    ),
                 }
                 mappings.append(
                     _mapping_row(

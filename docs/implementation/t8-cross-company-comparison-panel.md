@@ -30,6 +30,11 @@ standard family (for example `ifrs-full`) may qualify if its full exact
 identity is shared. Taxonomy namespace/version remains provenance and is not
 an undocumented matching gate.
 
+The source taxonomy family, version and namespace URI remain on every company
+cell and in company-specific mapping evidence. Version/URI are audit evidence,
+not automatic identity keys, so annual standard-taxonomy namespace changes do
+not incorrectly split a comparable exact QName.
+
 Company extensions, dimensioned facts, missing type metadata and
 measurement-incompatible standard concepts remain individual `UNRESOLVED`
 rows. They are retained rather than filtered out.
