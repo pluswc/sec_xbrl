@@ -95,3 +95,19 @@ mapping with scope evidence explicitly assigns `SUBCATEGORY_OF`,
 `SUPERSET_OF`, or `ANALYTICALLY_SIMILAR`. An explicit mapping also cannot
 silently override a generated standard mapping for the same company canonical
 entity; that collision fails validation.
+
+## T8 comparison serving boundary
+
+`CrossCompanyComparisonPanelBuilder` consumes two or more T6
+`QuarterlyAnalysisPivotResult` inputs for one requested fiscal-year/quarter
+column. All inputs must agree on `period_class`, selection view and as-of date;
+missing columns, repeated CIKs, and mismatches fail closed.
+
+T8 adds a measurement-scope gate to automatic standard identity: cells must be
+undimensioned and have matching non-empty unit semantics as well as exact
+QName/family/type/period identity. Labels, local names, values, company
+extensions and incomplete metadata remain visible `UNRESOLVED` rows. An
+optional explicit input permits only reviewed `SUBCATEGORY_OF`, `SUPERSET_OF`,
+or `ANALYTICALLY_SIMILAR` relations, never an override of automatic identity.
+The panel retains whole T6/T5 lineage and does not rank, average, calculate,
+recast, or chart cross-company values.

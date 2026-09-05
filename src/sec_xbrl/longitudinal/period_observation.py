@@ -232,6 +232,10 @@ def _observation(
         "raw_concept_local_name": concept.get("local_name"),
         "raw_concept_taxonomy_family": concept.get("taxonomy_family"),
         "raw_concept_taxonomy_version": concept.get("taxonomy_version"),
+        # The exact XBRL type is required later when a Layer 3 consumer asks
+        # whether a standard QName is genuinely comparable across companies.
+        # Preserve it as raw provenance; it is not a mapping decision.
+        "raw_concept_data_type": concept.get("data_type"),
         "raw_concept_is_standard": concept.get("is_standard"),
         "raw_concept_is_custom": concept.get("is_custom"),
         "raw_concept_period_type": concept.get("period_type"),
