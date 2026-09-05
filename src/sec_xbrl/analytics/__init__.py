@@ -8,6 +8,13 @@ from sec_xbrl.analytics.company_analysis_panel import (
     CompanyAnalysisPanelResult,
 )
 from sec_xbrl.analytics.data_access import ConsumerDataAccess
+from sec_xbrl.analytics.operational_query import (
+    OPERATIONAL_ANALYTICS_QUERY_VERSION,
+    OperationalAnalyticsQueryError,
+    OperationalAnalyticsQueryService,
+    OperationalPublicationRoots,
+    OperationalQueryScope,
+)
 from sec_xbrl.analytics.quarterly_analysis_pivot import (
     QUARTERLY_ANALYSIS_PIVOT_VERSION,
     QuarterlyAnalysisPivotBuilder,
@@ -38,6 +45,7 @@ from sec_xbrl.analytics.review_inventory_report import (
 
 __all__ = [
     "COMPANY_ANALYSIS_PANEL_VERSION",
+    "OPERATIONAL_ANALYTICS_QUERY_VERSION",
     "QUARTERLY_ANALYSIS_PIVOT_VERSION",
     "QUARTERLY_DERIVED_METRICS_VERSION",
     "AnalyticalRepository",
@@ -55,6 +63,10 @@ __all__ = [
     "FactNotFoundError",
     "KoreanReviewInventoryReport",
     "KoreanReviewInventoryReportGenerator",
+    "OperationalAnalyticsQueryError",
+    "OperationalAnalyticsQueryService",
+    "OperationalPublicationRoots",
+    "OperationalQueryScope",
     "QuarterlyAnalysisPivotBuilder",
     "QuarterlyAnalysisPivotError",
     "QuarterlyAnalysisPivotQuery",
