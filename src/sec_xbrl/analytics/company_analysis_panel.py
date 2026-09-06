@@ -398,6 +398,12 @@ def _reported_line(
         "context_start_date": source.get("context_start_date"),
         "context_end_date": source.get("context_end_date"),
         "context_instant_date": source.get("context_instant_date"),
+        # A filing can carry current and prior comparative contexts under one
+        # filing fiscal label.  Downstream fiscal time-series layout must be
+        # able to keep those observation families apart without guessing from
+        # date strings.
+        "period_class": source.get("period_class"),
+        "comparative_type": source.get("comparative_type"),
         "raw_concept_id": source["raw_concept_id"],
         "raw_concept_qname": source["raw_concept_qname"],
         "raw_concept_taxonomy_family": source.get("raw_concept_taxonomy_family"),

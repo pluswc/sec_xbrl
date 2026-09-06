@@ -8,6 +8,15 @@ from sec_xbrl.analytics.company_analysis_panel import (
     CompanyAnalysisPanelResult,
 )
 from sec_xbrl.analytics.data_access import ConsumerDataAccess
+from sec_xbrl.analytics.fiscal_time_series import (
+    FISCAL_TIME_SERIES_VERSION,
+    FiscalPeriod,
+    FiscalTimeSeriesBuilder,
+    FiscalTimeSeriesError,
+    FiscalTimeSeriesInput,
+    FiscalTimeSeriesQuery,
+    FiscalTimeSeriesResult,
+)
 from sec_xbrl.analytics.operational_query import (
     OPERATIONAL_ANALYTICS_QUERY_VERSION,
     OperationalAnalyticsQueryError,
@@ -58,6 +67,13 @@ __all__ = [
     "CompanyAnalysisPanelResult",
     "CompanyNotFoundError",
     "ConsumerDataAccess",
+    "FISCAL_TIME_SERIES_VERSION",
+    "FiscalPeriod",
+    "FiscalTimeSeriesBuilder",
+    "FiscalTimeSeriesError",
+    "FiscalTimeSeriesInput",
+    "FiscalTimeSeriesQuery",
+    "FiscalTimeSeriesResult",
     "DerivedMetricConflictError",
     "DerivedMetricNotFoundError",
     "FactNotFoundError",
