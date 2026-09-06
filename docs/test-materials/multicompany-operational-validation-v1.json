@@ -1,0 +1,129 @@
+{
+  "test_pack_id": "multicompany-operational-validation-v1",
+  "purpose": "A declarative, provenance-first operational validation pack for an expandable company cohort. It starts with NVDA, AMD, MSFT, AAPL, and AMZN, and includes one real AMD amendment pair.",
+  "storage_rule": "This file contains identities, availability, and assertions only. It never embeds SEC packages, Layer 1 snapshots, or generated Parquet publications.",
+  "local_corpus_evidence": {
+    "run_id": "20260827T051322Z",
+    "processed_run_relative_root": "data/processed/trailing_corpus_runs/20260827T051322Z",
+    "evidence_mode": "Optional integration evidence. The checked-in acceptance material remains runnable without this local corpus; an integration test skips when SEC_XBRL_CORPUS_ROOT is absent."
+  },
+  "companies": [
+    {
+      "ticker": "NVDA",
+      "cik": "0001045810",
+      "layer1_status": "AVAILABLE",
+      "available_snapshot_count": 14,
+      "reference_filing": {
+        "accession": "0001045810-24-000316",
+        "form": "10-Q",
+        "filed_date": "2024-11-20",
+        "report_date": "2024-10-27",
+        "snapshot_manifest_relative_path": "snapshots/0001045810/000104581024000316/layer1_manifest.json"
+      }
+    },
+    {
+      "ticker": "AMD",
+      "cik": "0000002488",
+      "layer1_status": "AVAILABLE",
+      "available_snapshot_count": 15,
+      "reference_filing": {
+        "accession": "0000002488-24-000163",
+        "form": "10-Q",
+        "filed_date": "2024-10-30",
+        "report_date": "2024-09-28",
+        "snapshot_manifest_relative_path": "snapshots/0000002488/000000248824000163/layer1_manifest.json"
+      }
+    },
+    {
+      "ticker": "MSFT",
+      "cik": "0000789019",
+      "layer1_status": "MISSING",
+      "available_snapshot_count": 0,
+      "reference_filing": null,
+      "required_next_step": "Discover, cache, and publish an immutable Layer 1 snapshot before this company can enter a common operational publication."
+    },
+    {
+      "ticker": "AAPL",
+      "cik": "0000320193",
+      "layer1_status": "AVAILABLE",
+      "available_snapshot_count": 15,
+      "reference_filing": {
+        "accession": "0000320193-24-000123",
+        "form": "10-K",
+        "filed_date": "2024-11-01",
+        "report_date": "2024-09-28",
+        "snapshot_manifest_relative_path": "snapshots/0000320193/000032019324000123/layer1_manifest.json"
+      }
+    },
+    {
+      "ticker": "AMZN",
+      "cik": "0001018724",
+      "layer1_status": "MISSING",
+      "available_snapshot_count": 0,
+      "reference_filing": null,
+      "required_next_step": "Discover, cache, and publish an immutable Layer 1 snapshot before this company can enter a common operational publication."
+    }
+  ],
+  "amendment_case": {
+    "case_id": "AMD_FY2025_10K_AND_10K_A",
+    "ticker": "AMD",
+    "cik": "0000002488",
+    "original_filing": {
+      "accession": "0000002488-26-000018",
+      "form": "10-K",
+      "filed_date": "2026-02-04",
+      "report_date": "2025-12-27",
+      "snapshot_manifest_relative_path": "snapshots/0000002488/000000248826000018/layer1_manifest.json"
+    },
+    "amendment_filing": {
+      "accession": "0000002488-26-000021",
+      "form": "10-K/A",
+      "filed_date": "2026-02-04",
+      "report_date": "2025-12-27",
+      "snapshot_manifest_relative_path": "snapshots/0000002488/000000248826000021/layer1_manifest.json"
+    },
+    "required_assertions": [
+      "The original and amendment remain distinct accession-level evidence records.",
+      "An amendment is not assumed to contain every original fact; absent facts are not fabricated or copied into the amendment.",
+      "AS_FILED and LATEST_REPORTED selection must retain the selected accession, filed date, form, and source fact lineage.",
+      "The pack does not infer an amendment sequence number from accession text or numeric order."
+    ]
+  },
+  "publication_gate": {
+    "storage_format": "parquet-operational-v1",
+    "required_roots": [
+      "reported_observations",
+      "relationships",
+      "exploration_graph",
+      "accession_ledger"
+    ],
+    "required_company_ciks": [
+      "0001045810",
+      "0000002488",
+      "0000789019",
+      "0000320193",
+      "0001018724"
+    ],
+    "same_layer1_run_fingerprint": true,
+    "fail_closed_condition": "Every requested CIK must have an immutable Layer 1 snapshot in one declared input run, and all four roots must attest that identical CIK scope and run fingerprint. Otherwise no five-company operational comparison is served.",
+    "current_status": "BLOCKED: MSFT and AMZN are not present in local Layer 1 evidence, and no five-company parquet-operational-v1 root set is published."
+  },
+  "acceptance_hypotheses": [
+    {
+      "id": "DECLARATIVE_COHORT_NOT_THREE_COMPANY_CODE",
+      "expected": "The cohort is defined by company records and CIKs, not a hard-coded three-company query path. Any company is served only after the publication gate attests it."
+    },
+    {
+      "id": "AVAILABLE_AND_MISSING_ARE_EXPLICIT",
+      "expected": "NVDA, AMD, and AAPL are marked AVAILABLE from local Layer 1 evidence; MSFT and AMZN are MISSING. Missing companies cannot silently be replaced with a different filing or current SEC result."
+    },
+    {
+      "id": "AMD_AMENDMENT_PRESERVES_ACCESSION_EVIDENCE",
+      "expected": "AMD 10-K 0000002488-26-000018 and 10-K/A 0000002488-26-000021 remain separately identifiable and never overwrite one another in Raw or operational lineage."
+    },
+    {
+      "id": "NO_UNREVIEWED_CROSS_COMPANY_EQUIVALENCE",
+      "expected": "T8 may mark only exact compatible standard taxonomy identities EQUIVALENT. Company-custom values and distinct standard QNames remain UNRESOLVED without a reviewed mapping."
+    }
+  ]
+}
