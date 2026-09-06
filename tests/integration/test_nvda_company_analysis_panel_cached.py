@@ -7,7 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from sec_xbrl.analytics import CompanyAnalysisPanelBuilder
+from sec_xbrl.analytics import (
+    CompanyAnalysisPanelBuilder,
+    FiscalTimeSeriesBuilder,
+    FiscalTimeSeriesInput,
+)
 from sec_xbrl.longitudinal import (
     AccessionVersionLedgerPipeline,
     AccessionVersionLedgerReader,
@@ -88,3 +92,33 @@ def test_cached_nvda_q3_panel_keeps_revenue_and_data_center_provenance(tmp_path:
     assert detail["accession"] == "0001045810-23-000227"
     assert detail["source_snapshot_id"] and detail["context_id"] and detail["unit_id"]
     assert detail["ledger_lineage"]["ledger_amendment_linkage_state"] == "NOT_APPLICABLE"
+
+    # Full exploration supplies several paths to the same detail Fact. Those
+    # paths must remain provenance, not abort the entire fiscal pivot.
+    inputs = []
+    for year in (2024, 2025):
+        period_rows = VersionedObservationPanelReader().get_period(
+            Layer2PublicationReader().load(t1.publication.run_root), cik="0001045810",
+            fiscal_year=year, fiscal_quarter=3, period_class="QTD_3M",
+        )
+        selection = selector.select_period(
+            observations=period_rows, ledger=ledger, cik="0001045810", fiscal_year=year,
+            fiscal_quarter=3, period_class="QTD_3M", as_of_date="2026-09-06", view="LATEST_REPORTED",
+        )
+        yearly = CompanyAnalysisPanelBuilder().build(
+            selected_rows=selection.rows, exploration=graph, cik="0001045810", fiscal_year=year,
+            fiscal_quarter=3, period_class="QTD_3M", view="LATEST_REPORTED", as_of_date="2026-09-06",
+        )
+        inputs.append(FiscalTimeSeriesInput(yearly, "--01-28"))
+    result = FiscalTimeSeriesBuilder().build(inputs=inputs)
+    coalesced = [cell for cell in result.cells if cell["resolution_status"] == "COALESCED"]
+    assert coalesced
+    assert all(cell["source_fact_count"] == 1 for cell in coalesced)
+    assert all(cell["candidate_count"] == len(cell["candidate_lineage"]) for cell in coalesced)
+    current_revenue = [cell for cell in result.cells if cell.get("value_lineage")
+                       and cell["value_lineage"].get("raw_concept_qname") == "us-gaap:Revenues"
+                       and cell["value_lineage"].get("comparative_type") == "CURRENT_FOCUS"
+                       and not cell["value_lineage"].get("canonical_dimension_signature")]
+    assert {cell["value_numeric"] for cell in current_revenue} == {"18120000000", "35082000000"}
+    assert len({cell["fiscal_time_series_row_id"] for cell in current_revenue}) == 1
+    assert all(cell["binding"]["primary_statement_evidence"] for cell in current_revenue)

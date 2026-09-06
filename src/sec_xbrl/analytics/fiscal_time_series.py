@@ -13,11 +13,12 @@ from collections.abc import Iterable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sec_xbrl.analytics.company_analysis_panel import CompanyAnalysisPanelResult
 
-FISCAL_TIME_SERIES_VERSION = "analysis-company-fiscal-timeseries-v1"
+FISCAL_TIME_SERIES_VERSION = "analysis-company-fiscal-timeseries-v2"
 _PERIOD_CLASSES = frozenset({"QTD_3M", "YTD_6M", "YTD_9M", "FY", "INSTANT", "OTHER_DURATION"})
 
 
@@ -89,7 +90,7 @@ class FiscalTimeSeriesBuilder:
         )
         rows: dict[tuple[Any, ...], dict[str, Any]] = {}
         cells: list[dict[str, Any]] = []
-        seen: set[tuple[str, str]] = set()
+        candidates: dict[tuple[str, str], list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]] = {}
         column_by_period = {
             (item["fiscal_year"], item["fiscal_quarter"], item["period_class"]): item
             for item in columns
@@ -111,10 +112,10 @@ class FiscalTimeSeriesBuilder:
                 row_id = _id("row", key)
                 rows.setdefault(row_id, _row(row_id, key, definition, binding, value))
                 coordinate = (row_id, str(column["fiscal_time_series_column_id"]))
-                if coordinate in seen:
-                    raise FiscalTimeSeriesError("duplicate selected values collide in one fiscal cell")
-                seen.add(coordinate)
-                cells.append(_cell(row_id, column, definition, binding, value))
+                candidates.setdefault(coordinate, []).append((definition, binding, value))
+        column_by_id = {str(column["fiscal_time_series_column_id"]): column for column in columns}
+        for (row_id, column_id), choices in candidates.items():
+            cells.append(_resolve_cell(row_id, column_by_id[column_id], choices))
         result = FiscalTimeSeriesResult(
             columns=columns,
             rows=tuple(sorted(rows.values(), key=_row_order)),
@@ -263,7 +264,7 @@ def _annotate_comparability(columns: tuple[dict[str, Any], ...]) -> tuple[dict[s
         else:
             difference = abs(int(column["duration_days"]) - int(previous["duration_days"]))
             if difference == 7:
-                status, reason = "DURATION_EXCEPTION_53_WEEK", "ACTUAL_DURATION_DIFFERS_BY_7_DAYS_NO_NORMALIZATION"
+                status, reason = "DURATION_EXCEPTION_7_DAYS", "ACTUAL_DURATION_DIFFERS_BY_7_DAYS_53_WEEK_NOT_CONFIRMED"
             elif difference > 7:
                 status, reason = "REVIEW_REQUIRED", "ACTUAL_DURATION_DIFFERS_BY_MORE_THAN_7_DAYS"
             else:
@@ -288,8 +289,8 @@ def _row_key(definition: Mapping[str, Any], binding: Mapping[str, Any], value: M
     boundaries = (value.get("context_start_date"), value.get("context_end_date"), value.get("context_instant_date"))
     family = ("COMPARATIVE", comparative) if comparative else ("UNCLASSIFIED_BOUNDARY", boundaries)
     if canonical and not review and unit != (None, None):
-        return ("JOIN", definition.get("line_class"), definition.get("line_scope"), definition.get("line_kind"), canonical, dimensions, unit, family)
-    return ("REVIEW", value.get("source_filing_id"), value.get("selected_source_fact_id"), binding.get("analysis_binding_id"))
+        return ("JOIN", canonical, dimensions, unit, family)
+    return ("REVIEW", value.get("source_snapshot_id"), value.get("source_filing_id"), value.get("selected_source_fact_id") or binding.get("analysis_binding_id"))
 
 
 def _row(row_id: str, key: tuple[Any, ...], definition: Mapping[str, Any], binding: Mapping[str, Any], value: Mapping[str, Any]) -> dict[str, Any]:
@@ -313,11 +314,65 @@ def _cell(row_id: str, column: Mapping[str, Any], definition: Mapping[str, Any],
     }
 
 
+def _resolve_cell(row_id: str, column: Mapping[str, Any], candidates: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]) -> dict[str, Any]:
+    """Coalesce navigation duplicates without guessing a conflicting fact.
+
+    Placement is only a preference inside one eligible filing version and
+    exact actual period. T4 remains the authority on eligible source versions.
+    Every rejected alternative and every graph path stays inspectable.
+    """
+    ordered = sorted(candidates, key=lambda item: str(item[2].get("analysis_line_value_id")))
+    lineage = tuple({"definition": deepcopy(d), "binding": deepcopy(b), "value": deepcopy(v)} for d, b, v in ordered)
+    boundaries = {(v.get("context_start_date"), v.get("context_end_date"), v.get("context_instant_date")) for _, _, v in ordered}
+    versions = {v.get("source_filing_id") for _, _, v in ordered}
+    reason = None
+    selected = ordered
+    if len(boundaries) > 1:
+        reason = "AMBIGUOUS_ACTUAL_PERIOD_BOUNDARIES"
+    elif len(versions) > 1:
+        reason = "MULTIPLE_SELECTED_FILING_VERSIONS"
+    else:
+        primary = [item for item in ordered if item[1].get("primary_statement_evidence")]
+        selected = primary or ordered
+    by_fact: dict[tuple[Any, ...], set[tuple[Any, ...]]] = {}
+    for _, _, candidate in ordered:
+        fact = (candidate.get("source_snapshot_id"), candidate.get("source_filing_id"), candidate.get("selected_source_fact_id"))
+        by_fact.setdefault(fact, set()).add(_value_signature(candidate))
+    if any(len(signatures) > 1 for signatures in by_fact.values()):
+        reason = "INCONSISTENT_SAME_SOURCE_FACT"
+    signatures = {_value_signature(v) for _, _, v in selected}
+    if len(signatures) > 1 and reason is None:
+        reason = "CONFLICTING_EQUAL_PRIORITY_FACTS"
+    definition, binding, value = selected[0]
+    cell = _cell(row_id, column, definition, binding, value)
+    cell["candidate_lineage"] = lineage
+    cell["candidate_count"] = len(ordered)
+    cell["source_fact_count"] = len({(v.get("source_snapshot_id"), v.get("source_filing_id"), v.get("selected_source_fact_id")) for _, _, v in ordered})
+    cell["resolution_rule"] = "PRIMARY_STATEMENT_THEN_NOTES_WITHIN_SELECTED_VERSION_V1"
+    cell["resolution_status"] = "UNAVAILABLE" if reason else "COALESCED" if len(ordered) > 1 else "SINGLE"
+    cell["resolution_reason"] = reason
+    if reason:
+        cell.update(value_status="UNAVAILABLE", value_numeric=None, value_text=None,
+                    comparability_status="REVIEW_REQUIRED", comparability_reason=reason,
+                    definition=None, binding=None, value_lineage=None)
+    return cell
+
+
+def _value_signature(value: Mapping[str, Any]) -> tuple[Any, ...]:
+    numeric = value.get("value_numeric")
+    if numeric is not None:
+        try:
+            numeric = Decimal(str(numeric))
+        except InvalidOperation:
+            numeric = str(numeric)
+    return (value.get("value_status"), numeric, value.get("value_text"), value.get("source_type"), value.get("reported_or_derived"))
+
+
 def _missing_cell(row: Mapping[str, Any], column: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "fiscal_time_series_row_id": row["fiscal_time_series_row_id"], "fiscal_time_series_column_id": column["fiscal_time_series_column_id"],
-        "value_status": "MISSING_HISTORY", "value_numeric": None, "value_text": None,
-        "comparability_status": "NOT_COMPARABLE", "comparability_reason": column["column_reason"] or "NO_SELECTED_PANEL_FOR_REQUESTED_FISCAL_PERIOD",
+        "value_status": "MISSING_HISTORY" if column["column_status"] == "MISSING_HISTORY" else "NOT_REPORTED", "value_numeric": None, "value_text": None,
+        "comparability_status": "NOT_COMPARABLE", "comparability_reason": column["column_reason"] or "NO_SELECTED_FACT_FOR_ROW_IN_AVAILABLE_PERIOD",
         "definition": None, "binding": None, "value_lineage": None,
     }
 
@@ -348,7 +403,7 @@ def _duration(start: Any, end: Any) -> int | None:
     if not start or not end:
         return None
     try:
-        return (date.fromisoformat(str(end)) - date.fromisoformat(str(start))).days + 1
+        return (date.fromisoformat(str(end)) - date.fromisoformat(str(start))).days
     except ValueError as exc:
         raise FiscalTimeSeriesError("actual context boundary is not ISO date") from exc
 

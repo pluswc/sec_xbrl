@@ -14,6 +14,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+from sec_xbrl.discovery.statement import _qualifying_statement_role
 from sec_xbrl.longitudinal.exploration_graph import ExplorationGraphReader
 from sec_xbrl.longitudinal.materialization import VerifiedLayer2Publication
 
@@ -74,6 +75,19 @@ class CompanyAnalysisPanelBuilder:
             for row in nodes.values()
             if row.get("node_kind") == "FACT"
         }
+        placement: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for edge in exploration.records(ExplorationGraphReader.edge_dataset):
+            if edge.get("source_network_type") != "PRE":
+                continue
+            kinds = tuple(kind for kind in ("IS", "BS", "CF", "EQ") if _qualifying_statement_role(edge, kind))
+            if not kinds:
+                continue
+            for endpoint in (edge.get("from_node_id"), edge.get("to_node_id")):
+                node = nodes.get(str(endpoint), {})
+                if node.get("node_kind") != "CONCEPT":
+                    continue
+                key = (str(edge.get("source_filing_id")), str(node.get("raw_id")))
+                placement.setdefault(key, []).append({"statement_types": kinds, **dict(edge)})
         definitions: list[dict[str, Any]] = []
         bindings: list[dict[str, Any]] = []
         values: list[dict[str, Any]] = []
@@ -118,6 +132,9 @@ class CompanyAnalysisPanelBuilder:
                 definition, binding, value = _reported_line(
                     source, selection, path, nodes, analysis_view_id, analysis_view_version
                 )
+                binding["primary_statement_evidence"] = deepcopy(placement.get(
+                    (str(source.get("source_filing_id")), str(source.get("raw_concept_id"))), []
+                ))
                 definitions.append(definition)
                 bindings.append(binding)
                 values.append(value)
