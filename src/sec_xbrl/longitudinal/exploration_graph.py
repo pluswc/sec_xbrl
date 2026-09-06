@@ -177,6 +177,22 @@ class ExplorationGraphReader:
     node_dataset = "analysis_exploration_node"
     edge_dataset = "analysis_exploration_edge"
 
+    def __init__(self) -> None:
+        self._indexed_publication: VerifiedLayer2Publication | None = None
+        self._nodes: dict[str, dict[str, Any]] = {}
+        self._outgoing: dict[str, list[dict[str, Any]]] = {}
+
+    def _indexes(self, publication: VerifiedLayer2Publication):
+        self._check(publication, None)
+        if self._indexed_publication is not publication:
+            self._nodes = {str(row["analysis_exploration_node_id"]): dict(row) for row in publication.records(self.node_dataset)}
+            outgoing: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            for edge in publication.records(self.edge_dataset):
+                outgoing[str(edge["from_node_id"])].append(dict(edge))
+            self._outgoing = {key: sorted(edges, key=lambda edge: str(edge["analysis_exploration_edge_id"])) for key, edges in outgoing.items()}
+            self._indexed_publication = publication
+        return self._nodes, self._outgoing
+
     def roots_for_fact(
         self,
         publication: VerifiedLayer2Publication,
@@ -212,10 +228,7 @@ class ExplorationGraphReader:
         routes to the same node visible (e.g. distinct statement roles).
         """
         self._check(publication, None)
-        nodes = {str(row["analysis_exploration_node_id"]): dict(row) for row in publication.records(self.node_dataset)}
-        outgoing: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for edge in publication.records(self.edge_dataset):
-            outgoing[str(edge["from_node_id"])].append(dict(edge))
+        nodes, outgoing = self._indexes(publication)
         result: list[dict[str, Any]] = []
         queue: deque[tuple[str, tuple[str, ...], tuple[dict[str, Any], ...], int, dict[str, Any] | None]] = deque()
         for root in root_node_ids:
@@ -232,7 +245,8 @@ class ExplorationGraphReader:
                 if target in path:  # semantic/cyclic DEF or presentation paths terminate safely.
                     continue
                 queue.append((target, path + (target,), path_edges + (edge,), depth + 1, edge))
-        return tuple(result)
+        from copy import deepcopy
+        return deepcopy(tuple(result))
 
     def _check(self, publication: VerifiedLayer2Publication, cik: str | None) -> None:
         if not publication.is_reader_attested:

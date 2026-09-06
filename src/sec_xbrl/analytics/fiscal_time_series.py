@@ -371,7 +371,7 @@ def _value_signature(value: Mapping[str, Any]) -> tuple[Any, ...]:
 def _missing_cell(row: Mapping[str, Any], column: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "fiscal_time_series_row_id": row["fiscal_time_series_row_id"], "fiscal_time_series_column_id": column["fiscal_time_series_column_id"],
-        "value_status": "MISSING_HISTORY" if column["column_status"] == "MISSING_HISTORY" else "NOT_REPORTED", "value_numeric": None, "value_text": None,
+        "value_status": column["column_status"] if column["column_status"] in {"MISSING_HISTORY", "UNAVAILABLE"} else "NOT_REPORTED", "value_numeric": None, "value_text": None,
         "comparability_status": "NOT_COMPARABLE", "comparability_reason": column["column_reason"] or "NO_SELECTED_FACT_FOR_ROW_IN_AVAILABLE_PERIOD",
         "definition": None, "binding": None, "value_lineage": None,
     }

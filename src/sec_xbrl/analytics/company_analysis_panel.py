@@ -39,6 +39,9 @@ class CompanyAnalysisPanelResult:
 class CompanyAnalysisPanelBuilder:
     """Build one filing-aware panel without selecting, deriving, or recasting."""
 
+    def __init__(self) -> None:
+        self._graph_reader = ExplorationGraphReader()
+
     def build(
         self,
         *,
@@ -116,7 +119,7 @@ class CompanyAnalysisPanelBuilder:
                 )
             _require_graph_fact_match(selection, root)
             root_id = str(root["analysis_exploration_node_id"])
-            paths = ExplorationGraphReader().traverse(exploration, root_node_ids=(root_id,))
+            paths = self._graph_reader.traverse(exploration, root_node_ids=(root_id,))
             for path in paths:
                 node = path["node"]
                 if node.get("node_kind") != "FACT":
