@@ -235,6 +235,115 @@ class CorpusReleaseAdapter:
         return CorpusRelease(root, corpus_run_id, requested, tuple(snapshots), run)
 
 
+@dataclass(frozen=True, slots=True)
+class CohortSnapshotReference:
+    """One explicitly named immutable snapshot in a cross-run cohort.
+
+    A reference does not make a copy of raw data.  Its source run and the
+    exact filing accession are part of the declaration so a later Layer 2 run
+    can only be built after revalidating that original snapshot in place.
+    """
+
+    cik: str
+    accession: str
+
+
+@dataclass(frozen=True, slots=True)
+class CohortSource:
+    """A named immutable source-run boundary for cohort references.
+
+    Some controlled Layer 1 intake runs contain only verified snapshots (and
+    intentionally have no trailing-corpus summary).  This source contract
+    admits those runs without fabricating a summary or mutating either source.
+    """
+
+    run_root: Path
+    run_id: str
+    snapshots: tuple[CohortSnapshotReference, ...]
+
+
+class CohortReleaseAdapter:
+    """Build one verified Layer 2 input declaration from named source runs.
+
+    This is a narrow bridge for a declared cohort, not a "latest" discovery
+    mechanism.  Every selected Layer 1 snapshot is validated with the same
+    byte/count/provenance/reference gates as :class:`CorpusReleaseAdapter`.
+    Source runs may therefore have different publication layouts, but their
+    snapshots never become interchangeable or copied into a new raw run.
+    """
+
+    def load(
+        self,
+        sources: Iterable[CohortSource],
+        *,
+        cohort_id: str,
+        ciks: Iterable[str],
+        run_version: str,
+        rules: Layer2RuleVersions,
+    ) -> CorpusRelease:
+        if not cohort_id or "/" in cohort_id or "\\" in cohort_id:
+            raise CorpusReleaseError("cohort_id must be a non-path identifier")
+        requested = tuple(sorted({canonicalize_cik(cik) for cik in ciks}))
+        if not requested:
+            raise CorpusReleaseError("at least one requested CIK is required")
+        source_rows = tuple(sources)
+        if not source_rows:
+            raise CorpusReleaseError("a cohort requires at least one explicit source run")
+        seen_source_ids: set[str] = set()
+        seen_inputs: set[tuple[str, str]] = set()
+        snapshots: list[CorpusSnapshot] = []
+        for source in source_rows:
+            root = Path(source.run_root)
+            if (
+                not source.run_id
+                or root.name != source.run_id
+                or not root.is_dir()
+                or root.is_symlink()
+            ):
+                raise CorpusReleaseError("cohort source must be an explicit non-symlink run_id directory")
+            if source.run_id in seen_source_ids:
+                raise CorpusReleaseError(f"duplicate cohort source run_id: {source.run_id}")
+            seen_source_ids.add(source.run_id)
+            if not source.snapshots:
+                raise CorpusReleaseError(f"cohort source has no snapshot references: {source.run_id}")
+            for reference in source.snapshots:
+                cik = canonicalize_cik(reference.cik)
+                accession = str(reference.accession)
+                identity = (cik, accession)
+                if cik not in requested:
+                    raise CorpusReleaseError("cohort reference CIK is outside requested scope")
+                if not accession or identity in seen_inputs:
+                    raise CorpusReleaseError("duplicate or missing cohort snapshot identity")
+                seen_inputs.add(identity)
+                directory = root / "snapshots" / cik / accession.replace("-", "")
+                snapshots.append(_load_declared_cohort_snapshot(directory, cik, accession))
+        admitted_ciks = tuple(sorted({item.input.cik for item in snapshots}))
+        if admitted_ciks != requested:
+            raise CorpusReleaseError(
+                f"cohort source coverage does not exactly match requested CIKs: {admitted_ciks} != {requested}"
+            )
+        snapshots.sort(
+            key=lambda item: (
+                item.input.cik,
+                item.input.filed_date,
+                item.input.accession,
+                item.input.snapshot_id,
+            )
+        )
+        return CorpusRelease(
+            Path(cohort_id),
+            cohort_id,
+            requested,
+            tuple(snapshots),
+            Layer2Run(
+                run_version=run_version,
+                corpus_run_id=cohort_id,
+                inputs=tuple(item.input for item in snapshots),
+                rules=rules,
+            ),
+        )
+
+
 def _load_company(root: Path, cik: str, company: Mapping[str, Any]) -> list[CorpusSnapshot]:
     return [
         _load_snapshot(directory, cik, filing, integrity)
@@ -380,6 +489,39 @@ def _load_snapshot(
         MappingProxyType(table_counts),
         MappingProxyType(tables),
     )
+
+
+def _load_declared_cohort_snapshot(directory: Path, cik: str, accession: str) -> CorpusSnapshot:
+    """Derive only the summary fields needed by ``_load_snapshot`` in place.
+
+    This is deliberately not a weaker snapshot reader for the cross-run case:
+    after reading the one filing row and its manifest, it delegates to the
+    complete existing verifier, which rereads and hashes every raw table.
+    """
+    manifest_path = directory / "layer1_manifest.json"
+    try:
+        manifest = Layer1SnapshotManifest.from_path(manifest_path)
+    except Layer1IngestionError as exc:
+        raise CorpusReleaseError(f"invalid declared cohort Layer 1 manifest: {directory}") from exc
+    if manifest.cik != cik or manifest.accession != accession:
+        raise CorpusReleaseError("declared cohort snapshot identity disagrees with manifest")
+    filing_path = directory / "filing.parquet"
+    if not filing_path.is_file() or filing_path.is_symlink():
+        raise CorpusReleaseError("declared cohort snapshot has no safe filing table")
+    filing_rows = _read_parquet(filing_path)
+    if len(filing_rows) != 1:
+        raise CorpusReleaseError("declared cohort snapshot requires exactly one filing row")
+    filing = filing_rows[0]
+    required = ("accession", "form", "filed_date", "report_date")
+    if any(not filing.get(field) for field in required):
+        raise CorpusReleaseError("declared cohort filing row lacks provenance")
+    if filing.get("accession") != accession or filing.get("form") != manifest.form:
+        raise CorpusReleaseError("declared cohort filing row disagrees with manifest")
+    integrity = {
+        "source_fact_count": manifest.source_fact_count,
+        "materialized_fact_count": manifest.materialized_fact_count,
+    }
+    return _load_snapshot(directory, cik, filing, integrity)
 
 
 def _validate_table_counts(

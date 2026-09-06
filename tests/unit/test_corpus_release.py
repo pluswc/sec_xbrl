@@ -10,6 +10,9 @@ import pytest
 
 from sec_xbrl.longitudinal import (
     RAW_TABLES,
+    CohortReleaseAdapter,
+    CohortSnapshotReference,
+    CohortSource,
     CorpusReleaseAdapter,
     CorpusReleaseError,
     Layer2RuleVersions,
@@ -116,6 +119,46 @@ def test_release_preserves_amendment_as_distinct_snapshot(tmp_path: Path) -> Non
     release = _release(_write_corpus(tmp_path, amendment=True))
     assert [item.form for item in release.layer2_run.inputs] == ["10-Q", "10-Q/A"]
     assert len({item.accession for item in release.layer2_run.inputs}) == 2
+
+
+def test_declared_cohort_revalidates_snapshot_without_a_trailing_corpus_summary(tmp_path: Path) -> None:
+    root = _write_corpus(tmp_path)
+    # A controlled intake run can retain immutable snapshots without claiming
+    # to be a complete trailing-corpus run.  The cohort bridge must validate
+    # the raw snapshot itself rather than inventing that missing summary.
+    (root / "run_metadata.json").unlink()
+    (root / "run_summary.json").unlink()
+    release = CohortReleaseAdapter().load(
+        (
+            CohortSource(
+                root,
+                root.name,
+                (CohortSnapshotReference("320193", "0000320193-25-000001"),),
+            ),
+        ),
+        cohort_id="five-company-fixture-cohort-v1",
+        ciks=("320193",),
+        run_version="five-company-fixture-t1-v1",
+        rules=RULES,
+    )
+    assert release.corpus_run_id == "five-company-fixture-cohort-v1"
+    assert release.layer2_run.inputs[0].cik == "0000320193"
+    assert release.layer2_run.inputs[0].manifest_sha256 == hashlib.sha256(
+        (root / "snapshots/0000320193/000032019325000001/layer1_manifest.json").read_bytes()
+    ).hexdigest()
+
+
+def test_declared_cohort_fails_closed_when_a_declared_snapshot_is_not_complete(tmp_path: Path) -> None:
+    root = _write_corpus(tmp_path)
+    (root / "snapshots/0000320193/000032019325000001/unit.parquet").unlink()
+    with pytest.raises(CorpusReleaseError, match="snapshot"):
+        CohortReleaseAdapter().load(
+            (CohortSource(root, root.name, (CohortSnapshotReference("320193", "0000320193-25-000001"),)),),
+            cohort_id="fixture-cohort-v1",
+            ciks=("320193",),
+            run_version="fixture-t1-v1",
+            rules=RULES,
+        )
 
 
 def test_raw_filing_index_returns_all_exact_period_candidates_and_loads_one_snapshot(

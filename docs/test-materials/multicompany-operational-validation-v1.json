@@ -121,7 +121,7 @@
     ],
     "same_layer1_run_fingerprint": true,
     "fail_closed_condition": "Every requested CIK must have an immutable Layer 1 snapshot in one declared input run, and all four roots must attest that identical CIK scope and run fingerprint. Otherwise no five-company operational comparison is served.",
-    "current_status": "BLOCKED: all five companies have individual Layer 1 evidence, but it spans two input runs and no five-company parquet-operational-v1 root set attests one identical CIK scope and Layer 1 fingerprint."
+    "current_status": "AVAILABLE: five-company-reference-2024q3-v1 publishes the declared five immutable reference snapshots through T1--T4 parquet-operational-v1 roots. The shared Layer 1 fingerprint and exact CIK scope are verified by the cached integration evidence; do not treat this reference cohort as a broader period-aligned cross-company equivalence assertion."
   },
   "acceptance_hypotheses": [
     {

@@ -48,6 +48,9 @@ from sec_xbrl.longitudinal.core_selection import (
 )
 from sec_xbrl.longitudinal.corpus_release import (
     RAW_TABLES,
+    CohortReleaseAdapter,
+    CohortSnapshotReference,
+    CohortSource,
     CorpusRelease,
     CorpusReleaseAdapter,
     CorpusReleaseError,
@@ -100,6 +103,14 @@ from sec_xbrl.longitudinal.metric_input import (
     METRIC_INPUT_HANDOFF_VERSION,
     MetricInputHandoffMaterializer,
     MetricInputHandoffResult,
+)
+from sec_xbrl.longitudinal.operational_cohort import (
+    FIVE_COMPANY_REFERENCE_CIKS,
+    FIVE_COMPANY_REFERENCE_COHORT_ID,
+    FIVE_COMPANY_REFERENCE_RULES,
+    FiveCompanyOperationalCohortResult,
+    five_company_reference_release,
+    publish_five_company_reference_cohort,
 )
 from sec_xbrl.longitudinal.period_observation import (
     PERIOD_OBSERVATION_RULE_VERSION,
@@ -184,6 +195,9 @@ __all__ = [
     "CURRENT_COMPARABLE_VERSION",
     "DEFAULT_LAYER2_ROOT",
     "EXPLORATION_GRAPH_RULE_VERSION",
+    "FIVE_COMPANY_REFERENCE_CIKS",
+    "FIVE_COMPANY_REFERENCE_COHORT_ID",
+    "FIVE_COMPANY_REFERENCE_RULES",
     "FLOW_CORE_CONCEPTS",
     "LAYER2_CONTRACT_VERSION",
     "LOGICAL_DATASETS",
@@ -215,6 +229,9 @@ __all__ = [
     "CapabilityInventoryMaterializer",
     "CapabilityInventoryQuery",
     "CapabilityInventoryResult",
+    "CohortReleaseAdapter",
+    "CohortSnapshotReference",
+    "CohortSource",
     "CompanyCanonicalizer",
     "CompanyCoverage",
     "CompanySeriesMaterializer",
@@ -244,6 +261,7 @@ __all__ = [
     "FilingRelationshipIndexPipeline",
     "FilingRelationshipIndexReader",
     "FilingRelationshipIndexResult",
+    "FiveCompanyOperationalCohortResult",
     "Layer1SnapshotInput",
     "Layer2MaterializationError",
     "Layer2Publication",
@@ -305,5 +323,7 @@ __all__ = [
     "VersionedObservationPanelReader",
     "VersionedObservationPanelResult",
     "core_canonical_concept_ids",
+    "five_company_reference_release",
+    "publish_five_company_reference_cohort",
     "validate_recast_evidence",
 ]

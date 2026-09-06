@@ -30,7 +30,7 @@ def test_multicompany_pack_declares_expandable_cohort_and_fail_closed_gate() -> 
     assert set(gate["required_company_ciks"]) == {  # type: ignore[index]
         "0001045810", "0000002488", "0000789019", "0000320193", "0001018724"
     }
-    assert gate["current_status"].startswith("BLOCKED:")
+    assert gate["current_status"].startswith("AVAILABLE:")
 
 
 def test_multicompany_pack_preserves_real_amd_amendment_as_distinct_accessions() -> None:
