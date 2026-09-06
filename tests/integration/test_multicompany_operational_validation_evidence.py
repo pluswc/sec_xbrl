@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import date
 from pathlib import Path
 
 import polars as pl
 import pytest
+
+from sec_xbrl.facts.layer1 import select_fact_corpus
+from sec_xbrl.filing.contracts import FilingRef
+from sec_xbrl.filing.filing_index import ArelleFilingLoader, FilingIndexCache, FilingPackageResolver
+from sec_xbrl.filing.package_cache import AccessionPackageCache
 
 PACK = Path(__file__).parents[2] / "docs/test-materials/multicompany-operational-validation-v1.json"
 
@@ -44,6 +50,13 @@ def _filing_row(root: Path, manifest_relative_path: str) -> dict[str, object]:
     ).to_dicts()
     assert len(rows) == 1
     return rows[0]
+
+
+class _NoNetworkFetcher:
+    """Makes a cached-package test fail if resolution tries the network."""
+
+    def fetch(self, url: str) -> bytes:
+        raise AssertionError(f"offline evidence test attempted network fetch: {url}")
 
 
 def test_available_company_reference_filings_match_local_layer1_manifests() -> None:
@@ -105,3 +118,47 @@ def test_amd_original_and_amendment_match_distinct_local_layer1_manifests() -> N
         assert actual["filed_date"] == expected["filed_date"]
         assert actual["report_date"] == expected["report_date"]
         assert actual["is_amendment"] is expected["is_amendment"]
+
+
+def test_msft_cached_package_reloads_offline_with_existing_taxonomy_cache(tmp_path: Path) -> None:
+    """Prove the successful MSFT evidence can be parsed again without a request or publication."""
+    pack = _pack()
+    msft = next(company for company in pack["companies"] if company["ticker"] == "MSFT")  # type: ignore[index]
+    root = _corpus_root(msft)
+    filing = msft["reference_filing"]
+    data_root = Path(os.environ.get("SEC_XBRL_DATA_ROOT", Path(__file__).parents[2]))
+    raw_root = data_root / "data/raw/operational_cohort_runs" / msft["layer1_evidence"]["run_id"]  # type: ignore[index]
+    taxonomy_cache = data_root / "data/taxonomy_cache"
+    accession_nodash = filing["accession"].replace("-", "")
+    required = (
+        raw_root / "packages" / msft["cik"] / accession_nodash / f"{filing['accession']}-xbrl.zip",
+        raw_root / "indexes" / msft["cik"] / accession_nodash / "index.json",
+        taxonomy_cache,
+        root / filing["snapshot_manifest_relative_path"],
+    )
+    if not all(path.exists() for path in required):
+        pytest.skip("actual MSFT package, taxonomy cache, or snapshot evidence is unavailable")
+
+    filing_ref = FilingRef(
+        cik=msft["cik"], accession=filing["accession"], form=filing["form"],
+        filed_date=date.fromisoformat(filing["filed_date"]),
+        report_date=date.fromisoformat(filing["report_date"]),
+        primary_document="msft-20240930.htm", source="sec_submissions",
+    )
+    resolver = FilingPackageResolver(
+        AccessionPackageCache(raw_root / "packages"), FilingIndexCache(raw_root / "indexes"),
+    )
+    resolved = resolver.resolve(filing_ref, _NoNetworkFetcher())
+    loader = ArelleFilingLoader(taxonomy_cache=taxonomy_cache, allow_network_taxonomy_resolution=False)
+    model = loader.load(resolved, tmp_path / "offline_msft_extraction")
+    try:
+        errors = tuple(str(error) for error in (getattr(model, "errors", None) or ()))
+        assert not any("ioerror" in error.lower() or "unresolved" in error.lower() for error in errors)
+        corpus = select_fact_corpus(model)
+        assert corpus.source == "model.facts"
+        assert corpus.source_count == filing["source_fact_count"] == 1236
+        assert all(getattr(fact, "concept", None) is not None for fact in corpus.facts)
+    finally:
+        model_manager = getattr(model, "modelManager", None)
+        if model_manager is not None:
+            model_manager.close()

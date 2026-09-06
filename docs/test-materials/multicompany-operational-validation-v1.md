@@ -62,3 +62,6 @@ SEC_XBRL_DATA_ROOT=/path/to/sec_xbrl \
 
 이 검사는 JSON에 기록한 CIK, accession, form, fact corpus 수가 실제 Layer 1
 manifest와 일치하는지 검증한다. 숫자·원본 SEC package·Parquet 산출물은 이 저장소에 커밋하지 않는다.
+MSFT의 실제 cached package는 네트워크를 차단한 fetcher와
+`allow_network_taxonomy_resolution=False`로 다시 로드해 1,236개의 source fact를
+검증한다. 이 검사는 snapshot을 재발행하지 않는다.
