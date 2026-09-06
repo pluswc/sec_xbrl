@@ -14,12 +14,13 @@ def _pack() -> dict[str, object]:
     return json.loads(PACK.read_text(encoding="utf-8"))
 
 
-def _corpus_root(pack: dict[str, object]) -> Path:
+def _corpus_root(company: dict[str, object]) -> Path:
     configured = os.environ.get("SEC_XBRL_CORPUS_ROOT")
     if configured:
         return Path(configured)
-    relative_root = pack["local_corpus_evidence"]["processed_run_relative_root"]  # type: ignore[index]
-    return Path(__file__).parents[2] / relative_root
+    relative_root = company["layer1_evidence"]["processed_run_relative_root"]  # type: ignore[index]
+    data_root = Path(os.environ.get("SEC_XBRL_DATA_ROOT", Path(__file__).parents[2]))
+    return data_root / relative_root
 
 
 def _manifest(root: Path, relative_path: str) -> dict[str, object]:
@@ -47,33 +48,33 @@ def _filing_row(root: Path, manifest_relative_path: str) -> dict[str, object]:
 
 def test_available_company_reference_filings_match_local_layer1_manifests() -> None:
     pack = _pack()
-    root = _corpus_root(pack)
     for company in pack["companies"]:  # type: ignore[index]
         if company["layer1_status"] != "AVAILABLE":
             continue
+        root = _corpus_root(company)
         filing = company["reference_filing"]
         manifest = _manifest(root, filing["snapshot_manifest_relative_path"])
         assert manifest["cik"] == company["cik"]
         assert manifest["accession"] == filing["accession"]
         assert manifest["form"] == filing["form"]
+        assert manifest["source_fact_count"] == filing.get("source_fact_count", manifest["source_fact_count"])
 
 
-def test_missing_companies_have_no_local_layer1_snapshot_in_this_frozen_run() -> None:
+def test_available_companies_have_declared_snapshot_evidence() -> None:
     pack = _pack()
-    root = _corpus_root(pack)
-    if not root.is_dir():
-        pytest.skip(f"local corpus evidence is unavailable: {root}")
     for company in pack["companies"]:  # type: ignore[index]
-        if company["layer1_status"] == "MISSING":
-            assert not (root / "snapshots" / company["cik"]).exists()
+        assert company["layer1_status"] == "AVAILABLE"
+        root = _corpus_root(company)
+        filing = company["reference_filing"]
+        assert _manifest(root, filing["snapshot_manifest_relative_path"])["accession"] == filing["accession"]
 
 
 def test_declared_snapshot_counts_match_this_frozen_local_corpus_run() -> None:
     pack = _pack()
-    root = _corpus_root(pack)
-    if not root.is_dir():
-        pytest.skip(f"local corpus evidence is unavailable: {root}")
     for company in pack["companies"]:  # type: ignore[index]
+        root = _corpus_root(company)
+        if not root.is_dir():
+            pytest.skip(f"local corpus evidence is unavailable: {root}")
         snapshot_root = root / "snapshots" / company["cik"]
         actual_count = len(list(snapshot_root.glob("*/layer1_manifest.json"))) if snapshot_root.is_dir() else 0
         assert actual_count == company["available_snapshot_count"]
@@ -81,8 +82,9 @@ def test_declared_snapshot_counts_match_this_frozen_local_corpus_run() -> None:
 
 def test_amd_original_and_amendment_match_distinct_local_layer1_manifests() -> None:
     pack = _pack()
-    root = _corpus_root(pack)
     amendment = pack["amendment_case"]  # type: ignore[index]
+    amd = next(company for company in pack["companies"] if company["ticker"] == "AMD")  # type: ignore[index]
+    root = _corpus_root(amd)
     original = amendment["original_filing"]
     amended = amendment["amendment_filing"]
     original_manifest = _manifest(root, original["snapshot_manifest_relative_path"])

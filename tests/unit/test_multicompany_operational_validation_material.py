@@ -17,14 +17,20 @@ def test_multicompany_pack_declares_expandable_cohort_and_fail_closed_gate() -> 
     assert companies["NVDA"]["layer1_status"] == "AVAILABLE"
     assert companies["AMD"]["layer1_status"] == "AVAILABLE"
     assert companies["AAPL"]["layer1_status"] == "AVAILABLE"
-    assert companies["MSFT"]["layer1_status"] == "MISSING"
-    assert companies["AMZN"]["layer1_status"] == "MISSING"
+    assert companies["MSFT"]["layer1_status"] == "AVAILABLE"
+    assert companies["AMZN"]["layer1_status"] == "AVAILABLE"
+    assert companies["MSFT"]["reference_filing"]["accession"] == "0000950170-24-118967"
+    assert companies["AMZN"]["reference_filing"]["accession"] == "0001018724-24-000161"
+    assert companies["MSFT"]["reference_filing"]["source_fact_count"] == 1236
+    assert companies["AMZN"]["reference_filing"]["source_fact_count"] == 1139
+    assert companies["MSFT"]["layer1_evidence"]["taxonomy_resolution"] == "controlled_bootstrap_then_offline_reload"
     gate = pack["publication_gate"]  # type: ignore[index]
     assert gate["storage_format"] == "parquet-operational-v1"
     assert gate["same_layer1_run_fingerprint"] is True
     assert set(gate["required_company_ciks"]) == {  # type: ignore[index]
         "0001045810", "0000002488", "0000789019", "0000320193", "0001018724"
     }
+    assert gate["current_status"].startswith("BLOCKED:")
 
 
 def test_multicompany_pack_preserves_real_amd_amendment_as_distinct_accessions() -> None:
