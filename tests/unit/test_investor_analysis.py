@@ -4,7 +4,13 @@ import json
 
 import pytest
 
-from sec_xbrl.analysis import VERSION, _definition_graph, open_analysis, stable
+from sec_xbrl.analysis import (
+    VERSION,
+    _apply_lens_preferences,
+    _definition_graph,
+    open_analysis,
+    stable,
+)
 from sec_xbrl.analytics.investor_metrics import ratio
 from sec_xbrl.history import _write_records
 
@@ -205,3 +211,29 @@ def test_catalog_bom_registration_and_query_pointer(bundle, tmp_path, monkeypatc
     destination = tmp_path / "combined"
     analysis.prepare_catalog(catalog=catalog, destination=destination)
     assert analysis.open_analysis(catalog).overview("TEST")["cells"][0]["value"] == "100"
+
+
+def test_exact_axis_and_node_display_preferences_do_not_change_relationships():
+    nodes = {name: {"node_id": name, "kind": "LENS", "lens_type": "DIMENSIONAL_VIEW", "label": name,
+                    "dimensions": axes, "basis_version": None, "anchor_row_id": "revenue"}
+             for name, axes in (("product", ["ProductAxis"]), ("region", ["GeographyAxis"]),
+                                ("internal", ["ConsolidationAxis"]), ("combined", ["ProductAxis", "ConsolidationAxis"]))}
+    before = copy.deepcopy(nodes)
+    _apply_lens_preferences(nodes, [
+        {"match": {"lens_type": "DIMENSIONAL_VIEW", "axis_signature": ["ProductAxis"]}, "display_order": 10, "label": "제품별"},
+        {"match": {"node_id": "region"}, "display_order": 20, "label": "지역별"},
+        {"match": {"axis_signature": ["ConsolidationAxis"]}, "display_order": 90},
+    ])
+    assert nodes["product"]["label"] == "제품별"
+    assert nodes["region"]["label"] == "지역별"
+    assert nodes["internal"]["display_order"] == 90
+    assert nodes["combined"] == before["combined"]
+    for key, node in nodes.items():
+        assert {k: v for k, v in node.items() if k not in {"label", "display_order"}} == {k: v for k, v in before[key].items() if k != "label"}
+    assert set(nodes) == set(before)
+
+
+@pytest.mark.parametrize("signature", ["ProductAxis", ["ProductAxis", "ProductAxis"], [None]])
+def test_malformed_axis_preferences_rejected(signature):
+    with pytest.raises(ValueError, match="axis_signature"):
+        _apply_lens_preferences({}, [{"match": {"axis_signature": signature}, "label": "bad"}])

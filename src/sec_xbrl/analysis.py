@@ -66,6 +66,25 @@ def default_profile() -> list[dict]:
             for key, label, section, period, concepts in CORE]
 
 
+def _apply_lens_preferences(nodes: dict[str, dict], preferences: list[dict]) -> None:
+    """Only customize existing display nodes; never create edges or identity."""
+    allowed = {"lens_type", "role_uri", "basis_version", "anchor_row_id", "node_id", "axis_signature"}
+    for preference in preferences:
+        selectors = preference.get("match", {})
+        if not selectors or set(selectors) - allowed:
+            raise ValueError("lens preference needs explicit supported selectors")
+        signature = selectors.get("axis_signature")
+        if "axis_signature" in selectors and (not isinstance(signature, list) or not all(isinstance(a, str) for a in signature) or len(signature) != len(set(signature))):
+            raise ValueError("axis_signature must be a unique complete list of axis identities")
+        for node in nodes.values():
+            if node["kind"] != "LENS":
+                continue
+            dimensions = node.get("dimensions") or []
+            axes = [d if isinstance(d, str) else d[0] for d in dimensions]
+            if all(sorted(axes) == sorted(v) if k == "axis_signature" else node.get(k) == v for k, v in selectors.items()):
+                node.update({k: preference[k] for k in ("label", "display_order", "hidden") if k in preference})
+
+
 def _table(root: Path, info: dict) -> list[dict]:
     proxy = object.__new__(HistoryPublicationReader)
     proxy.root = root
@@ -415,15 +434,7 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
                         evidence_path = Path(spec["availability_evidence"])
                         traces[-1]["availability_evidence"] = {"path": str(evidence_path.absolute()), "sha256": hashlib.sha256(evidence_path.read_bytes()).hexdigest()}
             metrics = materialize_metrics(core_cells)
-            for node in nodes.values():
-                if node["kind"] != "LENS":
-                    continue
-                for preference in settings.get("lens_preferences", []):
-                    selectors = preference.get("match", {})
-                    if not selectors or set(selectors) - {"lens_type", "role_uri", "basis_version", "anchor_row_id"}:
-                        raise ValueError("lens preference needs explicit supported selectors")
-                    if all(node.get(k) == v for k, v in selectors.items()):
-                        node.update({k: preference[k] for k in ("label", "display_order", "hidden") if k in preference})
+            _apply_lens_preferences(nodes, settings.get("lens_preferences", []))
             files = {}
             datasets = {"columns": columns, "core_rows": profile, "core_cells": core_cells, "cells": cells,
                         "nodes": list(nodes.values()), "edges": list(edges.values()), "metrics": metrics}

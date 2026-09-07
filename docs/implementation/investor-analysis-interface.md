@@ -65,6 +65,10 @@ The catalogue uses existing `company_reports` registration. Optional
 display notes, `breakdown_sources` and separately reviewed `hierarchies`.
 `lens_preferences` can match an existing anchor/lens type/role/basis to set its
 label, display order or hidden flag; it cannot create a semantic edge.
+An exact `node_id` or complete `axis_signature` (a unique list of the existing
+axis identities, order-insensitive) distinguishes otherwise identical views.
+For example, `{"match":{"lens_type":"DIMENSIONAL_VIEW","axis_signature":["srt:ProductOrServiceAxis"]},"label":"제품·서비스별","display_order":10}`
+does not match a combined product/geography or product/consolidation scope.
 Profiles have at most 25 unique core rows. A related statement source is labeled
 as such: LiabilitiesAndStockholdersEquity is not relabeled as a liabilities
 total. Productive-asset cash outflows are not silently equivalent to PPE-only
