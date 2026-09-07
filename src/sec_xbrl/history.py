@@ -226,7 +226,7 @@ def _validate_intake(intake: dict[str, Any]) -> None:
 
 
 def build_history(*, intake_manifest: Path, output_root: Path,
-                  views: tuple[str, ...] = ("AS_FILED", "LATEST_REPORTED")) -> Path:
+                  views: tuple[str, ...] = ("AS_FILED", "LATEST_REPORTED"), roots_only: bool = False) -> Path:
     """Publish all history once; materialize fiscal pivots for offline reload."""
     from sec_xbrl.analytics import (
         CompanyAnalysisPanelBuilder,
@@ -251,13 +251,18 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     intake = json.loads(intake_manifest.read_text())
     _validate_intake(intake)
     plan = intake["plan"]
-    destination = output_root / "panels"
-    if destination.exists():
+    destination = output_root / "reported-panels"
+    if destination.exists() and not roots_only:
         reader = HistoryPublicationReader(destination)
         if reader.manifest["plan"] != plan or tuple(reader.manifest["views"]) != views:
             raise ValueError("history publication scope differs; choose a new output root")
         reader.verify_all()
-        return destination
+        from sec_xbrl.analytics.history_quarters import publish_quarter_history
+        consumer = output_root / "panels"
+        if consumer.exists():
+            HistoryPublicationReader(consumer).verify_all()
+            return consumer
+        return publish_quarter_history(publication=destination, output_root=output_root, reuse_roots=True)
     grouped: dict[Path, list[Any]] = defaultdict(list)
     for item in intake["filings"]:
         grouped[Path(item["source_run"])].append(CohortSnapshotReference(item["filing"]["cik"], item["filing"]["accession"]))
@@ -265,7 +270,7 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     release = CohortReleaseAdapter().load(
         tuple(CohortSource(root, root.name, tuple(refs)) for root, refs in grouped.items()),
         cohort_id=run_id, ciks=tuple(company["cik"] for company in plan["companies"]), run_version=run_id,
-        rules=Layer2RuleVersions("period-v1", "mapping-v1", "recast-v1", "selection-v1"),
+        rules=Layer2RuleVersions("period-fiscal-boundaries-v2", "mapping-v1", "recast-v1", "selection-v1"),
     )
     planned = {(item["filing"]["cik"], item["filing"]["accession"]): item["filing"] for item in intake["filings"]}
     for snapshot in release.snapshots:
@@ -293,6 +298,8 @@ def build_history(*, intake_manifest: Path, output_root: Path,
         if publication.identity["layer2_run_fingerprint"] != release.layer2_run.fingerprint:
             raise ValueError("existing operational publication belongs to different raw inputs")
     print(json.dumps({"stage": "OPERATIONAL_ROOTS_READY", "filings": len(release.snapshots)}), flush=True)
+    if roots_only:
+        return output_root
     periods: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
     comparative_counts: dict[str, int] = defaultdict(int)
     for row in observations.records("reported_period_observation"):
@@ -365,7 +372,8 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     # Audit the complete persisted output before its atomic publication.
     HistoryPublicationReader(staging, allow_staging=True).verify_all()
     staging.rename(destination)
-    return destination
+    from sec_xbrl.analytics.history_quarters import publish_quarter_history
+    return publish_quarter_history(publication=destination, output_root=output_root, reuse_roots=True)
 
 
 def _expected_quarters(keys: list[tuple[Any, ...]]) -> list[Any]:
@@ -485,6 +493,8 @@ class HistoryPublicationReader:
         for table in self.manifest["tables"]:
             for info in table["files"].values():
                 self._records(info)
+        if self.manifest.get("derived_quarter"):
+            self._records(self.manifest["derived_quarter"])
 
     def load(self, *, ticker: str, period_class: str = "QTD_3M", view: str = "LATEST_REPORTED"):
         from sec_xbrl.analytics import FiscalTimeSeriesResult

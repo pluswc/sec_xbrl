@@ -17,10 +17,17 @@ Initial controlled vocabulary:
 - `YTD_6M`
 - `YTD_9M`
 - `FY`
+- `TTM`
 - `OTHER_DURATION`
 - `INSTANT`
 
-Use fiscal calendar and actual days; do not assume calendar quarters.
+Use fiscal calendar and actual days; do not assume calendar quarters. `FY`
+requires both annual-start alignment and fiscal-year-end evidence from annual
+filing focus or DEI fiscal calendar. A 350–378-day duration is only a candidate,
+not proof. The ±7-day boundary tolerance accommodates 52/53-week calendars.
+`TTM` requires positive rolling evidence: an annual-length interval ending at
+the current interim filing focus and away from the DEI fiscal-year end.
+Without sufficient boundary evidence use `OTHER_DURATION` with a reason.
 
 ## PR-005 — 3M and YTD never mixed
 A Q2 3M revenue and Q2 6M YTD revenue are distinct observations.
@@ -111,8 +118,11 @@ Use DEI fiscal-year/period fields + actual Context periods. Support 52/53-week y
 ## M6 analytical output boundary
 M6 copies raw fact rows into an analytical period result and fills `period_class`
 and `comparative_type`; it does not mutate the M2 Parquet snapshot.  Duration
-classification uses the Context's actual start/end days, with FY accepting
-350–378 days to cover 52/53-week fiscal years.  Q4 derivation requires an
+classification uses the Context's actual start/end days. Version
+`m6-fiscal-boundaries-v2` additionally requires annual boundary evidence before
+an annual-length interval becomes FY; TTM is never a fiscal annual input.
+Normal reported observations retain the classification reason/version.
+Q4 derivation requires an
 explicit `canonical_concept_id`, `is_additive=true`, equal dimensional context,
 units, fiscal year, identical FY/YTD Context start date, and
 structural/recast/comparability metadata. A fiscal-calendar change must be
@@ -120,3 +130,33 @@ represented by a differing `comparability_flag`, which rejects derivation
 rather than silently bridging the change. A derived
 record adds `formula`, `source_fact_ids`, and `derivation_rule_version` and is
 always distinct from its reported sources.
+
+## Connected core-quarter consumer publication
+
+The company-history producer now materializes a separate `derived_quarter`
+Parquet dataset and connects those values to the persisted consumer panel.
+The normal history build performs this step; load/query never calculates.
+The controlled standard statement allowlists in `q4_policy_registry` authorize
+only undimensioned monetary duration values with official annual FASB identity,
+main-statement PRE evidence, resolved canonical identity and exact currency
+semantics. Custom, dimensioned, EPS, share, ratio and average values remain
+reported-only in this governed core companion. The broad mechanical candidate
+companion remains a separate review-required product.
+
+Quarterly differences are Q4=`FY-YTD_9M`, Q3=`YTD_9M-YTD_6M`, and
+Q2=`YTD_6M-QTD_3M(Q1)`. A unique pair must share company canonical identity,
+complete dimensions, unit, view/as-of, actual fiscal start, and any declared
+basis/structural/recast versions; endpoint differences must be 75–105 days.
+Inputs filed after the requested as-of, mapping uncertainty and explicit basis
+breaks reject derivation. No evidence-backed recast equivalence is implied by
+the absence of a documented break. Directly reported quarter cells take
+precedence. A materialized unavailable/conflicting direct cell also remains
+untouched; subtraction fills absent coordinates, not failed direct selections.
+Balance-sheet year-end is an instant, never subtraction-derived.
+
+Raw Arelle context endpoints are exclusive: a derived quarter begins at the
+earlier cumulative endpoint, and duration is end minus start (no added day).
+Every derivative keeps both raw Fact/filing/accession inputs, selected input
+values and dates, formula, policy/rule version and compatibility statement.
+Unavailable underlying disclosures remain unavailable; an absent gross-profit
+concept is not invented by subtracting costs from revenue in this workflow.

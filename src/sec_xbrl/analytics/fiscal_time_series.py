@@ -19,7 +19,7 @@ from typing import Any
 from sec_xbrl.analytics.company_analysis_panel import CompanyAnalysisPanelResult
 
 FISCAL_TIME_SERIES_VERSION = "analysis-company-fiscal-timeseries-v2"
-_PERIOD_CLASSES = frozenset({"QTD_3M", "YTD_6M", "YTD_9M", "FY", "INSTANT", "OTHER_DURATION"})
+_PERIOD_CLASSES = frozenset({"QTD_3M", "YTD_6M", "YTD_9M", "FY", "TTM", "INSTANT", "OTHER_DURATION"})
 
 
 class FiscalTimeSeriesError(ValueError):

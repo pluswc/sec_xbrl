@@ -51,7 +51,9 @@ separate offline load. Each extraction attempt has its own directory.
 
 ## Published output and interpretation
 
-T1–T4 are built once per declared cohort and verified before reuse. `panels/`
+T1–T4 are built once per declared cohort and verified before reuse. `reported-panels/`
+keeps selected reported values; the default build then materializes the
+approved-core quarter companion and returns `panels/` for consumers. `panels/`
 contains a publication manifest plus `CIK/view/period_class/{columns,rows,cells}.parquet`.
 Scalar values are typed Parquet fields; nested provenance is JSON-valued columns,
 not JSONL copies of the complete dataset. Integrity hashes are per output file,
@@ -66,15 +68,18 @@ separate views; the latter is not an evidence-backed recast view. It includes
 eligible directly reported amendments without treating a partial amendment as
 a replacement for every fact in the original filing.
 
-QTD, YTD6M, YTD9M, FY and instant series remain separate. The latest incomplete
+QTD, YTD6M, YTD9M, FY, TTM and instant series remain separate. The latest incomplete
 year stops at its latest collected fiscal quarter, rather than inventing future
 missing columns. Expected coverage comes only from verified filing form and DEI
-fiscal focus. A 12-month note fact in a 10-Q may have duration class `FY`, but
-does not establish annual filing completion; inspect its actual boundaries.
+fiscal focus. Annual-length note facts require fiscal-boundary evidence to be
+FY; rolling annual values ending at interim focus become TTM. Neither TTM nor
+an ambiguous annual duration establishes annual filing completion.
 A complete annual year exposes Q1–Q4; absent quarterly Q4 is
 `UNAVAILABLE / DERIVATION_NOT_MATERIALIZED`, not absent ingestion and not a
-reported FY substitute. This workflow currently publishes reported series only;
-governed Q4 and quarterly cash-flow derivation are not materialized by it.
+reported FY substitute. The connected producer fills eligible standard core
+Q4 and missing cash-flow Q2/Q3 by governed cumulative differences, retaining
+reported and derived lineage separately. Unsupported/ambiguous cases remain
+unavailable; this is not a guarantee that every XBRL concept has four values.
 
 Rows retain full dimensions, standard/custom classification, canonical mapping
 and navigation lineage. Same raw fact repeated across navigation paths coalesces
@@ -95,6 +100,14 @@ the initial run's erroneous synthetic future columns: it revalidates the raw
 filing metadata, removes only unbacked empty quarterly columns, and preserves
 every actual row/cell. It never replaces the old publication or reselects facts.
 The new manifest records the old path, manifest digest and removed columns.
+
+The earlier reported-only release can be upgraded without repeating T5 graph
+traversal using `python -m sec_xbrl.analytics.history_quarters --publication OLD
+--output-root NEW`. It builds fresh correctly classified T1–T4, re-attests every
+selected cell to those raw observations, repartitions FY/TTM, and materializes
+the same core-quarter producer used by the default build. Previous candidate
+lineage is explicitly labeled prior-publication evidence. Existing publications
+and raw stores are never overwritten.
 
 The implementation must be independently verified on a frozen revision before
 release. Operational run results are reported separately with actual filing,

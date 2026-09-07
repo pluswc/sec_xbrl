@@ -939,7 +939,7 @@ def _validate_reported_period_observation(row: Mapping[str, Any]) -> None:
     if row.get("source_version") not in {"ORIGINAL", "AMENDMENT"}:
         raise Layer2MaterializationError("reported_period_observation has unsupported source_version")
     if row.get("period_class") not in {
-        "QTD_3M", "YTD_6M", "YTD_9M", "FY", "INSTANT", "OTHER_DURATION"
+        "QTD_3M", "YTD_6M", "YTD_9M", "FY", "TTM", "INSTANT", "OTHER_DURATION"
     }:
         raise Layer2MaterializationError("reported_period_observation has unsupported period_class")
 

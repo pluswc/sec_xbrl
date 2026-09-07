@@ -15,6 +15,7 @@ from typing import Any
 from sec_xbrl.facts.layer1 import _stable_id
 
 DERIVATION_RULE_VERSION = "m6-q4-subtraction-v1"
+PERIOD_CLASSIFICATION_VERSION = "m6-fiscal-boundaries-v2"
 
 _DURATION_RANGES = {
     "QTD_3M": range(75, 106),
@@ -58,11 +59,45 @@ class PeriodClassifier:
             context = context_by_id.get(str(fact.get("context_id")))
             concept = concept_by_id.get(str(fact.get("raw_concept_id")))
             fact["period_class"] = _period_class(concept, context)
+            fact["period_classification_reason"] = "CONTEXT_DURATION"
+            if fact["period_class"] == "FY":
+                fact["period_class"], fact["period_classification_reason"] = _annual_class(context or {}, filing)
+            fact["period_classification_version"] = PERIOD_CLASSIFICATION_VERSION
             fact["comparative_type"] = _comparative_type(
                 context, fact["period_class"], focus_date, fiscal_year_end
             )
             result.append(fact)
         return tuple(result)
+
+
+def _annual_class(context: Mapping[str, Any], filing: Mapping[str, Any]) -> tuple[str, str]:
+    start, end = _as_date(context.get("start_date")), _as_date(context.get("end_date"))
+    focus = _as_date(filing.get("report_date"))
+    if start is None or end is None:
+        return "OTHER_DURATION", "ANNUAL_BOUNDARY_EVIDENCE_MISSING"
+    # Raw Arelle endpoints are exclusive. Both ends must describe one fiscal
+    # cycle; duration tolerance alone cannot authorize a fiscal-year label.
+    reported_end = end - timedelta(days=1)
+    anniversary = date(end.year - 1, end.month, min(end.day, 28) if end.month == 2 else end.day)
+    if abs((start - anniversary).days) > 7:
+        return "OTHER_DURATION", "ANNUAL_START_BOUNDARY_MISMATCH"
+    annual_focus = str(filing.get("form", "")).removesuffix("/A") == "10-K" and filing.get("document_fiscal_period_focus") == "FY"
+    if annual_focus and focus is not None and end in {focus, focus + timedelta(days=1)}:
+        return "FY", "ANNUAL_FILING_CONTEXT_BOUNDARIES"
+    anchor = _fiscal_year_end(filing.get("fiscal_year_end"))
+    if anchor is not None:
+        month, day = anchor
+        endpoints = []
+        for year in (reported_end.year - 1, reported_end.year, reported_end.year + 1):
+            try:
+                endpoints.append(date(year, month, day))
+            except ValueError:
+                continue
+        if any(abs((reported_end - candidate).days) <= 7 for candidate in endpoints):
+            return "FY", "DEI_FISCAL_END_AND_ANNUAL_START_ALIGNMENT"
+        if focus is not None and end in {focus, focus + timedelta(days=1)} and str(filing.get("form", "")).removesuffix("/A") == "10-Q":
+            return "TTM", "ROLLING_ANNUAL_DURATION_AT_INTERIM_FOCUS"
+    return "OTHER_DURATION", "ANNUAL_BOUNDARY_EVIDENCE_MISSING"
 
 
 class Layer1PeriodAnalysis:

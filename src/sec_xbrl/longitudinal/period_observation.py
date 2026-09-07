@@ -19,7 +19,7 @@ from typing import Any
 
 from sec_xbrl.periods.logic import DERIVATION_RULE_VERSION, PeriodClassifier, derive_q4_facts
 
-PERIOD_OBSERVATION_RULE_VERSION = "l2-m1-period-observation-v1"
+PERIOD_OBSERVATION_RULE_VERSION = "l2-m1-period-observation-v2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +189,8 @@ def _exclusion(filing: Mapping[str, Any], fact: Mapping[str, Any], ordinal: int,
         "report_date": filing.get("report_date"),
         "exclusion_reason": reason,
         "classification_rule_version": PERIOD_OBSERVATION_RULE_VERSION,
+        "period_classification_reason": fact.get("period_classification_reason"),
+        "period_classification_version": fact.get("period_classification_version"),
     }
 
 
@@ -265,6 +267,8 @@ def _observation(
         ),
         "classification_rule_version": PERIOD_OBSERVATION_RULE_VERSION,
         "q4_derivation_eligible": False,
+        "period_classification_reason": fact.get("period_classification_reason"),
+        "period_classification_version": fact.get("period_classification_version"),
     }
     if policy is not None:
         result.update(_validated_q4_policy(policy, concept, unit))
@@ -419,12 +423,12 @@ def _q4_boundaries(fy: Mapping[str, Any], ytd: Mapping[str, Any]) -> tuple[str |
     ytd_end = _as_date(ytd.get("context_end_date"))
     if fy_end is None or ytd_end is None or ytd_end >= fy_end:
         return None, None
-    return (ytd_end.fromordinal(ytd_end.toordinal() + 1).isoformat(), fy_end.isoformat())
+    return (ytd_end.isoformat(), fy_end.isoformat())
 
 
 def _duration_days(start: str | None, end: str | None) -> int | None:
     start_date, end_date = _as_date(start), _as_date(end)
-    return None if start_date is None or end_date is None else (end_date - start_date).days + 1
+    return None if start_date is None or end_date is None else (end_date - start_date).days
 
 
 def _period_key_from_bounds(start: str | None, end: str | None, *, fallback: str) -> str:

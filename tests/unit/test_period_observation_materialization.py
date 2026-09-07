@@ -70,7 +70,7 @@ def test_malformed_l1_references_are_explicit_exclusions_not_silent_drops() -> N
 
 def test_q4_requires_explicit_additive_policy_and_never_derives_eps() -> None:
     snapshot = _snapshot()
-    filing = dict(snapshot["filing"], form="10-K")
+    filing = dict(snapshot["filing"], form="10-K", fiscal_year_end="--12-31", document_fiscal_period_focus="FY", report_date="2025-12-31")
     contexts = list(snapshot["contexts"])
     contexts.extend((
         {"context_id": "fy", "filing_id": filing["filing_id"], "period_kind": "DURATION", "start_date": "2025-01-01", "end_date": "2025-12-31", "instant_date": None, "duration_days": 364},
@@ -91,14 +91,15 @@ def test_q4_requires_explicit_additive_policy_and_never_derives_eps() -> None:
     assert derived[0]["source_fact_ids"] == ("fy", "ytd9")
     assert derived[0]["source_fact_id"] is None
     assert derived[0]["source_snapshot_id"] == "fixture/k25"
-    assert derived[0]["context_start_date"] == "2025-10-01"
+    assert derived[0]["context_start_date"] == "2025-09-30"
     assert derived[0]["context_end_date"] == "2025-12-31"
-    assert derived[0]["period_key"] == "2025-10-01/2025-12-31"
+    assert derived[0]["period_key"] == "2025-09-30/2025-12-31"
+    assert derived[0]["context_duration_days"] == 92
 
 
 def test_q4_rejects_malicious_policy_for_eps_shares_ratio_margin_and_average() -> None:
     snapshot = _snapshot()
-    filing = dict(snapshot["filing"], form="10-K")
+    filing = dict(snapshot["filing"], form="10-K", fiscal_year_end="--12-31", document_fiscal_period_focus="FY", report_date="2025-12-31")
     filing_id = str(filing["filing_id"])
     contexts = (
         {"context_id": "fy", "filing_id": filing_id, "period_kind": "DURATION", "start_date": "2025-01-01", "end_date": "2025-12-31", "duration_days": 364},

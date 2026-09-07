@@ -83,7 +83,7 @@ def test_52_and_53_week_fiscal_years_are_fy_not_calendar_assumptions() -> None:
         _context("fy-53", "2025-12-28", "2027-01-03"),
     )
     rows = PeriodClassifier().classify(
-        filing={"report_date": "2027-01-03"},
+        filing={"report_date": "2027-01-03", "fiscal_year_end": "--12-31", "form": "10-K", "document_fiscal_period_focus": "FY"},
         concepts=({"raw_concept_id": "raw-revenue", "period_type": "duration"},),
         contexts=contexts,
         facts=(_fact("fy-52", "fy-52"), _fact("fy-53", "fy-53")),
