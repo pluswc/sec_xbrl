@@ -95,6 +95,18 @@ def test_numeric_change_without_reviewed_evidence_is_not_current_comparable() ->
     assert comparable["unavailable_reason"] == "UNKNOWN_OR_UNSUPPORTED_BASIS_VERSION"
 
 
+def test_as_filed_only_selection_skips_recast_validation_and_comparable_work() -> None:
+    result = AnalyticalFactMaterializer().materialize(
+        current_candidates=(_candidate("reported", "q1", "2025-05-01", "FY25-Q1", "100"),),
+        recast_evidence=({"not": "valid recast evidence"},),
+        as_of_date="2025-05-02",
+        views=("AS_FILED",),
+    )
+
+    assert [row["view"] for row in result.analytical_facts] == ["AS_FILED"]
+    assert result.recast_evidence == ()
+
+
 def test_mapping_review_candidate_is_explicitly_unavailable_in_both_views() -> None:
     result = AnalyticalFactMaterializer().materialize(
         current_candidates=(_candidate("review", "q1", "2025-05-01", "FY25-Q1", "100", status="REVIEW_REQUIRED"),),

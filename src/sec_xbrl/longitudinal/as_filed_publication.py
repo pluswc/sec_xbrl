@@ -14,10 +14,14 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from sec_xbrl.longitudinal.canonical import CompanyCanonicalizer, MappingTables
-from sec_xbrl.longitudinal.capability import CapabilityInventoryMaterializer
+from sec_xbrl.longitudinal.canonical import CompanyCanonicalizer
+from sec_xbrl.longitudinal.core_coverage import core_canonical_concept_ids
+from sec_xbrl.longitudinal.core_selection import (
+    CORE_FACT_SELECTION_VERSION,
+    CoreQuarterlyFactSelector,
+)
 from sec_xbrl.longitudinal.corpus_release import CorpusRelease
-from sec_xbrl.longitudinal.materialization import Layer2Publication, Layer2Publisher
+from sec_xbrl.longitudinal.materialization import Layer2Publication, OperationalLayer2Publisher
 from sec_xbrl.longitudinal.period_observation import PeriodObservationMaterializer
 from sec_xbrl.longitudinal.selection import AnalyticalFactMaterializer
 from sec_xbrl.longitudinal.series import CompanySeriesMaterializer
@@ -108,7 +112,7 @@ class AsFiledPublicationPipeline:
         concepts_by_cik: dict[str, list[dict[str, Any]]] = defaultdict(list)
         dimensions_by_cik: dict[str, list[dict[str, Any]]] = defaultdict(list)
         relationships_by_cik: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        evidence_by_fact_id: dict[str, dict[str, Any]] = {}
+        roles_by_cik: dict[str, list[dict[str, Any]]] = defaultdict(list)
         raw_provenance_by_fact: dict[tuple[str, str], dict[str, Any]] = {}
 
         period_materializer = PeriodObservationMaterializer()
@@ -138,13 +142,12 @@ class AsFiledPublicationPipeline:
             dimensions_by_cik[cik].extend(snapshot.records("dimension_fact"))
             relationships = snapshot.records("relationship")
             relationships_by_cik[cik].extend(relationships)
+            roles_by_cik[cik].extend(snapshot.records("role"))
             facts = snapshot.records("fact")
-            evidence_by_fact_id.update(_role_evidence(facts, relationships))
             raw_provenance_by_fact.update(_raw_fact_provenance(filing, facts, snapshot.records("context")))
 
         datasets: dict[str, list[dict[str, Any]]] = defaultdict(list)
         all_analytical: list[dict[str, Any]] = []
-        all_capabilities: list[dict[str, Any]] = []
         all_series_exclusions: list[dict[str, Any]] = []
         all_observations: list[dict[str, Any]] = []
         all_period_exclusions: list[dict[str, Any]] = []
@@ -154,8 +157,11 @@ class AsFiledPublicationPipeline:
                 concepts=concepts_by_cik[cik],
                 dimension_facts=dimensions_by_cik[cik],
                 relationships=relationships_by_cik[cik],
+                roles=roles_by_cik[cik],
             )
-            _append_mapping_datasets(datasets, mappings)
+            datasets["company_concept_map"].extend(mappings.company_concept_map)
+            datasets["company_axis_map"].extend(mappings.company_axis_map)
+            datasets["company_member_map"].extend(mappings.company_member_map)
             snapshots = tuple(item for item in release.snapshots if item.input.cik == cik)
             snapshot_by_filing = {
                 str(item.records("filing")[0]["filing_id"]): item.input.snapshot_id for item in snapshots
@@ -172,36 +178,22 @@ class AsFiledPublicationPipeline:
             selected = AnalyticalFactMaterializer().materialize(
                 current_candidates=series.current,
                 as_of_date=as_of_date,
+                views=("AS_FILED",),
             )
             as_filed = _resolve_as_filed_identity_collisions(
-                row for row in selected.analytical_facts if row.get("view") == "AS_FILED"
+                (row for row in selected.analytical_facts if row.get("view") == "AS_FILED"),
+                core_canonical_ids=core_canonical_concept_ids(mappings.company_concept_map),
             )
             as_filed = _with_selected_raw_provenance(as_filed, raw_provenance_by_fact)
             if any(row.get("view") != "AS_FILED" for row in as_filed):
                 raise AsFiledPublicationError("C3-M1 emitted a non-AS_FILED analytical fact")
-            capabilities = CapabilityInventoryMaterializer().materialize(
-                company_ciks=(cik,),
-                series_candidates=series.current,
-                analytical_facts=as_filed,
-                processing_exclusions=(*exclusions_by_cik[cik], *series.exclusions),
-                source_evidence_by_fact_id=evidence_by_fact_id,
-            )
-            datasets["annual_series_candidate"].extend(series.annual)
-            datasets["current_series_candidate"].extend(series.current)
-            datasets["series_candidate_exclusion"].extend(series.exclusions)
             datasets["analytical_fact"].extend(as_filed)
-            datasets["capability_inventory"].extend(capabilities.inventory)
             all_observations.extend(observations_by_cik[cik])
             all_period_exclusions.extend(exclusions_by_cik[cik])
             all_series_exclusions.extend(series.exclusions)
             all_analytical.extend(as_filed)
-            all_capabilities.extend(capabilities.inventory)
-
-        datasets["period_observation"].extend(all_observations)
-        datasets["period_observation_exclusion"].extend(all_period_exclusions)
-        # deterministic rows make the publisher's content hash meaningful.
-        publication = Layer2Publisher(Path(output_root)).publish(
-            release.layer2_run, {name: tuple(_sorted_rows(rows)) for name, rows in datasets.items()}
+        publication = OperationalLayer2Publisher(Path(output_root)).publish(
+            release.layer2_run, {name: tuple(rows) for name, rows in datasets.items()}
         )
         return AsFiledPublicationResult(
             publication=publication,
@@ -211,14 +203,9 @@ class AsFiledPublicationPipeline:
                 period_exclusions=all_period_exclusions,
                 series_exclusions=all_series_exclusions,
                 analytical_facts=all_analytical,
-                capabilities=all_capabilities,
+                capabilities=(),
             ),
         )
-
-
-def _append_mapping_datasets(target: dict[str, list[dict[str, Any]]], mappings: MappingTables) -> None:
-    for name, rows in mappings.as_datasets().items():
-        target[name].extend(rows)
 
 
 def _raw_fact_provenance(
@@ -288,6 +275,8 @@ def _with_selected_raw_provenance(
 
 def _resolve_as_filed_identity_collisions(
     rows: Iterable[Mapping[str, Any]],
+    *,
+    core_canonical_ids: Iterable[str] = (),
 ) -> tuple[dict[str, Any], ...]:
     """Fail closed when the existing M4 identity cannot distinguish candidates.
 
@@ -302,6 +291,7 @@ def _resolve_as_filed_identity_collisions(
     for row in rows:
         grouped[str(row.get("analytical_fact_id") or "")].append(dict(row))
     result: list[dict[str, Any]] = []
+    selector = CoreQuarterlyFactSelector()
     for identity, candidates in sorted(grouped.items()):
         if not identity:
             raise AsFiledPublicationError("AS_FILED materializer returned a fact without identity")
@@ -309,6 +299,23 @@ def _resolve_as_filed_identity_collisions(
         if len(candidates) == 1:
             result.append(canonical)
             continue
+        core_selection = selector.select(
+            candidates, core_canonical_concept_ids=core_canonical_ids
+        )
+        if core_selection is not None and core_selection.selected is not None:
+            result.append(
+                {
+                    **dict(core_selection.selected),
+                    "basic_selection_rule_version": CORE_FACT_SELECTION_VERSION,
+                    "basic_selection_reason": "CORE_FACT_POLICY_RANKED",
+                }
+            )
+            continue
+        unavailable_reason = (
+            core_selection.unavailable_reason
+            if core_selection is not None
+            else "AMBIGUOUS_AS_FILED_SELECTION_IDENTITY"
+        )
         result.append(
             {
                 **canonical,
@@ -318,7 +325,10 @@ def _resolve_as_filed_identity_collisions(
                 "selected_fact_id": None,
                 "source_filing_id": None,
                 "filed_date": None,
-                "unavailable_reason": "AMBIGUOUS_AS_FILED_SELECTION_IDENTITY",
+                "unavailable_reason": unavailable_reason,
+                "basic_selection_rule_version": (
+                    CORE_FACT_SELECTION_VERSION if core_selection is not None else None
+                ),
             }
         )
     return tuple(result)

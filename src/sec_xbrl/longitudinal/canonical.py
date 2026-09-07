@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import date
 from enum import StrEnum
 from typing import Any
 
-MAPPING_VERSION = "l2-m2-company-canonical-v1"
+MAPPING_VERSION = "l2-m2-company-canonical-v3"
 
 
 class MappingRelation(StrEnum):
@@ -51,6 +53,45 @@ class MappingTables:
         }
 
 
+@dataclass(slots=True)
+class _EstablishedCandidateIndex:
+    """Restrict canonical-mapping comparisons to evidence-compatible rows.
+
+    Every list retains insertion order, so a reverse lookup keeps the original
+    newest-prior-row preference.  The index changes candidate discovery only;
+    all confirmation predicates and emitted mapping evidence are unchanged.
+    """
+
+    by_raw_id: dict[str, list[dict[str, Any]]] = field(default_factory=lambda: defaultdict(list))
+    by_name: dict[str, list[dict[str, Any]]] = field(default_factory=lambda: defaultdict(list))
+    by_local_name: dict[str, list[dict[str, Any]]] = field(
+        default_factory=lambda: defaultdict(list)
+    )
+    by_label_or_name: dict[str, list[dict[str, Any]]] = field(
+        default_factory=lambda: defaultdict(list)
+    )
+
+    def add(self, item: dict[str, Any]) -> None:
+        source = item["source"]
+        self.by_raw_id[_raw_id(source)].append(item)
+        self.by_name[_standard_local_name(source)].append(item)
+        self.by_local_name[str(source.get("local_name") or "")].append(item)
+        self.by_label_or_name[_label_or_name(source)].append(item)
+
+    def latest_raw_id(self, raw_ids: set[str]) -> Mapping[str, Any] | None:
+        candidates = [rows[-1] for raw_id, rows in self.by_raw_id.items() if raw_id in raw_ids]
+        return max(candidates, key=lambda item: item["_position"], default=None)
+
+    def reverse_name(self, name: str) -> Iterable[dict[str, Any]]:
+        return reversed(self.by_name.get(name, ()))
+
+    def reverse_local_name(self, local_name: str) -> Iterable[dict[str, Any]]:
+        return reversed(self.by_local_name.get(local_name, ()))
+
+    def reverse_label_or_name(self, value: str) -> Iterable[dict[str, Any]]:
+        return reversed(self.by_label_or_name.get(value, ()))
+
+
 class CompanyCanonicalizer:
     """Create conservative company-scoped IDs from ordered filing snapshots.
 
@@ -66,6 +107,7 @@ class CompanyCanonicalizer:
         concepts: Iterable[Mapping[str, Any]],
         dimension_facts: Iterable[Mapping[str, Any]] = (),
         relationships: Iterable[Mapping[str, Any]] = (),
+        roles: Iterable[Mapping[str, Any]] = (),
         documented_changes: Iterable[Mapping[str, Any]] = (),
     ) -> MappingTables:
         """Return new mapping rows; callers retain all supplied Layer 1 rows."""
@@ -73,7 +115,8 @@ class CompanyCanonicalizer:
         cik = _single_cik(filing_rows)
         order = _filing_order(filing_rows)
         filing_by_id = {str(row["filing_id"]): row for row in filing_rows}
-        relationships_by_concept = _relationships_by_concept(relationships)
+        concept_input = tuple(dict(row) for row in concepts)
+        relationships_by_concept = _relationships_by_concept(relationships, concepts=concept_input, roles=roles)
         changes = _changes_by_raw_id(documented_changes)
         # Concepts are immutable Layer 1 records.  The copied analysis rows
         # receive filing validity only from their declared source filing.
@@ -86,8 +129,10 @@ class CompanyCanonicalizer:
                     if not row.get(key)
                 },
             }
-            for row in concepts
+            for row in concept_input
         )
+        for row in rows:
+            row["_custom_structural_signature"] = _custom_structural_signature(row, relationships_by_concept)
         dimension_rows = tuple(dimension_facts)
         axis_ids = {
             str(row["axis_raw_concept_id"])
@@ -169,7 +214,11 @@ class CompanyCanonicalizer:
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         result: list[dict[str, Any]] = []
         events: list[dict[str, Any]] = []
-        established: list[dict[str, Any]] = []
+        established = _EstablishedCandidateIndex()
+        custom_counts: dict[tuple[str, str], int] = defaultdict(int)
+        for row in rows:
+            if not row.get("is_standard"):
+                custom_counts[(str(row.get("filing_id")), str(row.get("local_name")))] += 1
         for row in sorted(
             rows,
             key=lambda item: (filing_order.get(str(item.get("filing_id")), 10**9), _raw_id(item)),
@@ -177,6 +226,7 @@ class CompanyCanonicalizer:
             raw_id = _raw_id(row)
             if not raw_id:
                 continue
+            row["_custom_ambiguous"] = not row.get("is_standard") and custom_counts[(str(row.get("filing_id")), str(row.get("local_name")))] > 1
             prior, decision = _best_candidate(row, established, relationships, changes)
             if prior is None:
                 canonical_id = _canonical_id(cik, entity_type, raw_id)
@@ -186,9 +236,9 @@ class CompanyCanonicalizer:
                     source=row,
                     canonical_id=canonical_id,
                     valid_from_filing_id=str(row.get("filing_id") or ""),
-                    relation=MappingRelation.SAME,
-                    method="RAW_IDENTITY_BASELINE",
-                    confidence=1.0,
+                    relation=MappingRelation.UNCERTAIN if row["_custom_ambiguous"] else MappingRelation.SAME,
+                    method="AMBIGUOUS_CUSTOM_LOCAL_IDENTITY" if row["_custom_ambiguous"] else "RAW_IDENTITY_BASELINE",
+                    confidence=0.0 if row["_custom_ambiguous"] else 1.0,
                     evidence={
                         "raw_identity": raw_id,
                         "qname": row.get("qname"),
@@ -197,7 +247,7 @@ class CompanyCanonicalizer:
                     },
                     mapping_version=MAPPING_VERSION,
                     continuity_break=False,
-                    review_required=False,
+                    review_required=bool(row["_custom_ambiguous"]),
                 )
                 events.append(
                     _event(
@@ -283,7 +333,7 @@ class CompanyCanonicalizer:
                         )
                     )
             result.append(mapping)
-            established.append({"source": row, "mapping": mapping})
+            established.add({"source": row, "mapping": mapping, "_position": len(result) - 1})
         return result, events
 
 
@@ -612,7 +662,7 @@ def _selection_sort_key(row: Mapping[str, Any]) -> tuple[str, str, str, str]:
 
 def _best_candidate(
     row: Mapping[str, Any],
-    established: Iterable[Mapping[str, Any]],
+    established: _EstablishedCandidateIndex,
     relationships: Mapping[str, tuple[dict[str, Any], ...]],
     changes: Mapping[str, Mapping[str, Any]],
 ) -> tuple[Mapping[str, Any] | None, dict[str, Any]]:
@@ -620,14 +670,7 @@ def _best_candidate(
     documented = changes.get(raw_id)
     if documented:
         relation = _documented_relation(documented)
-        prior = next(
-            (
-                item
-                for item in reversed(tuple(established))
-                if _raw_id(item["source"]) in _documented_prior_raw_ids(documented)
-            ),
-            None,
-        )
+        prior = established.latest_raw_id(_documented_prior_raw_ids(documented))
         if prior:
             return prior["mapping"], {
                 "confirmed": True,
@@ -645,8 +688,27 @@ def _best_candidate(
                     MappingRelation.MERGED,
                 },
             }
-    for item in reversed(tuple(established)):
+    for item in established.reverse_name(_standard_local_name(row)):
         source = item["source"]
+        if _standard_us_gaap_namespace_continuity(row, source):
+            return item["mapping"], {
+                "confirmed": True,
+                "relation": MappingRelation.SAME,
+                "method": "STANDARD_US_GAAP_NAMESPACE_CONTINUITY",
+                "confidence": 1.0,
+                "evidence": {
+                    "taxonomy_family": "us-gaap",
+                    "local_name": _standard_local_name(row),
+                    "qname": row.get("qname"),
+                    "namespace_uri": row.get("namespace_uri"),
+                    "prior_qname": source.get("qname"),
+                    "prior_namespace_uri": source.get("namespace_uri"),
+                    "prior_raw_id": _raw_id(source),
+                    "semantic_fingerprint": _semantic_fingerprint(row),
+                    "prior_semantic_fingerprint": _semantic_fingerprint(source),
+                },
+                "continuity_break": False,
+            }
         if _exact_standard_identity(row, source):
             return item["mapping"], {
                 "confirmed": True,
@@ -662,18 +724,31 @@ def _best_candidate(
                 },
                 "continuity_break": False,
             }
-    for item in reversed(tuple(established)):
+    for item in established.reverse_local_name(str(row.get("local_name") or "")):
         source = item["source"]
-        if _well_supported_namespace_change(row, source, relationships):
+        if _well_supported_custom_continuity(row, source):
             return item["mapping"], {
                 "confirmed": True,
-                "relation": MappingRelation.RENAMED,
-                "method": "LOCAL_AXIS_ROLE_LABEL_CONTINUITY",
+                "relation": MappingRelation.SAME if row.get("namespace_uri") == source.get("namespace_uri") else MappingRelation.RENAMED,
+                "method": "CUSTOM_SEMANTIC_NETWORK_CONTINUITY",
                 "confidence": 0.9,
-                "evidence": _continuity_evidence(row, source, relationships),
+                "evidence": {**_continuity_evidence(row, source, relationships),
+                             "prior_namespace_uri": source.get("namespace_uri"), "namespace_uri": row.get("namespace_uri"),
+                             "qualified_network_signature": row.get("_custom_structural_signature"),
+                             "source_relationship_ids": [edge.get("relationship_id") for edge in relationships.get(_raw_id(row), ())],
+                             "prior_relationship_ids": [edge.get("relationship_id") for edge in relationships.get(_raw_id(source), ())],
+                             "source_role_uris": sorted({str(edge.get("role_uri")) for edge in relationships.get(_raw_id(row), ())}),
+                             "prior_role_uris": sorted({str(edge.get("role_uri")) for edge in relationships.get(_raw_id(source), ())})},
                 "continuity_break": False,
             }
-    for item in reversed(tuple(established)):
+        # Do not jump over a changed most-recent custom meaning to reconnect
+        # to a convenient older shape. A return to an old structure needs review.
+        if not row.get("is_standard") and not source.get("is_standard"):
+            return item["mapping"], {"confirmed": False, "relation": MappingRelation.UNCERTAIN,
+                                     "method": "STRING_SIMILARITY_ONLY" if _same_text(row, source) else "CUSTOM_EVIDENCE_CHANGED",
+                                     "confidence": 0.35, "continuity_break": False,
+                                     "evidence": {"prior_raw_id": _raw_id(source), "custom_continuity_rejection": _custom_rejection(row, source)}}
+    for item in established.reverse_label_or_name(_label_or_name(row)):
         source = item["source"]
         if _same_text(row, source):
             return item["mapping"], {
@@ -681,7 +756,8 @@ def _best_candidate(
                 "relation": MappingRelation.UNCERTAIN,
                 "method": "STRING_SIMILARITY_ONLY",
                 "confidence": 0.35,
-                "evidence": {"label_or_local_name": _label_or_name(row)},
+                "evidence": {"label_or_local_name": _label_or_name(row),
+                             "custom_continuity_rejection": _custom_rejection(row, source) if not row.get("is_standard") and not source.get("is_standard") else []},
                 "continuity_break": False,
             }
     return None, {"confirmed": False}
@@ -709,10 +785,68 @@ def _exact_standard_identity(left: Mapping[str, Any], right: Mapping[str, Any]) 
     return (
         bool(left.get("is_standard"))
         and bool(right.get("is_standard"))
-        and left.get("qname") == right.get("qname")
         and left.get("namespace_uri") == right.get("namespace_uri")
+        and _standard_local_name(left)
+        and _standard_local_name(left) == _standard_local_name(right)
         and _compatible_context_semantics(left, right)
     )
+
+
+def _standard_us_gaap_namespace_continuity(
+    left: Mapping[str, Any], right: Mapping[str, Any]
+) -> bool:
+    """Recognize a stable US-GAAP concept across annual taxonomy namespaces.
+
+    Layer 1 retains each filing's QName and namespace.  This is an additive
+    Layer 2 rule for *standard* US-GAAP concepts only; extension concepts never
+    qualify merely because a local name repeats.  The semantic fingerprint is
+    deliberately complete enough to reject duration/instant, type, balance,
+    and abstractness changes.
+    """
+    return bool(
+        left.get("is_standard")
+        and right.get("is_standard")
+        and _is_annual_fasb_us_gaap_namespace(left.get("namespace_uri"))
+        and _is_annual_fasb_us_gaap_namespace(right.get("namespace_uri"))
+        and _standard_local_name(left)
+        and _standard_local_name(left) == _standard_local_name(right)
+        and left.get("namespace_uri") != right.get("namespace_uri")
+        and _compatible_context_semantics(left, right)
+        and left.get("abstract") == right.get("abstract")
+    )
+
+
+_ANNUAL_FASB_US_GAAP_NAMESPACE = re.compile(
+    r"^https?://fasb\.org/us-gaap/[0-9]{4}$", re.IGNORECASE
+)
+
+
+def _is_annual_fasb_us_gaap_namespace(namespace_uri: object) -> bool:
+    """Accept only official, year-versioned FASB US-GAAP namespace URIs.
+
+    A QName prefix is an XML alias, so neither ``us-gaap`` nor ``gaap`` is a
+    trustworthy taxonomy classification by itself. This narrow rule permits
+    annual FASB namespace changes while leaving unversioned, look-alike, and
+    company-extension namespaces outside automatic continuity.
+    """
+    return bool(_ANNUAL_FASB_US_GAAP_NAMESPACE.fullmatch(str(namespace_uri or "")))
+
+
+def _standard_local_name(row: Mapping[str, Any]) -> str:
+    local = row.get("local_name")
+    if local:
+        return str(local)
+    qname = str(row.get("qname") or "")
+    return qname.rsplit(":", 1)[-1] if ":" in qname else ""
+
+
+def _semantic_fingerprint(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "period_type": row.get("period_type"),
+        "data_type": row.get("data_type"),
+        "balance": row.get("balance"),
+        "abstract": row.get("abstract"),
+    }
 
 
 def _compatible_context_semantics(
@@ -734,9 +868,14 @@ def _compatible_context_semantics(
     # Balance is relevant only where one side declares it.  A missing balance
     # on both is valid for duration concepts; a one-sided or changed balance is
     # a semantic incompatibility.
-    if left.get("balance") is not None or right.get("balance") is not None:
-        return left.get("balance") == right.get("balance")
-    return True
+    if (
+        (left.get("balance") is not None or right.get("balance") is not None)
+        and left.get("balance") != right.get("balance")
+    ):
+        return False
+    # Abstractness is semantic metadata too: a presentation-only abstract
+    # node must never join a reportable numeric concept.
+    return left.get("abstract") == right.get("abstract")
 
 
 def _well_supported_namespace_change(
@@ -755,6 +894,89 @@ def _well_supported_namespace_change(
     return _role_axis_signature(left, relationships) == _role_axis_signature(
         right, relationships
     ) and bool(_role_axis_signature(left, relationships))
+
+
+def _namespace_family(namespace: Any) -> str:
+    """Normalize only an explicit annual/date version segment, not an owner."""
+    text = str(namespace or "")
+    match = re.search(r"/((?:19|20)\d{2}(?:\d{4})?)$", text)
+    if match is None:
+        return text
+    version = match.group(1)
+    if len(version) == 8:
+        try:
+            date(int(version[:4]), int(version[4:6]), int(version[6:]))
+        except ValueError:
+            return text
+    return text[:match.start()] + "/{version}"
+
+
+def _custom_rejection(left: Mapping[str, Any], right: Mapping[str, Any]) -> list[str]:
+    reasons = []
+    if left.get("_custom_ambiguous") or right.get("_custom_ambiguous"):
+        reasons.append("AMBIGUOUS_CUSTOM_LOCAL_IDENTITY")
+    if not left.get("label") or not right.get("label"):
+        reasons.append("EXPLICIT_LABEL_MISSING")
+    elif _label_or_name(left) != _label_or_name(right):
+        reasons.append("EXPLICIT_LABEL_CHANGED")
+    if not _compatible_context_semantics(left, right):
+        reasons.append("SEMANTIC_FINGERPRINT_INCOMPATIBLE")
+    if _namespace_family(left.get("namespace_uri")) != _namespace_family(right.get("namespace_uri")):
+        reasons.append("CUSTOM_NAMESPACE_OWNER_OR_FAMILY_CHANGED")
+    if not left.get("_custom_structural_signature") or not right.get("_custom_structural_signature"):
+        reasons.append("COMPLETE_QUALIFIED_NETWORK_EVIDENCE_MISSING")
+    elif left.get("_custom_structural_signature") != right.get("_custom_structural_signature"):
+        reasons.append("QUALIFIED_NETWORK_STRUCTURE_CHANGED")
+    return reasons or ["LATEST_PRIOR_CUSTOM_IDENTITY_REQUIRES_REVIEW"]
+
+
+def _well_supported_custom_continuity(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    return bool(
+        not left.get("is_standard") and not right.get("is_standard")
+        and not left.get("_custom_ambiguous") and not right.get("_custom_ambiguous")
+        and left.get("filing_id") != right.get("filing_id")
+        and left.get("namespace_uri") and right.get("namespace_uri")
+        and _namespace_family(left.get("namespace_uri")) == _namespace_family(right.get("namespace_uri"))
+        and left.get("local_name") and left.get("local_name") == right.get("local_name")
+        and left.get("label") and right.get("label") and _label_or_name(left) == _label_or_name(right)
+        and _compatible_context_semantics(left, right)
+        and left.get("_custom_structural_signature")
+        and left.get("_custom_structural_signature") == right.get("_custom_structural_signature")
+    )
+
+
+def _custom_structural_signature(row: Mapping[str, Any], relationships: Mapping[str, tuple[dict[str, Any], ...]]) -> tuple[str, ...]:
+    signature = set()
+    for edge in relationships.get(_raw_id(row), ()):
+        if edge.get("arcrole") in {
+            "http://www.xbrl.org/2003/arcrole/concept-label",
+            "http://www.xbrl.org/2003/arcrole/concept-reference",
+            "http://xbrl.org/arcrole/2008/element-label",
+            "http://xbrl.org/arcrole/2008/element-reference",
+        }:
+            continue  # Resource links remain Raw, but cannot prove a financial structure.
+        supported = {
+            "PRE": {"http://www.xbrl.org/2003/arcrole/parent-child"},
+            "CAL": {"http://www.xbrl.org/2003/arcrole/summation-item"},
+            "DEF": {"http://xbrl.org/int/dim/arcrole/" + name for name in ("all", "notAll", "hypercube-dimension", "dimension-domain", "domain-member", "dimension-default")}
+                   | {"http://www.xbrl.org/2003/arcrole/" + name for name in ("general-special", "essence-alias", "similar-tuples", "requires-element")},
+        }
+        if edge.get("arcrole") not in supported.get(str(edge.get("network_type")), set()):
+            return ()
+        if any(not edge.get(key) for key in ("role_uri", "network_type", "arcrole", "link_qname", "arc_qname", "_from_identity", "_to_identity")):
+            return ()
+        signature.add(json.dumps((edge.get("network_type"), _issuer_role_identity(edge["role_uri"], row.get("namespace_uri")), edge.get("arcrole"),
+                                 edge.get("link_qname"), edge.get("arc_qname"),
+                                 edge["_from_identity"], edge["_to_identity"], _issuer_role_identity(edge.get("target_role_uri"), row.get("namespace_uri")),
+                                 edge.get("weight"), edge.get("usable"), edge.get("closed"), edge.get("context_element")), sort_keys=True))
+    return tuple(sorted(signature))
+
+
+def _issuer_role_identity(role_uri: Any, namespace_uri: Any) -> Any:
+    """Only the exact same-filing issuer namespace prefix may be versioned."""
+    if isinstance(role_uri, str) and isinstance(namespace_uri, str) and role_uri.startswith(namespace_uri + "/"):
+        return _namespace_family(namespace_uri) + role_uri[len(namespace_uri):]
+    return role_uri
 
 
 def _role_axis_signature(
@@ -816,10 +1038,21 @@ def _label_or_name(row: Mapping[str, Any]) -> str:
 
 def _relationships_by_concept(
     rows: Iterable[Mapping[str, Any]],
+    *, concepts: Iterable[Mapping[str, Any]] = (), roles: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, tuple[dict[str, Any], ...]]:
+    concept_by_id = {(str(row.get("filing_id")), _raw_id(row)): row for row in concepts}
+    role_by_id = {(str(row.get("filing_id")), str(row.get("role_id"))): row for row in roles}
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         copy = dict(row)
+        filing_id = str(row.get("filing_id"))
+        role = role_by_id.get((filing_id, str(row.get("role_id"))))
+        if role is not None:
+            copy["role_uri"] = role.get("role_uri")
+        for endpoint, target in (("from_raw_concept_id", "_from_identity"), ("to_raw_concept_id", "_to_identity")):
+            concept = concept_by_id.get((filing_id, str(row.get(endpoint))))
+            if concept is not None and concept.get("namespace_uri") and concept.get("local_name") and _compatible_context_semantics(concept, concept):
+                copy[target] = (_namespace_family(concept["namespace_uri"]), concept["local_name"], _semantic_fingerprint(concept))
         for key in ("from_raw_concept_id", "to_raw_concept_id"):
             if copy.get(key):
                 grouped[str(copy[key])].append(copy)
@@ -856,6 +1089,8 @@ def _mapping_row(
         "source_qname": source.get("qname"),
         "source_namespace_uri": source.get("namespace_uri"),
         "source_local_name": source.get("local_name"),
+        "source_taxonomy_family": source.get("taxonomy_family"),
+        "source_is_standard": source.get("is_standard"),
         "company_canonical_id": canonical_id,
         "canonical_entity_type": entity_type,
         "valid_from_filing_id": valid_from_filing_id,

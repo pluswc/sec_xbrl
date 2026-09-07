@@ -19,7 +19,7 @@ from typing import Any
 
 from sec_xbrl.periods.logic import DERIVATION_RULE_VERSION, PeriodClassifier, derive_q4_facts
 
-PERIOD_OBSERVATION_RULE_VERSION = "l2-m1-period-observation-v1"
+PERIOD_OBSERVATION_RULE_VERSION = "l2-m1-period-observation-v2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +189,8 @@ def _exclusion(filing: Mapping[str, Any], fact: Mapping[str, Any], ordinal: int,
         "report_date": filing.get("report_date"),
         "exclusion_reason": reason,
         "classification_rule_version": PERIOD_OBSERVATION_RULE_VERSION,
+        "period_classification_reason": fact.get("period_classification_reason"),
+        "period_classification_version": fact.get("period_classification_version"),
     }
 
 
@@ -212,6 +214,7 @@ def _observation(
         for row in dimension_signature
     )
     fiscal_year = _fiscal_year(filing, context)
+    fiscal_quarter = _fiscal_quarter(filing)
     source_fact_id = str(fact["fact_id"])
     result = {
         "period_observation_id": _stable_id("period-observation", source_fact_id, PERIOD_OBSERVATION_RULE_VERSION),
@@ -229,6 +232,14 @@ def _observation(
         "raw_concept_qname": concept.get("qname"),
         "raw_concept_namespace_uri": concept.get("namespace_uri"),
         "raw_concept_local_name": concept.get("local_name"),
+        "raw_concept_taxonomy_family": concept.get("taxonomy_family"),
+        "raw_concept_taxonomy_version": concept.get("taxonomy_version"),
+        # The exact XBRL type is required later when a Layer 3 consumer asks
+        # whether a standard QName is genuinely comparable across companies.
+        # Preserve it as raw provenance; it is not a mapping decision.
+        "raw_concept_data_type": concept.get("data_type"),
+        "raw_concept_is_standard": concept.get("is_standard"),
+        "raw_concept_is_custom": concept.get("is_custom"),
         "raw_concept_period_type": concept.get("period_type"),
         "context_id": fact.get("context_id"),
         "context_period_kind": context.get("period_kind"),
@@ -248,6 +259,7 @@ def _observation(
         "period_key": _period_key(context, period_class),
         "comparative_type": fact.get("comparative_type"),
         "fiscal_year": fiscal_year,
+        "fiscal_quarter": fiscal_quarter,
         # Class is deliberately inside this identity: QTD/YTD/FY/instant
         # candidates cannot coalesce before later mapping/series policy.
         "raw_series_identity": (
@@ -255,6 +267,8 @@ def _observation(
         ),
         "classification_rule_version": PERIOD_OBSERVATION_RULE_VERSION,
         "q4_derivation_eligible": False,
+        "period_classification_reason": fact.get("period_classification_reason"),
+        "period_classification_version": fact.get("period_classification_version"),
     }
     if policy is not None:
         result.update(_validated_q4_policy(policy, concept, unit))
@@ -409,12 +423,12 @@ def _q4_boundaries(fy: Mapping[str, Any], ytd: Mapping[str, Any]) -> tuple[str |
     ytd_end = _as_date(ytd.get("context_end_date"))
     if fy_end is None or ytd_end is None or ytd_end >= fy_end:
         return None, None
-    return (ytd_end.fromordinal(ytd_end.toordinal() + 1).isoformat(), fy_end.isoformat())
+    return (ytd_end.isoformat(), fy_end.isoformat())
 
 
 def _duration_days(start: str | None, end: str | None) -> int | None:
     start_date, end_date = _as_date(start), _as_date(end)
-    return None if start_date is None or end_date is None else (end_date - start_date).days + 1
+    return None if start_date is None or end_date is None else (end_date - start_date).days
 
 
 def _period_key_from_bounds(start: str | None, end: str | None, *, fallback: str) -> str:
@@ -438,6 +452,16 @@ def _fiscal_year(filing: Mapping[str, Any], context: Mapping[str, Any]) -> int |
             return date.fromisoformat(str(endpoint)).year
         except (TypeError, ValueError):
             return None
+
+
+def _fiscal_quarter(filing: Mapping[str, Any]) -> int | None:
+    """Copy the filing's declared fiscal focus; do not infer from calendar dates."""
+    focus = str(filing.get("document_fiscal_period_focus") or "").upper()
+    if focus in {"FY", "Q4"}:
+        return 4
+    if len(focus) == 2 and focus.startswith("Q") and focus[1] in "123":
+        return int(focus[1])
+    return None
 
 
 def _stable_id(*parts: Any) -> str:

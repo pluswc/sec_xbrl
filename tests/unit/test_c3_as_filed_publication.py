@@ -18,7 +18,9 @@ from sec_xbrl.longitudinal import (
     Layer2PublicationReader,
     Layer2RuleVersions,
     Layer2Run,
+    core_canonical_concept_ids,
 )
+from sec_xbrl.longitudinal.as_filed_publication import _resolve_as_filed_identity_collisions
 
 RULES = Layer2RuleVersions("period-v1", "mapping-v1", "recast-v1", "selection-v1")
 
@@ -70,13 +72,44 @@ def test_c3_m1_publishes_only_as_filed_and_is_admitted_by_consumer_c2(tmp_path: 
     assert {key: facts[0][key] for key in ("form", "accession", "report_date", "context_id", "unit_id")} == {
         "form": "10-Q", "accession": "0000320193-25-000001", "report_date": "2025-03-29", "context_id": "qtd", "unit_id": "usd",
     }
-    assert result.publication.output_counts["period_observation"] == 2
+    assert set(result.publication.output_counts) == {
+        "analytical_fact", "company_axis_map", "company_concept_map", "company_member_map"
+    }
     assert result.coverage[0].filing_count == 2
     assert result.coverage[0].views == ("AS_FILED",)
-    assert repository.discover_capabilities("0000320193")[0]["source_role_ids"] == ["role:revenue"]
-    candidates = Layer2PublicationReader().load(result.publication.run_root).records("current_series_candidate")
-    amendment = next(row for row in candidates if row["source_fact_id"] == "fact:000002")
-    assert (amendment["form"], amendment["accession"]) == ("10-Q/A", "0000320193-25-000002")
+
+
+def test_core_revenue_collision_selects_direct_undimensioned_10q_and_keeps_amendment_out() -> None:
+    common = {
+        "analytical_fact_id": "revenue-q1",
+        "company_canonical_concept_id": "company:revenue",
+        "source_type": "REPORTED",
+        "value_numeric": "100",
+        "value_text": None,
+        "source_filing_id": "filing:original",
+        "selected_fact_id": "fact:original",
+        "filed_date": "2024-05-22",
+        "accession": "0001045810-24-000100",
+        "form": "10-Q",
+        "raw_dimension_signature": (),
+    }
+    selected = _resolve_as_filed_identity_collisions(
+        (
+            common,
+            {
+                **common,
+                "source_filing_id": "filing:amendment",
+                "selected_fact_id": "fact:amendment",
+                "filed_date": "2024-06-01",
+                "accession": "0001045810-24-000101",
+                "form": "10-Q/A",
+            },
+        ),
+        core_canonical_ids=("company:revenue",),
+    )
+    assert selected[0]["source_type"] == "REPORTED"
+    assert selected[0]["selected_fact_id"] == "fact:original"
+    assert selected[0]["basic_selection_reason"] == "CORE_FACT_POLICY_RANKED"
 
 
 def test_c3_m1_actual_seven_company_corpus_when_cached(tmp_path: Path) -> None:
@@ -99,4 +132,33 @@ def test_c3_m1_actual_seven_company_corpus_when_cached(tmp_path: Path) -> None:
         and row.get("report_date")
         and row.get("context_id")
         for row in aapl
+    )
+
+
+def test_cached_nvda_fy2024_q1_revenue_selects_direct_10q_when_available(tmp_path: Path) -> None:
+    """Regression check over an explicit local cache; it never downloads SEC data."""
+    root = Path(os.environ.get("SEC_XBRL_CORPUS_ROOT", "data/processed/trailing_corpus_runs/20260827T051322Z"))
+    if not root.is_dir():
+        pytest.skip("cached NVDA corpus is not available")
+    release = CorpusReleaseAdapter().load(
+        root,
+        corpus_run_id=root.name,
+        ciks=("1045810",),
+        run_version="core-selection-nvda-regression-v1",
+        rules=RULES,
+    )
+    result = AsFiledPublicationPipeline().publish(
+        release, output_root=tmp_path / "nvda", as_of_date="2026-08-29"
+    )
+    published = Layer2PublicationReader().load(result.publication.run_root)
+    revenue_ids = core_canonical_concept_ids(published.records("company_concept_map"))
+    assert any(
+        row["company_canonical_concept_id"] in revenue_ids
+        and row.get("period_class") == "QTD_3M"
+        and row.get("fiscal_year") == 2024
+        and row.get("fiscal_quarter") == 1
+        and row.get("source_type") == "REPORTED"
+        and row.get("form") == "10-Q"
+        and row.get("company_canonical_dimension_key") in ((), [])
+        for row in published.records("analytical_fact")
     )

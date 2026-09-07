@@ -66,6 +66,16 @@ not a commitment that later high-volume materialization will remain JSONL; a
 Parquet writer may replace the row encoding only while retaining the same
 logical records, keys, manifest, and publication semantics.
 
+### Operational AS_FILED publication
+
+`OperationalLayer2Publisher` is the fast production path for an AS_FILED
+panel. It writes only `company_concept_map`, `company_axis_map`,
+`company_member_map`, and `analytical_fact` as CIK-partitioned Parquet. Its
+manifest retains the input declaration, rule versions, row counts, storage
+format, and atomic publication status, but deliberately has no per-dataset
+content hashes, JSONL encoding, or output read-back pass. The legacy canonical
+JSONL publisher remains a contract fixture for audit-oriented workflows.
+
 ### Consumer C2 verified-publication reader
 
 `Layer2PublicationReader` is the read-only consumer-side validator for this

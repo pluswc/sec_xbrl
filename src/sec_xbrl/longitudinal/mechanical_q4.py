@@ -307,6 +307,8 @@ def _candidate(fy: Mapping[str, Any], ytd: Mapping[str, Any], value: str) -> dic
         "basis_version": fy.get("basis_version"),
         "unit_semantics": fy.get("unit_semantics"),
         "period_class": "QTD_3M",
+        "fiscal_year": fy.get("fiscal_year"),
+        "fiscal_quarter": 4,
         "fiscal_year_end_period_key": fy["period_key"],
         "actual_period_boundaries": (_bounds(ytd)[1], _bounds(fy)[1]),
         "value_numeric": value,

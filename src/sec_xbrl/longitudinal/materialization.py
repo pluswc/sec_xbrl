@@ -26,6 +26,11 @@ LOGICAL_DATASETS = frozenset(
     {
         "period_observation",
         "period_observation_exclusion",
+        "reported_period_observation",
+        "filing_relationship_edge",
+        "analysis_exploration_node",
+        "analysis_exploration_edge",
+        "accession_version_ledger",
         "company_concept_map",
         "company_axis_map",
         "company_member_map",
@@ -210,6 +215,16 @@ class Layer2PublicationReader:
             raise Layer2PublicationValidationError("Layer 2 manifest fingerprint does not match its declaration")
         if manifest.get("contract_version") != LAYER2_CONTRACT_VERSION:
             raise Layer2PublicationValidationError("unsupported Layer 2 materialization contract version")
+        if manifest.get("storage_format") == "parquet-operational-v1":
+            _validate_operational_manifest_shape(manifest)
+            datasets = _read_operational_parquet_datasets(root, manifest, run)
+            try:
+                counts = _validate_candidate(run, datasets)
+            except Layer2MaterializationError as exc:
+                raise Layer2PublicationValidationError("Layer 2 publication rows fail contract validation") from exc
+            if counts != manifest["output_counts"]:
+                raise Layer2PublicationValidationError("Layer 2 publication row counts do not match manifest")
+            return _verified_publication(root, manifest_path, run, datasets)
         if manifest.get("storage_format") != "canonical-jsonl-v1":
             raise Layer2PublicationValidationError("unsupported Layer 2 publication storage format")
         _validate_manifest_shape(manifest)
@@ -224,26 +239,7 @@ class Layer2PublicationReader:
         hashes = _dataset_hashes(datasets)
         if hashes != manifest["output_content_sha256"]:
             raise Layer2PublicationValidationError("Layer 2 publication content hashes do not match manifest")
-        identity = {
-            "layer2_run_version": run.run_version,
-            "layer2_run_fingerprint": run.fingerprint,
-            "layer2_contract_version": run.contract_version,
-            "layer2_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
-        }
-        copied = MappingProxyType(
-            {
-                name: tuple(MappingProxyType(dict(row)) for row in rows)
-                for name, rows in datasets.items()
-            }
-        )
-        return VerifiedLayer2Publication(
-            run_root=root,
-            manifest_path=manifest_path,
-            identity=MappingProxyType(identity),
-            input_ciks=tuple(sorted(item.cik for item in run.inputs)),
-            datasets=copied,
-            _reader_attestation=_READER_ATTESTATION_TOKEN,
-        )
+        return _verified_publication(root, manifest_path, run, datasets)
 
 
 @dataclass(frozen=True, slots=True)
@@ -380,13 +376,97 @@ class Layer2Publisher:
         )
 
 
+class OperationalLayer2Publisher:
+    """Write the minimal governed Layer 2 panel as Parquet.
+
+    Unlike the legacy JSONL contract fixture, this operational writer validates
+    rows once, writes each logical dataset once, and records only lightweight
+    run metadata and row counts. It intentionally has no row-content hash or
+    JSONL read-back pass.
+    """
+
+    manifest_name = "layer2_run_manifest.json"
+    storage_format = "parquet-operational-v1"
+
+    def __init__(self, root: Path = DEFAULT_LAYER2_ROOT) -> None:
+        self.root = Path(root)
+
+    def publish(
+        self, run: Layer2Run, datasets: Mapping[str, Sequence[Mapping[str, Any]]]
+    ) -> Layer2Publication:
+        normalized = _normalize_datasets(datasets)
+        counts = _validate_candidate(run, normalized)
+        destination = self.root / run.run_version
+        if destination.exists():
+            return self._existing_publication(destination, run, counts)
+
+        self.root.mkdir(parents=True, exist_ok=True)
+        staging_root = self.root / ".staging"
+        staging_root.mkdir(parents=True, exist_ok=True)
+        temporary = Path(tempfile.mkdtemp(prefix=f".{run.run_version}.partial-", dir=staging_root))
+        try:
+            _write_operational_parquet_datasets(temporary, normalized)
+            manifest = {
+                "contract_version": run.contract_version,
+                "run_version": run.run_version,
+                "corpus_run_id": run.corpus_run_id,
+                "run_fingerprint": run.fingerprint,
+                "inputs": _sorted_dicts(asdict(item) for item in run.inputs),
+                "rules": asdict(run.rules),
+                "output_counts": dict(sorted(counts.items())),
+                "validation": {
+                    "ANALYTICAL_FACT_LINEAGE": "SUCCESS",
+                    "RUN_INPUT_AND_VERSION_MANIFEST": "SUCCESS",
+                    "ATOMIC_PUBLICATION": "SUCCESS",
+                },
+                "published_at": datetime.now(UTC).isoformat(),
+                "storage_format": self.storage_format,
+            }
+            (temporary / self.manifest_name).write_text(
+                json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            if destination.exists():
+                return self._existing_publication(destination, run, counts)
+            os.replace(temporary, destination)
+            return Layer2Publication(
+                run_root=destination,
+                manifest_path=destination / self.manifest_name,
+                fingerprint=run.fingerprint,
+                output_counts=counts,
+                reused_existing=False,
+            )
+        except Exception:
+            shutil.rmtree(temporary, ignore_errors=True)
+            raise
+
+    def _existing_publication(
+        self, destination: Path, run: Layer2Run, counts: Mapping[str, int]
+    ) -> Layer2Publication:
+        manifest = _read_publication_manifest(destination / self.manifest_name)
+        if (
+            manifest.get("storage_format") != self.storage_format
+            or manifest.get("run_fingerprint") != run.fingerprint
+            or manifest.get("output_counts") != dict(sorted(counts.items()))
+        ):
+            raise Layer2MaterializationError(
+                f"run_version already belongs to a different operational publication: {destination}"
+            )
+        return Layer2Publication(
+            run_root=destination,
+            manifest_path=destination / self.manifest_name,
+            fingerprint=run.fingerprint,
+            output_counts=counts,
+            reused_existing=True,
+        )
+
+
 def _normalize_datasets(
     datasets: Mapping[str, Sequence[Mapping[str, Any]]],
 ) -> dict[str, tuple[dict[str, Any], ...]]:
     unknown = set(datasets) - LOGICAL_DATASETS
     if unknown:
         raise Layer2MaterializationError(f"unknown Layer 2 logical datasets: {sorted(unknown)}")
-    if "analytical_fact" not in datasets and not (
+    if "analytical_fact" not in datasets and "reported_period_observation" not in datasets and "filing_relationship_edge" not in datasets and "accession_version_ledger" not in datasets and not ({"analysis_exploration_node", "analysis_exploration_edge"} <= set(datasets)) and not (
         {
             "annual_series_candidate",
             "current_series_candidate",
@@ -456,6 +536,16 @@ def _validate_candidate(
                 _validate_metric_input_candidate(row)
             elif dataset == "metric_input_compatibility":
                 _validate_metric_input_compatibility(row)
+            elif dataset == "reported_period_observation":
+                _validate_reported_period_observation(row)
+            elif dataset == "filing_relationship_edge":
+                _validate_filing_relationship_edge(row, run)
+            elif dataset == "analysis_exploration_node":
+                _validate_analysis_exploration_node(row, run)
+            elif dataset == "analysis_exploration_edge":
+                _validate_analysis_exploration_edge(row, run)
+            elif dataset == "accession_version_ledger":
+                _validate_accession_version_ledger(row, run)
             try:
                 _canonical_json(row)
             except (TypeError, ValueError) as exc:
@@ -812,10 +902,7 @@ def _validate_metric_input_compatibility(row: Mapping[str, Any]) -> None:
             f"metric_input_compatibility missing provenance: {missing}"
         )
     if row["metric_assessment_id"] not in {
-        "GROSS_MARGIN",
-        "OPERATING_MARGIN",
-        "REVENUE_GROWTH",
-        "Q4_FLOW",
+        "GROSS_MARGIN", "OPERATING_MARGIN", "REVENUE_GROWTH", "Q4_FLOW",
     }:
         raise Layer2MaterializationError("metric_input_compatibility has unsupported assessment")
     if row["compatibility_status"] not in {"ELIGIBLE", "UNAVAILABLE"}:
@@ -833,7 +920,173 @@ def _validate_metric_input_compatibility(row: Mapping[str, Any]) -> None:
         )
 
 
+def _validate_reported_period_observation(row: Mapping[str, Any]) -> None:
+    """Contract for the pre-selection, version-preserving L2 fact panel."""
+    required = (
+        "reported_period_observation_id", "source_fact_id", "source_filing_id",
+        "source_snapshot_id", "accession", "form", "filed_date", "context_id",
+        "raw_concept_id", "raw_concept_qname", "period_class", "period_key",
+        "fiscal_year", "classification_rule_version", "source_version", "source_is_amendment",
+        "raw_dimension_signature",
+    )
+    missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
+    if missing:
+        raise Layer2MaterializationError(
+            "reported_period_observation missing required lineage: " + ", ".join(missing)
+        )
+    if row.get("reported_or_derived") != "REPORTED":
+        raise Layer2MaterializationError("reported_period_observation must retain only reported Facts")
+    if row.get("source_version") not in {"ORIGINAL", "AMENDMENT"}:
+        raise Layer2MaterializationError("reported_period_observation has unsupported source_version")
+    if row.get("period_class") not in {
+        "QTD_3M", "YTD_6M", "YTD_9M", "FY", "TTM", "INSTANT", "OTHER_DURATION"
+    }:
+        raise Layer2MaterializationError("reported_period_observation has unsupported period_class")
+
+
+def _validate_filing_relationship_edge(row: Mapping[str, Any], run: Layer2Run) -> None:
+    """Contract for an additive, filing-versioned raw relationship index.
+
+    This is an index over immutable PRE/CAL/DEF edges, not a unified graph or
+    a calculation instruction.  Both raw endpoints and the exact base-set
+    identity remain mandatory even when a canonical endpoint map is absent.
+    """
+    required = (
+        "filing_relationship_edge_id", "relationship_id", "source_filing_id",
+        "source_snapshot_id", "accession", "form", "filed_date", "source_is_amendment",
+        "network_type", "role_id", "role_uri", "arcrole", "link_qname", "arc_qname",
+        "from_raw_concept_id", "to_raw_concept_id", "from_raw_concept_qname",
+        "to_raw_concept_qname", "from_taxonomy_family", "to_taxonomy_family",
+    )
+    missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
+    if missing:
+        raise Layer2MaterializationError(
+            "filing_relationship_edge missing required lineage: " + ", ".join(missing)
+        )
+    if row.get("network_type") not in {"PRE", "CAL", "DEF"}:
+        raise Layer2MaterializationError("filing_relationship_edge has unsupported network_type")
+    input_by_identity = {(item.cik, item.accession): item for item in run.inputs}
+    input_row = input_by_identity.get((str(row.get("cik")), str(row.get("accession"))))
+    if input_row is None:
+        raise Layer2MaterializationError("filing_relationship_edge does not resolve to a declared input")
+    if (
+        row.get("source_snapshot_id") != input_row.snapshot_id
+        or row.get("form") != input_row.form
+        or row.get("filed_date") != input_row.filed_date
+    ):
+        raise Layer2MaterializationError("filing_relationship_edge filing provenance disagrees with input")
+    if bool(row.get("source_is_amendment")) != str(row.get("form")).endswith("/A"):
+        raise Layer2MaterializationError("filing_relationship_edge amendment state is inconsistent")
+
+
+def _validate_analysis_exploration_node(row: Mapping[str, Any], run: Layer2Run) -> None:
+    """Require every exploration node to retain raw identity and source scope."""
+    required = ("analysis_exploration_node_id", "node_kind", "origin", "raw_id", "raw_qname")
+    missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
+    if missing:
+        raise Layer2MaterializationError("analysis_exploration_node missing provenance: " + ", ".join(missing))
+    if row["node_kind"] not in {"CONCEPT", "FACT", "AXIS", "MEMBER"}:
+        raise Layer2MaterializationError("analysis_exploration_node has unsupported node_kind")
+    if row["origin"] not in {
+        "STANDARD_CONCEPT", "CUSTOM_CONCEPT", "STANDARD_AXIS", "CUSTOM_AXIS",
+        "STANDARD_MEMBER", "CUSTOM_MEMBER",
+    }:
+        raise Layer2MaterializationError("analysis_exploration_node has unsupported origin")
+    if row["node_kind"] == "FACT":
+        required_fact = ("source_fact_id", "source_filing_id", "accession", "filed_date", "context_id")
+        if any(row.get(key) is None or row.get(key) == "" for key in required_fact):
+            raise Layer2MaterializationError("FACT exploration node lacks raw Fact lineage")
+    accession = row.get("accession")
+    if accession is not None and (str(row.get("cik")), str(accession)) not in {(item.cik, item.accession) for item in run.inputs}:
+        raise Layer2MaterializationError("analysis_exploration_node does not resolve to declared input")
+
+
+def _validate_analysis_exploration_edge(row: Mapping[str, Any], run: Layer2Run) -> None:
+    """Keep graph links descriptive; they must never be calculation instructions."""
+    required = ("analysis_exploration_edge_id", "edge_kind", "from_node_id", "to_node_id")
+    missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
+    if missing:
+        raise Layer2MaterializationError("analysis_exploration_edge missing provenance: " + ", ".join(missing))
+    if row["edge_kind"] not in {
+        "STATEMENT_COMPONENT", "DIMENSION_LENS", "FACT_SCOPE", "MEMBER_HIERARCHY",
+    }:
+        raise Layer2MaterializationError("analysis_exploration_edge has unsupported edge_kind")
+    if row["edge_kind"] == "STATEMENT_COMPONENT" and row.get("source_network_type") not in {"PRE", "CAL"}:
+        raise Layer2MaterializationError("STATEMENT_COMPONENT must retain PRE or CAL evidence")
+    if row["edge_kind"] == "MEMBER_HIERARCHY" and row.get("source_network_type") != "DEF":
+        raise Layer2MaterializationError("MEMBER_HIERARCHY must retain DEF evidence")
+    accession = row.get("accession")
+    if accession is not None and (str(row.get("cik")), str(accession)) not in {(item.cik, item.accession) for item in run.inputs}:
+        raise Layer2MaterializationError("analysis_exploration_edge does not resolve to declared input")
+
+
+def _validate_accession_version_ledger(row: Mapping[str, Any], run: Layer2Run) -> None:
+    """Validate a filing-version ledger without turning it into a selector.
+
+    A candidate relation is deliberately not a confirmed amendment link.  The
+    row therefore retains both its evidence method and an explicit review
+    state; later selection policy must not mistake filing order for proof.
+    """
+    required = (
+        "accession_version_ledger_id", "source_filing_id", "source_snapshot_id",
+        "accession", "form", "filed_date", "report_date", "is_amendment",
+        "amendment_flag_state", "amendment_linkage_state", "amendment_linkage_method",
+        "amendment_linkage_review_status", "reported_amendment_ordinal_state",
+    )
+    missing = [key for key in required if row.get(key) is None or row.get(key) == ""]
+    if missing:
+        raise Layer2MaterializationError(
+            "accession_version_ledger missing required provenance: " + ", ".join(missing)
+        )
+    input_by_identity = {(item.cik, item.accession): item for item in run.inputs}
+    input_row = input_by_identity.get((str(row.get("cik")), str(row.get("accession"))))
+    if input_row is None:
+        raise Layer2MaterializationError("accession_version_ledger does not resolve to a declared input")
+    if (
+        row.get("source_snapshot_id") != input_row.snapshot_id
+        or row.get("form") != input_row.form
+        or row.get("filed_date") != input_row.filed_date
+        or row.get("report_date") != input_row.report_date
+    ):
+        raise Layer2MaterializationError("accession_version_ledger filing provenance disagrees with input")
+    if bool(row.get("is_amendment")) != str(row.get("form")).endswith("/A"):
+        raise Layer2MaterializationError("accession_version_ledger amendment state is inconsistent")
+    if row["amendment_flag_state"] not in {"REPORTED_TRUE", "REPORTED_FALSE", "NOT_REPORTED"}:
+        raise Layer2MaterializationError("accession_version_ledger has unsupported amendment flag state")
+    if row["amendment_linkage_state"] not in {"LINKED", "CANDIDATE", "UNKNOWN", "NOT_APPLICABLE"}:
+        raise Layer2MaterializationError("accession_version_ledger has unsupported linkage state")
+    if row["amendment_linkage_review_status"] not in {"NOT_REQUIRED", "REVIEW_REQUIRED", "UNKNOWN"}:
+        raise Layer2MaterializationError("accession_version_ledger has unsupported linkage review status")
+    if row["reported_amendment_ordinal_state"] not in {"REPORTED", "NOT_REPORTED"}:
+        raise Layer2MaterializationError("accession_version_ledger has unsupported ordinal state")
+    if row["reported_amendment_ordinal_state"] == "REPORTED" and not row.get("reported_amendment_ordinal"):
+        raise Layer2MaterializationError("reported amendment ordinal needs its source value")
+    if row["reported_amendment_ordinal_state"] == "NOT_REPORTED" and row.get("reported_amendment_ordinal") is not None:
+        raise Layer2MaterializationError("unreported amendment ordinal cannot be populated")
+    if row["amendment_linkage_state"] == "LINKED" and (
+        not row.get("amends_accession")
+        or row["amendment_linkage_review_status"] != "NOT_REQUIRED"
+    ):
+        raise Layer2MaterializationError("linked amendment requires direct target and non-review evidence")
+    if row["amendment_linkage_state"] == "CANDIDATE" and (
+        not row.get("amends_accession")
+        or row["amendment_linkage_review_status"] != "REVIEW_REQUIRED"
+    ):
+        raise Layer2MaterializationError("candidate amendment link requires target and review")
+    if row["amendment_linkage_state"] in {"UNKNOWN", "NOT_APPLICABLE"} and row.get("amends_accession") is not None:
+        raise Layer2MaterializationError("unknown/non-applicable amendment link cannot name a target")
+
 def _record_id(dataset: str, row: Mapping[str, Any]) -> str:
+    if dataset == "analysis_exploration_node":
+        return str(row.get("analysis_exploration_node_id") or "")
+    if dataset == "analysis_exploration_edge":
+        return str(row.get("analysis_exploration_edge_id") or "")
+    if dataset == "filing_relationship_edge":
+        return str(row.get("filing_relationship_edge_id") or "")
+    if dataset == "accession_version_ledger":
+        return str(row.get("accession_version_ledger_id") or "")
+    if dataset == "reported_period_observation":
+        return str(row.get("reported_period_observation_id") or "")
     if dataset == "analytical_fact":
         return str(row.get("analytical_fact_id") or "")
     if dataset in {"annual_series_candidate", "current_series_candidate"}:
@@ -922,6 +1175,130 @@ def _read_publication_manifest(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise Layer2PublicationValidationError("Layer 2 manifest must be a JSON object")
     return value
+
+
+def _write_operational_parquet_datasets(
+    root: Path, datasets: Mapping[str, Sequence[Mapping[str, Any]]]
+) -> None:
+    try:
+        import polars as pl
+    except ImportError as exc:  # pragma: no cover - project dependency
+        raise Layer2MaterializationError("polars is required for operational Layer 2 Parquet") from exc
+    by_cik: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for dataset, rows in datasets.items():
+        for row in rows:
+            by_cik.setdefault(str(row["cik"]), {}).setdefault(dataset, []).append(dict(row))
+    for cik, tables in by_cik.items():
+        company_root = root / cik
+        company_root.mkdir(parents=True, exist_ok=True)
+        for dataset, rows in tables.items():
+            # Mapping evidence and nested review/relationship fields are
+            # heterogeneous across baselines and later continuity decisions.
+            # A bounded sample silently drops late Struct fields. Infer the
+            # complete dataset schema for every operational table, not only
+            # the graph tables. No JSONL copy or row-content hash is needed.
+            frame = pl.DataFrame(rows, strict=False, infer_schema_length=None)
+            if dataset == "filing_relationship_edge":
+                # A filing is the immutable relationship snapshot boundary.
+                # This extra partition makes a single filing graph lookup
+                # independent of every other filing retained for the CIK.
+                dataset_root = company_root / dataset
+                dataset_root.mkdir(parents=True, exist_ok=True)
+                for accession, group in frame.partition_by("accession", as_dict=True).items():
+                    accession_key = accession[0] if isinstance(accession, tuple) else accession
+                    if not isinstance(accession_key, str) or not accession_key:
+                        raise Layer2MaterializationError("relationship edge requires accession partition")
+                    group.write_parquet(dataset_root / f"{accession_key}.parquet")
+            elif dataset == "accession_version_ledger":
+                # One CIK ledger is the serving boundary.  It is intentionally
+                # not partitioned by an alleged amendment family because an
+                # unreviewed candidate must not become a storage assertion.
+                dataset_root = company_root / dataset
+                dataset_root.mkdir(parents=True, exist_ok=True)
+                frame.write_parquet(dataset_root / "ledger.parquet")
+            else:
+                frame.write_parquet(company_root / f"{dataset}.parquet")
+
+
+def _validate_operational_manifest_shape(manifest: Mapping[str, Any]) -> None:
+    expected = {
+        "contract_version", "run_version", "corpus_run_id", "run_fingerprint", "inputs", "rules",
+        "output_counts", "validation", "published_at", "storage_format",
+    }
+    if set(manifest) != expected or not isinstance(manifest.get("output_counts"), dict):
+        raise Layer2PublicationValidationError("operational Layer 2 manifest is malformed")
+    if any(type(value) is not int or value < 0 for value in manifest["output_counts"].values()):
+        raise Layer2PublicationValidationError("operational Layer 2 manifest has invalid output counts")
+    if not set(manifest["output_counts"]).issubset(LOGICAL_DATASETS):
+        raise Layer2PublicationValidationError("operational Layer 2 manifest has unsupported datasets")
+    expected_validation = {
+        "ANALYTICAL_FACT_LINEAGE", "RUN_INPUT_AND_VERSION_MANIFEST", "ATOMIC_PUBLICATION"
+    }
+    if manifest.get("validation") != {key: "SUCCESS" for key in expected_validation}:
+        raise Layer2PublicationValidationError("operational Layer 2 manifest did not declare success")
+
+
+def _read_operational_parquet_datasets(
+    root: Path, manifest: Mapping[str, Any], run: Layer2Run
+) -> dict[str, tuple[dict[str, Any], ...]]:
+    try:
+        import polars as pl
+    except ImportError as exc:  # pragma: no cover - project dependency
+        raise Layer2PublicationValidationError("polars is required for operational Layer 2 Parquet") from exc
+    declared = set(manifest["output_counts"])
+    input_ciks = {item.cik for item in run.inputs}
+    datasets: dict[str, list[dict[str, Any]]] = {name: [] for name in declared}
+    for child in root.iterdir():
+        if child.name == Layer2PublicationReader.manifest_name:
+            continue
+        if not child.is_dir() or child.is_symlink() or child.name not in input_ciks:
+            raise Layer2PublicationValidationError(f"unexpected operational Layer 2 entry: {child}")
+        for file_path in child.iterdir():
+            if file_path.is_dir() and not file_path.is_symlink() and file_path.name in {
+                "filing_relationship_edge", "accession_version_ledger"
+            }:
+                if file_path.name not in declared:
+                    raise Layer2PublicationValidationError(f"unexpected operational Layer 2 dataset: {file_path}")
+                candidates = tuple(file_path.iterdir())
+                dataset = file_path.name
+            else:
+                candidates = (file_path,)
+                dataset = file_path.stem
+            for parquet_path in candidates:
+                if not parquet_path.is_file() or parquet_path.is_symlink() or parquet_path.suffix != ".parquet":
+                    raise Layer2PublicationValidationError(f"unexpected operational Layer 2 dataset: {parquet_path}")
+                if dataset not in declared:
+                    raise Layer2PublicationValidationError(f"unexpected operational Layer 2 dataset: {parquet_path}")
+                try:
+                    rows = pl.read_parquet(parquet_path).to_dicts()
+                except Exception as exc:
+                    raise Layer2PublicationValidationError(f"cannot read operational Layer 2 dataset: {parquet_path}") from exc
+                if any(str(row.get("cik") or "") != child.name for row in rows):
+                    raise Layer2PublicationValidationError("operational Layer 2 row CIK does not match partition")
+                datasets[dataset].extend(rows)
+    return {name: tuple(rows) for name, rows in datasets.items()}
+
+
+def _verified_publication(
+    root: Path, manifest_path: Path, run: Layer2Run, datasets: Mapping[str, Sequence[Mapping[str, Any]]]
+) -> VerifiedLayer2Publication:
+    identity = {
+        "layer2_run_version": run.run_version,
+        "layer2_run_fingerprint": run.fingerprint,
+        "layer2_contract_version": run.contract_version,
+        "layer2_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+    }
+    copied = MappingProxyType(
+        {name: tuple(MappingProxyType(dict(row)) for row in rows) for name, rows in datasets.items()}
+    )
+    return VerifiedLayer2Publication(
+        run_root=root,
+        manifest_path=manifest_path,
+        identity=MappingProxyType(identity),
+        input_ciks=tuple(sorted(item.cik for item in run.inputs)),
+        datasets=copied,
+        _reader_attestation=_READER_ATTESTATION_TOKEN,
+    )
 
 
 def _validate_manifest_shape(manifest: Mapping[str, Any]) -> None:

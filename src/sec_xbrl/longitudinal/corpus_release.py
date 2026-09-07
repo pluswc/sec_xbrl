@@ -54,6 +54,108 @@ class CorpusSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class RawFilingReference:
+    """One discovered, as-filed Layer 1 snapshot without analytical selection."""
+
+    cik: str
+    accession: str
+    form: str
+    filed_date: str
+    report_date: str
+    issuer_fiscal_year: str | None
+    issuer_fiscal_period: str | None
+    snapshot_directory: Path
+    _filing: Mapping[str, Any]
+    _integrity: Mapping[str, Any]
+
+
+class RawFilingIndex:
+    """Fast provider-side discovery of raw filings within one immutable corpus.
+
+    This deliberately returns every exact raw filing match, including
+    amendments.  It does not decide which filing is analytically preferable;
+    Layer 2 owns that as-of and basis-selection policy.  Loading a returned
+    reference verifies and reads exactly one complete Layer 1 snapshot.
+    """
+
+    def __init__(self, corpus_root: Path, corpus_run_id: str, references: Iterable[RawFilingReference]):
+        self._corpus_root = Path(corpus_root)
+        self._corpus_run_id = corpus_run_id
+        self._references = tuple(
+            sorted(references, key=lambda row: (row.cik, row.filed_date, row.accession))
+        )
+
+    @classmethod
+    def from_corpus(
+        cls, corpus_root: Path, *, corpus_run_id: str, ciks: Iterable[str] | None = None
+    ) -> RawFilingIndex:
+        root = Path(corpus_root)
+        if not root.is_dir() or root.is_symlink() or root.name != corpus_run_id:
+            raise CorpusReleaseError("corpus_root must be an explicit non-symlink corpus_run_id directory")
+        metadata = _read_json(root / CorpusReleaseAdapter.metadata_name, "corpus metadata")
+        if metadata.get("run_id") != corpus_run_id:
+            raise CorpusReleaseError("corpus metadata run_id does not match requested corpus_run_id")
+        summary = _read_json(root / CorpusReleaseAdapter.summary_name, "corpus summary")
+        companies = _companies_by_cik(summary)
+        requested = (
+            tuple(sorted({canonicalize_cik(cik) for cik in ciks}))
+            if ciks is not None
+            else tuple(sorted(companies))
+        )
+        missing = sorted(set(requested) - set(companies))
+        if missing:
+            raise CorpusReleaseError(f"requested CIKs are absent from corpus summary: {missing}")
+        references: list[RawFilingReference] = []
+        for cik in requested:
+            for filing, integrity, directory in _company_filing_inputs(root, cik, companies[cik]):
+                raw_filing = _read_index_filing(directory, cik, filing)
+                references.append(
+                    RawFilingReference(
+                        cik=cik,
+                        accession=str(filing["accession"]),
+                        form=str(filing["form"]),
+                        filed_date=str(filing["filed_date"]),
+                        report_date=str(filing["report_date"]),
+                        issuer_fiscal_year=_optional_text(raw_filing.get("document_fiscal_year_focus")),
+                        issuer_fiscal_period=_optional_text(raw_filing.get("document_fiscal_period_focus")),
+                        snapshot_directory=directory,
+                        _filing=filing,
+                        _integrity=integrity,
+                    )
+                )
+        return cls(root, corpus_run_id, references)
+
+    def find(
+        self,
+        *,
+        cik: str,
+        issuer_fiscal_year: str | int | None = None,
+        issuer_fiscal_period: str | None = None,
+        form: str | None = None,
+        report_date: str | None = None,
+    ) -> tuple[RawFilingReference, ...]:
+        """Return all exact raw candidates; omitted fields are not inferred."""
+        normalized_cik = canonicalize_cik(cik)
+        return tuple(
+            row
+            for row in self._references
+            if row.cik == normalized_cik
+            and (issuer_fiscal_year is None or row.issuer_fiscal_year == str(issuer_fiscal_year))
+            and (issuer_fiscal_period is None or row.issuer_fiscal_period == issuer_fiscal_period)
+            and (form is None or row.form == form)
+            and (report_date is None or row.report_date == report_date)
+        )
+
+    def load_snapshot(self, reference: RawFilingReference) -> CorpusSnapshot:
+        """Verify and read exactly the selected complete raw snapshot."""
+        if reference not in self._references:
+            raise CorpusReleaseError("raw filing reference does not belong to this index")
+        return _load_snapshot(
+            reference.snapshot_directory, reference.cik, reference._filing, reference._integrity
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class CorpusRelease:
     """A deterministic, complete raw corpus selected for one Layer 2 run."""
 
@@ -133,7 +235,125 @@ class CorpusReleaseAdapter:
         return CorpusRelease(root, corpus_run_id, requested, tuple(snapshots), run)
 
 
+@dataclass(frozen=True, slots=True)
+class CohortSnapshotReference:
+    """One explicitly named immutable snapshot in a cross-run cohort.
+
+    A reference does not make a copy of raw data.  Its source run and the
+    exact filing accession are part of the declaration so a later Layer 2 run
+    can only be built after revalidating that original snapshot in place.
+    """
+
+    cik: str
+    accession: str
+
+
+@dataclass(frozen=True, slots=True)
+class CohortSource:
+    """A named immutable source-run boundary for cohort references.
+
+    Some controlled Layer 1 intake runs contain only verified snapshots (and
+    intentionally have no trailing-corpus summary).  This source contract
+    admits those runs without fabricating a summary or mutating either source.
+    """
+
+    run_root: Path
+    run_id: str
+    snapshots: tuple[CohortSnapshotReference, ...]
+
+
+class CohortReleaseAdapter:
+    """Build one verified Layer 2 input declaration from named source runs.
+
+    This is a narrow bridge for a declared cohort, not a "latest" discovery
+    mechanism.  Every selected Layer 1 snapshot is validated with the same
+    byte/count/provenance/reference gates as :class:`CorpusReleaseAdapter`.
+    Source runs may therefore have different publication layouts, but their
+    snapshots never become interchangeable or copied into a new raw run.
+    """
+
+    def load(
+        self,
+        sources: Iterable[CohortSource],
+        *,
+        cohort_id: str,
+        ciks: Iterable[str],
+        run_version: str,
+        rules: Layer2RuleVersions,
+    ) -> CorpusRelease:
+        if not cohort_id or "/" in cohort_id or "\\" in cohort_id:
+            raise CorpusReleaseError("cohort_id must be a non-path identifier")
+        requested = tuple(sorted({canonicalize_cik(cik) for cik in ciks}))
+        if not requested:
+            raise CorpusReleaseError("at least one requested CIK is required")
+        source_rows = tuple(sources)
+        if not source_rows:
+            raise CorpusReleaseError("a cohort requires at least one explicit source run")
+        seen_source_ids: set[str] = set()
+        seen_inputs: set[tuple[str, str]] = set()
+        snapshots: list[CorpusSnapshot] = []
+        for source in source_rows:
+            root = Path(source.run_root)
+            if (
+                not source.run_id
+                or root.name != source.run_id
+                or not root.is_dir()
+                or root.is_symlink()
+            ):
+                raise CorpusReleaseError("cohort source must be an explicit non-symlink run_id directory")
+            if source.run_id in seen_source_ids:
+                raise CorpusReleaseError(f"duplicate cohort source run_id: {source.run_id}")
+            seen_source_ids.add(source.run_id)
+            if not source.snapshots:
+                raise CorpusReleaseError(f"cohort source has no snapshot references: {source.run_id}")
+            for reference in source.snapshots:
+                cik = canonicalize_cik(reference.cik)
+                accession = str(reference.accession)
+                identity = (cik, accession)
+                if cik not in requested:
+                    raise CorpusReleaseError("cohort reference CIK is outside requested scope")
+                if not accession or identity in seen_inputs:
+                    raise CorpusReleaseError("duplicate or missing cohort snapshot identity")
+                seen_inputs.add(identity)
+                directory = root / "snapshots" / cik / accession.replace("-", "")
+                snapshots.append(_load_declared_cohort_snapshot(directory, cik, accession))
+        admitted_ciks = tuple(sorted({item.input.cik for item in snapshots}))
+        if admitted_ciks != requested:
+            raise CorpusReleaseError(
+                f"cohort source coverage does not exactly match requested CIKs: {admitted_ciks} != {requested}"
+            )
+        snapshots.sort(
+            key=lambda item: (
+                item.input.cik,
+                item.input.filed_date,
+                item.input.accession,
+                item.input.snapshot_id,
+            )
+        )
+        return CorpusRelease(
+            Path(cohort_id),
+            cohort_id,
+            requested,
+            tuple(snapshots),
+            Layer2Run(
+                run_version=run_version,
+                corpus_run_id=cohort_id,
+                inputs=tuple(item.input for item in snapshots),
+                rules=rules,
+            ),
+        )
+
+
 def _load_company(root: Path, cik: str, company: Mapping[str, Any]) -> list[CorpusSnapshot]:
+    return [
+        _load_snapshot(directory, cik, filing, integrity)
+        for filing, integrity, directory in _company_filing_inputs(root, cik, company)
+    ]
+
+
+def _company_filing_inputs(
+    root: Path, cik: str, company: Mapping[str, Any]
+) -> tuple[tuple[Mapping[str, Any], Mapping[str, Any], Path], ...]:
     report = company.get("report")
     integrity = company.get("integrity")
     if not isinstance(report, Mapping) or report.get("cik") != cik:
@@ -153,7 +373,7 @@ def _load_company(root: Path, cik: str, company: Mapping[str, Any]) -> list[Corp
         if accession in by_accession:
             raise CorpusReleaseError(f"duplicate filing accession in corpus report for {cik}: {accession}")
         by_accession[accession] = row
-    snapshots: list[CorpusSnapshot] = []
+    inputs: list[tuple[Mapping[str, Any], Mapping[str, Any], Path]] = []
     seen_accessions: set[str] = set()
     for item in integrity:
         if not isinstance(item, Mapping):
@@ -174,10 +394,41 @@ def _load_company(root: Path, cik: str, company: Mapping[str, Any]) -> list[Corp
         directory = root / relative
         # The summary's saved path is diagnostic only; a corpus release is
         # relocatable and must not trust an arbitrary external path.
-        snapshots.append(_load_snapshot(directory, cik, filing, item))
+        inputs.append((filing, item, directory))
     if set(by_accession) != seen_accessions:
         raise CorpusReleaseError(f"corpus filing/integrity coverage mismatch for {cik}")
-    return snapshots
+    return tuple(inputs)
+
+
+def _read_index_filing(
+    directory: Path, cik: str, report_filing: Mapping[str, Any]
+) -> Mapping[str, Any]:
+    """Read only filing metadata while building a point-query index.
+
+    Full table hashes and cross-table references are revalidated only when a
+    caller opens the selected snapshot through ``load_snapshot``.
+    """
+    path = directory / "filing.parquet"
+    if not directory.is_dir() or directory.is_symlink() or not path.is_file() or path.is_symlink():
+        raise CorpusReleaseError(f"raw filing index cannot read safe filing metadata: {directory}")
+    rows = _read_parquet(path)
+    if len(rows) != 1:
+        raise CorpusReleaseError(f"raw filing index requires exactly one filing row: {directory}")
+    row = rows[0]
+    expected = {
+        "cik": cik,
+        "accession": report_filing.get("accession"),
+        "form": report_filing.get("form"),
+        "filed_date": report_filing.get("filed_date"),
+        "report_date": report_filing.get("report_date"),
+    }
+    if any(not value for value in expected.values()) or any(row.get(key) != value for key, value in expected.items()):
+        raise CorpusReleaseError(f"raw filing index filing provenance mismatch: {directory}")
+    return row
+
+
+def _optional_text(value: object) -> str | None:
+    return str(value) if value not in (None, "") else None
 
 
 def _load_snapshot(
@@ -238,6 +489,39 @@ def _load_snapshot(
         MappingProxyType(table_counts),
         MappingProxyType(tables),
     )
+
+
+def _load_declared_cohort_snapshot(directory: Path, cik: str, accession: str) -> CorpusSnapshot:
+    """Derive only the summary fields needed by ``_load_snapshot`` in place.
+
+    This is deliberately not a weaker snapshot reader for the cross-run case:
+    after reading the one filing row and its manifest, it delegates to the
+    complete existing verifier, which rereads and hashes every raw table.
+    """
+    manifest_path = directory / "layer1_manifest.json"
+    try:
+        manifest = Layer1SnapshotManifest.from_path(manifest_path)
+    except Layer1IngestionError as exc:
+        raise CorpusReleaseError(f"invalid declared cohort Layer 1 manifest: {directory}") from exc
+    if manifest.cik != cik or manifest.accession != accession:
+        raise CorpusReleaseError("declared cohort snapshot identity disagrees with manifest")
+    filing_path = directory / "filing.parquet"
+    if not filing_path.is_file() or filing_path.is_symlink():
+        raise CorpusReleaseError("declared cohort snapshot has no safe filing table")
+    filing_rows = _read_parquet(filing_path)
+    if len(filing_rows) != 1:
+        raise CorpusReleaseError("declared cohort snapshot requires exactly one filing row")
+    filing = filing_rows[0]
+    required = ("accession", "form", "filed_date", "report_date")
+    if any(not filing.get(field) for field in required):
+        raise CorpusReleaseError("declared cohort filing row lacks provenance")
+    if filing.get("accession") != accession or filing.get("form") != manifest.form:
+        raise CorpusReleaseError("declared cohort filing row disagrees with manifest")
+    integrity = {
+        "source_fact_count": manifest.source_fact_count,
+        "materialized_fact_count": manifest.materialized_fact_count,
+    }
+    return _load_snapshot(directory, cik, filing, integrity)
 
 
 def _validate_table_counts(

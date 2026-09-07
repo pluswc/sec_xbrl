@@ -3,6 +3,29 @@
 ## Purpose
 Connect the same company's economic concepts, axes and members across 10-K/10-Q filings without changing Layer 1 raw identity.
 
+## T1 versioned reported-period panel
+
+Before any as-of or comparable selection, T1 publishes every eligible directly
+reported Layer 1 Fact as `reported_period_observation`.  Its grain is one raw
+Fact in one immutable filing snapshot: FY/Q, actual Context boundaries,
+QTD/YTD/FY/instant class, raw Fact/Context/Unit/full dimensions, accession,
+form, filed date, amendment state, and raw QName are all retained.  Later
+comparative presentations and amendments are additional rows, never updates.
+Company canonical concept/axis/member mapping is additive lineage on the row;
+an absent or uncertain mapping remains review-required rather than being
+silently joined.  T1 deliberately performs no AS_FILED selection, recast
+selection, Q4 derivation, or calculation.
+
+## T2 filing-versioned relationship index
+
+T2 publishes every Layer 1 PRE/CAL/DEF relationship as a separate
+`filing_relationship_edge` row. It makes filing-specific statement and
+dimension structure fast to find while retaining the filing/accession/version,
+role, fully specified base-set identity, raw endpoints, and all edge
+attributes. Canonical endpoint maps are additive only. T2 never merges network
+types, traverses a graph, infers a subtotal or driver, or selects a filing
+version.
+
 ## Mapping entities
 - `company_concept_map`
 - `company_axis_map`
@@ -56,6 +79,18 @@ neither view changes a Layer 1 Fact.
 - `AS_FILED`: for each target period, retain the first directly reported
   observation available on or before the requested `as_of_date`.  A later
   comparative value never overwrites that historical result.
+
+For a caller-declared common-core concept collision at the same analytical
+period, `CoreQuarterlyFactSelector` may make the basic `AS_FILED` choice
+deterministic: direct `10-Q` reporting ranks first; among that eligible set it
+first reduces every raw filing to its preferred Fact, with an undimensioned
+Fact ranking ahead only of dimensioned Facts in that same filing; it then
+chooses the latest non-amendment raw filing by `(filed_date, accession)`.
+Amendments remain
+immutable raw/series lineage but
+are not inputs to this basic selection.  Any exact rank tie (or an
+amendment-only group) remains `UNAVAILABLE` and review-required.  This is a
+mechanical common-core preference, not a recast policy or a semantic approval.
 - `LATEST_RECAST`: select the latest eligible `basis_version` available on or
   before `as_of_date` for a complete comparable period family.  Every selected
   quarter in that family must use that same basis.  A target period that is
@@ -112,6 +147,13 @@ Presentation/Definition evidence, then the exact Axis/Member facts, and then
 the related disclosure/detail.  This produces a discoverable group without
 turning a QName allowlist into a limitation on company-specific concepts.
 
+The consumer must retain the anchor, relationship-path, complete dimension
+signature, detail-Fact and derived-candidate provenance while making that
+group.  `MECHANICAL_CANDIDATE_REVIEW_REQUIRED` is period-arithmetic status,
+not a claim that the value is semantically approved or selected for a metric.
+See `consumer-exploration-contract.md` for the required group fields and
+consumer responsibilities.
+
 ## L2-M2 canonical-mapping materialization
 
 `CompanyCanonicalizer` is the L2-M2 producer.  Its `MappingTables.as_datasets()`
@@ -121,12 +163,23 @@ publisher.  A mapping preserves its source filing and raw identity alongside
 the company canonical ID; it does not update a Layer 1 record or replace an
 earlier mapping.
 
+Candidate discovery is indexed by raw ID, local name, and normalized
+label-or-name.  Each index keeps filing order, so matching still uses the most
+recent eligible prior row.  The index only narrows the rows passed to the same
+confirmation predicates; it does not relax mapping evidence or change emitted
+mapping results.
+
 The automatic confirmation boundary is intentionally narrow:
 
-- exact standard QName and namespace identity is `SAME` only when declared
-  `period_type` and `data_type` are both present and equal (and `balance` is
-  compatible when declared); an incomplete or duration-versus-instant/type
-  conflict remains `UNCERTAIN`;
+- exact standard namespace URI and local-name identity is `SAME` only when declared
+  `period_type` and `data_type` are both present and equal (and `balance` and
+  `abstract` are compatible when declared); an incomplete or
+  duration-versus-instant/type conflict remains `UNCERTAIN`;
+- the sole automatic cross-version standard-taxonomy rule is for an official
+  FASB annual URI matching `http(s)://fasb.org/us-gaap/YYYY`: equal local names
+  with compatible semantics are `SAME` across those years. The QName prefix is
+  not a comparison key; a generic `gaap` label, an unversioned URI, or a
+  look-alike/company URI containing `us-gaap` does not qualify;
 - a company extension namespace change is `RENAMED` only when local name,
   label, and role/axis/domain structural signatures agree;
 - a recast, split, or merge requires a supplied documented-change record that
@@ -134,6 +187,65 @@ The automatic confirmation boundary is intentionally narrow:
   breaks continuity;
 - text or label agreement alone yields `UNCERTAIN`, a distinct canonical ID,
   `REVIEW_REQUIRED`, and an `UNKNOWN_CHANGE` event.
+
+### Custom continuity v3 — qualified network evidence
+
+`l2-m2-company-canonical-v3` fixes an adapter failure: Raw relationships retain
+filing-scoped `role_id`, while the actual URI is in the Raw Role table. T1, T2
+and the as-filed producer now supply both tables to the canonicalizer and join
+them on `(filing_id, role_id)`. A filing-specific role hash is never evidence
+that two custom structures differ or agree.
+
+Within one CIK, the latest custom entity with the same local name can continue
+only with explicit matching labels; complete equal period/type/balance/abstract
+metadata; the same namespace owner/family; and the same nonempty qualified
+network signature. Both unchanged namespaces (`SAME`) and explicit annual/date
+version changes (`RENAMED`) are supported. Only a terminal four-digit year or
+valid eight-digit calendar date is normalized; other namespace paths remain
+distinct. A role or targetRole may normalize its version only when it starts
+with the exact source custom namespace followed by `/`; its full remaining
+suffix and owner are unchanged. Original URIs and relationship IDs remain
+mapping evidence.
+
+The signature retains relationship direction, PRE/CAL/DEF type, supported
+arcrole, link/arc QName, both qualified endpoint identities and semantics,
+targetRole, calculation weight and dimensional usable/closed/context-element
+attributes. It is not merely a shared role title. Different parent axes or
+domains cannot join members that happen to have the same label. Unsupported
+arcroles, missing role/base-set/endpoint evidence, or changed neighborhoods
+remain review-required. Exact standard label/reference resource arcroles are
+excluded from structural evidence but preserved Raw; labels alone cannot
+establish continuity.
+
+Same-filing ambiguous custom local identities remain separate and reviewed.
+The matcher cannot jump over a changed latest custom identity to reuse an older
+convenient structure. Rejection evidence identifies missing explicit labels,
+changed labels, incompatible raw semantic fingerprints, namespace-family
+changes, missing complete network evidence, and changed qualified structures.
+Resolved data-type strings currently compare exactly; lexical type-prefix
+differences without retained type-namespace evidence are conservative breaks,
+not guessed equivalences.
+
+Consumer publications must be rebuilt with the new mapping run version, not
+retagged from old unlinked panels. The T5 reader caches only immutable graph,
+Fact and placement indexes per attested publication object; version/as-of
+selection still runs for each request and returned nested data are defensive
+copies. Custom concepts, axes and members remain reported-only for quarter
+arithmetic: this mapping change does not broaden the approved additive registry.
+
+Operational Parquet schema inference scans every row of every dataset. Mapping
+baseline and continuity/review evidence have heterogeneous nested fields; a
+100-row inference sample silently loses fields that first appear later. The
+writer therefore preserves the full nested field union, including qualified
+network signatures, current/prior relationship IDs and review reasons. This is
+file serialization correctness, not a mapping-policy change or a JSONL copy.
+
+Continuity proves preserved XBRL identity/structure, not the correctness of the
+issuer's source tags relative to a rendered table. The actual AMD 2023 Q1 cache
+has a tag/display mismatch in segment revenue (for example, a displayed Data
+Center amount is tagged with ClientMember). These raw assignments are retained
+and must be treated as a source-quality caveat; this milestone does not silently
+relabel business segments or change the raw parser output.
 
 Structural events are provenance rows, not inferred accounting facts.  New
 raw entities emit `NEW_CONCEPT`, `NEW_AXIS`, or `NEW_MEMBER`; member renames,
@@ -169,6 +281,24 @@ silently joining an existing canonical series.
 A documented segment recast is additive: it emits a new `RECAST` mapping
 version, new canonical member ID, and `continuity_break=true`, while the prior
 mapping keeps its original validity and identity.
+
+### Core quarterly coverage diagnostics
+
+`CoreQuarterlyCoverageValidator` is a reusable, read-only quality gate for a
+caller-selected registry of common standard concepts.  The bundled registry
+includes Revenue aliases (`Revenues` and
+`RevenueFromContractWithCustomerExcludingAssessedTax`) and basic statement
+anchors, but it is not a claim that each entry is mandatory for every issuer.
+For the selected core set and fiscal years, it emits one undimensioned cell per
+concept/quarter/basis as `REPORTED`, `DERIVED`, `UNAVAILABLE`, or `MISSING`.
+`QUARTERLY` requires `QTD_3M` for Q1–Q4. `CUMULATIVE` requires `QTD_3M`,
+`YTD_6M`, `YTD_9M`, and `FY` for Q1–Q4 respectively. A Mechanical Q4 companion
+row may satisfy only quarterly Q4 as `DERIVED`; it never substitutes for the
+FY cumulative cell. An unavailable AS_FILED selection remains visible with its
+reason. `validate_core_flow_completion()` applies both bases to the bundled
+Revenue, Gross Profit, Operating Income (Loss), and Net Income (Loss) registry.
+The validator never selects a replacement fact, collapses dimensions, or
+changes Layer 1/Layer 2 records.
 
 ## L2-M3 company-series materialization
 

@@ -1,0 +1,144 @@
+{
+  "test_pack_id": "multicompany-operational-validation-v1",
+  "purpose": "A declarative, provenance-first operational validation pack for an expandable company cohort. It starts with NVDA, AMD, MSFT, AAPL, and AMZN, and includes one real AMD amendment pair.",
+  "storage_rule": "This file contains identities, availability, and assertions only. It never embeds SEC packages, Layer 1 snapshots, or generated Parquet publications.",
+  "local_layer1_evidence_rule": "Each AVAILABLE company records the immutable run and snapshot that prove its own availability. A company-level snapshot never by itself proves that a common multi-company operational publication exists.",
+  "companies": [
+    {
+      "ticker": "NVDA",
+      "cik": "0001045810",
+      "layer1_status": "AVAILABLE",
+      "available_snapshot_count": 14,
+      "reference_filing": {
+        "accession": "0001045810-24-000316",
+        "form": "10-Q",
+        "filed_date": "2024-11-20",
+        "report_date": "2024-10-27",
+        "snapshot_manifest_relative_path": "snapshots/0001045810/000104581024000316/layer1_manifest.json"
+      },
+      "layer1_evidence": {"run_id": "20260827T051322Z", "processed_run_relative_root": "data/processed/trailing_corpus_runs/20260827T051322Z"}
+    },
+    {
+      "ticker": "AMD",
+      "cik": "0000002488",
+      "layer1_status": "AVAILABLE",
+      "available_snapshot_count": 15,
+      "reference_filing": {
+        "accession": "0000002488-24-000163",
+        "form": "10-Q",
+        "filed_date": "2024-10-30",
+        "report_date": "2024-09-28",
+        "snapshot_manifest_relative_path": "snapshots/0000002488/000000248824000163/layer1_manifest.json"
+      },
+      "layer1_evidence": {"run_id": "20260827T051322Z", "processed_run_relative_root": "data/processed/trailing_corpus_runs/20260827T051322Z"}
+    },
+    {
+      "ticker": "MSFT",
+      "cik": "0000789019",
+      "layer1_status": "AVAILABLE",
+      "available_snapshot_count": 1,
+      "reference_filing": {
+        "accession": "0000950170-24-118967",
+        "form": "10-Q",
+        "filed_date": "2024-10-30",
+        "report_date": "2024-09-30",
+        "source_fact_count": 1236,
+        "snapshot_manifest_relative_path": "snapshots/0000789019/000095017024118967/layer1_manifest.json"
+      },
+      "layer1_evidence": {"run_id": "20260906T020000Z_msft_amzn_2024q3", "processed_run_relative_root": "data/processed/operational_cohort_runs/20260906T020000Z_msft_amzn_2024q3", "taxonomy_resolution": "controlled_bootstrap_then_offline_reload"}
+    },
+    {
+      "ticker": "AAPL",
+      "cik": "0000320193",
+      "layer1_status": "AVAILABLE",
+      "available_snapshot_count": 15,
+      "reference_filing": {
+        "accession": "0000320193-24-000123",
+        "form": "10-K",
+        "filed_date": "2024-11-01",
+        "report_date": "2024-09-28",
+        "snapshot_manifest_relative_path": "snapshots/0000320193/000032019324000123/layer1_manifest.json"
+      },
+      "layer1_evidence": {"run_id": "20260827T051322Z", "processed_run_relative_root": "data/processed/trailing_corpus_runs/20260827T051322Z"}
+    },
+    {
+      "ticker": "AMZN",
+      "cik": "0001018724",
+      "layer1_status": "AVAILABLE",
+      "available_snapshot_count": 1,
+      "reference_filing": {
+        "accession": "0001018724-24-000161",
+        "form": "10-Q",
+        "filed_date": "2024-11-01",
+        "report_date": "2024-09-30",
+        "source_fact_count": 1139,
+        "snapshot_manifest_relative_path": "snapshots/0001018724/000101872424000161/layer1_manifest.json"
+      },
+      "layer1_evidence": {"run_id": "20260906T020000Z_msft_amzn_2024q3", "processed_run_relative_root": "data/processed/operational_cohort_runs/20260906T020000Z_msft_amzn_2024q3", "taxonomy_resolution": "offline_existing_cache"}
+    }
+  ],
+  "amendment_case": {
+    "case_id": "AMD_FY2025_10K_AND_10K_A",
+    "ticker": "AMD",
+    "cik": "0000002488",
+    "original_filing": {
+      "accession": "0000002488-26-000018",
+      "form": "10-K",
+      "filed_date": "2026-02-04",
+      "report_date": "2025-12-27",
+      "is_amendment": false,
+      "snapshot_manifest_relative_path": "snapshots/0000002488/000000248826000018/layer1_manifest.json"
+    },
+    "amendment_filing": {
+      "accession": "0000002488-26-000021",
+      "form": "10-K/A",
+      "filed_date": "2026-02-04",
+      "report_date": "2025-12-27",
+      "is_amendment": true,
+      "snapshot_manifest_relative_path": "snapshots/0000002488/000000248826000021/layer1_manifest.json"
+    },
+    "required_assertions": [
+      "The original and amendment remain distinct accession-level evidence records.",
+      "An amendment is not assumed to contain every original fact; absent facts are not fabricated or copied into the amendment.",
+      "AS_FILED and LATEST_REPORTED selection must retain the selected accession, filed date, form, and source fact lineage.",
+      "The pack does not infer an amendment sequence number from accession text or numeric order."
+    ]
+  },
+  "publication_gate": {
+    "storage_format": "parquet-operational-v1",
+    "required_roots": [
+      "reported_observations",
+      "relationships",
+      "exploration_graph",
+      "accession_ledger"
+    ],
+    "required_company_ciks": [
+      "0001045810",
+      "0000002488",
+      "0000789019",
+      "0000320193",
+      "0001018724"
+    ],
+    "same_layer1_run_fingerprint": true,
+    "fail_closed_condition": "Every requested CIK must have an immutable Layer 1 snapshot in one declared input run, and all four roots must attest that identical CIK scope and run fingerprint. Otherwise no five-company operational comparison is served.",
+    "current_status": "AVAILABLE: five-company-reference-2024q3-v1 publishes the declared five immutable reference snapshots through T1--T4 parquet-operational-v1 roots. The shared Layer 1 fingerprint and exact CIK scope are verified by the cached integration evidence; do not treat this reference cohort as a broader period-aligned cross-company equivalence assertion."
+  },
+  "acceptance_hypotheses": [
+    {
+      "id": "DECLARATIVE_COHORT_NOT_THREE_COMPANY_CODE",
+      "expected": "The cohort is defined by company records and CIKs, not a hard-coded three-company query path. Any company is served only after the publication gate attests it."
+    },
+    {
+      "id": "AVAILABLE_AND_MISSING_ARE_EXPLICIT",
+      "expected": "All five companies are marked AVAILABLE only with their declared immutable Layer 1 snapshot. Their availability does not permit a five-company comparison until the separate publication gate attests one identical input scope and fingerprint."
+    },
+    {
+      "id": "AMD_AMENDMENT_PRESERVES_ACCESSION_EVIDENCE",
+      "expected": "AMD 10-K 0000002488-26-000018 and 10-K/A 0000002488-26-000021 remain separately identifiable and never overwrite one another in Raw or operational lineage."
+    },
+    {
+      "id": "NO_UNREVIEWED_CROSS_COMPANY_EQUIVALENCE",
+      "expected": "T8 may mark only exact compatible standard taxonomy identities EQUIVALENT. Company-custom values and distinct standard QNames remain UNRESOLVED without a reviewed mapping."
+    }
+  ]
+}

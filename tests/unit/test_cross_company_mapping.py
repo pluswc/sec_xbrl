@@ -182,6 +182,41 @@ def test_standard_equivalence_consolidates_multiple_filings_for_one_company() ->
     ]
 
 
+def test_exact_qualified_ifrs_standard_identity_is_equivalent() -> None:
+    standard = {
+        "qname": "ifrs-full:Revenue",
+        "taxonomy_family": "ifrs-full",
+        "data_type": "xbrli:monetaryItemType",
+        "period_type": "duration",
+        "is_standard": True,
+    }
+    tables = CrossCompanyMapper().build(
+        standard_concept_observations=(
+            {
+                **standard,
+                "cik": "0000000001",
+                "filing_id": "ifrs-one",
+                "raw_concept_id": "one:Revenue",
+                "company_canonical_concept_id": "company:one:revenue",
+            },
+            {
+                **standard,
+                "cik": "0000000002",
+                "filing_id": "ifrs-two",
+                "raw_concept_id": "two:Revenue",
+                "company_canonical_concept_id": "company:two:revenue",
+            },
+        )
+    )
+
+    assert {row["relation"] for row in tables.cross_company_concept_map} == {
+        CrossCompanyRelation.EQUIVALENT
+    }
+    assert {row["analytical_id"] for row in tables.cross_company_concept_map} == {
+        "analytical:standard:ifrs-full:Revenue"
+    }
+
+
 def test_label_only_standard_claim_remains_unresolved_not_equivalent() -> None:
     tables = CrossCompanyMapper().build(
         standard_concept_observations=(
