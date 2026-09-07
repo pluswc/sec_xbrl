@@ -72,6 +72,13 @@ Before coding:
 5. Run unit + relevant integration/golden tests.
 6. Report changed files, test results and deviations from contracts.
 
+### Default model operation
+- Treat the assignments below as the current project defaults, not permanent model rankings or guarantees: the lead uses GPT-6 Astra (`gpt-6-astra`), implementation uses GPT-5.6 Sol (`gpt-5.6-sol`), independent read-only verification uses a separate Astra, and evidence comparison may use GPT-5.6 Terra (`gpt-5.6-terra`) when needed.
+- The lead owns requirements, accounting judgment, acceptance criteria, delegation, and final acceptance. Simple explanations and read-only lookups may be handled directly without delegation.
+- Before implementation, follow the delegation contract in `docs/implementation/delivery-workflow.md`; keep one writer for the same implementation scope, and do not broaden accounting meaning or approved scope without lead approval.
+- If a requested model is unavailable, disclose the fallback instead of substituting silently, and preserve role independence. Higher-authority instructions and an explicit user model request take precedence.
+- A written default does not change the model actually selected by the execution environment. Do not claim speed, cost, or quality improvements without measurement; evaluate this policy under the workflow document before expanding it.
+
 ## Git workflow
 - `main` should remain passing.
 - Use milestone branches such as `feature/m1-raw-extraction`.
