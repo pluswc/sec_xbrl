@@ -21,7 +21,7 @@ from sec_xbrl.longitudinal.corpus_release import CorpusRelease
 from sec_xbrl.longitudinal.materialization import VerifiedLayer2Publication
 from sec_xbrl.longitudinal.quarterly_policy import QuarterlySemanticDeclaration
 
-Q4_POLICY_REGISTRY_VERSION = "c3-m5-q4-policy-registry-v1"
+Q4_POLICY_REGISTRY_VERSION = "c3-m5-q4-policy-registry-v2"
 INCOME_ALLOWLIST = frozenset({
     "RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "CostOfRevenue",
     "CostOfGoodsAndServicesSold", "CostOfGoodsAndServiceExcludingDepreciationDepletionAndAmortization",
@@ -38,6 +38,10 @@ CASH_FLOW_ALLOWLIST = frozenset({
     "NetCashProvidedByUsedInOperatingActivities", "NetCashProvidedByUsedInInvestingActivities",
     "NetCashProvidedByUsedInFinancingActivities", "PaymentsToAcquirePropertyPlantAndEquipment",
     "Depreciation", "DepreciationDepletionAndAmortization",
+    # Cash-flow statement amounts accumulated over a duration, not share
+    # counts, prices or EPS. Productive assets keeps its broader QName scope.
+    "PaymentsForRepurchaseOfCommonStock", "ShareBasedCompensation",
+    "PaymentsToAcquireProductiveAssets",
 })
 _DATASETS = ("approved_q4_declaration", "q4_policy_coverage")
 
@@ -100,6 +104,8 @@ class Q4PolicyRegistryMaterializer:
             for link in links:
                 role = roles.get((str(link.get("filing_id")), str(link.get("role_id"))))
                 category = _role_category(None if role is None else role.get("role_definition"))
+                if concept.get("local_name") in {"PaymentsForRepurchaseOfCommonStock", "ShareBasedCompensation", "PaymentsToAcquireProductiveAssets"} and category != "CASH_FLOWS":
+                    continue
                 if category:
                     matched.append({"role_id": link.get("role_id"), "role_definition": role.get("role_definition") if role else None, "role_category": category, "relationship_id": link.get("relationship_id")})
             if not matched:

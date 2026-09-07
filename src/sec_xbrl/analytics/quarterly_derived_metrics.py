@@ -277,7 +277,7 @@ def _ratio(
         return _unavailable(metric, column, inputs, "NON_FINITE_INPUT", row=row, input_roles=input_roles)
     if bottom == 0:
         return _unavailable(metric, column, inputs, "ZERO_DENOMINATOR", row=row, input_roles=input_roles)
-    result = ((top / bottom) - Decimal(1) if subtract_one else top / bottom) * Decimal(100)
+    result = percentage_result(top, bottom, subtract_one=subtract_one)
     return _record(
         metric,
         column,
@@ -289,6 +289,11 @@ def _ratio(
         formula=f"({numerator_name} / {denominator_name}{' - 1' if subtract_one else ''}) * 100",
         input_roles=input_roles,
     )
+
+
+def percentage_result(top: Decimal, bottom: Decimal, *, subtract_one: bool) -> Decimal:
+    """Shared arithmetic; callers independently enforce their governed scope."""
+    return ((top / bottom) - Decimal(1) if subtract_one else top / bottom) * Decimal(100)
 
 
 def _compatibility_code(inputs: tuple[dict[str, Any] | None, ...]) -> str | None:

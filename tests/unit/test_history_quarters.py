@@ -54,6 +54,19 @@ def test_governed_quarter_retains_formula_and_both_raw_sources(quarter, later, e
     assert left == before
 
 
+@pytest.mark.parametrize("name", ["PaymentsForRepurchaseOfCommonStock", "ShareBasedCompensation", "PaymentsToAcquireProductiveAssets"])
+def test_extended_cash_flows_require_cash_flow_presentation(name):
+    left, right = _cell("FY", "100", "2026-01-01"), _cell("YTD_9M", "70", "2025-10-01")
+    for cell in (left, right):
+        cell["value_lineage"]["raw_concept_qname"] = "us-gaap:" + name
+    assert derive_quarter(left, right, quarter=4) is None
+    for cell in (left, right):
+        cell["binding"]["primary_statement_evidence"] = [{"statement_types": ["CF"], "source_network_type": "PRE"}]
+    assert derive_quarter(left, right, quarter=4)["value_numeric"] == "30"
+    left["value_lineage"]["canonical_dimension_signature"] = [["extra", "member"]]
+    assert derive_quarter(left, right, quarter=4) is None
+
+
 @pytest.mark.parametrize("field,value", [
     ("period_class", "TTM"), ("context_start_date", "2025-01-02"),
     ("unit_numerator_measures", '["iso4217:EUR"]'), ("canonical_dimension_signature", [["axis", "member"]]),

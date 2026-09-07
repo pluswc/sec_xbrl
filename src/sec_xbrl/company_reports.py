@@ -15,7 +15,7 @@ import json
 import re
 import uuid
 from collections import defaultdict
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -446,14 +446,17 @@ def report(root: Path, *, review_as_of: date) -> Path:
 
 def refresh(root: Path, *, as_of: date, review_as_of: date, workspace: Path,
             source_runs: tuple[Path, ...] = (), submissions_roots: tuple[Path, ...] = (),
-            offline: bool = False, bootstrap_taxonomy: bool = False) -> Path:
+            offline: bool = False, bootstrap_taxonomy: bool = False,
+            tickers: tuple[str, ...] | None = None) -> Path:
     """Collect/build using the existing history workflow, then use the same report path."""
     original_settings = (root / "companies.csv").read_bytes()
     companies = _read_csv(root / "companies.csv", COMPANY_FIELDS, original_settings)
     _validate_companies(companies)
+    if tickers and {t.upper() for t in tickers} - {c["ticker"] for c in companies if c["active"] == "true"}:
+        raise ValueError("requested refresh companies not active/registered")
     run = workspace / uuid.uuid4().hex
     for company in companies:
-        if company["active"] != "true":
+        if company["active"] != "true" or (tickers and company["ticker"] not in {t.upper() for t in tickers}):
             continue
         # Explicit fiscal label ranges still need discovery through latest FY:
         # load enough annual baselines, then report validates exact fiscal labels.
@@ -467,6 +470,44 @@ def refresh(root: Path, *, as_of: date, review_as_of: date, workspace: Path,
                                         package_cache=workspace / "packages", index_cache=workspace / "indices",
                                         taxonomy_cache=workspace / "taxonomy", bootstrap_taxonomy=bootstrap_taxonomy)
         publication = history.build_history(intake_manifest=intake, output_root=scope / "analytical")
+        if company.get("publication") and (Path(company["publication"]) / "review_manifest.json").exists():
+            # Preserve exact-source decisions and quarantines. New filing
+            # identities never inherit a one-off interpretation approval.
+            from datetime import datetime, time
+
+            from sec_xbrl.longitudinal.disclosure_review import (
+                ReviewedPublicationReader,
+                publish_review,
+            )
+            old = ReviewedPublicationReader(Path(company["publication"]))
+            new_accessions = []
+            try:
+                old_intake = json.loads(Path(old.manifest["source_intake"]).read_text())
+                new_manifest = json.loads((publication / "history_manifest.json").read_text())
+                new_intake = json.loads(Path(new_manifest["source_intake"]).read_text())
+                known = {entry["filing"]["accession"] for entry in old_intake["filings"] if entry["ticker"] == company["ticker"]}
+                new_accessions = sorted({entry["filing"]["accession"] for entry in new_intake["filings"] if entry["ticker"] == company["ticker"]} - known)
+                if new_accessions:
+                    raise ValueError("new filing interpretation needs explicit review; old exact approvals cannot expand")
+                publication = publish_review(
+                    parent=publication, destination=scope / "reviewed",
+                    candidates=list(old.records("candidates")),
+                    decisions=list(old.records("decisions")),
+                    quality_decisions=list(old.records("quality_decisions")),
+                    review_as_of=datetime.combine(review_as_of, time.max, UTC),
+                    previous_publication=Path(company["publication"]),
+                )
+            except ValueError as exc:
+                # Registration is committed only after every company succeeds.
+                # Keep collected/new Analytical data available for the admin.
+                (scope / "review_refresh_required.json").write_text(json.dumps({
+                    "ticker": company["ticker"], "status": "REVIEW_REBIND_REQUIRED",
+                    "previous_publication": company["publication"],
+                    "prepared_parent": str(publication.absolute()), "reason": str(exc),
+                    "new_accessions_requiring_review": new_accessions,
+                    "policy": "EXACT_SOURCE_APPROVAL_ONLY_REGISTRATION_UNCHANGED",
+                }, indent=2))
+                raise ValueError(f"{company['ticker']}: review rebind required; previous registration preserved; prepared data: {scope}") from exc
         company["publication"] = str(publication.absolute())
     if (root / "companies.csv").read_bytes() != original_settings:
         raise ValueError("company settings changed during refresh; generated history retained, retry with current settings")

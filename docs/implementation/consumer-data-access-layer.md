@@ -97,9 +97,15 @@ candidate가 없다는 뜻일 뿐, SEC 공시 전체에 해당 Metric이 없다�
 
 DB adapter는 SQL을 사용할 수 있고 Parquet adapter는 파일을 읽을 수 있다.
 그 차이는 구현 세부 사항이며, 소비자 contract 또는 분석 정책의 차이가 아니다.
-현재 C2 JSONL adapter를 DB/Parquet adapter로 표현해서는 안 된다.
+Legacy C2 JSONL adapter와 operational Parquet adapter는 구분한다.
+현재 fiscal history publication 및 investor analysis bundle은 Parquet 기반이다.
 
 ## Current boundary and future work / 현재 범위와 후속 작업
+
+투자자 핵심 요약·점진 탐색의 공개 함수는
+[`investor-analysis-interface.md`](investor-analysis-interface.md)에 정의한다.
+`open_analysis()`는 준비된 번들만 읽으며, `prepare_catalog()`와
+`refresh_analysis()`가 수집·발행 및 관리자 등록을 담당한다.
 
 현재 `AnalyticalRepository`는 publication-backed in-process 구현체이며 operational
 Parquet publication을 읽는다. DB, HTTP, MCP는 아직 이 계약의 구현체가 아니다. 실제 Excel migration은

@@ -53,6 +53,10 @@ def approved_additive(cell: dict[str, Any]) -> bool:
     value = cell.get("value_lineage") or {}
     name = str(value.get("raw_concept_qname", "")).split(":")[-1]
     unit = _sequence(value.get("unit_numerator_measures") or [])
+    if name in {"PaymentsForRepurchaseOfCommonStock", "ShareBasedCompensation", "PaymentsToAcquireProductiveAssets"}:
+        evidence = cell.get("binding", {}).get("primary_statement_evidence", [])
+        if not any("CF" in e.get("statement_types", []) and e.get("source_network_type") == "PRE" for e in evidence):
+            return False
     return bool(
         cell.get("value_status") == "REPORTED" and value.get("source_type") == "REPORTED"
         and name in INCOME_ALLOWLIST | CASH_FLOW_ALLOWLIST
@@ -113,19 +117,22 @@ def derive_quarter(later: dict[str, Any], earlier: dict[str, Any], *, quarter: i
             "basis_compatibility": "DIRECT_REPORTED_SAME_SCOPE_NO_EVIDENCED_BREAK_NOT_RECAST_COMPARABLE"}
 
 
-def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots: bool = False) -> Path:
+def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots: bool = False,
+                            operational_root: Path | None = None) -> Path:
     """Upgrade reported period evidence and materialize governed quarter cells."""
     old = HistoryPublicationReader(publication)
     old.verify_all()
     destination = output_root / "panels"
     if destination.exists():
         raise ValueError("choose a new immutable quarterly publication destination")
+    output_root.mkdir(parents=True, exist_ok=True)
     intake_path = Path(old.manifest["source_intake"])
-    if not reuse_roots:
+    if not reuse_roots and operational_root is None:
         build_history(intake_manifest=intake_path, output_root=output_root, views=tuple(old.manifest["views"]), roots_only=True)
-    roots = {name: output_root / name / output_root.name for name in ("t1", "t2", "t3", "t4")}
+    prepared_root = operational_root or output_root
+    roots = {name: prepared_root / name / prepared_root.name for name in ("t1", "t2", "t3", "t4")}
     observed = Layer2PublicationReader().load(roots["t1"])
-    if reuse_roots and observed.identity["layer2_run_fingerprint"] != old.manifest["input_fingerprint"]:
+    if (reuse_roots or operational_root is not None) and observed.identity["layer2_run_fingerprint"] != old.manifest["input_fingerprint"]:
         raise ValueError("reused period publications do not match reported panels")
     by_fact = {(row["source_filing_id"], row["source_fact_id"]): row for row in observed.records("reported_period_observation")}
     bundles: dict[tuple[str, str, str], dict[str, Any]] = {}
