@@ -19,6 +19,10 @@ data outside Git, not automatic source-code mappings.
   fiscal column, displayed table and inline locator. The original package ZIP
   must match the immutable Layer1 package hash; XHTML bytes must match the exact
   ZIP member. A copied/altered same-name document is insufficient.
+  The selected raw Fact ID must also match the inline ID, source locator and
+  one ordinal in the immutable manifest's source-corpus count. This verifies the
+  actual Layer1 identity formula without guessing DOM/Arelle ordering or tuple
+  positions; duplicate identical numeric/context facts cannot substitute IDs.
 - B approves `FY - YTD_9M` for two exact A candidates. Both A approvals must be
   effective and usable. The producer checks company, concept, full reviewed
   dimensions, basis, year/start/end boundaries, numerator-only currency, monetary
@@ -78,6 +82,14 @@ lineage, formula, A/B decision IDs, dates and original values. Quality-blocked
 analytical cells expose null availability while preserving the source number in
 lineage. Raw source cells selected into the reviewed basis are superseded only
 in the reviewed view, not removed from the parent or AS_FILED.
+
+The additional persisted `quarantine` dataset makes any opted-in A candidate
+that is pending/rejected/withdrawn unavailable in the reviewed view. This applies
+even without an old quality BLOCK, so a known interpretation problem cannot
+fall back to a normal raw-tagged value when approval is withdrawn. It is scoped
+to the exact candidate source Fact; other parent observations and AS_FILED are
+unchanged. Historical review outputs lacking this dataset must be republished
+before their reviewed view is consumed (their decision history remains readable).
 
 `history.open_history_publication(path)` is the shared data entry point. The
 reviewed reader composes persisted records without parsing or calculating.

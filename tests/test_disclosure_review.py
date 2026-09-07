@@ -169,6 +169,16 @@ def test_duplicate_b_candidates_all_excluded(corpus, tmp_path):
     assert all(r["reason"] == "Q4_AMBIGUOUS_COMPATIBLE_INPUT_PAIR" for r in reader.records("review_queue"))
 
 
+def test_competing_targets_for_one_fact_and_basis_fail(corpus, tmp_path):
+    alternative = copy.deepcopy(corpus[1][0])
+    alternative["target_dimensions"][0][1] = "Another division"
+    alternative["candidate_id"] = review.identity({k: v for k, v in alternative.items() if k != "candidate_id"})
+    corpus[1].append(alternative)
+    corpus[2].append(dict(corpus[2][0], decision_id="alternative", candidate_id=alternative["candidate_id"]))
+    with pytest.raises(ValueError, match="competing approved interpretations"):
+        publish(corpus, tmp_path / "p")
+
+
 def test_publication_decision_history_immutable(corpus, tmp_path):
     first = publish(corpus, tmp_path / "p1")
     corpus[2][0]["reason"] = "changed"
@@ -176,11 +186,41 @@ def test_publication_decision_history_immutable(corpus, tmp_path):
         publish(corpus, tmp_path / "p2", previous_publication=first)
 
 
+@pytest.mark.parametrize("action", ["WITHDRAW", "REJECT", "MORE_EVIDENCE", "PENDING"])
+@pytest.mark.parametrize("with_quality_block", [False, True])
+def test_inactive_interpretation_quarantines_parent_not_as_filed(corpus, tmp_path, action, with_quality_block):
+    quality = [{"decision_id": "q1", "issue_id": "tag-issue", "ticker": "TEST", "accession": "FY-acc",
+                "concept": "x:Revenue", "axis": "x:Axis", "member": "x:Wrong", "decision": "BLOCK",
+                "known_at": "2026-09-07T09:00:00+09:00"}] if with_quality_block else []
+    first = publish(corpus, tmp_path / "approved", quality_decisions=quality)
+    original = corpus[2][0]
+    if action == "PENDING":
+        corpus[2].pop(0)
+        previous = None  # fresh historical/pending review, not deleting history
+    else:
+        corpus[2].append(dict(original, decision_id="change", previous_decision_id=original["decision_id"],
+                             action=action, known_at="2026-09-07T10:01:00+09:00"))
+        previous = first
+    updated = publish(corpus, tmp_path / "updated", quality_decisions=quality, previous_publication=previous)
+    reader = history.open_history_publication(updated)
+    result = reader.load(ticker="TEST", period_class="FY").cells
+    assert len(result) == 1
+    assert result[0]["value_numeric"] is None
+    assert result[0]["value_status"] == "UNAVAILABLE"
+    assert result[0]["resolution_reason"].startswith("INTERPRETATION_")
+    assert result[0]["value_lineage"]["value_numeric"] == "100000000"
+    assert reader.load(ticker="TEST", period_class="FY", view="AS_FILED").cells[0]["value_numeric"] == "100000000"
+    assert not reader.records("derived")
+    assert len(reader.records("quarantine")) == 1
+    assert history.open_history_publication(first).load(ticker="TEST", period_class="FY").cells[0]["value_numeric"] == "100000000"
+
+
 def test_source_evidence_bound_to_original_package(tmp_path):
     document = '''<html xmlns="http://www.w3.org/1999/xhtml" xmlns:ix="http://www.xbrl.org/2013/inlineXBRL" xmlns:x="urn:context">
     <x:context id="ctx"><x:period><x:startDate>2023-01-01</x:startDate><x:endDate>2023-03-31</x:endDate></x:period><x:explicitMember dimension="x:Axis">x:Wrong</x:explicitMember></x:context>
     <x:unit id="usd"><x:measure>iso4217:USD</x:measure></x:unit>
-    <table><tr><td>Division</td><td><ix:nonFraction id="fact" name="x:Revenue" contextRef="ctx" unitRef="usd" scale="6">25</ix:nonFraction></td></tr></table></html>'''
+    <table><tr><td>Division</td><td><ix:nonFraction id="fact" name="x:Revenue" contextRef="ctx" unitRef="usd" scale="6">25</ix:nonFraction></td></tr>
+    <tr><td>Different division</td><td><ix:nonFraction id="fact2" name="x:Revenue" contextRef="ctx" unitRef="usd" scale="6">25</ix:nonFraction></td></tr></table></html>'''
     path = tmp_path / "source.htm"
     path.write_text(document)
     package = tmp_path / "filing.zip"
@@ -193,9 +233,12 @@ def test_source_evidence_bound_to_original_package(tmp_path):
     raw = {"source_document": "source.htm", "source_package_sha256": hashlib.sha256(package.read_bytes()).hexdigest(),
                "context_id": review._stable_id("context", "filing", "ctx"), "raw_concept_id": "concept", "value_numeric": "25000000", "decimals": "-6"}
     concepts = {"axis": {"qname": "x:Axis"}, "member": {"qname": "x:Wrong"}}
+    raw.update(source_fact_count=2, source_locator="line:4", fact_id=review._stable_id("fact", "filing", "fact", "line:4", 1))
     args = {"file": path, "inline_fact_id": "fact", "lineage": lineage, "raw_fact": raw, "concepts": concepts, "package_zip": package}
     evidence = review.source_evidence(**args)
     assert evidence["display_label"] == "Division"
+    with pytest.raises(ValueError, match="selected raw Fact ID"):
+        review.source_evidence(**{**args, "inline_fact_id": "fact2"})
     path.write_text(document.replace("Division", "Forged division"))
     with pytest.raises(ValueError, match="original Layer1 package"):
         review.source_evidence(**args)

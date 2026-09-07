@@ -98,6 +98,15 @@ def source_evidence(*, file: Path, inline_fact_id: str, lineage: dict,
     if len(matches) != 1:
         raise ValueError("inline fact locator is ambiguous or missing")
     fact = matches[0]
+    # Layer1 IDs include the Arelle corpus ordinal. Search the manifest-bounded
+    # ordinal domain, not guessed DOM order (tuples can leave ordinal gaps).
+    # This binds the precise inline ID even if several facts share semantics.
+    count = raw_fact.get("source_fact_count")
+    if not isinstance(count, int) or count < 1 or not any(
+            _stable_id("fact", lineage["source_filing_id"], inline_fact_id,
+                       raw_fact.get("source_locator") or "", ordinal) == raw_fact.get("fact_id")
+            for ordinal in range(count)):
+        raise ValueError("inline ID does not bind to the selected raw Fact ID")
     if etree.QName(fact).localname != "nonFraction" or any(
             etree.QName(p).localname == "hidden" for p in fact.iterancestors()):
         raise ValueError("visible numeric inline fact required")
@@ -262,6 +271,7 @@ def raw_index(reader: HistoryPublicationReader, ticker: str) -> tuple[dict, dict
         snapshot = _load_declared_cohort_snapshot(Path(entry["source_run"]) / "snapshots" / ref["cik"] / ref["accession"].replace("-", ""), ref["cik"], ref["accession"])
         concepts.update({r["raw_concept_id"]: r for r in snapshot.records("concept")})
         facts.update({r["fact_id"]: {**r, "source_package_sha256": snapshot.manifest.package_sha256,
+                                    "source_fact_count": snapshot.manifest.source_fact_count,
                                     "source_cik": ref["cik"], "source_accession": ref["accession"]}
                       for r in snapshot.records("fact")})
     return concepts, facts
@@ -310,8 +320,9 @@ def publish_review(*, parent: Path, destination: Path, candidates: list[dict],
             raise ValueError("published quality decisions cannot change/disappear")
     candidate_index = {c["candidate_id"]: c for c in candidates}
     panels, raw = {}, {}
-    interpreted, derived, queue = [], [], []
+    interpreted, derived, queue, quarantine = [], [], [], []
     accepted: dict[str, dict] = {}
+    approved_sources: set[tuple] = set()
     for candidate in candidates:
         if candidate["kind"] != "A":
             continue
@@ -347,10 +358,24 @@ def publish_review(*, parent: Path, destination: Path, candidates: list[dict],
             raise ValueError("invalid candidate scope")
         decision = active.get(candidate["candidate_id"], {})
         if decision.get("action") != "APPROVE":
-            queue.append({"candidate_id": candidate["candidate_id"], "kind": "A", "reason": decision.get("action", "INTERPRETATION_REVIEW_REQUIRED")})
+            reason = "INTERPRETATION_" + decision.get("action", "REVIEW_REQUIRED")
+            queue.append({"candidate_id": candidate["candidate_id"], "kind": "A", "reason": reason})
+            # Persist quarantine independently of successful interpretations.
+            # Otherwise a withdrawal could fall through to a mis-tagged raw
+            # value in the parent LATEST view, bypassing report-only masking.
+            quarantine.append({"ticker": candidate["ticker"], "period_class": candidate["period_class"],
+                               "source_fact_id": original["value_lineage"]["selected_source_fact_id"],
+                               "candidate_id": candidate["candidate_id"], "decision_id": decision.get("decision_id"),
+                               "value_numeric": None, "value_text": None, "value_status": "UNAVAILABLE",
+                               "source_type": "UNAVAILABLE", "resolution_reason": reason})
             continue
         if timestamp(decision["known_at"]).date() < date.fromisoformat(original["value_lineage"]["filed_date"]):
             raise ValueError("interpretation approval predates filing")
+        source_key = (candidate["ticker"], original["value_lineage"]["selected_source_fact_id"],
+                      candidate["basis_version"], candidate["period_class"])
+        if source_key in approved_sources:
+            raise ValueError("competing approved interpretations of one source Fact in the same basis")
+        approved_sources.add(source_key)
         cell = {k: copy.deepcopy(original.get(k)) for k in ("fiscal_time_series_cell_id", "fiscal_time_series_row_id", "fiscal_time_series_column_id", "value_status", "value_numeric", "value_text", "value_lineage", "binding")}
         row_id = "reviewed-row:" + identity((candidate["ticker"], cell["value_lineage"]["company_canonical_concept_id"], candidate["target_dimensions"], candidate["basis_version"], cell["value_lineage"]["unit_numerator_measures"]))[:24]
         cell.update(fiscal_time_series_cell_id="reviewed-cell:" + candidate["candidate_id"], fiscal_time_series_row_id=row_id,
@@ -467,9 +492,10 @@ def publish_review(*, parent: Path, destination: Path, candidates: list[dict],
     staging = destination.parent / (".partial-" + uuid.uuid4().hex)
     staging.mkdir(parents=True)
     tables = {}
-    for name, records in (("analytical", interpreted), ("derived", derived), ("review_queue", queue), ("candidates", candidates), ("decisions", decisions), ("quality_decisions", quality_decisions)):
+    for name, records in (("analytical", interpreted), ("derived", derived), ("quarantine", quarantine), ("review_queue", queue), ("candidates", candidates), ("decisions", decisions), ("quality_decisions", quality_decisions)):
         tables[name] = {"path": name + ".parquet", **_write_records(staging / (name + ".parquet"), tuple(records))}
     manifest = {"version": VERSION, "parent": str(parent.absolute()),
+                "availability_policy_version": "inactive-interpretation-quarantine-v1",
                 "parent_manifest_sha256": hashlib.sha256((parent / "history_manifest.json").read_bytes()).hexdigest(),
                 "review_as_of": review_as_of.isoformat(), "tables": tables}
     (staging / "review_manifest.json").write_text(json.dumps(manifest, indent=2))
@@ -503,10 +529,19 @@ class ReviewedPublicationReader:
         base = self.parent.load(ticker=ticker, period_class=period_class, view=view)
         if view != "LATEST_REPORTED":
             return base  # Raw/as-filed consumer remains unchanged.
+        if "quarantine" not in self.review_manifest["tables"]:
+            raise ValueError("legacy reviewed publication requires republication with persisted quarantine")
         additions = [r for name in ("analytical", "derived") for r in self.records(name)
                      if r["ticker"] == ticker.upper() and r["period_class"] == period_class]
         suppressed = {r["source_fact_id"] for r in additions if r["suppress_source"]}
         cells = [c for c in base.cells if c.get("value_lineage", {}).get("selected_source_fact_id") not in suppressed]
+        quarantine = {r["source_fact_id"]: r for r in self.records("quarantine")
+                      if r["ticker"] == ticker.upper() and r["period_class"] == period_class}
+        cells = [dict(c, value_numeric=q["value_numeric"], value_text=q["value_text"], value_status=q["value_status"],
+                      resolution_reason=q["resolution_reason"], comparability_status="REVIEW_REQUIRED",
+                      value_lineage={**c["value_lineage"], "source_type": q["source_type"],
+                                     "interpretation_quarantine": q})
+                 if (q := quarantine.get(c.get("value_lineage", {}).get("selected_source_fact_id"))) else c for c in cells]
         cells.extend(r["cell"] for r in additions)
         rows = [dict(r, raw_tag_view=True) for r in base.rows]
         seen = set()
