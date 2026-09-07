@@ -158,6 +158,7 @@ def materialize_quality(*, ticker: str, cell: dict[str, Any], dimensions: list[d
     scopes = [{"accession": lineage.get("accession"), "concept": lineage.get("raw_concept_qname"), "dimensions": dimensions}, *(source_scopes or [])]
     matched = [row for row in decisions if row["ticker"] == ticker and any(
                row["accession"] == scope["accession"] and row["concept"] == scope["concept"]
+               and row["issue_id"] not in scope.get("resolved_issue_ids", [])
                and (not row["axis"] or any(d["axis"] == row["axis"] and d["member"] == row["member"] for d in scope["dimensions"])) for scope in scopes)]
     blocked = any(row["decision"] == "BLOCK" for row in matched)
     warnings = [row["reason"] for row in matched if row["decision"] != "RELEASE"]
@@ -216,11 +217,15 @@ def _years(reader: history.HistoryPublicationReader, company: dict[str, str]) ->
     return requested
 
 
-def _company_data(company: dict[str, str], decisions: list[dict[str, str]]) -> dict[str, Any]:
+def _company_data(company: dict[str, str], decisions: list[dict[str, str]], review_as_of: date | None = None) -> dict[str, Any]:
     ticker = company["ticker"]
     if not company["publication"]:
         raise ValueError(f"{ticker}: no publication; run refresh to collect/build first")
-    reader = history.HistoryPublicationReader(Path(company["publication"]))
+    reader = history.open_history_publication(Path(company["publication"]))
+    if hasattr(reader, "review_manifest") and review_as_of is not None:
+        cutoff = datetime.combine(review_as_of + timedelta(days=1), time.min, REVIEW_TIMEZONE)
+        if _decision_time(reader.review_manifest["review_as_of"]) >= cutoff:
+            raise ValueError("review publication is newer than requested review date; select an earlier immutable publication")
     years = _years(reader, company)
     concepts, facts = _raw_index(reader, ticker)
     tables, quality = [], []
@@ -257,9 +262,18 @@ def _company_data(company: dict[str, str], decisions: list[dict[str, str]]) -> d
                            "typed_member": dim[2], "dimension_type": dim[3], "is_default": dim[4]}
                           for dim in lineage.get("raw_dimension_signature", [])]
             source_scopes = [{"accession": source.get("accession"), "concept": source.get("raw_concept_qname"),
+                              "resolved_issue_ids": source.get("resolved_issue_ids", []),
                               "dimensions": [{"axis": concepts.get(dim[0], {}).get("qname", dim[0]), "member": concepts.get(dim[1], {}).get("qname", dim[1])}
-                                             for dim in source.get("raw_dimension_signature", [])]} for source in lineage.get("source_inputs", [])]
-            overlay = materialize_quality(ticker=ticker, cell=cell, dimensions=dimensions, decisions=decisions, source_scopes=source_scopes)
+                                             for dim in source.get("raw_dimension_signature", [])]} for source in lineage.get("source_inputs", []) or [lineage]]
+            # Quality scopes remain RAW; displayed dimensions come only from the
+            # persisted, separately approved Analytical interpretation below.
+            quality_lineage = {**lineage, "accession": None} if lineage.get("interpretation_decision_id") else lineage
+            quality_cell = {**cell, "value_lineage": quality_lineage}
+            overlay = materialize_quality(ticker=ticker, cell=quality_cell, dimensions=dimensions, decisions=decisions, source_scopes=source_scopes)
+            if lineage.get("analytical_dimensions"):
+                dimensions = [{"axis": d[0], "member": d[1], "typed_member": d[2], "dimension_type": d[3], "is_default": d[4]}
+                              for d in lineage["analytical_dimensions"]]
+                overlay["quality_reasons"].append("공시 화면 기준 검토 완료 · 원래 태그와 판단 근거 보존")
             quality.append({"cell_id": cell["fiscal_time_series_cell_id"], **overlay})
             cells.append({"cell_id": cell["fiscal_time_series_cell_id"], "row_id": cell["fiscal_time_series_row_id"],
                           "column_id": cell["fiscal_time_series_column_id"], "raw_value": cell.get("value_numeric"),
@@ -277,7 +291,7 @@ def _company_data(company: dict[str, str], decisions: list[dict[str, str]]) -> d
             sections = sorted({kind for edge in evidence for kind in edge.get("statement_types", [])})
             rows.append({"row_id": row["fiscal_time_series_row_id"], "qname": row["raw_concept_qname"],
                          "company_canonical_concept_id": row.get("company_canonical_concept_id"),
-                         "label": _label(row["raw_concept_qname"]), "line_class": row["line_class"],
+                         "label": _label(row["raw_concept_qname"]) + (" [검토 기준: " + row["basis_version"] + "]" if row.get("reviewed_interpretation") else " [원문 태그 기준]" if row.get("raw_tag_view") and row.get("canonical_dimension_signature") else ""), "line_class": row["line_class"],
                          "sections": sections, "dimensioned": bool(row.get("canonical_dimension_signature")),
                          "mapping_review_required": row.get("mapping_review_required"),
                          "navigation": row.get("first_definition", {}).get("relationship_navigation", [])})
@@ -285,6 +299,8 @@ def _company_data(company: dict[str, str], decisions: list[dict[str, str]]) -> d
         tables.append({"period_class": period_class, "scope": panel.scope, "columns": columns, "rows": rows, "cells": cells})
     return {"ticker": ticker, "years": years, "publication": company["publication"],
             "source_manifest_sha256": hashlib.sha256((reader.root / "history_manifest.json").read_bytes()).hexdigest(),
+            "review_manifest_sha256": hashlib.sha256((Path(company["publication"]) / "review_manifest.json").read_bytes()).hexdigest() if hasattr(reader, "review_manifest") else None,
+            "interpretation_review_as_of": reader.review_manifest["review_as_of"] if hasattr(reader, "review_manifest") else None,
             "tables": tables, "quality_overlay": quality}
 
 
@@ -412,7 +428,7 @@ def report(root: Path, *, review_as_of: date) -> Path:
     active = [row for row in companies if row["active"] == "true"]
     if not active:
         raise ValueError("no active companies")
-    data = [_company_data(company, decisions) for company in active]
+    data = [_company_data(company, decisions, review_as_of) for company in active]
     run_id = uuid.uuid4().hex
     staging = root / "runs" / (".partial-" + run_id)
     staging.mkdir(parents=True)

@@ -112,7 +112,7 @@ def test_csv_text_safe_numeric_negative(tmp_path):
 def test_report_settings_snapshot_and_new_run(tmp_path, monkeypatch):
     cr.register_company(tmp_path, ticker="NVDA", publication=tmp_path)
     original = (tmp_path / "companies.csv").read_bytes()
-    def data(company, decisions):
+    def data(company, decisions, review_as_of=None):
         cr.register_company(tmp_path, ticker="AMD", publication=tmp_path)
         return {"ticker": company["ticker"], "years": [2024, 2025, 2026], "publication": str(tmp_path), "source_manifest_sha256": "test", "tables": [], "quality_overlay": []}
     monkeypatch.setattr(cr, "_company_data", data)

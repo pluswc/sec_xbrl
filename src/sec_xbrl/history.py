@@ -464,6 +464,14 @@ def _write_records(path: Path, records: tuple[dict[str, Any], ...]) -> dict[str,
     return {"count": len(records), "json_fields": json_fields, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
+def open_history_publication(root: Path):
+    """Common persisted-data reader, including reviewed disclosure publications."""
+    if (root / "review_manifest.json").exists():
+        from sec_xbrl.longitudinal.disclosure_review import ReviewedPublicationReader
+        return ReviewedPublicationReader(root)
+    return HistoryPublicationReader(root)
+
+
 class HistoryPublicationReader:
     """Reload persisted fiscal tables only: no SEC, Arelle, selection or build."""
 
