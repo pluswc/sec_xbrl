@@ -8,9 +8,11 @@ import pytest
 from sec_xbrl.longitudinal import (
     Layer1SnapshotInput,
     Layer2MaterializationError,
+    Layer2PublicationReader,
     Layer2Publisher,
     Layer2RuleVersions,
     Layer2Run,
+    OperationalLayer2Publisher,
 )
 
 
@@ -91,6 +93,29 @@ def test_publishes_complete_manifest_and_partitioned_deterministic_rows(tmp_path
     repeated = publisher.publish(_run(), _datasets())
     assert repeated.reused_existing is True
     assert repeated.fingerprint == published.fingerprint
+
+
+def test_operational_parquet_retains_late_nested_custom_mapping_evidence(tmp_path: Path) -> None:
+    mappings = [{"mapping_id": f"mapping:{index:04d}", "cik": "0000320193", "entity_type": "concept",
+                 "source_raw_id": f"raw:{index}", "source_filing_id": "filing-aapl-q2",
+                 "company_canonical_id": f"canonical:{index}", "valid_from_filing_id": "filing-aapl-q2",
+                 "relation": "SAME", "method": "RAW_IDENTITY_BASELINE", "mapping_version": "map-v3",
+                 "continuity_break": False, "review_required": False, "review_state": "AUTO_ACCEPTED", "evidence": {"raw_identity": f"raw:{index}"}}
+                for index in range(122)]
+    expected = {"qualified_network_signature": ['["PRE","https://issuer.test/role/Income","parent-child"]'],
+                "source_relationship_ids": ["edge:new"], "prior_relationship_ids": ["edge:old"],
+                "source_role_uris": ["https://issuer.test/20240201/role/Income"],
+                "prior_role_uris": ["https://issuer.test/20240101/role/Income"],
+                "context_semantics": {"period_type": "duration", "data_type": "monetaryItemType", "abstract": False}}
+    mappings[120].update(method="CUSTOM_SEMANTIC_NETWORK_CONTINUITY", evidence=expected)
+    mappings[121].update(relation="UNCERTAIN", review_required=True, review_state="REVIEW_REQUIRED",
+                         evidence={"custom_continuity_rejection": ["QUALIFIED_NETWORK_STRUCTURE_CHANGED"]})
+    publication = OperationalLayer2Publisher(tmp_path).publish(_run(), {"company_concept_map": mappings, "analytical_fact": _datasets()["analytical_fact"]})
+    loaded = Layer2PublicationReader().load(publication.run_root).records("company_concept_map")
+    by_id = {row["mapping_id"]: row for row in loaded}
+    for key, value in expected.items():
+        assert by_id["mapping:0120"]["evidence"][key] == value
+    assert by_id["mapping:0121"]["evidence"]["custom_continuity_rejection"] == ["QUALIFIED_NETWORK_STRUCTURE_CHANGED"]
 
 
 @pytest.mark.parametrize(

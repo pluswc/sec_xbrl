@@ -1192,14 +1192,12 @@ def _write_operational_parquet_datasets(
         company_root = root / cik
         company_root.mkdir(parents=True, exist_ok=True)
         for dataset, rows in tables.items():
-            # Relationship attributes such as targetRole may be null in the
-            # first hundred arcs and populated later in the same filing.
-            # Infer the one edge table completely so optional XBRL attributes
-            # are not rejected by Polars' bounded default sample.
-            infer_schema_length = None if dataset in {
-                "filing_relationship_edge", "analysis_exploration_node", "analysis_exploration_edge"
-            } else 100
-            frame = pl.DataFrame(rows, strict=False, infer_schema_length=infer_schema_length)
+            # Mapping evidence and nested review/relationship fields are
+            # heterogeneous across baselines and later continuity decisions.
+            # A bounded sample silently drops late Struct fields. Infer the
+            # complete dataset schema for every operational table, not only
+            # the graph tables. No JSONL copy or row-content hash is needed.
+            frame = pl.DataFrame(rows, strict=False, infer_schema_length=None)
             if dataset == "filing_relationship_edge":
                 # A filing is the immutable relationship snapshot boundary.
                 # This extra partition makes a single filing graph lookup

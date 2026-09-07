@@ -4,9 +4,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import polars as pl
 import pytest
 
 from sec_xbrl.history import HistoryPublicationReader, _write_json, build_history
+from sec_xbrl.longitudinal import Layer2PublicationReader
 
 
 def test_cached_custom_expense_is_connected_in_default_consumer(tmp_path: Path) -> None:
@@ -31,3 +33,15 @@ def test_cached_custom_expense_is_connected_in_default_consumer(tmp_path: Path) 
     assert all(cell["value_status"] == "REPORTED" and cell["value_numeric"] is not None for cell in values)
     assert len({cell["value_lineage"]["source_filing_id"] for cell in values}) == 2
     assert all(cell["binding"]["concept_origin"] == "CUSTOM_CONCEPT" for cell in values)
+    t1 = Layer2PublicationReader().load(consumer.parent / "t1" / consumer.parent.name)
+    mapped = next(row for row in t1.records("company_concept_map")
+                  if row.get("source_qname") == "amzn:FulfillmentExpense" and row["method"] == "CUSTOM_SEMANTIC_NETWORK_CONTINUITY")
+    evidence = mapped["evidence"]
+    assert evidence["qualified_network_signature"]
+    assert evidence["prior_relationship_ids"]
+    source_item = next(item for item in items if item["filing"]["report_date"] == "2023-06-30")
+    raw_dir = Path(source_item["source_run"]) / "snapshots" / source_item["filing"]["cik"] / source_item["filing"]["accession"].replace("-", "")
+    raw_edges = pl.read_parquet(raw_dir / "relationship.parquet").to_dicts()
+    expected_ids = {edge["relationship_id"] for edge in raw_edges
+                    if mapped["source_raw_id"] in (edge["from_raw_concept_id"], edge["to_raw_concept_id"])}
+    assert set(evidence["source_relationship_ids"]) == expected_ids

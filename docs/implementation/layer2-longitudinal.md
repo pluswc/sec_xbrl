@@ -233,6 +233,20 @@ selection still runs for each request and returned nested data are defensive
 copies. Custom concepts, axes and members remain reported-only for quarter
 arithmetic: this mapping change does not broaden the approved additive registry.
 
+Operational Parquet schema inference scans every row of every dataset. Mapping
+baseline and continuity/review evidence have heterogeneous nested fields; a
+100-row inference sample silently loses fields that first appear later. The
+writer therefore preserves the full nested field union, including qualified
+network signatures, current/prior relationship IDs and review reasons. This is
+file serialization correctness, not a mapping-policy change or a JSONL copy.
+
+Continuity proves preserved XBRL identity/structure, not the correctness of the
+issuer's source tags relative to a rendered table. The actual AMD 2023 Q1 cache
+has a tag/display mismatch in segment revenue (for example, a displayed Data
+Center amount is tagged with ClientMember). These raw assignments are retained
+and must be treated as a source-quality caveat; this milestone does not silently
+relabel business segments or change the raw parser output.
+
 Structural events are provenance rows, not inferred accounting facts.  New
 raw entities emit `NEW_CONCEPT`, `NEW_AXIS`, or `NEW_MEMBER`; member renames,
 documented recasts, splits, and merges emit their controlled event types.
