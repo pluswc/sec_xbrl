@@ -92,8 +92,12 @@ cross-company semantic comparison are not computed by this workflow.
 
 Custom facts are available with raw identity and mapping review state, but their
 presence is not proof of aligned custom-concept continuity across quarters.
-The five-company QTD run did not demonstrate a custom-concept row joined across
-multiple columns. No label-only mapping is introduced to manufacture continuity.
+The earlier reported-only five-company run did not demonstrate a custom-concept
+row joined across multiple columns. Custom continuity v3 rebuilds those series
+using qualified raw-role and neighboring concept evidence, retaining uncertain
+changes as separate rows. No label-only mapping is introduced. Operational
+before/after counts must distinguish numeric monetary custom series from text,
+resource nodes, and standard concepts shown under custom members.
 
 `repair-coverage --publication OLD --destination NEW` is a narrow migration for
 the initial run's erroneous synthetic future columns: it revalidates the raw

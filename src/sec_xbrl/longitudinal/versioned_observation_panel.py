@@ -51,6 +51,7 @@ class VersionedObservationPanelPipeline:
         concepts: dict[str, list[dict[str, Any]]] = defaultdict(list)
         dimensions: dict[str, list[dict[str, Any]]] = defaultdict(list)
         relationships: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        roles: dict[str, list[dict[str, Any]]] = defaultdict(list)
         observations: dict[str, list[dict[str, Any]]] = defaultdict(list)
         exclusions: list[dict[str, Any]] = []
         materializer = PeriodObservationMaterializer()
@@ -77,6 +78,7 @@ class VersionedObservationPanelPipeline:
             concepts[cik].extend(snapshot.records("concept"))
             dimensions[cik].extend(snapshot.records("dimension_fact"))
             relationships[cik].extend(snapshot.records("relationship"))
+            roles[cik].extend(snapshot.records("role"))
             observations[cik].extend(
                 {
                     **row,
@@ -96,6 +98,7 @@ class VersionedObservationPanelPipeline:
                 concepts=concepts[cik],
                 dimension_facts=dimensions[cik],
                 relationships=relationships[cik],
+                roles=roles[cik],
             )
             datasets["company_concept_map"].extend(mappings.company_concept_map)
             datasets["company_axis_map"].extend(mappings.company_axis_map)

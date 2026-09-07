@@ -270,7 +270,7 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     release = CohortReleaseAdapter().load(
         tuple(CohortSource(root, root.name, tuple(refs)) for root, refs in grouped.items()),
         cohort_id=run_id, ciks=tuple(company["cik"] for company in plan["companies"]), run_version=run_id,
-        rules=Layer2RuleVersions("period-fiscal-boundaries-v2", "mapping-v1", "recast-v1", "selection-v1"),
+        rules=Layer2RuleVersions("period-fiscal-boundaries-v2", "mapping-custom-network-v3", "recast-v1", "selection-v1"),
     )
     planned = {(item["filing"]["cik"], item["filing"]["accession"]): item["filing"] for item in intake["filings"]}
     for snapshot in release.snapshots:

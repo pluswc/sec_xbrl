@@ -93,11 +93,14 @@ def test_namespace_change_preserves_well_supported_same_company_series() -> None
         ),
     )
 
-    tables = CompanyCanonicalizer().build(filings=_filings(), concepts=concepts)
+    parents = tuple(_concept("parent-" + str(row["filing_id"]), str(row["filing_id"]), local_name="Parent", label="Parent", namespace_uri=row["namespace_uri"]) for row in concepts)
+    roles = tuple({"filing_id": row["filing_id"], "role_id": "role-" + str(row["filing_id"]), "role_uri": "https://example.test/role/Revenue"} for row in concepts)
+    edges = tuple({"filing_id": row["filing_id"], "role_id": role["role_id"], "network_type": "PRE", "arcrole": "http://www.xbrl.org/2003/arcrole/parent-child", "link_qname": "link:presentationLink", "arc_qname": "link:presentationArc", "from_raw_concept_id": parent["raw_concept_id"], "to_raw_concept_id": row["raw_concept_id"]} for row, role, parent in zip(concepts, roles, parents, strict=True))
+    tables = CompanyCanonicalizer().build(filings=_filings(), concepts=concepts + parents, roles=roles, relationships=edges)
 
-    old, new = tables.company_concept_map
+    old, new = [row for row in tables.company_concept_map if row["source_raw_id"] in {"old", "new"}]
     assert new["relation"] == MappingRelation.RENAMED
-    assert new["method"] == "LOCAL_AXIS_ROLE_LABEL_CONTINUITY"
+    assert new["method"] == "CUSTOM_SEMANTIC_NETWORK_CONTINUITY"
     assert new["company_canonical_id"] == old["company_canonical_id"]
     assert new["confidence"] == 0.9
     assert new["review_required"] is False

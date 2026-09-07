@@ -188,6 +188,51 @@ The automatic confirmation boundary is intentionally narrow:
 - text or label agreement alone yields `UNCERTAIN`, a distinct canonical ID,
   `REVIEW_REQUIRED`, and an `UNKNOWN_CHANGE` event.
 
+### Custom continuity v3 — qualified network evidence
+
+`l2-m2-company-canonical-v3` fixes an adapter failure: Raw relationships retain
+filing-scoped `role_id`, while the actual URI is in the Raw Role table. T1, T2
+and the as-filed producer now supply both tables to the canonicalizer and join
+them on `(filing_id, role_id)`. A filing-specific role hash is never evidence
+that two custom structures differ or agree.
+
+Within one CIK, the latest custom entity with the same local name can continue
+only with explicit matching labels; complete equal period/type/balance/abstract
+metadata; the same namespace owner/family; and the same nonempty qualified
+network signature. Both unchanged namespaces (`SAME`) and explicit annual/date
+version changes (`RENAMED`) are supported. Only a terminal four-digit year or
+valid eight-digit calendar date is normalized; other namespace paths remain
+distinct. A role or targetRole may normalize its version only when it starts
+with the exact source custom namespace followed by `/`; its full remaining
+suffix and owner are unchanged. Original URIs and relationship IDs remain
+mapping evidence.
+
+The signature retains relationship direction, PRE/CAL/DEF type, supported
+arcrole, link/arc QName, both qualified endpoint identities and semantics,
+targetRole, calculation weight and dimensional usable/closed/context-element
+attributes. It is not merely a shared role title. Different parent axes or
+domains cannot join members that happen to have the same label. Unsupported
+arcroles, missing role/base-set/endpoint evidence, or changed neighborhoods
+remain review-required. Exact standard label/reference resource arcroles are
+excluded from structural evidence but preserved Raw; labels alone cannot
+establish continuity.
+
+Same-filing ambiguous custom local identities remain separate and reviewed.
+The matcher cannot jump over a changed latest custom identity to reuse an older
+convenient structure. Rejection evidence identifies missing explicit labels,
+changed labels, incompatible raw semantic fingerprints, namespace-family
+changes, missing complete network evidence, and changed qualified structures.
+Resolved data-type strings currently compare exactly; lexical type-prefix
+differences without retained type-namespace evidence are conservative breaks,
+not guessed equivalences.
+
+Consumer publications must be rebuilt with the new mapping run version, not
+retagged from old unlinked panels. The T5 reader caches only immutable graph,
+Fact and placement indexes per attested publication object; version/as-of
+selection still runs for each request and returned nested data are defensive
+copies. Custom concepts, axes and members remain reported-only for quarter
+arithmetic: this mapping change does not broaden the approved additive registry.
+
 Structural events are provenance rows, not inferred accounting facts.  New
 raw entities emit `NEW_CONCEPT`, `NEW_AXIS`, or `NEW_MEMBER`; member renames,
 documented recasts, splits, and merges emit their controlled event types.

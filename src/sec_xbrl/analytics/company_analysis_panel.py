@@ -41,6 +41,31 @@ class CompanyAnalysisPanelBuilder:
 
     def __init__(self) -> None:
         self._graph_reader = ExplorationGraphReader()
+        self._indexed_graph: VerifiedLayer2Publication | None = None
+        self._indexes: tuple[dict[str, Any], dict[Any, Any], dict[Any, Any]] | None = None
+
+    def _graph_indexes(self, exploration: VerifiedLayer2Publication):
+        if self._indexed_graph is exploration:
+            return self._indexes
+        nodes = {str(row["analysis_exploration_node_id"]): dict(row)
+                 for row in exploration.records(ExplorationGraphReader.node_dataset)}
+        facts = {(str(row.get("source_filing_id")), str(row.get("source_fact_id"))): row
+                 for row in nodes.values() if row.get("node_kind") == "FACT"}
+        placement: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for edge in exploration.records(ExplorationGraphReader.edge_dataset):
+            if edge.get("source_network_type") != "PRE":
+                continue
+            kinds = tuple(kind for kind in ("IS", "BS", "CF", "EQ") if _qualifying_statement_role(edge, kind))
+            if not kinds:
+                continue
+            for endpoint in (edge.get("from_node_id"), edge.get("to_node_id")):
+                node = nodes.get(str(endpoint), {})
+                if node.get("node_kind") == "CONCEPT":
+                    key = (str(edge.get("source_filing_id")), str(node.get("raw_id")))
+                    placement.setdefault(key, []).append({"statement_types": kinds, **dict(edge)})
+        self._indexed_graph = exploration
+        self._indexes = (nodes, facts, placement)
+        return self._indexes
 
     def build(
         self,
@@ -69,28 +94,7 @@ class CompanyAnalysisPanelBuilder:
         _validate_selection_scope(
             selected, cik, fiscal_year, fiscal_quarter, period_class, view, as_of_date
         )
-        nodes = {
-            str(row["analysis_exploration_node_id"]): dict(row)
-            for row in exploration.records(ExplorationGraphReader.node_dataset)
-        }
-        facts = {
-            (str(row.get("source_filing_id")), str(row.get("source_fact_id"))): row
-            for row in nodes.values()
-            if row.get("node_kind") == "FACT"
-        }
-        placement: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        for edge in exploration.records(ExplorationGraphReader.edge_dataset):
-            if edge.get("source_network_type") != "PRE":
-                continue
-            kinds = tuple(kind for kind in ("IS", "BS", "CF", "EQ") if _qualifying_statement_role(edge, kind))
-            if not kinds:
-                continue
-            for endpoint in (edge.get("from_node_id"), edge.get("to_node_id")):
-                node = nodes.get(str(endpoint), {})
-                if node.get("node_kind") != "CONCEPT":
-                    continue
-                key = (str(edge.get("source_filing_id")), str(node.get("raw_id")))
-                placement.setdefault(key, []).append({"statement_types": kinds, **dict(edge)})
+        nodes, facts, placement = self._graph_indexes(exploration)
         definitions: list[dict[str, Any]] = []
         bindings: list[dict[str, Any]] = []
         values: list[dict[str, Any]] = []

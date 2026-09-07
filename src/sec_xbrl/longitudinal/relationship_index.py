@@ -88,6 +88,7 @@ class FilingRelationshipIndexPipeline:
                 concepts=concepts[cik],
                 dimension_facts=dimensions[cik],
                 relationships=relationships[cik],
+                roles=[role for filing in filings[cik] for role in roles_by_filing[str(filing["filing_id"])].values()],
             )
             # Mapping records are embedded as endpoint lineage on each edge.
             # T2 does not republish the full maps, which are independently

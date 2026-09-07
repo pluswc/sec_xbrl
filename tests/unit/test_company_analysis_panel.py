@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 import pytest
 
 from sec_xbrl.analytics import (
@@ -256,3 +258,22 @@ def test_query_returns_defensive_copies_and_does_not_calculate_metrics(tmp_path)
     first["value"]["value_numeric"] = "changed"
     assert query.rows()[0]["value"]["value_numeric"] == "18120000000"
     assert "qoq" not in query.rows()[0]["value"]
+
+
+def test_cached_graph_indexes_are_defensive_and_refresh_for_new_publication(tmp_path) -> None:
+    builder = CompanyAnalysisPanelBuilder()
+    graph = _graph(tmp_path / "first")
+    args = {"selected_rows": (_selected(TOTAL), _selected(DETAIL, dimensions=(("axis:product", "member:data-center", None, "EXPLICIT", False),))),
+            "exploration": graph, "cik": CIK, "fiscal_year": 2024, "fiscal_quarter": 3,
+            "period_class": "QTD_3M", "view": "LATEST_REPORTED", "as_of_date": "2023-11-21"}
+    first = builder.build(**args)
+    expected = deepcopy(first)
+    first.bindings[1]["relationship_navigation"][0]["mutated"] = True
+    first.values[0]["value_numeric"] = "changed"
+    assert builder.build(**args) == expected
+    with pytest.raises(CompanyAnalysisPanelError, match="view/as-of"):
+        builder.build(**{**args, "as_of_date": "2024-01-01"})
+    other = _graph(tmp_path / "other", snapshot_id="snap:other")
+    with pytest.raises(CompanyAnalysisPanelError, match="source_snapshot_id"):
+        builder.build(**{**args, "exploration": other})
+    assert builder._indexed_graph is other

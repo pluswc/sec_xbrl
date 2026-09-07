@@ -112,6 +112,7 @@ class AsFiledPublicationPipeline:
         concepts_by_cik: dict[str, list[dict[str, Any]]] = defaultdict(list)
         dimensions_by_cik: dict[str, list[dict[str, Any]]] = defaultdict(list)
         relationships_by_cik: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        roles_by_cik: dict[str, list[dict[str, Any]]] = defaultdict(list)
         raw_provenance_by_fact: dict[tuple[str, str], dict[str, Any]] = {}
 
         period_materializer = PeriodObservationMaterializer()
@@ -141,6 +142,7 @@ class AsFiledPublicationPipeline:
             dimensions_by_cik[cik].extend(snapshot.records("dimension_fact"))
             relationships = snapshot.records("relationship")
             relationships_by_cik[cik].extend(relationships)
+            roles_by_cik[cik].extend(snapshot.records("role"))
             facts = snapshot.records("fact")
             raw_provenance_by_fact.update(_raw_fact_provenance(filing, facts, snapshot.records("context")))
 
@@ -155,6 +157,7 @@ class AsFiledPublicationPipeline:
                 concepts=concepts_by_cik[cik],
                 dimension_facts=dimensions_by_cik[cik],
                 relationships=relationships_by_cik[cik],
+                roles=roles_by_cik[cik],
             )
             datasets["company_concept_map"].extend(mappings.company_concept_map)
             datasets["company_axis_map"].extend(mappings.company_axis_map)
