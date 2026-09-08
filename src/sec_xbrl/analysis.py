@@ -799,8 +799,9 @@ if(data.parent_cells.length){let caption=document.createElement('p');caption.tex
 if(data.excluded_count){let note=document.createElement('p');note.textContent=data.excluded_count+'개 항목은 현재 중요 항목 목록에서 제외됨';el.append(note);}
 function page(){let group=data.children.slice(offset,offset+5);offset+=group.length;
 for(let n of group){let det=document.createElement('details'),summary=document.createElement('summary'),ev=n.importance||{},labels={TOP_AMOUNT:'금액 상위',USER_PINNED:'고정 항목',SIGN_TRANSITION:'손익 부호 전환',BASIS_WARNING:'보고 기준 변경',CRITICAL_SOURCE_WARNING:'원천 검토 경고',ABRUPT_RATE_AND_MATERIAL_CHANGE:'큰 금액·비율 변화',REFERENCE_PERIOD_UNAVAILABLE_FORMER_TOP_AMOUNT:'최신 분기 값 미준비 · 과거 주요 항목',STRUCTURAL_NAVIGATION:'세부 경로'};summary.textContent=n.label+' · '+(n.importance_reasons||[]).map(x=>labels[x]||x).join(', ')+(ev.parent_share===null?' · 구성비 검토 필요':ev.parent_share?' · 구성비 '+Number(ev.parent_share).toFixed(1)+'%':'');det.append(summary);
-let evidence=document.createElement('pre');evidence.textContent=JSON.stringify({importance_reasons:n.importance_reasons,reference_importance:ev,importance_history:n.importance_history},null,2);det.append(evidence);
 let cells=data.cells.filter(c=>c.node_id===n.node_id);if(cells.length)det.append(tableFor(cells));
+let reason=document.createElement('p');reason.textContent=(n.importance_reasons||[]).map(x=>labels[x]||x).join(' · ');det.append(reason);
+let proof=document.createElement('details'),proofTitle=document.createElement('summary'),evidence=document.createElement('pre');proofTitle.textContent='중요도 판단 근거';evidence.textContent=JSON.stringify({importance_reasons:n.importance_reasons,reference_importance:ev,importance_history:n.importance_history},null,2);proof.append(proofTitle,evidence);det.append(proof);
 if(n.has_children){det.classList.add('branch');det.dataset.node=n.branch_key;det.dataset.path=JSON.stringify([...path,id]);}el.append(det);}
 if(offset<data.children.length){let more=document.createElement('button');more.textContent='다음 5개 펼치기 ('+(data.children.length-offset)+'개 남음)';more.onclick=()=>{more.remove();page();};el.append(more);}}
 page();}

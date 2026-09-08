@@ -116,3 +116,153 @@ def test_change_basis_break_is_critical_and_unknown_basis_is_only_warning():
     current = next(row for row in rows if row["child_id"] == "c6" and row["fiscal_year"] == 2026)
     assert current["change_reason"] == "INCOMPATIBLE_COMPARISON_SCOPE"
     assert "BASIS_WARNING" in current["reasons"]
+
+
+def share_case(tmp_path, *, quarter=None, start="2026-10-01", end="2027-01-01"):
+    """An explicit reviewed decomposition over independently sourced amounts."""
+    nodes, edges, cells, parents = graph()
+    nodes, edges = nodes[:3], edges[:2]
+    cells = [c for c in cells if c["fiscal_year"] == 2026 and c["node_id"] in {"c1", "c2"}]
+    parents = [c for c in parents if c["fiscal_year"] == 2026]
+    traces = []
+    for c in [*cells, *parents]:
+        c.update(fiscal_quarter=quarter or 1, start=start, end=end)
+        source = {'source_filing_id': "filing", 'selected_source_fact_id': c["cell_id"],
+                      'company_canonical_concept_id': c["node_id"], 'canonical_dimension_signature': [],
+                      'context_start_date': start, 'context_end_date': end, 'source_type': "REPORTED",
+                      'unit_numerator_measures': UNIT[0], 'unit_denominator_measures': UNIT[1],
+                      'period_class': "QTD_3M", 'value_numeric': c["value"]}
+        if quarter:
+            classes = {2: ("YTD_6M", "QTD_3M"), 3: ("YTD_9M", "YTD_6M"), 4: ("FY", "YTD_9M")}[quarter]
+            later = {**source, "context_start_date": "2026-01-01", "period_class": classes[0],
+                     "source_filing_id": "later", "value_numeric": str(int(c["value"]) + 1000)}
+            earlier = {**source, "context_start_date": "2026-01-01", "context_end_date": start,
+                       "period_class": classes[1], "source_filing_id": "earlier", "value_numeric": "1000",
+                       "selected_source_fact_id": c["cell_id"] + "-earlier"}
+            source.update(source_type="DERIVED_QUARTER", reported_or_derived="DERIVED",
+                          derivation_rule_version="approved-core-cumulative-difference-v1",
+                          semantic_review_state="REVIEWED_ADDITIVE_AMOUNT",
+                          policy_registry="CONTROLLED_STANDARD_STATEMENT_ALLOWLIST",
+                          formula=" - ".join(classes), source_inputs=[later, earlier])
+            c["status"] = "DERIVED"
+        traces.append({"cell_id": c["cell_id"], "value_lineage": source})
+    for edge in edges:
+        edge["periods"] = [[2026, quarter or 1]]
+    pairs = sorted([[s["source_filing_id"], s["context_start_date"], s["context_end_date"]]
+                    for s in traces[0]["value_lineage"].get("source_inputs", [traces[0]["value_lineage"]])], key=repr)
+    binding = {'fiscal_year': 2026, 'fiscal_quarter': quarter or 1, 'parent_cell_id': parents[0]["cell_id"],
+                   'child_cell_ids': {c["node_id"]: c["cell_id"] for c in cells}, 'parent_dimensions': [],
+                   'child_dimensions': {c["node_id"]: [] for c in cells}, 'parent_source_period_pairs': pairs,
+                   'child_source_period_pairs': {c["node_id"]: deepcopy(pairs) for c in cells},
+                   'actual_start': start, 'actual_end': end, 'period_class': "QTD_3M", 'classification_basis': "products"}
+    evidence = tmp_path / "review.txt"
+    evidence.write_text("explicit complete mutually exclusive economic decomposition")
+    rule = {'parent_node_id': "lens", 'review_id': "r", 'reviewer': "admin", 'reviewed_at': "2027-02-01T00:00:00Z",
+                'evidence_path': str(evidence), 'evidence_sha256': hashlib.sha256(evidence.read_bytes()).hexdigest(),
+                'classification_basis': "products", 'complete_mutually_exclusive': True, 'bindings': [binding]}
+    return {'nodes': nodes, 'edges': edges, 'cells': cells, 'core_cells': parents, 'traces': traces,
+                'configuration': {"economic_decompositions": [rule]}, 'review_cutoff': "2027-02-02T00:00:00Z"}
+
+
+def test_aliases_and_duplicate_raw_scope_cannot_receive_shares(tmp_path):
+    base = share_case(tmp_path)
+    for kind in ("alias", "fact", "scope", "parent"):
+        args = deepcopy(base)
+        binding = args["configuration"]["economic_decompositions"][0]["bindings"][0]
+        if kind == "alias":
+            args["nodes"][2]["value_node_id"] = "c1"
+            args["cells"] = args["cells"][:1]
+            binding["child_cell_ids"]["c2"] = binding["child_cell_ids"]["c1"]
+        elif kind == "parent":
+            args["core_cells"].append({**args["core_cells"][0], "cell_id": "ambiguous", "value": "1"})
+        elif kind == "fact":
+            args["traces"][1]["value_lineage"]["selected_source_fact_id"] = args["traces"][0]["value_lineage"]["selected_source_fact_id"]
+        else:
+            args["traces"][1]["value_lineage"]["company_canonical_concept_id"] = "c1"
+        assert all(r["share_status"] == "UNAVAILABLE" for r in materialize_importance(**args)), kind
+
+
+def test_review_schema_and_aware_cutoff_fail_closed(tmp_path):
+    base = share_case(tmp_path)
+    for key, invalid in (("complete_mutually_exclusive", "false"), ("complete_mutually_exclusive", 1),
+                         ("reviewer", " "), ("reviewer", True), ("reviewed_at", "2027-02-01"),
+                         ("reviewed_at", "2027-02-03T00:00:00Z"), ("bindings", [None])):
+        args = deepcopy(base)
+        args["configuration"]["economic_decompositions"][0][key] = invalid
+        assert {r["share_reason"] for r in materialize_importance(**args)} == {"INVALID_REVIEW_EVIDENCE"}
+    for cutoff in (None, "2027-02-02", "bad"):
+        assert {r["share_reason"] for r in materialize_importance(**{**base, "review_cutoff": cutoff})} == {"INVALID_REVIEW_EVIDENCE"}
+
+
+def test_complete_governed_quarters_and_53_week_q4_recalculate(tmp_path):
+    from decimal import Decimal
+
+    for quarter, start, end in ((2, "2026-04-01", "2026-07-01"), (3, "2026-07-01", "2026-10-01"),
+                                (4, "2026-10-01", "2027-01-01"), (4, "2026-10-01", "2027-01-08")):
+        args = share_case(tmp_path, quarter=quarter, start=start, end=end)
+        rows = materialize_importance(**args)
+        parent_inputs = args["traces"][-1]["value_lineage"]["source_inputs"]
+        parent = Decimal(parent_inputs[0]["value_numeric"]) - Decimal(parent_inputs[1]["value_numeric"])
+        for row, trace in zip(rows, args["traces"], strict=False):
+            left, right = trace["value_lineage"]["source_inputs"]
+            assert row["share_status"] == "AVAILABLE"
+            assert Decimal(row["parent_share"]) == (Decimal(left["value_numeric"]) - Decimal(right["value_numeric"])) / parent * 100
+
+
+def test_derived_share_rejects_invented_or_misaligned_derivations(tmp_path):
+    base = share_case(tmp_path, quarter=4)
+    for kind in ("display", "formula", "rule", "approval", "status", "order", "count", "fy_fy", "start", "amount", "unit", "dimensions"):
+        args = deepcopy(base)
+        for trace in args["traces"]:
+            line = trace["value_lineage"]
+            if kind == "formula": line["formula"] = "FY + YTD_9M"
+            elif kind == "rule": line["derivation_rule_version"] = "mechanical-candidate"
+            elif kind == "approval": line.pop("semantic_review_state")
+            elif kind == "status": line["source_inputs"][0]["source_type"] = "UNAVAILABLE"
+            elif kind == "order": line["source_inputs"].reverse()
+            elif kind == "count": line["source_inputs"].append(deepcopy(line["source_inputs"][0]))
+            elif kind == "fy_fy": line["source_inputs"][1]["period_class"] = "FY"
+            elif kind == "start": line["source_inputs"][1]["context_start_date"] = "2026-02-01"
+            elif kind == "amount": line["source_inputs"][0]["value_numeric"] = "9999"
+            elif kind == "unit": line["source_inputs"][1]["unit_numerator_measures"] = '["iso4217:EUR"]'
+            elif kind == "dimensions": line["source_inputs"][1]["canonical_dimension_signature"] = [["axis", "member"]]
+        if kind == "display":
+            for c in args["cells"] + args["core_cells"]:
+                c.update(start="2026-01-01", end="2026-04-01")
+            args["configuration"]["economic_decompositions"][0]["bindings"][0].update(actual_start="2026-01-01", actual_end="2026-04-01")
+        assert all(r["share_status"] == "UNAVAILABLE" for r in materialize_importance(**args)), kind
+
+
+def test_reported_instant_and_reviewed_q4_positive_amounts(tmp_path):
+    from decimal import Decimal
+
+    for kind in ("reported", "instant", "reviewed_q4"):
+        args = share_case(tmp_path, quarter=4 if kind == "reviewed_q4" else None)
+        if kind == "instant":
+            for c in args["cells"] + args["core_cells"]:
+                c.update(start=None, period_class="INSTANT")
+            for trace in args["traces"]:
+                line = trace["value_lineage"]
+                line.update(context_start_date=None, context_instant_date=line.pop("context_end_date"))
+            binding = args["configuration"]["economic_decompositions"][0]["bindings"][0]
+            binding.update(actual_start=None, period_class="INSTANT", parent_source_period_pairs=[["filing", None, "2027-01-01"]],
+                           child_source_period_pairs={c: [["filing", None, "2027-01-01"]] for c in ("c1", "c2")})
+        elif kind == "reviewed_q4":
+            for trace in args["traces"]:
+                trace["value_lineage"].update(derivation_rule_version="disclosure-review-v1", source_type="DERIVED_METRIC",
+                                             value_status="DERIVED", metric_id="QUARTERLY_ADDITIVE_FLOW",
+                                             calculation_decision_id="approved-decision", compatibility_result="COMPATIBLE_INPUTS")
+        rows = materialize_importance(**args)
+        assert [Decimal(r["parent_share"]) for r in rows] == [Decimal(600) / 2100 * 100, Decimal(500) / 2100 * 100]
+
+
+def test_missing_malformed_or_unbound_source_period_is_unavailable(tmp_path):
+    for invalid in ([], [None], "invalid", [{"source_filing_id": None}], [{"source_filing_id": ["bad"]}]):
+        args = share_case(tmp_path, quarter=4)
+        args["traces"][0]["value_lineage"]["source_inputs"] = invalid
+        assert all(r["share_status"] == "UNAVAILABLE" for r in materialize_importance(**args))
+    args = share_case(tmp_path)
+    args["traces"][0]["value_lineage"]["context_end_date"] = "2027-02-01"
+    binding = args["configuration"]["economic_decompositions"][0]["bindings"][0]
+    binding["child_source_period_pairs"]["c1"][0][2] = "2027-02-01"
+    assert all(r["share_status"] == "UNAVAILABLE" for r in materialize_importance(**args))

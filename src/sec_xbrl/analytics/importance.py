@@ -9,7 +9,7 @@ import hashlib
 import json
 import re
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -40,7 +40,10 @@ def materialize_importance(
     cell_by_node_period: dict[tuple[str, int, int], list[dict[str, Any]]] = defaultdict(list)
     for cell in cells:
         cell_by_node_period[(cell["node_id"], cell["fiscal_year"], cell["fiscal_quarter"])].append(cell)
-    core_by_row_period = {(c["row_id"], c["fiscal_year"], c["fiscal_quarter"]): c for c in core_cells}
+    core_candidates: dict[tuple[str, int, int], list[dict[str, Any]]] = defaultdict(list)
+    for cell in core_cells:
+        core_candidates[(cell["row_id"], cell["fiscal_year"], cell["fiscal_quarter"])].append(cell)
+    core_by_row_period = {key: rows[0] for key, rows in core_candidates.items() if len(rows) == 1}
     children: dict[str, set[str]] = defaultdict(set)
     edge_periods: dict[tuple[str, str], set[tuple[int, int]]] = defaultdict(set)
     for edge in edges:
@@ -244,20 +247,33 @@ def _reviewed_shares(
         return output
     rule = matching[0]
     required = ("review_id", "reviewer", "reviewed_at", "evidence_path", "evidence_sha256", "classification_basis", "complete_mutually_exclusive", "bindings")
-    if any(not rule.get(key) for key in required) or not _HEX_64.fullmatch(str(rule["evidence_sha256"])):
+    if (any(not rule.get(key) for key in required)
+            or rule.get("complete_mutually_exclusive") is not True
+            or any(not isinstance(rule.get(key), str) or not rule[key].strip()
+                   for key in required if key not in {"complete_mutually_exclusive", "bindings"})
+            or not isinstance(rule.get("bindings"), list)
+            or not _HEX_64.fullmatch(str(rule["evidence_sha256"]))):
         return {(period, child): _unavailable_share("INVALID_REVIEW_EVIDENCE") for period in periods for child in child_ids}
     try:
         reviewed_at = datetime.fromisoformat(str(rule["reviewed_at"]))
         cutoff = datetime.fromisoformat(review_cutoff) if review_cutoff else None
+        if cutoff is None or reviewed_at.utcoffset() is None or cutoff.utcoffset() is None or reviewed_at > cutoff:
+            raise ValueError("review requires an aware publication cutoff")
         evidence_path = Path(rule["evidence_path"])
         evidence_valid = evidence_path.is_file() and hashlib.sha256(evidence_path.read_bytes()).hexdigest() == rule["evidence_sha256"]
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OSError):
         return {(period, child): _unavailable_share("INVALID_REVIEW_EVIDENCE") for period in periods for child in child_ids}
-    if not rule["complete_mutually_exclusive"] or not evidence_valid or (cutoff and reviewed_at > cutoff):
+    if not evidence_valid:
         return {(period, child): _unavailable_share("INVALID_REVIEW_EVIDENCE") for period in periods for child in child_ids}
     by_period: dict[tuple[int, int], list[dict[str, Any]]] = defaultdict(list)
     for binding in rule["bindings"]:
-        by_period[(int(binding["fiscal_year"]), int(binding["fiscal_quarter"]))].append(binding)
+        if (not isinstance(binding, dict)
+                or any(type(binding.get(key)) is not int for key in ("fiscal_year", "fiscal_quarter"))
+                or binding["fiscal_quarter"] not in {1, 2, 3, 4}
+                or any(not isinstance(binding.get(key), dict) for key in
+                       ("child_cell_ids", "child_dimensions", "child_source_period_pairs"))):
+            return {(period, child): _unavailable_share("INVALID_REVIEW_EVIDENCE") for period in periods for child in child_ids}
+        by_period[(binding["fiscal_year"], binding["fiscal_quarter"])].append(binding)
     for period in periods:
         bindings = by_period.get(period, [])
         if len(bindings) != 1:
@@ -271,6 +287,10 @@ def _reviewed_shares(
         if set(bound_children) != child_ids or set(cells) != child_ids:
             for child in child_ids:
                 output[(period, child)] = _unavailable_share("INCOMPLETE_DECOMPOSITION")
+            continue
+        if _duplicate_values(list(cells.values()), trace_by_cell):
+            for child in child_ids:
+                output[(period, child)] = _unavailable_share("DUPLICATE_DECOMPOSITION_VALUE")
             continue
         parent_cell = parent_cells_by_period.get(period)
         if parent_cell is None or parent_cell.get("cell_id") != binding.get("parent_cell_id"):
@@ -355,17 +375,106 @@ def _reviewed_shares(
 def _source_period_pairs(cell: dict[str, Any], trace_by_cell: dict[str, dict[str, Any]]) -> list[list[Any]]:
     lineage = trace_by_cell.get(cell.get("cell_id"), {})
     inputs = lineage.get("source_inputs") or [lineage]
+    if not isinstance(inputs, list) or any(not isinstance(row, dict) for row in inputs):
+        return [[None, None, None]]
     return sorted([[row.get("source_filing_id"), row.get("context_start_date"),
                     row.get("context_end_date") or row.get("context_instant_date")] for row in inputs], key=repr)
 
 
+def _duplicate_values(cells: list[dict[str, Any]], traces: dict[str, dict[str, Any]]) -> bool:
+    """Presentation aliases must not count the same underlying value twice."""
+    seen: set[tuple[str, str]] = set()
+    for cell in cells:
+        lineage = traces.get(cell.get("cell_id"), {})
+        inputs = lineage.get("source_inputs") or [lineage]
+        identities = [("cell", str(cell.get("cell_id"))), ("value_node", str(cell.get("node_id")))]
+        for source in inputs if isinstance(inputs, list) else []:
+            if not isinstance(source, dict):
+                continue
+            if source.get("selected_source_fact_id"):
+                identities.append(("fact", json.dumps([source.get("source_filing_id"), source["selected_source_fact_id"]])))
+            concept = source.get("company_canonical_concept_id") or source.get("raw_concept_id")
+            if concept:
+                identities.append(("scope", json.dumps([
+                    source.get("source_filing_id"), concept,
+                    sorted(source.get("canonical_dimension_signature") or source.get("raw_dimension_signature") or [], key=repr),
+                    source.get("context_start_date"), source.get("context_end_date"), source.get("context_instant_date"),
+                    source.get("unit_numerator_measures"), source.get("unit_denominator_measures"),
+                ], sort_keys=True)))
+        if any(identity in seen for identity in identities):
+            return True
+        seen.update(identities)
+    return False
+
+
 def _complete_source_pairs(cell: dict[str, Any], pairs: list[list[Any]], trace_by_cell: dict[str, dict[str, Any]]) -> bool:
-    if not pairs or any(pair[0] in (None, "") or pair[2] in (None, "") for pair in pairs) or len({tuple(pair) for pair in pairs}) != len(pairs):
-        return False
-    if cell.get("period_class") == "INSTANT":
-        if any(pair[1] not in (None, "") for pair in pairs):
-            return False
-    elif any(pair[1] in (None, "") for pair in pairs):
+    if (not pairs or any(not isinstance(pair[0], str) or not pair[0] or not isinstance(pair[2], str) or not pair[2]
+                         or pair[1] is not None and not isinstance(pair[1], str) for pair in pairs)
+            or len({tuple(pair) for pair in pairs}) != len(pairs)):
         return False
     lineage = trace_by_cell.get(cell.get("cell_id"), {})
-    return not (cell.get("status") == "DERIVED" and len(lineage.get("source_inputs") or []) < 2)
+    try:
+        end = date.fromisoformat(cell["end"])
+        if cell.get("status") == "REPORTED":
+            if len(pairs) != 1 or date.fromisoformat(pairs[0][2]) != end:
+                return False
+            if cell.get("period_class") == "INSTANT":
+                return cell.get("start") is None and pairs[0][1] is None
+            return date.fromisoformat(pairs[0][1]) == date.fromisoformat(cell["start"]) < end
+        if cell.get("status") != "DERIVED" or cell.get("period_class") != "QTD_3M":
+            return False
+        inputs = lineage.get("source_inputs") or []
+        quarter = cell.get("fiscal_quarter")
+        expected = {2: ("YTD_6M", "QTD_3M"), 3: ("YTD_9M", "YTD_6M"), 4: ("FY", "YTD_9M")}.get(quarter)
+        if len(inputs) != 2 or expected is None:
+            return False
+        later, earlier = inputs
+        if tuple(row.get("period_class") for row in inputs) != expected or lineage.get("formula") != " - ".join(expected):
+            return False
+        core_approved = (lineage.get("derivation_rule_version") == "approved-core-cumulative-difference-v1"
+                         and lineage.get("source_type") == "DERIVED_QUARTER"
+                         and lineage.get("reported_or_derived") == "DERIVED"
+                         and lineage.get("semantic_review_state") == "REVIEWED_ADDITIVE_AMOUNT"
+                         and lineage.get("policy_registry") == "CONTROLLED_STANDARD_STATEMENT_ALLOWLIST")
+        review_approved = (quarter == 4 and lineage.get("derivation_rule_version") == "disclosure-review-v1"
+                           and lineage.get("source_type") == "DERIVED_METRIC"
+                           and lineage.get("value_status") == "DERIVED"
+                           and lineage.get("metric_id") == "QUARTERLY_ADDITIVE_FLOW"
+                           and lineage.get("calculation_decision_id")
+                           and lineage.get("compatibility_result") == "COMPATIBLE_INPUTS")
+        if not (core_approved or review_approved):
+            return False
+        start = date.fromisoformat(cell["start"])
+        if (later.get("context_start_date") != earlier.get("context_start_date")
+                or not date.fromisoformat(later["context_start_date"]) < start
+                or date.fromisoformat(earlier["context_end_date"]) != start
+                or date.fromisoformat(later["context_end_date"]) != end
+                or not 75 <= (end - start).days <= 105
+                or (lineage.get("context_start_date"), lineage.get("context_end_date"), lineage.get("period_class"))
+                != (cell["start"], cell["end"], cell["period_class"])):
+            return False
+        # Validate ordered input scope and arithmetic without inferring approval.
+        scope = ("company_canonical_concept_id", "canonical_dimension_signature", "analytical_dimensions",
+                 "unit_numerator_measures", "unit_denominator_measures", "selection_view", "selection_as_of_date",
+                 "basis_version", "structural_version", "recast_version")
+        if (not later.get("company_canonical_concept_id")
+                or any(later.get(key) != earlier.get(key) for key in scope)
+                or any(not row.get("selected_source_fact_id") or row.get("source_type") != "REPORTED"
+                       or row.get("continuity_break") or row.get("recast_review_required") for row in inputs)):
+            return False
+        day_bounds = {"FY": (350, 378), "YTD_9M": (250, 290), "YTD_6M": (160, 200), "QTD_3M": (75, 105)}
+        for row in inputs:
+            days = (date.fromisoformat(row["context_end_date"]) - date.fromisoformat(row["context_start_date"])).days
+            low, high = day_bounds[row["period_class"]]
+            if not low <= days <= high:
+                return False
+            source_unit = [row.get("unit_numerator_measures"), row.get("unit_denominator_measures")]
+            if _currency_unit({"monetary": True, "unit": source_unit}) != _currency_unit(cell):
+                return False
+            dimensions = row.get("analytical_dimensions") or row.get("canonical_dimension_signature") or []
+            if dimensions != cell.get("dimensions"):
+                return False
+        values = [_decimal(row.get("value_numeric")) for row in inputs]
+        return all(value is not None for value in values) and values[0] - values[1] == _amount(cell)
+    except (KeyError, TypeError, ValueError):
+        return False

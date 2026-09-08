@@ -183,3 +183,35 @@ automatically approved, so such shares and interpretations remain review
 required. The optional detailed record is
 `work/u3_acceptance_nflx/EVIDENCE.md`. Frozen-commit independent verification
 and remote publication remain separate completion gates.
+
+## Corrective candidate after independent rejection (2026-09-08)
+
+Independent verification of local candidate `d5bc5406a74a70079847850f53e4ee863cb61e2d`
+found duplicate underlying child values, unvalidated derived source intervals,
+and truthy non-boolean review completeness could incorrectly produce shares.
+The lead escalated the sole implementation role from Sol to Astra because
+repeated corrections had left semantic omissions; the separate Astra verifier
+remains read-only. This records a task-specific escalation, not a model ranking.
+
+The corrective producer rejects aliases of the same cell/value node, raw Fact,
+or complete concept/dimension/source scope. Ambiguous core-parent candidates
+also fail closed. Review completeness must be boolean `true`; reviewer and
+other evidence identifiers must be nonempty strings, and both review time and
+publication cutoff must be timezone-aware with review no later than cutoff.
+Missing, malformed, or unreadable evidence cannot authorize shares.
+
+Reported duration/instant sources must correspond to the displayed actual
+boundaries. Derived shares require an existing governed core cumulative rule
+(Q2=6M−Q1, Q3=9M−6M, Q4=FY−9M), or separately reviewed disclosure Q4 rule,
+with its approval/status/formula metadata, exactly two ordered source legs,
+compatible full scopes, finite matching arithmetic, shared fiscal start and
+correct exclusive output endpoints. The 75–105-day quarter window preserves
+52/53-week calendars. Mechanical candidates and metadata-free subtraction
+cannot authorize a share. No new company review is created by this change.
+
+The HTML child first shows values and a short human-readable importance reason.
+Complete reference/history evidence and exact reason codes remain accessible
+under the initially collapsed “중요도 판단 근거” control. Local commit freeze,
+independent rerun, real-cache artifacts, and remote publication are separate
+gates. Remote push was rejected by automatic approval review for lack of
+external-publishing authorization; this corrective work does not retry it.
