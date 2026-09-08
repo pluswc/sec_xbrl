@@ -292,6 +292,43 @@ class AnalysisClient:
                     if row["parent_id"] == parent_id and (row["fiscal_year"], row["fiscal_quarter"]) in periods and row["child_id"] in linked}
         return selected, False
 
+    def _hierarchy_records(self, ticker: str, name: str, filing_id: str | None = None) -> list[dict]:
+        key = (ticker.upper(), "HIERARCHY", filing_id, name)
+        if key not in self._cache:
+            try:
+                info = self.manifest["companies"][ticker.upper()]["hierarchy"]
+                files = info["filings"][filing_id]["files"] if filing_id else info["files"]
+                self._cache[key] = _table(self.root, files[name])
+            except KeyError as exc:
+                raise ValueError("hierarchy dataset not prepared in this publication") from exc
+        return self._cache[key]
+
+    def statement_catalog(self, ticker: str, *, section: str | None = None) -> dict:
+        from sec_xbrl.analytics.hierarchy_queries import statement_catalog
+        return statement_catalog(self, ticker, section=section)
+
+    def statement(self, ticker: str, table_id: str) -> dict:
+        from sec_xbrl.analytics.hierarchy_queries import statement
+        return statement(self, ticker, table_id)
+
+    def pre_table(self, ticker: str, table_id: str) -> dict:
+        from sec_xbrl.analytics.hierarchy_queries import pre_table
+        return pre_table(self, ticker, table_id)
+
+    def axes(self, ticker: str, filing_id: str, *, raw_concept_id: str | None = None) -> dict:
+        from sec_xbrl.analytics.hierarchy_queries import axes
+        return axes(self, ticker, filing_id, raw_concept_id=raw_concept_id)
+
+    def member_metrics(self, ticker: str, filing_id: str, *, axis_id: str, member_id: str | None,
+                       typed_value: str | None = None, raw_concept_id: str | None = None) -> dict:
+        from sec_xbrl.analytics.hierarchy_queries import member_metrics
+        return member_metrics(self, ticker, filing_id, axis_id=axis_id, member_id=member_id,
+                              typed_value=typed_value, raw_concept_id=raw_concept_id)
+
+    def importance_v2(self, ticker: str, *, view: str = "LATEST_REPORTED") -> dict:
+        return copy.deepcopy({"policy": self.manifest["importance_v2_policy"],
+                              "records": self._records(ticker, view, "importance_v2")})
+
     def target_status(self, ticker: str) -> dict:
         """Return the persisted preparation outcome without interpreting absence."""
         ticker = ticker.upper()

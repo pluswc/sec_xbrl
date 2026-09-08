@@ -4,9 +4,10 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import defaultdict
+from collections.abc import Iterable, Mapping
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 CAL_CHECK_VERSION = "h1-signed-calculation-v1"
 NETWORK_FIELDS = ("filing_id", "role_id", "role_uri", "arcrole", "link_qname", "arc_qname")
@@ -48,8 +49,10 @@ def validate_fact(fact: Mapping[str, Any]) -> None:
     period = scope["period"]
     if not isinstance(period, Mapping) or not {"type", "start", "end", "instant", "class"} <= period.keys():
         raise ValueError("CAL requires complete period")
-    if not isinstance(period["class"], str) or not period["class"]:
+    if period["class"] not in {"INSTANT", "QTD_3M", "YTD_6M", "YTD_9M", "FY", "TTM", "OTHER_DURATION"}:
         raise ValueError("CAL requires period class")
+    if (period["type"] == "instant") != (period["class"] == "INSTANT"):
+        raise ValueError("period type/class mismatch")
     if period["type"] == "instant":
         date.fromisoformat(period["instant"])
         if period["start"] is not None or period["end"] is not None:
@@ -69,7 +72,7 @@ def validate_fact(fact: Mapping[str, Any]) -> None:
         raise ValueError("unit numerator is required")
     dimensions = scope["dimensions"]
     if not isinstance(dimensions, list):
-        raise ValueError("complete dimensions are required")
+        raise TypeError("complete dimensions are required")
     axes = set()
     for dim in dimensions:
         if not isinstance(dim, Mapping) or not {"axis", "member", "typed_value", "is_default"} <= dim.keys():
@@ -78,6 +81,8 @@ def validate_fact(fact: Mapping[str, Any]) -> None:
             raise ValueError("duplicate/missing axis")
         if not isinstance(dim["is_default"], bool) or (dim["member"] is None) == (dim["typed_value"] is None):
             raise ValueError("invalid explicit/typed dimension")
+        if any(v is not None and (not isinstance(v, str) or not v.strip()) for v in (dim["member"], dim["typed_value"])):
+            raise ValueError("empty or invalid dimension value")
         axes.add(dim["axis"])
 
 
@@ -116,7 +121,15 @@ def materialize_signed_calculation_checks(
         if not parents:
             results.append(_check(None, arcs, by_concept))
         for parent in sorted(parents, key=lambda r: r["fact_id"]):
-            results.append(_check(parent, arcs, by_concept))
+            result = _check(parent, arcs, by_concept)
+            peers = [p["fact_id"] for p in parents if p["scope"] == parent["scope"]]
+            result["parent_candidate_fact_ids"] = peers
+            if len(peers) > 1:
+                result["status"] = "AMBIGUOUS_PARENT"
+                result["issues"].append("AMBIGUOUS_PARENT")
+                result["calculated_value"] = None
+                result["difference_calculated_minus_reported"] = None
+            results.append(result)
     return results
 
 

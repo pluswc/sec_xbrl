@@ -70,3 +70,19 @@ def test_baseset_separation(field):
 @pytest.mark.parametrize("value", [None, "NaN", "Infinity", "-Infinity"])
 def test_nonfinite(value):
     assert checks(facts=[fact("parent", "0"), fact("child", value)], relationships=[arc()])[0]["status"] == "NONFINITE_OR_NIL_INPUT"
+
+
+def test_ambiguous_parent_never_certifies_one_duplicate():
+    parent = fact("parent", "-1")
+    other = {**parent, "fact_id": "other-parent", "value_numeric": "-2"}
+    results = checks(facts=[parent, other, fact("child", "1")], relationships=[arc()])
+    assert {r["status"] for r in results} == {"AMBIGUOUS_PARENT"}
+    assert all(r["calculated_value"] is None for r in results)
+
+
+@pytest.mark.parametrize("period_class", ["INSTANT", "bogus"])
+def test_malformed_period_class(period_class):
+    f = fact("parent", "0")
+    f["scope"]["period"]["class"] = period_class
+    with pytest.raises(ValueError):
+        checks(facts=[f], relationships=[arc()])
