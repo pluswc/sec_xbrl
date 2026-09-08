@@ -26,6 +26,7 @@ try {
   for (const ticker of ['NVDA', 'AMD', 'MSFT', 'AMZN', 'AAPL', 'NFLX']) {
     await page.selectOption('#company', ticker);
     await page.waitForFunction(t => window.HIERARCHY_DATA?.filing.cik === window.HIERARCHY_CATALOG[t].filings[0].filing.cik && document.querySelector('#rows tr'), ticker);
+    await page.selectOption('#mode', 'source');
     // Historical filing selection must never lend its heading to the company overview.
     const historical = await page.evaluate(t => window.HIERARCHY_CATALOG[t].filings.at(-1).filing.filing_id, ticker);
     await page.selectOption('#filing', historical);
@@ -37,9 +38,9 @@ try {
       const ctx = window.HIERARCHY_CATALOG[document.querySelector('#company').value].overview.context;
       const visible = document.querySelector('#scope').textContent;
       return {ctx, visible, accession: window.HIERARCHY_DATA.filing.accession,
-        count: document.querySelectorAll('#period-header span').length,
+        count: document.querySelectorAll('#financial-table thead th[data-period]').length,
         coverage: document.querySelector('#coverage').textContent,
-        cells: [...document.querySelectorAll('[data-cell-id]')].map(e => [e.dataset.cellId, e.dataset.rawValue]),
+        cells: [...document.querySelectorAll('[data-cell-id]:not([data-cell-id=""])')].map(e => [e.dataset.cellId, e.dataset.rawValue]),
         expectedCells: window.HIERARCHY_CATALOG[ctx.ticker].overview.cells.map(c => [c.cell_id, c.value ?? ''])};
     });
     for (const value of [ticker, scope.ctx.view, scope.ctx.as_of, scope.ctx.review_cutoff]) {
@@ -72,7 +73,7 @@ try {
       assert.equal(derived.sourceFact, null);assert.equal(derived.filingInputs.length, 2);
       assert(origins.some(c => c.expected === 'REPORTED' && c.text.includes('보고')));
       const row = page.locator('#rows tr').filter({has: page.locator(`[data-cell-id="${derived.id}"]`)});
-      await row.locator('.proof').first().click();
+      await row.getByRole('button', {name: '산식 · 중요도 · 출처', exact: true}).click();
       const evidence = await page.locator('#inspection').textContent();
       for (const input of [derived.id, derived.reason, ...derived.filingInputs]) assert(evidence.includes(input));
       const trace = await page.evaluate(id => window.HIERARCHY_CATALOG.NVDA.traces[id].value_lineage, derived.id);
@@ -88,6 +89,7 @@ try {
       assert((await page.locator('#scope').textContent()).includes(scope.accession));
     }
     await page.selectOption('#mode', 'analytical');
+    await page.selectOption('#mode', 'source');
     await page.selectOption('#explore', 'member');
     assert(await page.locator('#filing').isEnabled());
     assert(await page.locator('#statement').isEnabled());

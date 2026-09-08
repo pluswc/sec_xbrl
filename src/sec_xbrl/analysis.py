@@ -106,6 +106,9 @@ class AnalysisClient:
         if self.manifest["version"] != VERSION:
             raise ValueError("unsupported analysis bundle")
         self._cache: dict[tuple, list[dict]] = {}
+        from sec_xbrl.analytics.axis_timeseries_queries import load_axis_manifest
+        self.axis_manifest = load_axis_manifest(self.root, self.manifest)
+        self._axis_cache: dict[tuple, dict[str, Any]] = {}
 
     def _records(self, ticker: str, view: str, name: str) -> list[dict]:
         key = (ticker.upper(), view, name)
@@ -328,6 +331,23 @@ class AnalysisClient:
     def importance_v2(self, ticker: str, *, view: str = "LATEST_REPORTED") -> dict:
         return copy.deepcopy({"policy": self.manifest["importance_v2_policy"],
                               "records": self._records(ticker, view, "importance_v2")})
+
+    def axis_timeseries(self, ticker: str, lens_id: str, *, context: dict[str, Any]) -> dict[str, Any]:
+        from sec_xbrl.analytics.axis_timeseries_queries import axis_timeseries
+        return axis_timeseries(self, ticker, lens_id, context=context)
+
+    def _axis_json(self, relative: str, expected_sha256: str) -> dict[str, Any]:
+        identity = self.axis_manifest or {}
+        key = (identity.get("publication_id"), identity.get("decision_cutoff"), relative, expected_sha256)
+        if key not in self._axis_cache:
+            path = self.root / relative
+            if not path.is_file() or path.is_symlink() or self.root.resolve() not in path.resolve().parents:
+                raise ValueError("axis review path is outside the publication")
+            payload = path.read_bytes()
+            if hashlib.sha256(payload).hexdigest() != expected_sha256:
+                raise ValueError("axis review checksum mismatch")
+            self._axis_cache[key] = json.loads(payload)
+        return copy.deepcopy(self._axis_cache[key])
 
     def target_status(self, ticker: str) -> dict:
         """Return the persisted preparation outcome without interpreting absence."""

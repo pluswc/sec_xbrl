@@ -46,7 +46,15 @@ def render_hierarchy(client: AnalysisClient, *, destination: Path, source_commit
         overview = client.overview(ticker, fiscal_start=min(info["years"]), fiscal_end=max(info["years"]))
         traces = {c["cell_id"]: client.trace(c["cell_id"], context=overview["context"])["trace"]
                   for c in overview["cells"] if c["status"] in {"REPORTED", "DERIVED"}}
-        catalog[ticker] = {"filings": filings, "warnings": source["warnings"], "as_of": info["as_of"],
+        axis_series = {}
+        for row in overview["rows"]:
+            for lens in client.list_breakdowns(row["row_id"], context=overview["context"])["groups"]:
+                if lens["lens_type"] == "DIMENSIONAL_VIEW":
+                    axis_series[lens["node_id"]] = client.axis_timeseries(ticker, lens["node_id"], context=overview["context"])
+        relative = Path(ticker) / "analytical.js"
+        (destination / relative).write_text("window.AXIS_COMPANY=" + _json(ticker) + ";window.AXIS_DATA=" + _json(axis_series) + ";window.axisLoaded();", encoding="utf-8")
+        catalog[ticker] = {"axis_path": str(relative), "axis_lenses": [
+            {"node_id": a["lens"]["node_id"], "label": a["lens"]["label"], "anchor_row_id": a["lens"]["anchor_row_id"]} for a in axis_series.values()],"filings": filings, "warnings": source["warnings"], "as_of": info["as_of"],
                            "source_review_cutoff": info["review_cutoff"], "importance": client.importance_v2(ticker),
                            "overview": overview, "traces": traces}
     static = Path(__file__).parent
