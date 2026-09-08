@@ -227,3 +227,50 @@ The writer reports full pytest, Ruff, actual browser/API parity and immutable
 hash checks in `VERIFICATION.md` in the generated output directory. A separate
 read-only verifier must certify the final local SHA; interim lead probes and
 writer self-checks are not independent final PASS.
+
+## Independent review F1–F3 display correction
+
+The first frozen candidate `ea336a3b9d012e6a2a99d6f579434c77645fb10d`
+received an independent **FAIL** for three display defects. Its complete final
+bundle/HTML and independent evidence are preserved under generated
+`work/u3_followup_complete/frozen_ea336a3`. The lead authorized the sole writer
+to correct these defects without changing the approved economic scope.
+
+Analytical is a company-publication overview. Its heading now uses the exact
+prepared overview context: company, view, as-of/source selection cutoff, original
+review cutoff, fiscal period range, and recast-comparability warnings. It does
+not claim to be the selected historical filing or a historical as-of query.
+Filing/table controls are disabled there and restored for source/PRE/member
+exploration. Analytical coverage describes its prepared periods and rows, not
+an unrelated source table.
+
+PRE rows now merge mandatory importance warnings by exact current fact ID,
+including sign/base/scope warnings. The existing visibility protection therefore
+keeps these rows visible through ancestor collapse and depth restrictions.
+Warnings on a different fact ID do not transfer merely through a concept label.
+Raw duration labels explicitly say `종료일 제외` in both period headers and value
+cells; instant labels say `시점`. Raw dates are not changed.
+
+These display-only corrections reuse the byte-identical governed bundle and
+its original publication ID. A rebuilt HTML page separately embeds
+`renderer_source_commit`; generated freeze records distinguish this renderer
+source from the bundle-producing commit. No producer recomputation or review
+cutoff adjustment is needed.
+
+The committed opt-in browser regression `tests/browser/hierarchy_regression.mjs`
+tests historical-selection/Analytical transitions for six companies, prepared
+context/value parity, source/PRE/member control restoration, actual AMD tax and
+discontinued-operations warnings, exact-ID synthetic warning isolation through
+collapse/depth, and duration/instant labels. Run with explicit local paths:
+
+```bash
+SEC_XBRL_HIERARCHY_HTML=/absolute/path/to/html/index.html \
+SEC_XBRL_BROWSER_REPORT=/absolute/path/to/new-report.json \
+SEC_XBRL_PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs \
+SEC_XBRL_CHROMIUM=/absolute/path/to/chrome \
+node tests/browser/hierarchy_regression.mjs
+```
+
+Playwright and Chromium may use installed defaults when those optional paths
+are omitted. HTTP(S) requests are blocked and asserted absent. Synthetic
+browser fixtures are labelled separately from actual filing evidence.

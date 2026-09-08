@@ -12,7 +12,7 @@ def _json(value) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
 
 
-def render_hierarchy(client: AnalysisClient, *, destination: Path) -> None:
+def render_hierarchy(client: AnalysisClient, *, destination: Path, source_commit: str | None = None) -> None:
     """Write one table UI and local prepared JS shards, usable offline via file://."""
     if destination.exists():
         raise ValueError("new immutable HTML destination required")
@@ -49,5 +49,5 @@ def render_hierarchy(client: AnalysisClient, *, destination: Path) -> None:
     static = Path(__file__).parent
     for name in ("hierarchy.js", "hierarchy.css"):
         (destination / name).write_bytes((static / name).read_bytes())
-    page = (static / "hierarchy.html").read_text().replace("__CATALOG__", _json(catalog)).replace("__PUBLICATION__", _json({"id": client.manifest["publication_id"], "decision_cutoff": client.manifest["decision_cutoff"], "policy": client.manifest["importance_v2_policy"]}))
+    page = (static / "hierarchy.html").read_text().replace("__CATALOG__", _json(catalog)).replace("__PUBLICATION__", _json({"id": client.manifest["publication_id"], "renderer_source_commit": source_commit, "decision_cutoff": client.manifest["decision_cutoff"], "policy": client.manifest["importance_v2_policy"]}))
     (destination / "index.html").write_text(page, encoding="utf-8")
