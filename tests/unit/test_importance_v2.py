@@ -58,7 +58,7 @@ def reviewed_pair():
         reviews.append({"review_id": str(year), "reviewer": "synthetic-test-only", "economic_scope_id": "scope", "complete": True, "exclusive": True,
                         "reviewed_at": "2026-09-08T00:00:00+00:00", **table, "parent_fact_id": ids[0], "child_fact_ids": ids[1:],
                         "scope": scope, "source_cells": source_cells})
-    return dict(facts=facts, tables=[table], reviews=reviews, decision_cutoff="2026-09-08T01:00:00+00:00")
+    return {"facts": facts, "tables": [table], "reviews": reviews, "decision_cutoff": "2026-09-08T01:00:00+00:00"}
 
 
 def test_bound_two_period_share_and_four_inputs(reviewed_pair):
@@ -78,6 +78,7 @@ def test_bound_two_period_share_and_four_inputs(reviewed_pair):
 ])
 def test_two_valid_but_incompatible_reviews_do_not_allow_pp(reviewed_pair, field, value):
     from copy import deepcopy
+
     from sec_xbrl.analytics.importance_v2 import reviewed_raw_shares
     for f in reviewed_pair["facts"][:3]:
         f["scope"][field] = deepcopy(value)
@@ -115,3 +116,41 @@ def test_invalid_share_review_fails_closed(reviewed_pair, mutate):
         reviewed_pair["reviews"][0]["source_cells"]["2024-a"]["inline_id"] = "wrong"
     with pytest.raises(ValueError):
         reviewed_raw_shares(**reviewed_pair)
+
+
+def test_raw_standard_same_table_and_custom_remain_distinct(reviewed_pair):
+    from sec_xbrl.analytics.importance_v2 import materialize_raw_statement_v2
+    facts = reviewed_pair["facts"]
+    for f in facts:
+        f["concept"] = {"data_type": "xbrli:monetaryItemType", "is_standard": True, "taxonomy_family": "us-gaap", "taxonomy_version": "2025", "namespace_uri": "http://fasb.org/us-gaap/2025"}
+    table = {**reviewed_pair["tables"][0], "section": "IS"}
+    rows = [{"table_id": "table", "parent_row_id": None, "cells": [{"inline_facts": [{"fact_id": f["fact_id"]}]}]} for f in facts]
+    result = materialize_raw_statement_v2(facts=facts, tables=[table], rows=rows, checks=[], reviewed=[])
+    current = next(r for r in result if r["current_fact_id"] == "2025-a")
+    assert current["amount_change"]["value"] == "6"
+    assert current["is_reference_period"] is True
+    assert current["share"]["status"] == "UNAVAILABLE"
+    assert "REPORTED_ARITHMETIC_NOT_RECAST_VALIDATED" in current["warnings"]
+    facts[4]["concept"]["is_standard"] = False
+    result = materialize_raw_statement_v2(facts=facts, tables=[table], rows=rows, checks=[], reviewed=[])
+    assert next(r for r in result if r["current_fact_id"] == "2025-a")["amount_change"]["reason"] == "CUSTOM_COMPARISON_NOT_APPROVED"
+
+
+@pytest.mark.parametrize("prior_value,expected", [("NaN", "NONFINITE_OR_NONNUMERIC_PRIOR"), ("invalid", "NONFINITE_OR_NONNUMERIC_PRIOR"), ("0", "ZERO_OR_NEGATIVE_BASE_OR_SIGN_CHANGE"), ("-1", "ZERO_OR_NEGATIVE_BASE_OR_SIGN_CHANGE")])
+def test_raw_statement_prior_failures_keep_precise_reasons(reviewed_pair, prior_value, expected):
+    from sec_xbrl.analytics.importance_v2 import materialize_raw_statement_v2
+    facts = reviewed_pair["facts"]
+    for f in facts:
+        f["concept"] = {"data_type": "xbrli:monetaryItemType", "is_standard": True, "taxonomy_family": "us-gaap", "taxonomy_version": "2025", "namespace_uri": "http://fasb.org/us-gaap/2025"}
+    facts[1]["value_numeric"] = prior_value
+    table = {**reviewed_pair["tables"][0], "section": "IS"}
+    rows = [{"table_id": "table", "parent_row_id": None, "cells": [{"inline_facts": [{"fact_id": f["fact_id"]}]}]} for f in facts]
+    result = materialize_raw_statement_v2(facts=facts, tables=[table], rows=rows, checks=[], reviewed=[])
+    current = next(r for r in result if r["current_fact_id"] == "2025-a")
+    assert current["rate_change"]["reason"] == expected
+    assert current["rate_change"]["value"] is None
+    if prior_value in {"0", "-1"}:
+        assert current["amount_change"]["value"] is not None
+    else:
+        assert current["amount_change"]["reason"] == expected
+    assert "ACTUAL_DURATION_DIFFERS" in current["warnings"]

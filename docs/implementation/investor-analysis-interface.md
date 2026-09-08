@@ -104,9 +104,10 @@ The design goal is for the five currently exercised companies to remain
 regression samples, not a ticker allowlist. The existing generic registration
 and preparation functions are intended to let an administrator register any
 SEC-supported filer, select its filing range and approved configuration, prepare
-its data, and expose it through the same catalogue and consumer API. Arbitrary-
-company end-to-end operation has not yet been demonstrated; its acceptance
-requirements are defined in the [U3 important-items analysis plan](u3-important-items-plan.md).
+its data, and expose it through the same catalogue and consumer API. Frozen U3 demonstrated cached NFLX registration, preparation and refresh outside
+the original five-company cohort, using the same engine and administrator API.
+This does not demonstrate universal-filer or live-collection coverage; acceptance
+requirements remain in the [U3 important-items analysis plan](u3-important-items-plan.md).
 Onboarding must not add ticker-specific branches to the engine. A generic defect
 discovered by a new filer may be fixed for all companies, while company-specific
 QName choices, display preferences, and reviewed interpretations remain
@@ -129,11 +130,12 @@ Preparation and catalogue publication must distinguish at least these outcomes:
 - `REVIEW_REQUIRED`: collected evidence needs an administrator's explicit interpretation or approval
 - `DISCLOSURE_MISSING`: a prepared, eligible filing range was checked and the disclosure is actually absent
 
-These names describe the required semantic distinctions; their persisted schema
-and API representation remain an implementation decision. A not-yet-held filing
+These outcomes are persisted in the administrator catalogue and consumer target
+status records, and exposed through `target_status` / `read_target_status`. A not-yet-held filing
 is a collection target and must never be converted to `DISCLOSURE_MISSING` merely
 to fill a cell. Only the administrator makes review and accounting-meaning
-decisions. Default thresholds and ranking policies remain drafts until approved.
+decisions. U3 v1 thresholds are approved in its plan; new U3-R v2 thresholds and bounded
+source approvals are recorded separately in the followup delivery contract.
 
 `prepare_analysis(publication=..., destination=..., tickers=...)` is the lower
 level single-source producer. It reads governed history plus its declared raw
@@ -167,7 +169,8 @@ pairs. Financial arithmetic is persisted by the producer, never by HTML.
 
 Not implemented: automatic narrative-to-zero extraction, unrestricted custom
 concept bridges, cross-company accounting equivalence, automatic new-filing
-semantic approvals, or importance ranking. Missing direct totals are not filled
+semantic approvals. U3 v1 importance ranking is implemented in the frozen
+`09309c80700fed2115e2b18eddd2c21dc5e200e3` baseline. Missing direct totals are not filled
 by an unreviewed Assets-minus-Equity guess. Retained original notes and explicit
 review queues are the fallback, not fabricated values.
 
@@ -195,3 +198,31 @@ not silently rewritten. Finally `company_reports.register_company(...,
 publication=NEW_REVIEW)` and `prepare_catalog(...)` publish the new consumer
 bundle. New accession and changed-concept bridges remain explicit review work,
 not a fully automatic refresh capability.
+
+## H1 / U3-R / H2 followup interface
+
+Frozen U3 verified the five-company cohort plus cached NFLX registration,
+preparation and refresh. This is an outside-cohort demonstration through the
+same engine; it does not establish universal SEC-filer coverage or live
+collection in the current followup.
+
+The new local publication adds `statement_catalog(ticker)`,
+`statement(ticker, table_id)`, `pre_table(ticker, table_id)`,
+`axes(ticker, filing_id, raw_concept_id=...)`,
+`member_metrics(ticker, filing_id, axis_id=..., member_id=..., typed_value=...)`,
+and `importance_v2(ticker, view=...)`. These are prepared-data-only reads.
+Original U3 calls and datasets retain their v1 behavior and byte identity.
+
+H1 preserves independent actual HTML-row coverage, all Raw FY/YTD/QTD/instant
+contexts, separate PRE/CAL/DEF networks, exact signed calculations, source-bound
+checks and reviewed source reconciliations. U3-R v2 persists five separate
+signals and review/denominator evidence under a new policy. The H2 screen uses
+one expandable table, protected subtotals/warnings and independent Axis/member
+queries. Unknown or unprepared scopes raise an error instead of a disclosure
+absence assertion. Amendments and missing current notes remain explicit.
+
+See [followup delivery contract](u3-followup-delivery.md) for bounded NVDA
+source reviews, the supplemental MSFT Calculation 1.1 source-gap adapter,
+actual versus synthetic evidence, current comparison limitations and local
+independent-verification requirements. A later unreviewed filing never inherits
+a prior economic share or reviewed source-equation approval.

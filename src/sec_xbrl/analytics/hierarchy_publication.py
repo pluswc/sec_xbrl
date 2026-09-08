@@ -10,12 +10,15 @@ from datetime import datetime
 from pathlib import Path
 
 from sec_xbrl.analysis import open_analysis
+from sec_xbrl.analytics.calculation11 import supplement_calculation11
 from sec_xbrl.analytics.importance_v2 import (
     POLICY,
     POLICY_VERSION,
     materialize_analytical_v2,
+    materialize_raw_statement_v2,
     reviewed_raw_shares,
 )
+from sec_xbrl.analytics.source_reconciliation import materialize_source_reconciliations
 from sec_xbrl.analytics.statement_source import (
     apply_display_reviews,
     prepare_filing,
@@ -28,7 +31,9 @@ VERSION = "h1-h2-source-hierarchy-v1"
 
 
 def prepare_hierarchy(*, baseline: Path, destination: Path, package_roots: dict[str, str],
-                      reviews: list[dict], display_reviews: list[dict], decision_cutoff: str) -> Path:
+                      reviews: list[dict], display_reviews: list[dict], decision_cutoff: str,
+                      taxonomy_cache: Path | None = None, supplemental_work: Path | None = None,
+                      reconciliation_reviews: list[dict] | None = None) -> Path:
     """Publish full attested filing contexts; never rerun discovery or v1 policy.
 
     Source selection is the existing history intake and as-of. The separately
@@ -51,7 +56,7 @@ def prepare_hierarchy(*, baseline: Path, destination: Path, package_roots: dict[
                     baseline_publication_id=source.manifest["publication_id"],
                     baseline_manifest_sha256=hashlib.sha256((baseline / "analysis_manifest.json").read_bytes()).hexdigest(),
                     decision_cutoff=decision_cutoff, importance_v2_policy={"version": POLICY_VERSION, **POLICY})
-    applied_display, applied_economic = set(), set()
+    applied_display, applied_economic, applied_reconciliation = set(), set(), set()
     for ticker, info in manifest["companies"].items():
         reader = open_history_publication(Path(info["source_publication"]))
         intake_path = Path(reader.manifest["source_intake"])
@@ -81,17 +86,31 @@ def prepare_hierarchy(*, baseline: Path, destination: Path, package_roots: dict[
             if entry["source_run"] not in package_roots:
                 raise ValueError("explicit upstream package root adapter required")
             doc = read_primary_document(entry=entry, filing=filing, package_root=Path(package_roots[entry["source_run"]]))
-            data = prepare_filing(snapshot=snapshot, document=doc, as_of=info["as_of"])
+            package = Path(package_roots[entry["source_run"]]) / ref["cik"] / ref["accession"].replace("-", "") / (ref["accession"] + "-xbrl.zip")
+            supplement = supplement_calculation11(filing=filing, package=package,
+                concepts={r["raw_concept_id"]: dict(r) for r in snapshot.records("concept")},
+                roles={r["role_id"]: dict(r) for r in snapshot.records("role")}, taxonomy_cache=taxonomy_cache,
+                destination=supplemental_work / ticker / ref["accession"] if supplemental_work else None)
+            data = prepare_filing(snapshot=snapshot, document=doc, as_of=info["as_of"], supplemental_relationships=supplement)
             applied_display.update(apply_display_reviews(rows=data["source_statement_rows"], tables=data["source_tables"], pre=data["statement_rows"], reviews=display_reviews, decision_cutoff=decision_cutoff))
             scoped = [r for r in reviews if r["scope"]["filing_id"] == filing["filing_id"]]
             data["raw_importance_v2"] = reviewed_raw_shares(facts=data["statement_facts"], tables=data["source_tables"], reviews=scoped, decision_cutoff=decision_cutoff)
+            data["raw_importance_v2"] = materialize_raw_statement_v2(facts=data["statement_facts"], tables=data["source_tables"], rows=data["source_statement_rows"], checks=data["source_calculation_checks"], reviewed=data["raw_importance_v2"])
             applied_economic.update(r["review_id"] for r in scoped)
+            recon = [r for r in reconciliation_reviews or [] if r["parent"]["scope"]["filing_id"] == filing["filing_id"]]
+            data["source_reconciliation_checks"] = materialize_source_reconciliations(facts=data["statement_facts"], tables=data["source_tables"], reviews=recon, decision_cutoff=decision_cutoff)
+            applied_reconciliation.update(r["review_id"] for r in recon)
+            protected = {r["parent"]["row_locator"] for r in recon}
+            for row in data["source_statement_rows"]:
+                if row["row_locator"] in protected:
+                    row["protected"] = True
             catalog.extend(data["source_tables"])
             files = {}
             for name, records in data.items():
                 relative = Path("hierarchy") / ticker / filing["filing_id"] / (name + ".parquet")
                 files[name] = {"path": str(relative), **_write_records(staging / relative, tuple(records))}
             hierarchy["filings"][filing["filing_id"]] = {"filing": filing, "files": files,
+                                                       "primary_coverage": data["filing_coverage"],
                                                        "snapshot_manifest_sha256": hashlib.sha256((run / "snapshots" / ref["cik"] / ref["accession"].replace("-", "") / "layer1_manifest.json").read_bytes()).hexdigest()}
         catalog.sort(key=lambda t: (t["filing"]["report_date"], t["filing"]["filed_date"], t["filing"]["accession"], -t["table_order"]), reverse=True)
         relative = Path("hierarchy") / ticker / "source_tables.parquet"
@@ -103,6 +122,8 @@ def prepare_hierarchy(*, baseline: Path, destination: Path, package_roots: dict[
         print(f"{ticker}: {len(hierarchy['filings'])} filings, {len(catalog)} original tables prepared", flush=True)
     if applied_display != {r["review_id"] for r in display_reviews} or applied_economic != {r["review_id"] for r in reviews}:
         raise ValueError("every approved review must bind an included source")
+    if applied_reconciliation != {r["review_id"] for r in reconciliation_reviews or []}:
+        raise ValueError("every source reconciliation review must bind")
     (staging / "analysis_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
     staging.rename(destination)
     return destination

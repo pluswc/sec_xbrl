@@ -10,7 +10,7 @@ def statement_catalog(client, ticker: str, *, section: str | None = None) -> dic
     if section is not None:
         tables = [t for t in tables if t["section"] == section]
     return copy.deepcopy({"publication_id": client.manifest["publication_id"], "ticker": ticker.upper(),
-                          "tables": tables, "decision_cutoff": client.manifest["decision_cutoff"],
+                          "tables": tables, "filings": [copy.deepcopy(i) for i in client.manifest["companies"][ticker.upper()]["hierarchy"]["filings"].values()], "decision_cutoff": client.manifest["decision_cutoff"],
                           "warnings": client.manifest["companies"][ticker.upper()]["hierarchy"]["warnings"]})
 
 
@@ -26,11 +26,14 @@ def statement(client, ticker: str, table_id: str) -> dict:
     facts = [f for f in client._hierarchy_records(ticker, "statement_facts", filing_id) if f["fact_id"] in ids]
     checks = [c for c in client._hierarchy_records(ticker, "calculation_checks", filing_id)
               if c["parent_fact_id"] in ids or (c["network_identity"]["role_id"] == table["role_id"] and c["status"] == "MISSING_PARENT")]
+    raw_scope_checks = checks
+    checks = [c for c in client._hierarchy_records(ticker, "source_calculation_checks", filing_id) if c["source_table_id"] == table_id]
+    checks.extend(c for c in client._hierarchy_records(ticker, "source_reconciliation_checks", filing_id) if c["source_table_id"] == table_id)
     pre = [p for p in client._hierarchy_records(ticker, "statement_rows", filing_id) if p["network_identity"]["role_id"] == table["role_id"]]
     raw_ids = {f["raw_concept_id"] for f in facts}
-    importance = [r for r in client._hierarchy_records(ticker, "raw_importance_v2", filing_id) if r["current_fact_id"] in ids]
+    importance = [r for r in client._hierarchy_records(ticker, "raw_importance_v2", filing_id) if r["current_fact_id"] in ids and (not r.get("table_id") or r["table_id"] == table_id)]
     return copy.deepcopy({"publication_id": client.manifest["publication_id"], "table": table, "rows": rows, "facts": facts,
-                          "checks": checks, "pre_rows": pre, "pre_not_in_html": [p["row_id"] for p in pre if p["raw_concept_id"] not in raw_ids],
+                          "checks": checks, "raw_scope_checks": raw_scope_checks, "pre_rows": pre, "pre_not_in_html": [p["row_id"] for p in pre if p["raw_concept_id"] not in raw_ids],
                           "importance": importance, "warnings": client.manifest["companies"][ticker.upper()]["hierarchy"]["warnings"]})
 
 

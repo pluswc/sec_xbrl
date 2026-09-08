@@ -1,0 +1,53 @@
+"""Static H2 consumer. No Raw readers, XBRL parser or financial policy imports."""
+from __future__ import annotations
+
+import json
+import shutil
+from pathlib import Path
+
+from sec_xbrl.analysis import AnalysisClient
+
+
+def _json(value) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+
+
+def render_hierarchy(client: AnalysisClient, *, destination: Path) -> None:
+    """Write one table UI and local prepared JS shards, usable offline via file://."""
+    if destination.exists():
+        raise ValueError("new immutable HTML destination required")
+    destination.mkdir(parents=True)
+    font = Path("/mnt/c/Windows/Fonts/malgun.ttf")
+    if font.is_file():
+        shutil.copyfile(font, destination / "korean.ttf")
+    catalog = {}
+    for ticker, info in client.manifest["companies"].items():
+        source = client.statement_catalog(ticker)
+        filings = []
+        for fid, fi in info["hierarchy"]["filings"].items():
+            tables = [t for t in source["tables"] if t["filing_id"] == fid]
+            panels = {t["table_id"]: client.statement(ticker, t["table_id"]) for t in tables}
+            pre = {t["table_id"]: client.pre_table(ticker, t["table_id"])["pre_rows"] for t in tables if t["section"] != "DISCLOSURE"}
+            lenses = client.axes(ticker, fid)
+            members = {}
+            for lens in lenses["axes"]:
+                for member in lens["members"]:
+                    key = _json([lens["axis_id"], member["member_id"], member["typed_value"]])
+                    result = client.member_metrics(ticker, fid, axis_id=lens["axis_id"], member_id=member["member_id"], typed_value=member["typed_value"])
+                    members[key] = {k: v for k, v in result.items() if k != "member_paths"}
+            paths = client._hierarchy_records(ticker, "member_paths", fid)
+            data = {"filing": fi["filing"], "tables": tables, "panels": panels, "pre": pre,
+                    "axes": lenses, "members": members, "member_paths": paths}
+            relative = Path(ticker) / (fid + ".js")
+            (destination / relative).parent.mkdir(exist_ok=True)
+            (destination / relative).write_text("window.HIERARCHY_DATA=" + _json(data) + ";window.hierarchyLoaded();", encoding="utf-8")
+            filings.append({"filing": fi["filing"], "path": str(relative)})
+        filings.sort(key=lambda f: (f["filing"]["report_date"], f["filing"]["filed_date"], f["filing"]["accession"]), reverse=True)
+        catalog[ticker] = {"filings": filings, "warnings": source["warnings"], "as_of": info["as_of"],
+                           "source_review_cutoff": info["review_cutoff"], "importance": client.importance_v2(ticker),
+                           "overview": client.overview(ticker, fiscal_start=min(info["years"]), fiscal_end=max(info["years"]))}
+    static = Path(__file__).parent
+    for name in ("hierarchy.js", "hierarchy.css"):
+        (destination / name).write_bytes((static / name).read_bytes())
+    page = (static / "hierarchy.html").read_text().replace("__CATALOG__", _json(catalog)).replace("__PUBLICATION__", _json({"id": client.manifest["publication_id"], "decision_cutoff": client.manifest["decision_cutoff"], "policy": client.manifest["importance_v2_policy"]}))
+    (destination / "index.html").write_text(page, encoding="utf-8")

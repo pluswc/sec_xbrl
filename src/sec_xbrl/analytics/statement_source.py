@@ -47,7 +47,7 @@ def read_primary_document(*, entry: dict, filing: dict, package_root: Path) -> b
         return archive.read(matches[0])
 
 
-def prepare_filing(*, snapshot: Any, document: bytes, as_of: str) -> dict[str, list[dict]]:
+def prepare_filing(*, snapshot: Any, document: bytes, as_of: str, supplemental_relationships: list[dict] | None = None) -> dict[str, list[dict]]:
     filing = dict(next(iter(snapshot.records("filing"))))
     concepts = {r["raw_concept_id"]: dict(r) for r in snapshot.records("concept")}
     contexts = {r["context_id"]: dict(r) for r in snapshot.records("context")}
@@ -56,6 +56,9 @@ def prepare_filing(*, snapshot: Any, document: bytes, as_of: str) -> dict[str, l
     relationships = [{**r, "role_uri": roles[r["role_id"]]["role_uri"],
                       "role_definition": roles[r["role_id"]]["role_definition"]}
                      for r in snapshot.records("relationship")]
+    for relationship in relationships:
+        relationship["evidence_origin"] = "IMMUTABLE_RAW_SNAPSHOT"
+    relationships.extend(supplemental_relationships or [])
     dims = defaultdict(list)
     for d in snapshot.records("dimension_fact"):
         dims[d["fact_id"]].append({"axis": d["axis_raw_concept_id"], "member": d["member_raw_concept_id"],
@@ -91,9 +94,29 @@ def prepare_filing(*, snapshot: Any, document: bytes, as_of: str) -> dict[str, l
         f["calculation_status"] = "PREPARED_CHECKS" if by_parent[f["fact_id"]] else "NO_CAL_RELATION"
     pre = presentation_paths(relationships, concepts, roles)
     rows, tables, coverage = enumerate_source(document=document, filing=filing, facts=facts, pre=pre)
-    return {"filings": [filing], "statement_facts": list(facts.values()), "source_statement_rows": rows,
+    source_checks = []
+    arithmetic_ids = {f["fact_id"] for f in arithmetic}
+    for table in tables:
+        if not table["role_id"]:
+            continue
+        bound_facts = [f for f in facts.values() if f["fact_id"] in arithmetic_ids and any(loc["table_id"] == table["table_id"] for loc in f["source_locations"])]
+        arcs = [a for a in relationships if a["network_type"] == "CAL" and a["role_id"] == table["role_id"]]
+        for check in materialize_signed_calculation_checks(facts=bound_facts, relationships=arcs):
+            check["calculation_check_id"] = stable_id(table["table_id"], check["calculation_check_id"])
+            check["source_table_id"] = table["table_id"]
+            check["source_document_sha256"] = table["source_document_sha256"]
+            check["check_basis"] = "EXACT_SOURCE_TABLE_FACT_OCCURRENCES"
+            source_checks.append(check)
+    filing_coverage = []
+    for section in ("IS", "BS", "CF"):
+        selected = [t for t in tables if t["section"] == section]
+        filing_coverage.append({"filing_id": filing["filing_id"], "accession": filing["accession"], "form": filing["form"],
+                                "section": section, "status": "INCLUDED" if selected else "NOT_PREPARED",
+                                "reason": "PRIMARY_SOURCE_TABLE_BOUND" if selected else "NO_PRIMARY_SOURCE_TABLE_CLASSIFIED; RAW_AMENDMENT_OR_DISCLOSURE_PRESERVED",
+                                "table_ids": [t["table_id"] for t in selected], "enumerated_html_tables": len(tables)})
+    return {"filings": [filing], "filing_coverage": filing_coverage, "statement_facts": list(facts.values()), "source_statement_rows": rows,
             "source_tables": tables, "row_coverage": coverage, "statement_rows": pre,
-            "statement_relationships": relationships, "calculation_checks": checks,
+            "statement_relationships": relationships, "calculation_checks": checks, "source_calculation_checks": source_checks,
             "member_paths": member_paths(relationships, concepts, facts)}
 
 
@@ -305,7 +328,7 @@ def member_paths(relationships: list[dict], concepts: dict, facts: dict) -> list
                              "network_key": list(key), "depth": len(path), "relationship_ids": list(rels),
                              "cycle": cycle, "usable": usable, "relationship_type": "DEF_MEMBER",
                              "fact_ids": sorted(f["fact_id"] for f in facts.values() if any(d["axis"] == axis and d["member"] == key[-1] for d in f["scope"]["dimensions"])) if usable else [],
-                             "aggregation_status": "NOT_AUTHORIZED"})
+                             "aggregation_status": "NOT_AUTHORIZED", "validation_scope": "PER_PATH_USABILITY_EVIDENCE_NOT_FULL_DRS_VALIDATION"})
                 if cycle:
                     continue
                 for a in sorted(outgoing[key], key=lambda x: (finite_decimal(x["order"]) or 0, x["relationship_id"]), reverse=True):

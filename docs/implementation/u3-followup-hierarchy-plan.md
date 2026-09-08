@@ -1,6 +1,6 @@
 # U3 follow-up: governed statement and segment hierarchy
 
-Status: implementation plan for H1, U3-R, H2, and H3  
+Status: implemented candidate for H1, U3-R, H2, and H3; independent frozen verification required. See `u3-followup-delivery.md`.  
 Baseline: immutable U3 commit `09309c80700fed2115e2b18eddd2c21dc5e200e3`  
 Implementation branch: `codex/u3-followup-hierarchy`
 
@@ -101,8 +101,9 @@ contract.
   selected statement-table scope. Their row-level exclusion is recorded when
   the role or source table can be classified.
 - Actual economic share approval needs an exact, hash-bound source review.
-  Until such evidence is supplied and accepted by the lead, actual shares stay
-  `REVIEW_REQUIRED`; synthetic tests alone do not authorize a company rule.
+  The lead approved only the exact NVDA same-table two-period OpEx source
+  review recorded in `u3-followup-delivery.md`; all other actual shares remain
+  `REVIEW_REQUIRED`. Synthetic tests do not authorize a company rule.
 - A latest filing without a prior filing-scoped member remains absent, not zero.
   Raw member names are never used to infer a longitudinal join.
 

@@ -17,7 +17,7 @@ POLICY = {"share_percent": "10", "share_change_pp": "5", "yoy_percent": "25",
 
 def evidence(value=None, *, reason=None, inputs=(), denominator=None, current_period=None, comparison_period=None):
     return {"value": None if value is None else str(value), "status": "AVAILABLE" if value is not None else "UNAVAILABLE",
-            "reason": reason, "input_ids": list(inputs), "denominator": denominator,
+            "reason": reason if reason is not None or value is not None else "INPUT_NOT_AVAILABLE", "input_ids": list(inputs), "denominator": denominator,
             "current_period": current_period, "comparison_period": comparison_period}
 
 
@@ -221,3 +221,97 @@ def _same_share_comparison(current, previous, facts) -> bool:
         if not all(330 <= (date.fromisoformat(p[k]) - date.fromisoformat(q[k])).days <= 400 for k in ("start", "end")):
             return False
     return True
+
+
+def materialize_raw_statement_v2(*, facts: list[dict], tables: list[dict], rows: list[dict], checks: list[dict], reviewed: list[dict]) -> list[dict]:
+    """Same-source standard monetary arithmetic, explicitly not recast approval.
+
+    Custom concepts retain amounts but do not gain a comparison basis from a
+    shared label or source column. No FY/YTD growth rule is introduced.
+    """
+    by_id = {f["fact_id"]: f for f in facts}
+    reviewed_by_fact = {r["current_fact_id"]: r for r in reviewed}
+    results = []
+    for table in tables:
+        if table["section"] == "DISCLOSURE":
+            continue
+        table_rows = [r for r in rows if r["table_id"] == table["table_id"]]
+        ids = {i["fact_id"] for r in table_rows for c in r["cells"] for i in c["inline_facts"] if i["fact_id"]}
+        selected = [by_id[i] for i in sorted(ids)]
+        source_row = {i["fact_id"]: r for r in table_rows for c in r["cells"] for i in c["inline_facts"] if i["fact_id"]}
+        groups = defaultdict(dict)
+        for f in selected:
+            unit = f["scope"]["unit"]
+            if (f["concept"]["data_type"] != "xbrli:monetaryItemType" or f["is_nil"] or finite_decimal(f["value_numeric"]) is None
+                    or len(unit["numerator"]) != 1 or not unit["numerator"][0].startswith("iso4217:") or unit["denominator"]):
+                continue
+            key = stable_id(f["scope"], source_row[f["fact_id"]]["parent_row_id"])
+            groups[key][f["fact_id"]] = abs(Decimal(f["value_numeric"]))
+        rank = {fid: n+1 for group in groups.values() for n, (fid, _) in enumerate(sorted(group.items(), key=lambda item: (-item[1], item[0])))}
+        for f in selected:
+            if f["fact_id"] not in rank:
+                continue
+            scope, concept = f["scope"], f["concept"]
+            period = scope["period"]
+            reference = max((g["scope"]["period"]["end"] or g["scope"]["period"]["instant"] for g in selected if g["scope"]["period"]["class"] == period["class"]), default=None)
+            previous = []
+            approved_standard = (concept["is_standard"] and concept["taxonomy_family"] == "us-gaap"
+                                 and concept["namespace_uri"] in {f"http://fasb.org/us-gaap/{concept['taxonomy_version']}", f"https://fasb.org/us-gaap/{concept['taxonomy_version']}"})
+            if approved_standard and period["class"] == "QTD_3M":
+                for other in selected:
+                    op = other["scope"]["period"]
+                    if other["raw_concept_id"] != f["raw_concept_id"] or op["class"] != "QTD_3M" or other["is_nil"]:
+                        continue
+                    if {k: v for k, v in other["scope"].items() if k != "period"} != {k: v for k, v in scope.items() if k != "period"}:
+                        continue
+                    if not all(75 <= (date.fromisoformat(p["end"])-date.fromisoformat(p["start"])).days <= 105 for p in (op, period)):
+                        continue
+                    if all(330 <= (date.fromisoformat(period[k])-date.fromisoformat(op[k])).days <= 400 for k in ("start", "end")):
+                        previous.append(other)
+            prior = previous[0] if len(previous) == 1 else None
+            prior_value = finite_decimal(prior["value_numeric"]) if prior else None
+            value = Decimal(f["value_numeric"])
+            delta = value - prior_value if prior_value is not None else None
+            rate = delta / prior_value * 100 if delta is not None and prior_value > 0 and value >= 0 else None
+            if not approved_standard:
+                comparison_reason = "CUSTOM_COMPARISON_NOT_APPROVED"
+            elif period["class"] != "QTD_3M":
+                comparison_reason = "GROWTH_POLICY_NOT_APPROVED_FOR_PERIOD_CLASS"
+            elif len(previous) > 1:
+                comparison_reason = "AMBIGUOUS_SAME_TABLE_PRIOR"
+            elif prior is None:
+                comparison_reason = "NO_EXACT_SAME_TABLE_PRIOR"
+            elif prior_value is None:
+                comparison_reason = "NONFINITE_OR_NONNUMERIC_PRIOR"
+            else:
+                comparison_reason = None
+            rate_reason = comparison_reason or ("ZERO_OR_NEGATIVE_BASE_OR_SIGN_CHANGE" if rate is None else None)
+            scalar_candidates = {check["parent_fact_id"] for check in checks if check["source_table_id"] == table["table_id"] and check["status"] == "MATCH"
+                                 and any(i["child_fact_id"] == f["fact_id"] for i in check["inputs"])
+                                 and check["parent_fact_id"] in by_id and finite_decimal(check["parent_value"]) is not None and Decimal(check["parent_value"]) > 0}
+            scalar = by_id[next(iter(scalar_candidates))] if len(scalar_candidates) == 1 else None
+            reasons, warnings = evaluate_signals(amount=value, amount_rank=rank[f["fact_id"]], delta=delta, rate=rate, scale=scalar["value_numeric"] if scalar else None)
+            if prior and (date.fromisoformat(period["end"])-date.fromisoformat(period["start"])).days != (date.fromisoformat(prior["scope"]["period"]["end"])-date.fromisoformat(prior["scope"]["period"]["start"])).days:
+                warnings.append("ACTUAL_DURATION_DIFFERS")
+            common = {"current_period": period, "comparison_period": prior["scope"]["period"] if prior else None}
+            inputs = [f["fact_id"], prior["fact_id"]] if prior else [f["fact_id"]]
+            row = {"importance_id": stable_id(POLICY_VERSION, table["table_id"], f["fact_id"]), "policy_version": POLICY_VERSION,
+                   "table_id": table["table_id"], "current_fact_id": f["fact_id"], "comparison_fact_id": prior["fact_id"] if prior else None,
+                   "selection_view": "RAW_AS_FILED", "scope": scope, "reference_period_end": reference,
+                   "is_reference_period": (period["end"] or period["instant"]) == reference,
+                   "amount": evidence(value, inputs=[f["fact_id"]], **common), "amount_rank": rank[f["fact_id"]],
+                   "amount_change": evidence(delta, reason=comparison_reason, inputs=inputs, **common),
+                   "rate_change": evidence(rate, reason=rate_reason, inputs=inputs, denominator={"fact_id": prior["fact_id"], "value": prior["value_numeric"]} if prior else None, **common),
+                   "share": evidence(reason="NO_EXACT_REVIEWED_DECOMPOSITION", **common),
+                   "share_change_pp": evidence(reason="NO_TWO_PERIOD_SAME_ECONOMIC_SCOPE_REVIEW", **common),
+                   "scale_evidence": {"fact_id": scalar["fact_id"], "value": scalar["value_numeric"], "scope": scalar["scope"], "purpose": "MONETARY_SCALE_NOT_COMPOSITION"} if scalar else None,
+                   "comparison_evidence": "SAME_TABLE_SAME_RAW_STANDARD_CONCEPT_REPORTED_ARITHMETIC_NOT_RECAST_VALIDATED" if prior else None,
+                   "reasons": reasons, "warnings": sorted({*warnings, *([rate_reason] if rate_reason else []), "REPORTED_ARITHMETIC_NOT_RECAST_VALIDATED"}),
+                   "evidence_kind": "ACTUAL_SAME_TABLE_RAW_STANDARD_ARITHMETIC"}
+            if f["fact_id"] in reviewed_by_fact:
+                review_row = reviewed_by_fact[f["fact_id"]]
+                row.update({k: review_row[k] for k in ("share", "share_change_pp", "review", "prior_review", "decision_cutoff")})
+                row["reasons"] = sorted({*row["reasons"], *review_row["reasons"]})
+                row["evidence_kind"] = "REVIEWED_ACTUAL_SOURCE_CELLS"
+            results.append(row)
+    return results
