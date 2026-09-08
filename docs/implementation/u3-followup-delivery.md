@@ -274,3 +274,23 @@ node tests/browser/hierarchy_regression.mjs
 Playwright and Chromium may use installed defaults when those optional paths
 are omitted. HTTP(S) requests are blocked and asserted absent. Synthetic
 browser fixtures are labelled separately from actual filing evidence.
+
+### F4 — Analytical value origin labels
+
+The second candidate `127b15de2264c51a70233c5d507abc35d9582c96` retained
+an incorrect static Raw-value column title in Analytical mode. The lead
+returned this bounded accounting-label defect to the sole writer. Its HTML,
+freeze records and independent evidence are preserved under `frozen_127b15d`.
+
+Analytical now labels the column `준비된 분석 값 · 보고/파생 구분` and displays
+each prepared cell's exact `status`: `REPORTED` (보고), `DERIVED` (파생),
+`UNAVAILABLE` (미준비), or its other explicit status. Neither Q4 nor reason text
+is used to infer origin. Source/PRE/member modes retain the Raw title. Existing
+reason and provenance remain in the inspector. The display renderer also reads
+the existing prepared `AnalysisClient.trace` for reported/derived cells and
+exposes its original formula, source inputs and policy versions in that same
+inspector; it performs no calculation. The browser regression checks
+all displayed status values against actual metadata, the exact NVDA FY2024 Q4
+revenue derived cell (22,103,000,000, no source fact ID and two filing inputs),
+a reported value, unchanged inspector evidence, and title restoration. No
+financial policy, governed bundle, source date or calculation changes follow.

@@ -43,9 +43,12 @@ def render_hierarchy(client: AnalysisClient, *, destination: Path, source_commit
             (destination / relative).write_text("window.HIERARCHY_DATA=" + _json(data) + ";window.hierarchyLoaded();", encoding="utf-8")
             filings.append({"filing": fi["filing"], "path": str(relative)})
         filings.sort(key=lambda f: (f["filing"]["report_date"], f["filing"]["filed_date"], f["filing"]["accession"]), reverse=True)
+        overview = client.overview(ticker, fiscal_start=min(info["years"]), fiscal_end=max(info["years"]))
+        traces = {c["cell_id"]: client.trace(c["cell_id"], context=overview["context"])["trace"]
+                  for c in overview["cells"] if c["status"] in {"REPORTED", "DERIVED"}}
         catalog[ticker] = {"filings": filings, "warnings": source["warnings"], "as_of": info["as_of"],
                            "source_review_cutoff": info["review_cutoff"], "importance": client.importance_v2(ticker),
-                           "overview": client.overview(ticker, fiscal_start=min(info["years"]), fiscal_end=max(info["years"]))}
+                           "overview": overview, "traces": traces}
     static = Path(__file__).parent
     for name in ("hierarchy.js", "hierarchy.css"):
         (destination / name).write_bytes((static / name).read_bytes())

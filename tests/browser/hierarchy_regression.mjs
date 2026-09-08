@@ -50,8 +50,39 @@ try {
     assert(scope.visible.includes('과거 공시 시점 조회가 아닙니다'));
     assert.equal(scope.count, scope.ctx.periods.length);
     assert.deepEqual(scope.cells.sort(), scope.expectedCells.sort(), 'all values keep prepared scope');
+    assert.equal(await page.locator('#value-title').textContent(), '준비된 분석 값 · 보고/파생 구분');
+    const origins = await page.evaluate(() => {
+      const cells = window.HIERARCHY_CATALOG[document.querySelector('#company').value].overview.cells;
+      return cells.map(c => {
+        const el = [...document.querySelectorAll('[data-cell-id]')].find(e => e.dataset.cellId === c.cell_id);
+        return {id: c.cell_id, expected: c.status, displayed: el.dataset.sourceStatus,
+          text: el.querySelector('.origin-status').textContent, value: c.value, reason: c.reason,
+          sourceFact: c.source_fact_id, filingInputs: c.source_filing_ids};
+      });
+    });
+    for (const c of origins) {
+      assert.equal(c.displayed, c.expected, 'origin comes from exact prepared status');
+      assert(c.text.includes(c.expected));
+      if (c.expected === 'DERIVED') assert(c.text.includes('파생'));
+      if (c.expected === 'REPORTED') assert(c.text.includes('보고'));
+    }
+    if (ticker === 'NVDA') {
+      const derived = origins.find(c => c.id === 'fiscal-timeseries:derived:67ab82abfd2b569b707d7a30');
+      assert.equal(derived.expected, 'DERIVED');assert.equal(derived.value, '22103000000');
+      assert.equal(derived.sourceFact, null);assert.equal(derived.filingInputs.length, 2);
+      assert(origins.some(c => c.expected === 'REPORTED' && c.text.includes('보고')));
+      const row = page.locator('#rows tr').filter({has: page.locator(`[data-cell-id="${derived.id}"]`)});
+      await row.locator('.proof').first().click();
+      const evidence = await page.locator('#inspection').textContent();
+      for (const input of [derived.id, derived.reason, ...derived.filingInputs]) assert(evidence.includes(input));
+      const trace = await page.evaluate(id => window.HIERARCHY_CATALOG.NVDA.traces[id].value_lineage, derived.id);
+      assert.equal(trace.reported_or_derived, 'DERIVED');assert.equal(trace.source_inputs.length, 2);
+      for (const input of [trace.formula, trace.derivation_rule_version, ...trace.source_fact_ids, ...trace.source_inputs.map(i => i.value_numeric)]) assert(evidence.includes(input));
+      await page.click('#close-inspector');
+    }
     for (const mode of ['source', 'pre']) {
       await page.selectOption('#mode', mode);
+      assert.equal(await page.locator('#value-title').textContent(), '공시 값 · Raw 원금액');
       assert(await page.locator('#filing').isEnabled());
       assert(await page.locator('#statement').isEnabled());
       assert((await page.locator('#scope').textContent()).includes(scope.accession));
@@ -61,6 +92,7 @@ try {
     assert(await page.locator('#filing').isEnabled());
     assert(await page.locator('#statement').isEnabled());
     assert(await page.locator('#axis').isEnabled());
+    assert.equal(await page.locator('#value-title').textContent(), '공시 값 · Raw 원금액');
     assert.equal(await page.locator('#mode').inputValue(), 'source');
     await page.selectOption('#mode', 'analytical');
     assert.equal(await page.locator('#explore').inputValue(), 'statement');
@@ -100,7 +132,7 @@ try {
     await page.selectOption('#statement', bs);
     assert((await page.locator('#period-header').textContent()).includes('(시점)'));
     assert(!(await page.locator('#period-header').textContent()).includes('(종료)'));
-    results.companies[ticker] = {historicalAnalyticalContext: 'PASS', controlsRestore: 'PASS',
+    results.companies[ticker] = {analyticalOrigins: origins, historicalAnalyticalContext: 'PASS', controlsRestore: 'PASS',
       criticalPREWarnings: warnings, periodLabels: 'PASS'};
     await page.selectOption('#mode', 'source');
   }
