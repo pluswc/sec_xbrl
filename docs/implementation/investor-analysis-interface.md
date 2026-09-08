@@ -17,11 +17,35 @@ client = open_analysis("/absolute/path/to/catalog")
 panel = client.overview("AMD", fiscal_start=2023, fiscal_end=2025)
 groups = client.list_breakdowns("revenue", context=panel["context"])
 branch = client.children(groups["groups"][0]["node_id"], context=panel["context"])
+all_branch = client.children(groups["groups"][0]["node_id"],
+                             context=panel["context"], selection="all",
+                             reference_period=(2025, 4))
 more = client.children(branch["children"][0]["node_id"],
                        context=panel["context"], path=tuple(branch["path"]))
 trace = client.trace(panel["cells"][0]["cell_id"], context=panel["context"])
 comparison = client.compare_views("AMD", fiscal_start=2023, fiscal_end=2025)
+status = client.target_status("AMD")
 ```
+
+U3 bundles default `children` to `selection="important"`; `selection="all"`
+recovers presentation exclusions and ordinary warnings. `limit` remains the
+page size and does not change the policy's top-five threshold. The reference is
+the latest requested context quarter unless an exact prepared context period is
+supplied. Each child carries prepared amount/change ranks, separate reason and
+warning codes, reviewed parent-share evidence or an unavailable reason, and the
+historical evidence period when the requested reference has no observation.
+The cursor binds policy/version, selection, reference period, context, node and
+ancestor path. Pre-U3 immutable bundles remain readable through an explicit
+`legacy_fallback` response and retain their old stable-node ordering; queries do
+not synthesize importance evidence for them.
+
+`list_breakdowns(..., include_hidden=True)` is the administrator/all-items path
+for exact hidden lenses. `target_status` returns a persisted `READY`,
+`UNSUPPORTED`, `PREPARATION_FAILED`, `NOT_PREPARED`, `REVIEW_REQUIRED`, or
+`DISCLOSURE_MISSING` outcome. Before any consumer bundle exists,
+`company_reports.read_target_status` reads the administrator record. A missing
+disclosure status requires explicit checked-publication evidence; registration
+or an unheld filing range is `NOT_PREPARED`, never disclosure absence.
 
 Omitting year bounds returns the latest eight prepared quarters. Explicit year
 bounds can include an incomplete year, including a single newly collected

@@ -42,6 +42,46 @@ Before implementation, approve the ranking and eligibility decisions using
 actual examples. Thresholds, weights, limits, and new function parameters are
 drafts until that decision is recorded.
 
+### Approved policy decision — 2026-09-08
+
+Preparation uses policy `important-financial-items` version
+`u3-important-items-v1`. The reference is the latest quarter in the requested
+context, even when a branch has no value in that quarter. Ranking is by absolute
+amount within the exact parent, view, period class and complete currency unit;
+ties use stable `node_id`. Current-reference rows precede historical fallback
+rows. When the reference has no prepared observation, a former top-five item is
+identified as `REFERENCE_PERIOD_UNAVAILABLE_FORMER_TOP_AMOUNT`, retains its
+latest historical evidence period/rank/cell, and is never shown as a current
+zero or called a disappeared disclosure.
+
+The default contains current top-five amounts, exact-node pins, critical source
+or review warnings, sign transitions, incompatible reporting-basis breaks,
+rate changes of at least 50 percent whose absolute change also ranks in the top
+five, the historical fallback above, and structural navigation needed to reach
+those items. Amount-change rank and small-base/high-rate change remain separate
+evidence and do not alone promote an item. Presentation exclusions cannot hide
+a pin or critical warning. The all-items path recovers excluded items, hidden
+views, warnings and reasons.
+
+Actual NVDA FY2026 Q3 evidence exposed the identifier-order defect. In its
+`ProductOrServiceAxis` revenue lens, Data Center was USD 51.215 billion, Compute
+USD 43.028 billion, Networking USD 8.187 billion, Gaming USD 4.265 billion,
+Professional Visualization USD 0.760 billion, Automotive USD 0.592 billion,
+and OEM and Other USD 0.174 billion. Stable node order had placed OEM and Other
+before Data Center. Compute and Networking overlap the Data Center presentation,
+so this evidence approves magnitude ordering and also demonstrates why the lens
+must not be treated as an additive decomposition.
+
+Parent share requires a separate administrator-reviewed complete and mutually
+exclusive economic-decomposition record. It binds exact parent/child cells,
+explicit full-dimension scopes, actual periods, period class, unit,
+classification basis, corresponding filing/source-period pairs, reviewer,
+review time, and an immutable evidence-file hash. CAL, co-presentation,
+observed dimensions, and reviewed display hierarchy are insufficient.
+Zero/negative parents, offsets, nils, duplicates, incomplete sets, and
+unit/period/basis/source mismatches stay unavailable. Values above 100 percent
+are warned without normalization, and no residual is invented.
+
 The design must:
 
 1. Preserve separate, explainable reasons for amount, parent share, amount
@@ -120,3 +160,26 @@ Excluded unless separately approved: narrative-to-zero inference, unrestricted
 custom bridges, EPS Q4, automatic approval of new-filing meaning, an ad hoc
 historical `as_of` reselection, cumulative overview mode, Excel output, and a
 claim of comprehensive financial-sector or foreign-issuer support.
+
+## Staged implementation evidence (2026-09-08)
+
+The five-company pre-freeze build preserved the existing columns, core rows,
+core cells, cells, metrics and trace datasets byte-for-byte while adding U3
+datasets. With producer functions and socket connection blocked, the same API
+returned default eight-quarter and explicit twelve-quarter views, nested AMD
+reviewed hierarchy/Q4 values, and traces for all five companies. The local
+optional record is `work/u3_final_five/consumer_probe.json`; it is acceptance
+evidence, not a normative input.
+
+NFLX (CIK 0001065280) supplied the outside-cohort case using 12 real SEC filing
+snapshots from the explicit cached Layer 1 run
+`data/processed/trailing_corpus_runs/20260827T051322Z`. Generic registration,
+offline discovery/reuse, governed history, immutable FY2023–2025 preparation,
+the common consumer API, and a separate FY2024–2025 refresh passed. Reopening
+the earlier bundle after refresh preserved its manifest hashes and periods.
+No live SEC request was used in this acceptance run; every filing input was the
+identified cache. No NFLX custom meaning or economic decomposition was
+automatically approved, so such shares and interpretations remain review
+required. The optional detailed record is
+`work/u3_acceptance_nflx/EVIDENCE.md`. Frozen-commit independent verification
+and remote publication remain separate completion gates.

@@ -25,6 +25,11 @@ def bundle(tmp_path):
                 "nodes": [{"node_id": "lens", "kind": "LENS", "anchor_row_id": "revenue"},
                           {"node_id": "value", "kind": "VALUE", "value_node_id": None}],
                 "edges": [{"parent_id": "lens", "child_id": "value", "periods": [[2025, 1]]}],
+                "importance": [{"policy_id": "important-financial-items", "policy_version": "u3-important-items-v1",
+                                "parent_id": "lens", "child_id": "value", "fiscal_year": 2025, "fiscal_quarter": 1,
+                                "present": True, "amount_rank": 1, "reasons": ["TOP_AMOUNT"], "warnings": [],
+                                "presentation_excluded": False, "share_status": "UNAVAILABLE",
+                                "share_reason": "NO_REVIEWED_ECONOMIC_DECOMPOSITION"}],
                 "trace_" + stable("fact")[0]: [{"cell_id": "fact", "fiscal_year": 2025, "fiscal_quarter": 1, "source_fact_id": "raw"}]}
     for name, records in datasets.items():
         files[name] = {"path": name + ".parquet", **_write_records(tmp_path / (name + ".parquet"), tuple(records))}
@@ -43,6 +48,56 @@ def test_query_values_null_proxy_trace_and_copy(bundle, monkeypatch):
     assert bundle.trace("fact", context=d["context"])["trace"]["source_fact_id"] == "raw"
     result["cells"][0]["value"] = "999"
     assert bundle.children("lens", context=d["context"])["cells"][0]["value"] == "100"
+
+
+def test_importance_all_cursor_scope_and_status(bundle):
+    context = bundle.overview("TEST")["context"]
+    result = bundle.children("lens", context=context, selection="important", reference_period=(2025, 1))
+    assert result["children"][0]["importance_reasons"] == ["TOP_AMOUNT"]
+    assert result["importance_policy"]["legacy_fallback"] is False
+    assert bundle.children("lens", context=context, selection="all")["children"]
+    assert bundle.target_status("TEST")["status"] == "READY"
+    with pytest.raises(ValueError, match="malformed cursor"):
+        bundle.children("lens", context=context, cursor="not-json")
+    with pytest.raises(ValueError, match="reference period"):
+        bundle.children("lens", context=context, reference_period=(2024, 1))
+
+
+def test_amount_change_rank_alone_does_not_enter_default(bundle):
+    row = bundle._records("TEST", "LATEST_REPORTED", "importance")[0]
+    row.update(amount_rank=None, amount_change_rank=1, reasons=["TOP_AMOUNT_CHANGE"])
+    context = bundle.overview("TEST")["context"]
+    assert bundle.children("lens", context=context)["children"] == []
+    assert bundle.children("lens", context=context, selection="all")["children"][0]["importance_reasons"] == ["TOP_AMOUNT_CHANGE"]
+
+
+def test_legacy_bundle_fallback_is_explicit(bundle):
+    del bundle.manifest["companies"]["TEST"]["views"]["LATEST_REPORTED"]["files"]["importance"]
+    result = bundle.children("lens", context=bundle.overview("TEST")["context"])
+    assert result["importance_policy"]["legacy_fallback"] is True
+    assert result["children"][0]["importance"] is None
+
+
+def test_missing_reference_uses_latest_historical_rank_without_zero_fill(bundle):
+    view = "LATEST_REPORTED"
+    bundle._records("TEST", view, "columns").append({"fiscal_year": 2024, "fiscal_quarter": 1, "period_class": "QTD_3M"})
+    bundle._records("TEST", view, "nodes").append({"node_id": "former", "kind": "VALUE", "label": "Former major"})
+    bundle._records("TEST", view, "edges").append({"parent_id": "lens", "child_id": "former", "periods": [[2024, 1]]})
+    bundle._records("TEST", view, "cells").append({"cell_id": "former-cell", "node_id": "former", "row_id": "revenue",
+                                                     "fiscal_year": 2024, "fiscal_quarter": 1, "period_class": "QTD_3M", "value": "900"})
+    bundle._records("TEST", view, "importance").append({
+        "policy_id": "important-financial-items", "policy_version": "u3-important-items-v1", "parent_id": "lens",
+        "child_id": "former", "fiscal_year": 2024, "fiscal_quarter": 1, "present": True, "amount_rank": 1,
+        "current_cell_id": "former-cell", "reasons": ["TOP_AMOUNT", "USER_PINNED"], "warnings": [], "pinned": True, "presentation_excluded": True,
+        "share_status": "UNAVAILABLE", "share_reason": "NO_REVIEWED_ECONOMIC_DECOMPOSITION",
+    })
+    context = bundle.overview("TEST")["context"]
+    result = bundle.children("lens", context=context)
+    former = next(row for row in result["children"] if row["node_id"] == "former")
+    assert former["importance_reasons"] == ["REFERENCE_PERIOD_UNAVAILABLE_FORMER_TOP_AMOUNT", "USER_PINNED"]
+    assert former["importance"]["reference_period_status"] == "UNAVAILABLE"
+    assert former["importance"]["ordering_reference_period"] == [2024, 1]
+    assert not [cell for cell in result["cells"] if cell["node_id"] == "former" and cell["fiscal_year"] == 2025]
 
 
 @pytest.mark.parametrize("kwargs", [{"as_of": "2025-01-01"}, {"review_cutoff": "2026-09-06"}, {"fiscal_start": 2023, "fiscal_end": 2025}, {"profile": "unknown"}])
@@ -211,6 +266,40 @@ def test_catalog_bom_registration_and_query_pointer(bundle, tmp_path, monkeypatc
     destination = tmp_path / "combined"
     analysis.prepare_catalog(catalog=catalog, destination=destination)
     assert analysis.open_analysis(catalog).overview("TEST")["cells"][0]["value"] == "100"
+    assert company_reports.read_target_status(catalog, ticker="TEST")["status"] == "READY"
+
+
+def test_registered_target_status_is_explicit_before_preparation(tmp_path):
+    from sec_xbrl import company_reports
+    company_reports.register_company(tmp_path, ticker="NEW", fiscal_start=2024, fiscal_end=2025)
+    assert company_reports.read_target_status(tmp_path, ticker="new") == {
+        "ticker": "NEW", "status": "NOT_PREPARED", "reason": "REGISTERED_COLLECTION_TARGET", "evidence": None,
+    }
+    with pytest.raises(ValueError):
+        company_reports.set_target_status(tmp_path, ticker="NEW", status="DISCLOSURE_MISSING", reason="missing")
+    company_reports.set_target_status(tmp_path, ticker="NEW", status="DISCLOSURE_MISSING", reason="checked eligible range",
+                                      evidence={"publication": "/immutable", "periods": [[2024, 1]]})
+    assert company_reports.read_target_status(tmp_path, ticker="NEW")["status"] == "DISCLOSURE_MISSING"
+
+
+def test_status_read_is_non_mutating_and_prepare_failure_is_persisted(tmp_path, monkeypatch):
+    from sec_xbrl import analysis, company_reports
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(ValueError):
+        company_reports.read_target_status(empty, ticker="NONE")
+    assert list(empty.iterdir()) == []
+    catalog = tmp_path / "catalog"
+    source = tmp_path / "source"
+    source.mkdir()
+    company_reports.register_company(catalog, ticker="FAIL", publication=source)
+    assert company_reports.read_target_status(catalog, ticker="FAIL")["status"] == "NOT_PREPARED"
+    monkeypatch.setattr(analysis, "prepare_analysis", lambda **kwargs: (_ for _ in ()).throw(ValueError("bad source")))
+    with pytest.raises(ValueError, match="bad source"):
+        analysis.prepare_catalog(catalog=catalog, destination=tmp_path / "bundle")
+    outcome = company_reports.read_target_status(catalog, ticker="FAIL")
+    assert outcome["status"] == "PREPARATION_FAILED"
+    assert outcome["reason"] == "bad source"
 
 
 def test_exact_axis_and_node_display_preferences_do_not_change_relationships():
