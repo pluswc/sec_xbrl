@@ -8,6 +8,11 @@ Metrics planes, and supports:
 2. Layer 2 — Longitudinal canonicalization within the same company.
 3. Layer 3 — Cross-company semantic comparison.
 
+The product goal is company-agnostic operation: it must support administrator
+registration and preparation of any supported SEC filer without ticker-specific
+engine changes. The existing five companies are regression fixtures, not the
+intended supported-company boundary.
+
 Excel, API, and dashboard views are consumers of governed Analytical and
 Derived Metrics data.  They are not SEC parsers, recast-selection engines, or
 business-calculation policy engines.

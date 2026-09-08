@@ -74,6 +74,43 @@ as such: LiabilitiesAndStockholdersEquity is not relabeled as a liabilities
 total. Productive-asset cash outflows are not silently equivalent to PPE-only
 cash outflows. A new company requires configuration, not engine code changes.
 
+### Company-independent onboarding
+
+The design goal is for the five currently exercised companies to remain
+regression samples, not a ticker allowlist. The existing generic registration
+and preparation functions are intended to let an administrator register any
+SEC-supported filer, select its filing range and approved configuration, prepare
+its data, and expose it through the same catalogue and consumer API. Arbitrary-
+company end-to-end operation has not yet been demonstrated; its acceptance
+requirements are defined in the [U3 important-items analysis plan](u3-important-items-plan.md).
+Onboarding must not add ticker-specific branches to the engine. A generic defect
+discovered by a new filer may be fixed for all companies, while company-specific
+QName choices, display preferences, and reviewed interpretations remain
+administrator configuration or explicit review decisions. A previously unseen
+custom disclosure requires a manually scoped administrator review; registration
+alone does not approve its meaning.
+
+The current implementation has materially deeper regression evidence for the
+five samples than for arbitrary filers. It currently supports the 10-K, 10-Q,
+10-K/A, and 10-Q/A preservation and selection rules described by the project
+contracts; this is not a claim of complete coverage for financial institutions,
+foreign issuers, every taxonomy pattern, or every custom disclosure. Registering
+a ticker establishes a preparation target, not proof that its analysis is ready.
+
+Preparation and catalogue publication must distinguish at least these outcomes:
+
+- `UNSUPPORTED`: outside the declared SEC/form or implementation contract
+- `PREPARATION_FAILED`: discovery, collection, parsing, analysis, or publication failed
+- `NOT_PREPARED`: supported target whose required publication has not been prepared
+- `REVIEW_REQUIRED`: collected evidence needs an administrator's explicit interpretation or approval
+- `DISCLOSURE_MISSING`: a prepared, eligible filing range was checked and the disclosure is actually absent
+
+These names describe the required semantic distinctions; their persisted schema
+and API representation remain an implementation decision. A not-yet-held filing
+is a collection target and must never be converted to `DISCLOSURE_MISSING` merely
+to fill a cell. Only the administrator makes review and accounting-meaning
+decisions. Default thresholds and ranking policies remain drafts until approved.
+
 `prepare_analysis(publication=..., destination=..., tickers=...)` is the lower
 level single-source producer. It reads governed history plus its declared raw
 relationship/concept snapshots only during preparation. Existing source files
