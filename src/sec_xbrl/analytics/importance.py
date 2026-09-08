@@ -353,13 +353,24 @@ def _reviewed_shares(
             continue
         assert parent_amount is not None and all(value is not None for value in amounts.values())
         total = sum((value for value in amounts.values() if value is not None), Decimal(0))
+        if total != parent_amount:
+            for child in child_ids:
+                output[(period, child)] = _unavailable_share(
+                    "NON_RECONCILING_DECOMPOSITION",
+                    decomposition_review_id=rule["review_id"],
+                    share_input_cell_ids=[parent_cell["cell_id"], cells[child]["cell_id"]],
+                    share_parent_value=parent_cell["value"], share_child_value=cells[child]["value"],
+                    share_child_total=str(total), share_total_difference=str(total - parent_amount),
+                    share_reconciliation_inputs={cells[key]["cell_id"]: cells[key]["value"] for key in sorted(child_ids)},
+                )
+            continue
         for child, amount in amounts.items():
             assert amount is not None
             output[(period, child)] = {
                 "parent_share": str((amount / parent_amount) * Decimal(100)),
                 "share_status": "AVAILABLE",
                 "share_reason": None,
-                "share_warning": "CHILDREN_EXCEED_PARENT" if total > parent_amount else None,
+                "share_warning": None,
                 "decomposition_review_id": rule["review_id"],
                 "decomposition_evidence_sha256": rule["evidence_sha256"],
                 "share_formula": "child / reviewed economic parent * 100",
@@ -462,6 +473,8 @@ def _complete_source_pairs(cell: dict[str, Any], pairs: list[list[Any]], trace_b
                 or any(not row.get("selected_source_fact_id") or row.get("source_type") != "REPORTED"
                        or row.get("continuity_break") or row.get("recast_review_required") for row in inputs)):
             return False
+        if not _derived_output_scope(cell, lineage, inputs):
+            return False
         day_bounds = {"FY": (350, 378), "YTD_9M": (250, 290), "YTD_6M": (160, 200), "QTD_3M": (75, 105)}
         for row in inputs:
             days = (date.fromisoformat(row["context_end_date"]) - date.fromisoformat(row["context_start_date"])).days
@@ -478,3 +491,31 @@ def _complete_source_pairs(cell: dict[str, Any], pairs: list[list[Any]], trace_b
         return all(value is not None for value in values) and values[0] - values[1] == _amount(cell)
     except (KeyError, TypeError, ValueError):
         return False
+
+
+def _derived_output_scope(cell: dict[str, Any], lineage: dict[str, Any], inputs: list[dict[str, Any]]) -> bool:
+    """Bind governed source identity through its persisted output to the display cell."""
+    # These are canonical/analytical fields. Raw concept and dimension IDs may
+    # legitimately differ between filings and are never used as a mapped bridge.
+    mapped = {"company_canonical_concept_id": "semantic_id", "selection_view": "selection_view",
+              "selection_as_of_date": "as_of", "basis_version": "basis_version"}
+    for source_key, cell_key in mapped.items():
+        expected = cell.get(cell_key)
+        if source_key != "basis_version" and not expected:
+            return False
+        if any(row.get(source_key) != expected for row in [lineage, *inputs]):
+            return False
+    if not lineage.get("cik"):
+        return False
+    for key in ("cik", "structural_version", "recast_version"):
+        if any(row.get(key) != lineage.get(key) for row in inputs):
+            return False
+    for row in [lineage, *inputs]:
+        if row.get("ticker") is not None and row["ticker"] != cell.get("ticker"):
+            return False
+        unit = [row.get("unit_numerator_measures"), row.get("unit_denominator_measures")]
+        dimensions = row.get("analytical_dimensions") or row.get("canonical_dimension_signature") or []
+        if (_currency_unit({"monetary": True, "unit": unit}) != _currency_unit(cell)
+                or dimensions != cell.get("dimensions")):
+            return False
+    return True

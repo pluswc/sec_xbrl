@@ -48,7 +48,7 @@ def test_reviewed_share_requires_hash_exact_bindings_scope_and_source_pairs(tmp_
     nodes = nodes[:3]
     edges = edges[:2]
     cells = [row for row in cells if row["node_id"] in {"c1", "c2"} and row["fiscal_year"] == 2026]
-    parents = [row for row in parents if row["fiscal_year"] == 2026]
+    parents = [{**row, "value": "1100"} for row in parents if row["fiscal_year"] == 2026]
     evidence = tmp_path / "review.txt"
     evidence.write_text("reviewed complete decomposition")
     digest = hashlib.sha256(evidence.read_bytes()).hexdigest()
@@ -123,15 +123,17 @@ def share_case(tmp_path, *, quarter=None, start="2026-10-01", end="2027-01-01"):
     nodes, edges, cells, parents = graph()
     nodes, edges = nodes[:3], edges[:2]
     cells = [c for c in cells if c["fiscal_year"] == 2026 and c["node_id"] in {"c1", "c2"}]
-    parents = [c for c in parents if c["fiscal_year"] == 2026]
+    parents = [{**c, "value": "1100"} for c in parents if c["fiscal_year"] == 2026]
     traces = []
     for c in [*cells, *parents]:
-        c.update(fiscal_quarter=quarter or 1, start=start, end=end)
+        c.update(fiscal_quarter=quarter or 1, start=start, end=end, semantic_id=c["node_id"], as_of="2027-02-02")
         source = {'source_filing_id': "filing", 'selected_source_fact_id': c["cell_id"],
                       'company_canonical_concept_id': c["node_id"], 'canonical_dimension_signature': [],
                       'context_start_date': start, 'context_end_date': end, 'source_type': "REPORTED",
                       'unit_numerator_measures': UNIT[0], 'unit_denominator_measures': UNIT[1],
                       'period_class': "QTD_3M", 'value_numeric': c["value"]}
+        source.update(cik="0000123456", ticker=c["ticker"], basis_version=c["basis_version"],
+                      selection_view=c["selection_view"], selection_as_of_date=c["as_of"])
         if quarter:
             classes = {2: ("YTD_6M", "QTD_3M"), 3: ("YTD_9M", "YTD_6M"), 4: ("FY", "YTD_9M")}[quarter]
             later = {**source, "context_start_date": "2026-01-01", "period_class": classes[0],
@@ -253,7 +255,7 @@ def test_reported_instant_and_reviewed_q4_positive_amounts(tmp_path):
                                              value_status="DERIVED", metric_id="QUARTERLY_ADDITIVE_FLOW",
                                              calculation_decision_id="approved-decision", compatibility_result="COMPATIBLE_INPUTS")
         rows = materialize_importance(**args)
-        assert [Decimal(r["parent_share"]) for r in rows] == [Decimal(600) / 2100 * 100, Decimal(500) / 2100 * 100]
+        assert [Decimal(r["parent_share"]) for r in rows] == [Decimal(600) / 1100 * 100, Decimal(500) / 1100 * 100]
 
 
 def test_missing_malformed_or_unbound_source_period_is_unavailable(tmp_path):
@@ -266,3 +268,54 @@ def test_missing_malformed_or_unbound_source_period_is_unavailable(tmp_path):
     binding = args["configuration"]["economic_decompositions"][0]["bindings"][0]
     binding["child_source_period_pairs"]["c1"][0][2] = "2027-02-01"
     assert all(r["share_status"] == "UNAVAILABLE" for r in materialize_importance(**args))
+
+
+def test_derived_sources_must_bind_scope_to_lineage_and_compact_output(tmp_path):
+    fields = {
+        "basis_version": "different-basis", "selection_view": "AS_FILED",
+        "selection_as_of_date": "2027-03-01", "company_canonical_concept_id": "different-concept",
+        "cik": "9999999999", "ticker": "OTHER", "structural_version": "changed", "recast_version": "changed",
+        "unit_numerator_measures": '["iso4217:EUR"]', "unit_denominator_measures": '["shares"]',
+        "canonical_dimension_signature": [["axis", "member"]], "analytical_dimensions": [["axis", "member"]],
+    }
+    for kind in ("core", "reviewed"):
+        base = share_case(tmp_path, quarter=4)
+        if kind == "reviewed":
+            for trace in base["traces"]:
+                trace["value_lineage"].update(derivation_rule_version="disclosure-review-v1", source_type="DERIVED_METRIC",
+                                             value_status="DERIVED", metric_id="QUARTERLY_ADDITIVE_FLOW",
+                                             calculation_decision_id="approved-decision", compatibility_result="COMPATIBLE_INPUTS")
+        assert all(r["share_status"] == "AVAILABLE" for r in materialize_importance(**base))
+        for key, bad in fields.items():
+            for target in ("inputs", "lineage"):
+                args = deepcopy(base)
+                for trace in args["traces"]:
+                    line = trace["value_lineage"]
+                    for row in line["source_inputs"] if target == "inputs" else [line]:
+                        row[key] = bad
+                assert all(r["share_status"] == "UNAVAILABLE" for r in materialize_importance(**args)), (kind, key, target)
+        for key in ("semantic_id", "basis_version", "selection_view", "as_of", "ticker"):
+            args = deepcopy(base)
+            for c in args["cells"] + args["core_cells"]:
+                c[key] = "wrong-output"
+            assert all(r["share_status"] == "UNAVAILABLE" for r in materialize_importance(**args)), (kind, key)
+
+
+def test_reconciliation_requires_exact_sum_and_retains_mismatch_inputs(tmp_path):
+    for parent in ("1000", "2100"):
+        args = share_case(tmp_path)
+        args["core_cells"][0]["value"] = parent
+        rows = materialize_importance(**args)
+        assert {r["share_reason"] for r in rows} == {"NON_RECONCILING_DECOMPOSITION"}
+        for row in rows:
+            assert row["share_status"] == "UNAVAILABLE" and row["parent_share"] is None
+            assert row["share_parent_value"] == parent
+            assert row["share_child_total"] == "1100"
+            assert row["share_total_difference"] == str(1100 - int(parent))
+            assert row["share_reconciliation_inputs"] == {"c1-2026": "600", "c2-2026": "500"}
+            assert row["share_input_cell_ids"][0] == "parent-2026"
+        assert args["core_cells"][0]["value"] == parent
+        assert [c["value"] for c in args["cells"]] == ["600", "500"]
+    args = share_case(tmp_path)
+    args["configuration"] = {}
+    assert {r["share_reason"] for r in materialize_importance(**args)} == {"NO_REVIEWED_ECONOMIC_DECOMPOSITION"}

@@ -79,8 +79,9 @@ classification basis, corresponding filing/source-period pairs, reviewer,
 review time, and an immutable evidence-file hash. CAL, co-presentation,
 observed dimensions, and reviewed display hierarchy are insufficient.
 Zero/negative parents, offsets, nils, duplicates, incomplete sets, and
-unit/period/basis/source mismatches stay unavailable. Values above 100 percent
-are warned without normalization, and no residual is invented.
+unit/period/basis/source mismatches stay unavailable. Under the corrective lead
+policy below, a child total either below or above the parent stays unavailable
+as `NON_RECONCILING_DECOMPOSITION`. No normalization or residual is invented.
 
 The design must:
 
@@ -215,3 +216,35 @@ under the initially collapsed “중요도 판단 근거” control. Local commi
 independent rerun, real-cache artifacts, and remote publication are separate
 gates. Remote push was rejected by automatic approval review for lack of
 external-publishing authorization; this corrective work does not retry it.
+
+
+## Corrective scope and reconciliation decision (2026-09-08)
+
+Independent verification of `c2e74b1623dd4e4603f2fbccb827a9b561e6603a` found
+that matching derived input legs could both contradict the persisted output's
+basis, selection view/as-of or canonical concept. Derived share eligibility
+now binds both legs through their governed output lineage to the compact cell's
+`semantic_id`, `basis_version`, `selection_view`, and `as_of`. It also requires
+consistent source/output CIK, declared ticker, structural/recast metadata,
+complete units and full analytical dimensions. Canonical/analytical identity
+is used; raw IDs across filings are not assumed equivalent. Missing identity
+or an unbound difference stays unavailable rather than inventing a mapping.
+
+The lead also approved a conservative reconciliation refinement after the
+synthetic “complete” example had children 600 + 500 and parent 2100, leaving
+1000 unexplained. This decision supersedes the earlier policy permitting a
+share above 100 percent with only a warning. Without retained precision and
+approved tolerance evidence, this implementation requires exact equality of
+the complete child total and positive parent. Both undershoot and overshoot
+return `NON_RECONCILING_DECOMPOSITION`, null share, original parent/child
+values and cell IDs, the full child inputs, total and signed total-minus-parent
+difference. No residual or normalized value is created. Equality alone never
+replaces the explicit economic-decomposition review. A future tolerance policy
+requires retained source precision and a separate approval; rounding tolerance
+is not guessed here. This is a lead eligibility decision for U3, not approval
+of any real company's accounting decomposition.
+
+Reconciled reported/instant and governed core/reviewed derived fixtures use
+parent 1100 and children 600 + 500, with independently recalculated percentages.
+Sibling-field counterexamples change both source legs, output lineage, and
+compact identity separately, while preserving the remaining valid evidence.
