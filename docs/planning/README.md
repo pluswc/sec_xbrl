@@ -4,7 +4,8 @@
 규범적 계획은 Git 추적 문서이며, 임시 계획 파일이나 특정 도구를 읽거나 설치할
 필요가 없다. 이 등록부를 만든 과거 변경은 문서 설계만 승인했다. 2026-09-09
 후속 승인은 [U4 전달 계약](../implementation/u4-continuous-refresh-delivery.md)의
-제한된 로컬 구현으로 확대됐지만 live 신규 공시 인수는 아직 완료되지 않았다.
+제한된 로컬 구현으로 확대됐고, 2026-09-10 결과는
+[U4 완료·인수](../implementation/u4-completion-and-acceptance.md)에 기록한다.
 
 ## 읽기 순서와 문서 소유권
 
@@ -19,6 +20,7 @@
 | [U3 v1](../implementation/u3-important-items-plan.md), [후속 v2 전달](../implementation/u3-followup-delivery.md), [Axis 전달](../implementation/u3-axis-timeseries-delivery.md) | 승인 정책, 구현·검증 계약과 한계. 로드맵이 수치를 재승인하지 않음 |
 | [U3 완료·우선순위](../implementation/u3-closeout-and-followup-priority.md) | 완료 결정과 날짜가 있는 정정 기록 |
 | [U4 계속 갱신 제안](../implementation/u4-continuous-refresh-plan.md) | 기존 기능/격차 대조와 후속 실행 수락안. 구현 승인 아님 |
+| [U4 완료·인수](../implementation/u4-completion-and-acceptance.md) | 후속 사용자 승인, 동결 소스, live/cache 구분, 독립 검증과 잔여 한계 |
 | [기간 규칙](../implementation/period-rules.md), [Layer 2 연결](../implementation/layer2-longitudinal.md), [공시 발견 계약](../implementation/accession-contract.md) | 표시 계획으로 바꿀 수 없는 의미·입력 경계 |
 
 충돌 시 적용되는 사용자 결정과 승인 범위를 먼저 확인하고, 해당 평면의 계약을
@@ -33,7 +35,7 @@
 | U1 핵심 요약 | 기존 제안에서 납품 | 기존 제한 범위 | `9eb37d4`에 존재 | 해당 후보 PASS | 완료 | PR #62, `7f8cc523` |
 | U2 단계별 탐색 | 기존 제안에서 납품 | 기존 제한 범위 | `9eb37d4`에 존재 | 해당 후보 PASS | 완료 | PR #62, `7f8cc523` |
 | U3 중요도·구조·Axis 시계열 | 승인 범위까지 확장·납품 | 명시적 U3 범위 | `3098be6` | 664 passed / 16 skipped, Ruff, 실제 6사 PASS | 2026-09-09 COMPLETE | **미병합; main에 포함되지 않음** |
-| U4 계속 갱신 | 복구된 제안과 후속 전달 계약 | 제한된 로컬 orchestration·복구·명시적 재개; live 대상/원격 제외 | `e2b6893` | [LOCAL_CODE_AND_CACHE_PASS](../implementation/u4-local-verification-and-next-steps.md); full U4는 미완료 | **완료 아님** | U4 완료로 표시하지 않음 |
+| U4 계속 갱신 | 복구된 제안과 후속 전달 계약 | bounded orchestration·복구·재개·live 입력·quality materialization; 원격 제외 | `3236778` | 675 passed / 37 skipped, Ruff, 6사 21, 실제 NFLX 14공시·동일 API/화면 PASS | **2026-09-10 LOCAL_ACCEPTED** | **미병합; main에 포함되지 않음** |
 | U5 보관·공유 | **복구된 기존 제안** | 상세 구현 승인은 후속 | CSV/HTML 기반 존재; 선택 상태 보존·Excel 납품 완료 아님 | U5 전체 PASS 없음 | 완료 아님 | U5 완료로 표시하지 않음 |
 
 정확한 식별:

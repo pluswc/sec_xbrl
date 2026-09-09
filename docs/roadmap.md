@@ -11,8 +11,10 @@ As recorded on 2026-09-09: U1/U2 are merged through PR #62 at
 `7f8cc5232d0df3d4c184de55827111e599b94dbd`; U3 is locally accepted at
 `3098be6db7622f2ec444a9979732b7dfaa685641` with closeout documentation at
 `32212caba5daf8273663d70ba3075db5d1d56fc7`, and is **not in main**. U4
-“계속 갱신” and U5 “보관·공유” are recovered existing proposals, not completed
-milestones or implementation authorization from this documentation task.
+“계속 갱신” was subsequently locally accepted on 2026-09-10 at product SHA
+`3236778e57872b8ea41e421534e4a9d9ea0d58ff`; see the
+[U4 acceptance record](implementation/u4-completion-and-acceptance.md). It is
+not in `main`. U5 “보관·공유” remains a proposal.
 
 ## Historical M0 — Repository and accession discovery contracts
 The original bootstrap work established repository contracts, CI skeleton, and

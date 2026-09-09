@@ -1,10 +1,15 @@
 # U4 continuous refresh — implementation delivery contract
 
-Date: 2026-09-09. Status: **implementation authorized; local verification in
-progress**. The current user authorization supersedes the historical
+Date: 2026-09-09. Historical status: **implementation authorized; local
+verification in progress**. The current user authorization supersedes the historical
 document-only sentence in the proposal for this bounded implementation. It does
 not authorize a live SEC target, remote push, PR, merge, scheduler, Excel, or a
 new economic approval.
+
+Status update 2026-09-10: the bounded delivery was independently verified and
+locally accepted at product SHA `3236778e57872b8ea41e421534e4a9d9ea0d58ff`.
+See [U4 completion and acceptance](u4-completion-and-acceptance.md) for the live
+input distinction, quality materialization, results, and remaining exclusions.
 
 ## Milestone and acceptance boundary
 
@@ -81,9 +86,10 @@ new six-company producer success.
 The implementation does not infer Q4, share, hierarchy, reconciliation, or
 cross-accession approvals. It does not change discovery, parsing, period rules,
 Layer 2 selection, or review economics. Unit tests use synthetic producer
-doubles and explicit fault points. Cached six-company evidence and one live new
-filing are reported separately; U4 remains incomplete until the lead supplies
-and accepts the new-filing evidence.
+doubles and explicit fault points. At this contract's initial date, cached
+six-company evidence and one live new filing were still pending separately. The
+2026-09-10 acceptance record supplies and accepts that later evidence without
+changing this historical sequencing requirement.
 
 Every legacy `admin/runs/*/decisions.csv` snapshot is copied into the private
 administrator before refresh validation. Successful U4 runs also append an

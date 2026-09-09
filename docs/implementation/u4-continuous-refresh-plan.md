@@ -7,6 +7,12 @@
 제외된다. 별도 작업트리나 cached 성공도 전체 완료 증거가 아니다.
 [계획 등록부](../planning/README.md)와 [U 로드맵](../planning/investor-analysis-roadmap.md)을 따른다.
 
+**2026-09-10 후속 상태 정정:** 사용자가 live 입력과 bounded 구현을 추가로
+승인했고, 제품 SHA `3236778e57872b8ea41e421534e4a9d9ea0d58ff`가 독립
+검증 후 로컬 인수됐다. 아래의 제안/격차 설명은 2026-09-09 당시 기록으로
+보존한다. 해결된 quality/live 항목, 정확한 증거와 잔여 한계는
+[U4 완료·인수](u4-completion-and-acceptance.md)가 최신 상태다.
+
 ## 목적과 그대로 지킬 계약
 
 새 분기·새 기업에서도 같은 분석 구조를 유지한다. 회사별 설정, 제한된 검토 규칙
@@ -147,3 +153,8 @@ accession 증거 전에는 U4를 `COMPLETE`로 바꾸지 않는다.
 보존한다. 일반 quality overlay 구현은 남은 범위다. 현재 미완성 연도의 적법한 분기는
 기존 연간 HTML gate를 거치지 않고 prepared consumer로 전달하되, 기간/Q4 정책은
 그대로 유지한다.
+
+2026-09-10 정정: 위 quality gap은 기존 materializer를 prepared Analytical
+경계에서 재사용하고 exact matched-decision ledger와 unmatched fail-closed 검사를
+추가해 해결됐다. 실제 신규 2공시도 별도 live intake 후 최종 14공시 offline U4
+발행에 연결됐다. 이는 새 경제 의미의 자동 승인으로 확대되지 않는다.
