@@ -336,6 +336,19 @@ class AnalysisClient:
         from sec_xbrl.analytics.axis_timeseries_queries import axis_timeseries
         return axis_timeseries(self, ticker, lens_id, context=context)
 
+    def overview_snapshot(self, ticker: str, **selection: Any) -> dict[str, Any]:
+        """Create a canonical U5 snapshot from one prepared overview response."""
+        from sec_xbrl.consumer.export import prepare_overview_snapshot
+
+        return prepare_overview_snapshot(self, ticker, **selection)
+
+    def axis_snapshot(self, ticker: str, lens_id: str, *, context: dict[str, Any],
+                      **selection: Any) -> dict[str, Any]:
+        """Create a canonical U5 snapshot from one prepared Axis response."""
+        from sec_xbrl.consumer.export import prepare_axis_snapshot
+
+        return prepare_axis_snapshot(self, ticker, lens_id, context=context, **selection)
+
     def _axis_json(self, relative: str, expected_sha256: str) -> dict[str, Any]:
         identity = self.axis_manifest or {}
         key = (identity.get("publication_id"), identity.get("decision_cutoff"), relative, expected_sha256)
