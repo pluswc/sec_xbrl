@@ -33,7 +33,7 @@
 | U1 핵심 요약 | 기존 제안에서 납품 | 기존 제한 범위 | `9eb37d4`에 존재 | 해당 후보 PASS | 완료 | PR #62, `7f8cc523` |
 | U2 단계별 탐색 | 기존 제안에서 납품 | 기존 제한 범위 | `9eb37d4`에 존재 | 해당 후보 PASS | 완료 | PR #62, `7f8cc523` |
 | U3 중요도·구조·Axis 시계열 | 승인 범위까지 확장·납품 | 명시적 U3 범위 | `3098be6` | 664 passed / 16 skipped, Ruff, 실제 6사 PASS | 2026-09-09 COMPLETE | **미병합; main에 포함되지 않음** |
-| U4 계속 갱신 | 복구된 제안과 후속 전달 계약 | 제한된 로컬 orchestration·복구·명시적 재개; live 대상/원격 제외 | `codex/u4` 후보 구현·자체 검증 | 독립 검증 대기; cached NFLX/6사 증거는 live 신규 공시가 아님 | **완료 아님** | U4 완료로 표시하지 않음 |
+| U4 계속 갱신 | 복구된 제안과 후속 전달 계약 | 제한된 로컬 orchestration·복구·명시적 재개; live 대상/원격 제외 | `e2b6893` | [LOCAL_CODE_AND_CACHE_PASS](../implementation/u4-local-verification-and-next-steps.md); full U4는 미완료 | **완료 아님** | U4 완료로 표시하지 않음 |
 | U5 보관·공유 | **복구된 기존 제안** | 상세 구현 승인은 후속 | CSV/HTML 기반 존재; 선택 상태 보존·Excel 납품 완료 아님 | U5 전체 PASS 없음 | 완료 아님 | U5 완료로 표시하지 않음 |
 
 정확한 식별:
