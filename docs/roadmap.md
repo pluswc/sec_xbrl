@@ -14,8 +14,9 @@ As recorded on 2026-09-09: U1/U2 are merged through PR #62 at
 “계속 갱신” was subsequently locally accepted on 2026-09-10 at product SHA
 `3236778e57872b8ea41e421534e4a9d9ea0d58ff`; see the
 [U4 acceptance record](implementation/u4-completion-and-acceptance.md). It is
-not in `main`. U5 “보관·공유” is a locally implemented candidate under
-[its export contract](implementation/u5-consumer-export.md), pending independent verification.
+not in `main`. U5 “보관·공유” is locally accepted at product SHA
+`8867229455f9441807117a4a4a3e1ebaa8ae7eee` and remains unmerged; see
+[U5 completion and acceptance](implementation/u5-completion-and-acceptance.md).
 
 ## Historical M0 — Repository and accession discovery contracts
 The original bootstrap work established repository contracts, CI skeleton, and

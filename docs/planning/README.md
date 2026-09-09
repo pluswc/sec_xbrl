@@ -36,7 +36,7 @@
 | U2 단계별 탐색 | 기존 제안에서 납품 | 기존 제한 범위 | `9eb37d4`에 존재 | 해당 후보 PASS | 완료 | PR #62, `7f8cc523` |
 | U3 중요도·구조·Axis 시계열 | 승인 범위까지 확장·납품 | 명시적 U3 범위 | `3098be6` | 664 passed / 16 skipped, Ruff, 실제 6사 PASS | 2026-09-09 COMPLETE | **미병합; main에 포함되지 않음** |
 | U4 계속 갱신 | 복구된 제안과 후속 전달 계약 | bounded orchestration·복구·재개·live 입력·quality materialization; 원격 제외 | `3236778` | 675 passed / 37 skipped, Ruff, 6사 21, 실제 NFLX 14공시·동일 API/화면 PASS | **2026-09-10 LOCAL_ACCEPTED** | **미병합; main에 포함되지 않음** |
-| U5 보관·공유 | 복구된 기존 제안 | `51c196f` 기준 로컬 구현 승인 | canonical snapshot + CSV/HTML/JSON/XLSX + offline 저장 controls | 자체 검증 진행; 독립 검증 대기 | 후보; 로컬 인수 전 | 미병합; main에 포함되지 않음 |
+| U5 보관·공유 | 복구된 기존 제안 | `51c196f` 기준 로컬 구현 승인 | product `8867229`; canonical snapshot + CSV/HTML/JSON/XLSX + offline 저장 controls | 679 passed / 37 skipped, cached 21, Ruff, 80 snapshots·320 formats·4,844 cells·24 downloads PASS | **2026-09-10 LOCAL_ACCEPTED** | **미병합; main에 포함되지 않음** |
 
 정확한 식별:
 
@@ -45,6 +45,8 @@
 - U3 인수: `3098be6db7622f2ec444a9979732b7dfaa685641`.
   문서 closeout: `32212caba5daf8273663d70ba3075db5d1d56fc7`.
   문서 커밋은 제품 테스트 결과의 대상 SHA를 바꾸지 않는다.
+- U5 product: `8867229455f9441807117a4a4a3e1ebaa8ae7eee`.
+  완료·인수 근거: [U5 완료·인수](../implementation/u5-completion-and-acceptance.md).
 - 이번 계획 설계의 기준 부모는 위 `32212ca`다. 단일 작성자 로컬 문서 커밋 후
   별도 읽기 전용 검증을 받는다. 독립 검증·인수·병합을 미리 완료로 표시하지 않는다.
 

@@ -81,8 +81,9 @@ Arbitrary row/period partial exports use the Python API above.
 
 ## Delivery boundary
 
-The U5 candidate is based on completion baseline `51c196f`. The lead retains
-the prior local delivery boundary: there is no push, PR, CI, or merge in U5 implementation.
+The accepted U5 product is based on completion baseline `51c196f` and frozen at
+`8867229455f9441807117a4a4a3e1ebaa8ae7eee`. Independent verification returned
+`PASS` and the lead recorded `LOCAL_ACCEPTED_NOT_MERGED`; see
+[U5 completion and local acceptance](u5-completion-and-acceptance.md). The lead
+retains the prior local delivery boundary: there is no push, PR, CI, or merge.
 This is a documented exception to the delivery workflow's remote freeze step.
-Independent verification must use the final local commit SHA; local acceptance
-and `main` merge status remain separate decisions.

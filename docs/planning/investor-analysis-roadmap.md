@@ -143,10 +143,13 @@ API/화면을 별도 검증했다. 이는 무인 경제 승인이나 main 병합
   필수 경고 보존을 후속 상세 구현 범위에서 검증한다. 내보내기가 수집·공시 선택·
   연결·회계 계산·승인을 실행해서는 안 된다.
 
-상태 정정(2026-09-10): 사용자가 completion baseline `51c196f`에서 U5 로컬 구현을
-승인했다. canonical snapshot과 CSV/HTML/JSON/XLSX 산출물, 오프라인 화면의 직접
-저장 링크 및 자체 검증은 [U5 전달 계약](../implementation/u5-consumer-export.md)에
-기록한다. 구현 후보는 독립 검증 전이며 로컬 인수·main 병합으로 표시하지 않는다.
+상태 정정(2026-09-10): completion baseline `51c196f`에서 승인된 U5 제품
+`8867229455f9441807117a4a4a3e1ebaa8ae7eee`는 독립 검증 `PASS` 후
+`LOCAL_ACCEPTED_NOT_MERGED`로 인수됐다. canonical snapshot,
+CSV/HTML/JSON/XLSX와 오프라인 저장 범위는
+[U5 전달 계약](../implementation/u5-consumer-export.md), 검증·제약·재작업 근거는
+[U5 완료·인수](../implementation/u5-completion-and-acceptance.md)에 기록한다.
+`main`에는 병합되지 않았다.
 
 ## 계속 유지할 잔여 범위와 제외 사항
 
