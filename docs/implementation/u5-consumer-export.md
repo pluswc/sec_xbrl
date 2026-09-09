@@ -67,10 +67,11 @@ a snapshot whose content no longer matches that hash.
   reconstructable canonical snapshot. JSON is chunked below Excel's 32,767
   character cell limit with explicit part numbers.
 
-All spreadsheet-facing text beginning with formula trigger characters is
-escaped in CSV/HTML table output. XLSX stores every cell as a string, so no
-formula is executed and amounts beyond Excel's 15-digit numeric precision stay
-exact. Canonical JSON chunks are stored verbatim and reconstruct losslessly.
+CSV text beginning with formula trigger characters is escaped. HTML escapes
+markup while preserving signed values, and XLSX stores every cell explicitly
+as a string, so formulas do not execute and amounts beyond Excel's 15-digit
+numeric precision stay exact. Canonical JSON chunks are stored verbatim and
+reconstruct losslessly.
 
 The offline hierarchy screen exposes direct links for all four formats while
 in Analytical mode. The links follow the selected company, core metric, or Axis

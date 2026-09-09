@@ -163,8 +163,20 @@ def _cell(client: Any, context: dict[str, Any], source: dict[str, Any]) -> dict[
     cell = deepcopy(source)
     provenance = cell.pop("provenance", None)
     cell_id = cell.get("cell_id")
-    if provenance is None and cell_id and cell.get("status") in {"REPORTED", "DERIVED"}:
-        provenance = client.trace(cell_id, context=context)["trace"]
+    traced = cell.get("status") in {"REPORTED", "DERIVED"}
+    if traced and (not isinstance(cell_id, str) or not cell_id):
+        raise ValueError("reported/derived export cell requires a cell_id")
+    if provenance is None and traced:
+        response = client.trace(cell_id, context=context)
+        if not isinstance(response, dict) or "trace" not in response:
+            raise ValueError("reported/derived export cell has malformed trace response")
+        provenance = response["trace"]
+    if traced and (
+        not isinstance(provenance, dict)
+        or provenance.get("cell_id") != cell_id
+        or not isinstance(provenance.get("value_lineage"), dict)
+    ):
+        raise ValueError("reported/derived export cell trace is missing or mismatched")
     display_value = cell.get("value")
     if cell.get("quality_status") == "BLOCK":
         display_value = None
@@ -294,12 +306,16 @@ def _validate_snapshot(snapshot: dict[str, Any]) -> None:
         raise ValueError("not a canonical U5 export snapshot")
 
 
-def _safe(value: Any) -> str:
+def _text(value: Any) -> str:
     if value is None:
         return ""
     if isinstance(value, (list, dict)):
         value = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
-    result = str(value)
+    return str(value)
+
+
+def _csv_safe(value: Any) -> str:
+    result = _text(value)
     if result.lstrip().startswith(("=", "+", "-", "@")):
         return "'" + result
     return result
@@ -317,7 +333,7 @@ def _flat_rows(snapshot: dict[str, Any]) -> list[list[str]]:
             cell.get("unit"), cell.get("dimensions"), cell.get("basis_version"),
             cell.get("source_fact_id"), cell.get("cell_id"),
         ])
-    return [[_safe(value) for value in row] for row in result]
+    return [[_text(value) for value in row] for row in result]
 
 
 HEADERS = ["row_id", "label", "depth", "fiscal_year", "fiscal_quarter", "period_class", "display_value",
@@ -330,14 +346,14 @@ def _csv(snapshot: dict[str, Any]) -> str:
     writer = csv.writer(output, lineterminator="\n")
     writer.writerow(["record_type", *HEADERS, "record_json"])
     metadata = {key: snapshot[key] for key in snapshot if key != "cells"}
-    writer.writerow(["SNAPSHOT", *([""] * len(HEADERS)), _safe(metadata)])
+    writer.writerow(["SNAPSHOT", *([""] * len(HEADERS)), _csv_safe(metadata)])
     for row, source in zip(_flat_rows(snapshot), snapshot["cells"], strict=True):
-        writer.writerow(["CELL", *row, _safe(source)])
+        writer.writerow(["CELL", *[_csv_safe(value) for value in row], _csv_safe(source)])
     return output.getvalue()
 
 
 def _html(snapshot: dict[str, Any]) -> str:
-    esc = lambda value: html.escape(_safe(value), quote=True)
+    esc = lambda value: html.escape(_text(value), quote=True)
     metadata = esc(json.dumps({key: snapshot[key] for key in ("snapshot_id", "kind", "context", "publication", "selection", "warnings")}, ensure_ascii=False, indent=2))
     headings = "".join(f"<th>{esc(value)}</th>" for value in HEADERS)
     rows = "".join("<tr>" + "".join(f"<td>{esc(value)}</td>" for value in row) + "</tr>" for row in _flat_rows(snapshot))
@@ -358,9 +374,9 @@ def _xlsx(snapshot: dict[str, Any], destination: Path) -> None:
     periods = list(dict.fromkeys(
         (column["fiscal_year"], column["fiscal_quarter"]) for column in snapshot["columns"]
     ))
-    headers = ["label", "period_class", "unit", "row_warnings", "cell_statuses", "row_id", "depth", *[
+    headers = ["label", "period_class", "unit", *[
         f"FY{year} Q{quarter}" for year, quarter in periods
-    ]]
+    ], "row_warnings", "cell_statuses", "row_id", "depth"]
     table.append(headers)
     cell_index = {(cell["row_id"], cell["fiscal_year"], cell["fiscal_quarter"], cell["period_class"]): cell
                   for cell in snapshot["cells"]}
@@ -374,34 +390,37 @@ def _xlsx(snapshot: dict[str, Any], destination: Path) -> None:
                      "status": cell.get("status"), "quality_status": cell.get("quality_status"),
                      "reason": cell.get("reason"), "quality_reasons": cell.get("quality_reasons") or []}
                     for cell in row_cells]
-        values = [row.get("label"), period_class, " | ".join(units),
-                  _json_text(row.get("warnings") or []), _json_text(statuses),
-                  row["row_id"], row.get("depth")]
+        values = [row.get("label"), period_class, " | ".join(units)]
         for year, quarter in periods:
             cell = cell_index.get((row["row_id"], year, quarter, period_class))
             values.append(None if cell is None else cell.get("display_value"))
-        table.append([_safe(value) for value in values])
+        values.extend([_json_text(row.get("warnings") or []), _json_text(statuses),
+                       row["row_id"], row.get("depth")])
+        table.append([_text(value) for value in values])
     for cell in table[1]:
         cell.font = Font(bold=True)
-    table.freeze_panes = "H2"
+    table.freeze_panes = "D2"
     table.auto_filter.ref = table.dimensions
-    for name, width in {"A": 28, "B": 16, "C": 28, "D": 34, "E": 48, "F": 34, "G": 9}.items():
+    for name, width in {"A": 28, "B": 16, "C": 28}.items():
         table.column_dimensions[name].width = width
-    table.column_dimensions["F"].hidden = True
-    table.column_dimensions["G"].hidden = True
-    for column in range(8, table.max_column + 1):
+    for column in range(4, 4 + len(periods)):
         table.column_dimensions[table.cell(1, column).column_letter].width = 20
+    evidence_start = 4 + len(periods)
+    table.column_dimensions[table.cell(1, evidence_start).column_letter].width = 34
+    table.column_dimensions[table.cell(1, evidence_start + 1).column_letter].width = 48
+    table.column_dimensions[table.cell(1, evidence_start + 2).column_letter].hidden = True
+    table.column_dimensions[table.cell(1, evidence_start + 3).column_letter].hidden = True
 
     cells = workbook.create_sheet("Cells")
     cell_headers = sorted({key for row in snapshot["cells"] for key in row if key != "provenance"})
     cells.append(cell_headers)
     for row in snapshot["cells"]:
-        cells.append([_safe(row.get(key)) for key in cell_headers])
+        cells.append([_text(row.get(key)) for key in cell_headers])
 
     provenance = workbook.create_sheet("Provenance")
     provenance.append(["cell_id", "part", "parts", "provenance_json_chunk"])
     for row in snapshot["cells"]:
-        _append_chunks(provenance, _safe(row.get("cell_id")), _json_text(row.get("provenance")))
+        _append_chunks(provenance, _text(row.get("cell_id")), _json_text(row.get("provenance")))
 
     metadata = workbook.create_sheet("Metadata")
     metadata.append(["key", "value"])

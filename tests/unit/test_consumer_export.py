@@ -45,6 +45,8 @@ class PreparedClient:
                  "raw_value": "12559938000", "quality_status": "BLOCK", "quality_reasons": ["REVIEW_BLOCK"]},
                 {"cell_id": "formula", "row_id": "warning", "fiscal_year": 2026, "fiscal_quarter": 1,
                  "period_class": "QTD_3M", "status": "DERIVED", "value": "=1+1"},
+                {"cell_id": "negative", "row_id": "warning", "fiscal_year": 2026, "fiscal_quarter": 2,
+                 "period_class": "QTD_3M", "status": "REPORTED", "value": "-263653000"},
             ],
             "metrics": [{"metric_id": "QOQ", "row_id": "safe", "fiscal_year": 2026,
                          "fiscal_quarter": 2, "formula": "(current/prior)-1",
@@ -112,14 +114,16 @@ def test_all_formats_share_snapshot_and_are_spreadsheet_injection_safe(tmp_path:
     rows = list(csv.DictReader(io.StringIO(paths["csv"].read_text(encoding="utf-8-sig"))))
     assert next(row for row in rows if row["cell_id"] == "reported")["display_value"] == "123456789012345678.90"
     assert next(row for row in rows if row["cell_id"] == "blocked")["display_value"] == ""
-    assert "&#x27;=1+1" in paths["html"].read_text()
+    assert "<td>=1+1</td>" in paths["html"].read_text()
+    assert "<td>-263653000</td>" in paths["html"].read_text()
     embedded = paths["html"].read_text().split('id="sec-xbrl-snapshot">', 1)[1].split("</script>", 1)[0]
     assert json.loads(embedded) == snapshot
     workbook = load_workbook(paths["xlsx"], data_only=False)
     assert workbook.sheetnames == ["Table", "Cells", "Provenance", "Metadata"]
     values = [[cell.value for cell in row] for row in workbook["Table"].iter_rows()]
     assert any("123456789012345678.90" in row for row in values)
-    assert any("'=1+1" in row for row in values)
+    assert any("=1+1" in row for row in values)
+    assert any("-263653000" in row for row in values)
     assert all(cell.data_type != "f" for sheet in workbook for row in sheet.iter_rows() for cell in row)
     assert "source_inputs" in workbook["Provenance"][2][3].value
     metadata_rows = list(workbook["Metadata"].iter_rows(min_row=2, values_only=True))
@@ -164,3 +168,30 @@ def test_export_rejects_mutation_duplicate_selection_and_missing_trace(tmp_path:
         raise AssertionError("reported cell without trace should fail closed")
     except ValueError as exc:
         assert "missing" in str(exc)
+
+    class NullTrace(PreparedClient):
+        def trace(self, cell_id, *, context):
+            return {"trace": None}
+
+    class MismatchedTrace(PreparedClient):
+        def trace(self, cell_id, *, context):
+            return {"trace": {"cell_id": "other", "value_lineage": {}}}
+
+    for broken in (NullTrace(), MismatchedTrace()):
+        try:
+            prepare_overview_snapshot(broken, "TEST")
+            raise AssertionError("null or mismatched trace should fail closed")
+        except ValueError as exc:
+            assert "trace" in str(exc)
+
+    class MissingCellId(PreparedClient):
+        def overview(self, ticker, **kwargs):
+            response = super().overview(ticker, **kwargs)
+            response["cells"][0].pop("cell_id")
+            return response
+
+    try:
+        prepare_overview_snapshot(MissingCellId(), "TEST")
+        raise AssertionError("reported cell without identity should fail closed")
+    except ValueError as exc:
+        assert "cell_id" in str(exc)

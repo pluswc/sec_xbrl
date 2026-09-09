@@ -1,6 +1,7 @@
 """Static H2 consumer. No Raw readers, XBRL parser or financial policy imports."""
 from __future__ import annotations
 
+import base64
 import json
 import shutil
 from pathlib import Path
@@ -98,6 +99,16 @@ def _exports(destination: Path, ticker: str, name: str, snapshot: dict) -> dict[
     paths = {}
     for extension in ("json", "csv", "html", "xlsx"):
         relative = Path("exports") / ticker / f"{safe_name}.{extension}"
-        export_snapshot(snapshot, destination / relative)
+        artifact = export_snapshot(snapshot, destination / relative)
+        mime = {"json": "application/json", "csv": "text/csv;charset=utf-8",
+                "html": "text/html;charset=utf-8", "xlsx":
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}[extension]
+        payload = {"name": artifact.name, "mime": mime,
+                   "base64": base64.b64encode(artifact.read_bytes()).decode("ascii")}
+        Path(str(artifact) + ".download.js").write_text(
+            "window.SEC_XBRL_EXPORT_BYTES=window.SEC_XBRL_EXPORT_BYTES||{};"
+            f"window.SEC_XBRL_EXPORT_BYTES[{_json(str(relative))}]={_json(payload)};",
+            encoding="utf-8",
+        )
         paths[extension] = str(relative)
     return paths
