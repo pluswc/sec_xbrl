@@ -1,5 +1,19 @@
 # Implementation Roadmap
 
+Planning entry: [planning registry](planning/README.md). This M roadmap describes
+architecture/delivery goals; its milestone headings and historical next-step
+notes are not a current completion or merge ledger. Investor usage stages U1–U5
+are maintained in the [investor roadmap](planning/investor-analysis-roadmap.md).
+Read the registry's separate proposal/approval/implementation/verification/local
+acceptance/merge status and the linked execution contracts before starting work.
+
+As recorded on 2026-09-09: U1/U2 are merged through PR #62 at
+`7f8cc5232d0df3d4c184de55827111e599b94dbd`; U3 is locally accepted at
+`3098be6db7622f2ec444a9979732b7dfaa685641` with closeout documentation at
+`32212caba5daf8273663d70ba3075db5d1d56fc7`, and is **not in main**. U4
+“계속 갱신” and U5 “보관·공유” are recovered existing proposals, not completed
+milestones or implementation authorization from this documentation task.
+
 ## Historical M0 — Repository and accession discovery contracts
 The original bootstrap work established repository contracts, CI skeleton, and
 the accession adapter.  Its discovery boundary remains governed by

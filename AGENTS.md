@@ -19,6 +19,18 @@ business-calculation policy engines.
 
 10-K is the annual baseline. 10-Q updates the current state. 10-K/A and 10-Q/A are preserved as amendments and never overwrite raw facts.
 
+## Planning entry and status
+Start planning and handoffs at [docs/planning/README.md](docs/planning/README.md). It indexes the M
+architecture roadmap, U investor roadmap, execution contracts, status and evidence.
+Use tracked `docs/` for normative plans and substantive decisions. Tool/session
+plans under `.omx/`, `.codex/`, or `work/` are optional historical or working
+material, never authority or prerequisites for understanding the checkout.
+Promote decisions into tracked docs before handoff; no particular skill, CLI or
+orchestrator is required. Keep proposal, approval, implementation, independent
+verification, local acceptance and main merge status separate. Future acceptance
+criteria do not authorize implementation. Follow the tool-independent planning
+rules in `docs/implementation/delivery-workflow.md`.
+
 ## Source of truth
 Read these before implementing related code:
 - `docs/implementation/delivery-workflow.md` — follow its all-milestone role separation, branch-freeze, independent verification, and PR/CI decision process.
