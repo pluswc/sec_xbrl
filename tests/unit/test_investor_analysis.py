@@ -8,9 +8,114 @@ from sec_xbrl.analysis import (
     VERSION,
     _apply_lens_preferences,
     _definition_graph,
+    _materialize_prepared_quality,
     open_analysis,
     stable,
 )
+
+
+def _admin_decision(
+    decision_id,
+    issue_id,
+    decision,
+    *,
+    accession="a1",
+    concept="us-gaap:Revenue",
+    axis="",
+    member="",
+):
+    return {
+        "decision_id": decision_id,
+        "issue_id": issue_id,
+        "ticker": "TEST",
+        "accession": accession,
+        "concept": concept,
+        "nub": "",
+        "axis": axis,
+        "member": member,
+        "decision": decision,
+        "reason": decision_id,
+    }
+
+
+def test_prepared_quality_blocks_derived_source_leg_and_preserves_raw() -> None:
+    decisions = [_admin_decision("block", "issue", "BLOCK", accession="a2")]
+    lineage = {
+        "source_inputs": [
+            {
+                "accession": "a1",
+                "raw_concept_qname": "us-gaap:Revenue",
+                "raw_dimension_signature": [],
+            },
+            {
+                "accession": "a2",
+                "raw_concept_qname": "us-gaap:Revenue",
+                "raw_dimension_signature": [],
+            },
+        ]
+    }
+    source = {"value_numeric": "120", "value_text": None, "value_lineage": lineage}
+    compact = {"value": "120", "status": "DERIVED"}
+    matched = set()
+    _materialize_prepared_quality(
+        ticker="TEST",
+        compact=compact,
+        source_cell=source,
+        concepts={},
+        decisions=decisions,
+        matched=matched,
+    )
+    assert compact["raw_value"] == "120"
+    assert compact["value"] is None and compact["analytical_value"] is None
+    assert compact["status"] == "DERIVED" and compact["quality_status"] == "BLOCK"
+    assert matched == {"block"}
+
+
+def test_prepared_quality_release_cannot_clear_unrelated_block_and_resolved_issue_does_not_match() -> (
+    None
+):
+    decisions = [
+        _admin_decision("release", "released", "RELEASE"),
+        _admin_decision("block", "other", "BLOCK"),
+        _admin_decision("resolved", "resolved", "BLOCK"),
+    ]
+    lineage = {
+        "accession": "a1",
+        "raw_concept_qname": "us-gaap:Revenue",
+        "raw_dimension_signature": [],
+        "resolved_issue_ids": ["resolved"],
+    }
+    source = {"value_numeric": "100", "value_text": None, "value_lineage": lineage}
+    compact = {"value": "100", "status": "REPORTED"}
+    matched = set()
+    _materialize_prepared_quality(
+        ticker="TEST",
+        compact=compact,
+        source_cell=source,
+        concepts={},
+        decisions=decisions,
+        matched=matched,
+    )
+    assert compact["quality_status"] == "BLOCK" and compact["value"] is None
+    assert matched == {"release", "block"}
+
+
+def test_prepared_quality_requires_exact_axis_member_and_preserves_typed_scope() -> None:
+    decision = _admin_decision("warn", "axis", "WARN", axis="ex:RegionAxis", member="ex:USMember")
+    lineage = {"accession": "a1", "raw_concept_qname": "us-gaap:Revenue",
+               "raw_dimension_signature": [["axis-id", "member-id", None, "EXPLICIT", False],
+                                           ["typed-axis-id", None, "typed-raw", "TYPED", False]]}
+    source = {"value_numeric": "100", "value_text": None, "value_lineage": lineage}
+    compact = {"value": "100", "status": "REPORTED"}
+    matched = set()
+    concepts = {"axis-id": {"qname": "ex:OtherAxis"}, "member-id": {"qname": "ex:USMember"},
+                "typed-axis-id": {"qname": "ex:CustomerAxis"}}
+    _materialize_prepared_quality(ticker="TEST", compact=compact, source_cell=source,
+                                  concepts=concepts, decisions=[decision], matched=matched)
+    assert matched == set() and compact["quality_status"] == "AVAILABLE"
+    assert lineage["raw_dimension_signature"][1] == ["typed-axis-id", None, "typed-raw", "TYPED", False]
+
+
 from sec_xbrl.analytics.investor_metrics import ratio
 from sec_xbrl.history import _write_records
 

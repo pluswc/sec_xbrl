@@ -92,14 +92,18 @@ Deletion or editing fails before any producer runs; a later exact `RELEASE` may
 proceed while retaining the preceding WARN/BLOCK row. The registry index is
 committed and recovered with company/status files before the final pointer.
 
-The existing prepared analysis producer does not materialize arbitrary active
-administrator quality WARN/BLOCK decisions. U4 therefore stops with an exact
-`REVIEW_REQUIRED` exception instead of publishing a consumer that might ignore
-one. The effective decision is resolved from the same byte-exact private
-settings/history snapshot used for the run; an earlier preflight read cannot
-authorize publication if the setting changes before capture. Building a general
-quality overlay is outside this delivery. Effective RELEASE histories and empty
-quality histories can continue.
+The prepared analysis producer reuses the existing administrator quality
+materializer on exact raw accession, QName, and optional Axis/Member source
+scopes. It preserves the source amount, source status, full dimension signature,
+and lineage in the trace while publishing separate analytical availability.
+`BLOCK` masks the analytical cell before metrics and importance are calculated;
+`WARN` retains the value and warning; an exact `RELEASE` cannot clear another
+issue. The optional `admin-quality-v1` manifest ledger records decision IDs that
+actually matched a prepared source. Any effective WARN/BLOCK absent from that
+ledger stops U4 with `REVIEW_REQUIRED`. Decisions are resolved from the same
+byte-exact private settings/history snapshot used for the run. Empty decision
+configuration retains the prior prepared-data contract, and older bundles remain
+readable.
 
 `company_reports.refresh(..., render_report=False)` is a backwards-compatible
 producer option used by U4. It avoids the older complete-year HTML report gate
@@ -107,3 +111,9 @@ after history build, so a legitimate current incomplete year can reach
 `prepare_catalog`; the default remains `True`. Final U4 display still uses the
 same H1/H2 renderer after all companions are complete. No missing quarter or Q4
 is invented by this option.
+
+The U4 run accepts optional inclusive consumer `fiscal_start` and `fiscal_end`
+bounds, records them in the immutable request, and passes them only to
+`prepare_catalog`. They do not change filing discovery or collection scope.
+This permits an explicit FY2023–FY2026 consumer to include available 2026 Q1/Q2
+columns without requiring a completed 2026 annual baseline or inventing Q3/Q4.

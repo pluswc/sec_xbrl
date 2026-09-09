@@ -422,9 +422,74 @@ def _compact(cell: dict, row: dict, column: dict, *, ticker: str, view: str, nod
             "semantic_id": lineage.get("company_canonical_concept_id"), "source_fact_id": lineage.get("selected_source_fact_id")}
 
 
+def _materialize_prepared_quality(
+    *,
+    ticker: str,
+    compact: dict,
+    source_cell: dict,
+    concepts: dict,
+    decisions: list[dict[str, str]],
+    matched: set[str],
+) -> None:
+    """Apply the existing administrative overlay to one analytical cell."""
+    from sec_xbrl.company_reports import materialize_quality
+
+    lineage = source_cell.get("value_lineage", {})
+    dimensions = [
+        {
+            "axis": concepts.get(dim[0], {}).get("qname", dim[0]),
+            "member": concepts.get(dim[1], {}).get("qname", dim[1]),
+            "typed_member": dim[2],
+            "dimension_type": dim[3],
+            "is_default": dim[4],
+        }
+        for dim in lineage.get("raw_dimension_signature", [])
+    ]
+    inputs = lineage.get("source_inputs", []) or [lineage]
+    source_scopes = [
+        {
+            "accession": source.get("accession"),
+            "concept": source.get("raw_concept_qname"),
+            "resolved_issue_ids": source.get("resolved_issue_ids", []),
+            "dimensions": [
+                {
+                    "axis": concepts.get(dim[0], {}).get("qname", dim[0]),
+                    "member": concepts.get(dim[1], {}).get("qname", dim[1]),
+                }
+                for dim in source.get("raw_dimension_signature", [])
+            ],
+        }
+        for source in inputs
+    ]
+    # Match only the explicit source scopes below. They carry resolved issue
+    # identities for direct, interpreted, and derived observations.
+    quality_lineage = {**lineage, "accession": None}
+    overlay = materialize_quality(
+        ticker=ticker,
+        cell={**source_cell, "value_lineage": quality_lineage},
+        dimensions=dimensions,
+        decisions=decisions,
+        source_scopes=source_scopes,
+    )
+    matched.update(row["decision_id"] for row in overlay["decisions"])
+    compact.update(
+        raw_value=compact.get("value"),
+        raw_text=source_cell.get("value_text"),
+        analytical_value=overlay["analytical_value"],
+        analytical_text=overlay["analytical_text"],
+        quality_status=overlay["quality_status"],
+        quality_reasons=overlay["quality_reasons"],
+        quality_decisions=overlay["decisions"],
+        value=overlay["analytical_value"],
+    )
+
+
+
+
 def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str, ...],
                      configuration: dict | None = None, fiscal_years: int = 3,
-                     fiscal_start: int | None = None, fiscal_end: int | None = None) -> Path:
+                     fiscal_start: int | None = None, fiscal_end: int | None = None,
+                     quality_decisions: list[dict[str, str]] | None = None) -> Path:
     """Materialize a consumer bundle. This is the only raw-reading/build boundary."""
     if destination.exists() or fiscal_years < 1:
         raise ValueError("new destination and positive fiscal scope required")
@@ -435,8 +500,12 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
     source_hashes = {"history_manifest_sha256": hashlib.sha256((reader.root / "history_manifest.json").read_bytes()).hexdigest()}
     if (publication / "review_manifest.json").exists():
         source_hashes["review_manifest_sha256"] = hashlib.sha256((publication / "review_manifest.json").read_bytes()).hexdigest()
+    quality_decisions = copy.deepcopy(quality_decisions or [])
     manifest = {"version": VERSION, "publication_id": uuid.uuid4().hex, "companies": {}, "targets": {},
                 "configuration": configuration, "source_manifest_hashes": source_hashes}
+    if quality_decisions:
+        manifest["quality_overlay"] = {"version": "admin-quality-v1", "matched_decision_ids": []}
+    matched_quality: set[str] = set()
     for ticker in tickers:
         ticker = ticker.upper()
         settings = configuration.get(ticker, {})
@@ -478,10 +547,17 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
                     column = selected_columns[cell["fiscal_time_series_column_id"]]
                     nid = stable(ticker, view, period, row["fiscal_time_series_row_id"])
                     compact = _compact(cell, row, column, ticker=ticker, view=view, node_id=nid)
+                    if quality_decisions:
+                        _materialize_prepared_quality(ticker=ticker, compact=compact, source_cell=cell, concepts=concepts,
+                                                      decisions=quality_decisions, matched=matched_quality)
                     cells.append(compact)
                     trace = {"cell_id": compact["cell_id"], "fiscal_year": column["fiscal_year"], "fiscal_quarter": column["fiscal_quarter"],
                              "value_lineage": lineage, "source_publication": str(publication.absolute()),
                              "definition": {k: row.get(k) for k in ("raw_concept_qname", "canonical_dimension_signature", "basis_version")}}
+                    if quality_decisions:
+                        trace["quality_overlay"] = {key: copy.deepcopy(compact[key]) for key in
+                                                    ("quality_status", "quality_reasons", "quality_decisions",
+                                                     "raw_value", "raw_text", "analytical_value", "analytical_text")}
                     traces.append(trace)
                     raw_dimensions = [[concepts.get(d[0], {}).get("qname", d[0]), concepts.get(d[1], {}).get("qname", d[1]), *d[2:]] for d in lineage.get("raw_dimension_signature", [])]
                     displayed = lineage.get("analytical_dimensions") or raw_dimensions
@@ -598,6 +674,8 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
                 relative = f"{ticker}/{view}/{name}.parquet"
                 files[name] = {"path": relative, **_write_records(staging / relative, tuple(records))}
             info["views"][view] = {"files": files}
+    if quality_decisions:
+        manifest["quality_overlay"]["matched_decision_ids"] = sorted(matched_quality)
     (staging / "analysis_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     staging.rename(destination)
     return destination
@@ -698,7 +776,8 @@ def _reviewed_hierarchies(rules, nodes, cells, traces, add_edge, *, view, review
 
 
 def prepare_catalog(*, catalog: Path, destination: Path, tickers: tuple[str, ...] | None = None,
-                    fiscal_start: int | None = None, fiscal_end: int | None = None) -> Path:
+                    fiscal_start: int | None = None, fiscal_end: int | None = None,
+                    quality_decisions: list[dict[str, str]] | None = None) -> Path:
     """Prepare registered company sources; callers need not know source paths."""
     import csv
     if destination.exists():
@@ -732,7 +811,8 @@ def prepare_catalog(*, catalog: Path, destination: Path, tickers: tuple[str, ...
             prepare_analysis(publication=Path(company["publication"]), destination=sub, tickers=(ticker,), configuration=config,
                              fiscal_years=int(company["recent_fiscal_years"]),
                              fiscal_start=fiscal_start if fiscal_start is not None else int(company["fiscal_start"]) if company.get("fiscal_start") else None,
-                             fiscal_end=fiscal_end if fiscal_end is not None else int(company["fiscal_end"]) if company.get("fiscal_end") else None)
+                             fiscal_end=fiscal_end if fiscal_end is not None else int(company["fiscal_end"]) if company.get("fiscal_end") else None,
+                             quality_decisions=quality_decisions)
         except Exception as exc:
             from sec_xbrl.company_reports import set_target_status
             prior = statuses.get(ticker, {})
@@ -747,9 +827,14 @@ def prepare_catalog(*, catalog: Path, destination: Path, tickers: tuple[str, ...
             for file in view["files"].values():
                 file["path"] = ticker + "/" + file["path"]
         manifest["companies"][ticker] = info
+        if child.get("quality_overlay"):
+            overlay = manifest.setdefault("quality_overlay", {"version": "admin-quality-v1", "matched_decision_ids": []})
+            overlay["matched_decision_ids"].extend(child["quality_overlay"]["matched_decision_ids"])
         if manifest["targets"].get(ticker, {}).get("status") != "REVIEW_REQUIRED":
             manifest["targets"][ticker] = {"status": "READY", "reason": None,
                                            "evidence": {"source_publication": info["source_publication"]}}
+    if manifest.get("quality_overlay"):
+        manifest["quality_overlay"]["matched_decision_ids"] = sorted(set(manifest["quality_overlay"]["matched_decision_ids"]))
     (staging / "analysis_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
     staging.rename(destination)
     # Publish the lightweight catalogue pointer only after the entire bundle

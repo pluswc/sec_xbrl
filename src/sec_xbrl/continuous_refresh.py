@@ -90,11 +90,6 @@ def run_continuous_refresh(
     stages: list[dict[str, Any]] = []
     active_stage = "history_review"
     try:
-        if unresolved := [row for row in active_quality if row["decision"] in {"WARN", "BLOCK"}]:
-            raise ValueError(
-                "REVIEW_REQUIRED: final analytical consumer cannot yet attest effective admin "
-                f"quality decisions: {json.dumps(unresolved, sort_keys=True)}"
-            )
         active_stage = "history_review"
         source_report = refresh(
             private_admin,
@@ -125,7 +120,20 @@ def run_continuous_refresh(
             tickers=None,
             fiscal_start=fiscal_start,
             fiscal_end=fiscal_end,
+            quality_decisions=active_quality,
         )
+        base_manifest = json.loads((base / "analysis_manifest.json").read_text())
+        matched = set(base_manifest.get("quality_overlay", {}).get("matched_decision_ids", []))
+        unmatched = [
+            row
+            for row in active_quality
+            if row["decision"] in {"WARN", "BLOCK"} and row["decision_id"] not in matched
+        ]
+        if unmatched:
+            raise ValueError(
+                "REVIEW_REQUIRED: effective admin quality decisions did not match a prepared "
+                f"analytical source: {json.dumps(unmatched, sort_keys=True)}"
+            )
         _stage(
             stages,
             "consumer",

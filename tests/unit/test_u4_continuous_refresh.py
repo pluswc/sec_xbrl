@@ -92,6 +92,11 @@ def _producer_mocks(admin: Path, *, fail: str | None = None):
                 raise RuntimeError(f"{name} failed")
             destination = kwargs["destination"]
             destination.mkdir(parents=True)
+            if name == "catalog":
+                matched = [row["decision_id"] for row in kwargs.get("quality_decisions", [])]
+                (destination / "analysis_manifest.json").write_text(
+                    json.dumps({"quality_overlay": {"matched_decision_ids": matched}})
+                )
             return destination
 
         return call
@@ -129,6 +134,17 @@ def _run(admin: Path, workspace: Path, *, tickers=("AAA",), **kwargs):
         offline=True,
         **kwargs,
     )
+
+
+def _unmatched_bundle(destination: Path) -> Path:
+    destination.mkdir(parents=True)
+    (destination / "analysis_manifest.json").write_text("{}")
+    return destination
+
+
+def _history_output(destination: Path) -> Path:
+    destination.mkdir(parents=True)
+    return destination
 
 
 def test_complete_run_publishes_final_companion_last_and_keeps_catalog_cohort(
@@ -312,8 +328,16 @@ def test_effective_block_stops_with_exact_review_exception(tmp_path: Path) -> No
     _csv(admin / "decisions.csv", DECISION_FIELDS, [block])
     old["decisions.csv"] = (admin / "decisions.csv").read_bytes()
     with (
-        patch.object(u4, "refresh", side_effect=AssertionError("producer")),
-        pytest.raises(ValueError, match="cannot yet attest effective admin quality decisions"),
+        patch.object(
+            u4, "refresh", side_effect=lambda *a, **k: _history_output(tmp_path / "history")
+        ),
+        patch.object(
+            u4,
+            "prepare_catalog",
+            side_effect=lambda **kwargs: _unmatched_bundle(kwargs["destination"]),
+        ),
+        patch.object(u4, "_observe_history", return_value={"filings": []}),
+        pytest.raises(ValueError, match="did not match a prepared analytical source"),
     ):
         _run(admin, tmp_path / "run")
     exception = u4.read_exceptions(tmp_path / "run")[0]
@@ -336,8 +360,16 @@ def test_quality_gate_uses_exact_snapshot_when_decision_changes_after_precheck(
 
     with (
         patch.object(u4, "_snapshot_settings", side_effect=change_then_snapshot),
-        patch.object(u4, "refresh", side_effect=AssertionError("producer")),
-        pytest.raises(ValueError, match="cannot yet attest effective admin quality decisions"),
+        patch.object(
+            u4, "refresh", side_effect=lambda *a, **k: _history_output(tmp_path / "history")
+        ),
+        patch.object(
+            u4,
+            "prepare_catalog",
+            side_effect=lambda **kwargs: _unmatched_bundle(kwargs["destination"]),
+        ),
+        patch.object(u4, "_observe_history", return_value={"filings": []}),
+        pytest.raises(ValueError, match="did not match a prepared analytical source"),
     ):
         _run(admin, tmp_path / "run")
     request = json.loads((tmp_path / "run" / "request.json").read_text())
