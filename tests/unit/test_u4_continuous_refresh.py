@@ -59,6 +59,23 @@ def _admin(root: Path) -> dict[str, bytes]:
     return {name: (root / name).read_bytes() for name in (*u4.SETTINGS, "analysis_current.json")}
 
 
+def _quality_decision(decision_id: str, decision: str, known_at: str) -> dict[str, str]:
+    return {
+        "decision_id": decision_id,
+        "issue_id": "issue-1",
+        "ticker": "AAA",
+        "accession": "0000000001-26-000001",
+        "concept": "us-gaap:Revenue",
+        "axis": "",
+        "member": "",
+        "decision": decision,
+        "reviewer": "reviewer",
+        "reason": "exact source check",
+        "evidence": "/evidence/source.json",
+        "known_at": known_at,
+    }
+
+
 def _producer_mocks(admin: Path, *, fail: str | None = None):
     def refresh(private, **kwargs):
         if fail == "refresh":
@@ -120,7 +137,7 @@ def test_complete_run_publishes_final_companion_last_and_keeps_catalog_cohort(
     old = _admin(admin)
     mocks = _producer_mocks(admin)
     with (
-        mocks[0],
+        mocks[0] as refresh_mock,
         mocks[1] as catalog,
         mocks[2],
         mocks[3],
@@ -139,13 +156,70 @@ def test_complete_run_publishes_final_companion_last_and_keeps_catalog_cohort(
     assert b"/old/bbb" in (admin / "companies.csv").read_bytes()
     assert (admin / "decisions.csv").read_bytes() == old["decisions.csv"]
     assert catalog.call_args.kwargs["tickers"] is None
+    assert refresh_mock.call_args.kwargs["render_report"] is False
     manifest = json.loads((tmp_path / "run" / "run_manifest.json").read_text())
     assert manifest["status"] == "PUBLISHED"
     assert [stage["declared_source_mode"] for stage in manifest["stages"]] == ["SYNTHETIC"] * 5
 
 
-@pytest.mark.parametrize("failure", ["refresh", "catalog", "hierarchy", "axis", "render"])
-def test_producer_failure_preserves_all_administrator_bytes(tmp_path: Path, failure: str) -> None:
+def test_second_run_rejects_edit_to_first_u4_decision_snapshot(tmp_path: Path) -> None:
+    admin = tmp_path / "admin"
+    _admin(admin)
+    block = _quality_decision("block", "BLOCK", "2026-09-01T00:00:00+09:00")
+    release = _quality_decision("release", "RELEASE", "2026-09-02T00:00:00+09:00")
+    _csv(admin / "decisions.csv", DECISION_FIELDS, [block, release])
+    mocks = _producer_mocks(admin)
+    with mocks[0], mocks[1], mocks[2], mocks[3], mocks[4], mocks[5], mocks[6], mocks[7], mocks[8]:
+        _run(admin, tmp_path / "first")
+    assert (admin / u4.DECISION_HISTORY).is_file()
+    _csv(
+        admin / "decisions.csv",
+        DECISION_FIELDS,
+        [dict(block, reason="edited published reason"), release],
+    )
+    with (
+        patch.object(u4, "refresh", side_effect=AssertionError("producer")),
+        pytest.raises(ValueError, match="published U4 decisions cannot be edited or deleted"),
+    ):
+        _run(admin, tmp_path / "second")
+    assert not (tmp_path / "second").exists()
+
+
+def test_company_refresh_can_skip_legacy_complete_year_report(tmp_path: Path, monkeypatch) -> None:
+    from sec_xbrl import company_reports as cr
+
+    cr.register_company(tmp_path, ticker="AAA", recent_fiscal_years=3)
+    for name, result in (
+        ("discover_history", tmp_path / "plan"),
+        ("ingest_history", tmp_path / "intake"),
+        ("build_history", tmp_path / "panels"),
+    ):
+        monkeypatch.setattr(cr.history, name, lambda _result=result, **kwargs: _result)
+    monkeypatch.setattr(cr, "report", lambda *args, **kwargs: pytest.fail("legacy report called"))
+    result = cr.refresh(
+        tmp_path,
+        as_of=date(2026, 9, 9),
+        review_as_of=date(2026, 9, 9),
+        workspace=tmp_path / "work",
+        offline=True,
+        render_report=False,
+    )
+    assert result.parent == tmp_path / "work"
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_stage"),
+    [
+        ("refresh", "history_review"),
+        ("catalog", "consumer"),
+        ("hierarchy", "hierarchy"),
+        ("axis", "axis"),
+        ("render", "render"),
+    ],
+)
+def test_producer_failure_preserves_all_administrator_bytes(
+    tmp_path: Path, failure: str, expected_stage: str
+) -> None:
     admin = tmp_path / "admin"
     old = _admin(admin)
     mocks = _producer_mocks(admin, fail=failure)
@@ -164,8 +238,60 @@ def test_producer_failure_preserves_all_administrator_bytes(tmp_path: Path, fail
         _run(admin, tmp_path / "run")
     assert {name: (admin / name).read_bytes() for name in old} == old
     exception = u4.read_exceptions(tmp_path / "run")[0]
+    assert exception["stage"] == expected_stage
     assert exception["source"]["request"].endswith("request.json")
     assert exception["impact"] and exception["next_action"]
+
+
+def test_legacy_published_decision_deletion_stops_before_any_producer(tmp_path: Path) -> None:
+    admin = tmp_path / "admin"
+    old = _admin(admin)
+    legacy = admin / "runs" / "old" / "decisions.csv"
+    legacy.parent.mkdir(parents=True)
+    _csv(
+        legacy, DECISION_FIELDS, [_quality_decision("block", "BLOCK", "2026-09-01T00:00:00+09:00")]
+    )
+    with (
+        patch.object(u4, "refresh", side_effect=AssertionError("producer")),
+        pytest.raises(ValueError, match="published decisions cannot be edited or deleted"),
+    ):
+        _run(admin, tmp_path / "run")
+    assert not (tmp_path / "run").exists()
+    assert {name: (admin / name).read_bytes() for name in old} == old
+
+
+def test_legacy_histories_are_copied_and_release_allows_refresh(tmp_path: Path) -> None:
+    admin = tmp_path / "admin"
+    _admin(admin)
+    block = _quality_decision("block", "BLOCK", "2026-09-01T00:00:00+09:00")
+    release = _quality_decision("release", "RELEASE", "2026-09-02T00:00:00+09:00")
+    legacy = admin / "runs" / "old" / "decisions.csv"
+    legacy.parent.mkdir(parents=True)
+    _csv(legacy, DECISION_FIELDS, [block])
+    _csv(admin / "decisions.csv", DECISION_FIELDS, [block, release])
+    private = tmp_path / "private"
+    private.mkdir()
+    u4._snapshot_settings(admin, private)
+    from sec_xbrl.company_reports import read_decisions
+
+    assert read_decisions(private, review_as_of=date(2026, 9, 9))[0]["decision"] == "RELEASE"
+
+
+def test_effective_block_stops_with_exact_review_exception(tmp_path: Path) -> None:
+    admin = tmp_path / "admin"
+    old = _admin(admin)
+    block = _quality_decision("block", "BLOCK", "2026-09-01T00:00:00+09:00")
+    _csv(admin / "decisions.csv", DECISION_FIELDS, [block])
+    old["decisions.csv"] = (admin / "decisions.csv").read_bytes()
+    with (
+        patch.object(u4, "refresh", side_effect=AssertionError("producer")),
+        pytest.raises(ValueError, match="cannot yet attest effective admin quality decisions"),
+    ):
+        _run(admin, tmp_path / "run")
+    exception = u4.read_exceptions(tmp_path / "run")[0]
+    assert exception["classification"] == "REVIEW_REQUIRED"
+    assert "0000000001-26-000001" in exception["source"]["detail"]
+    assert {name: (admin / name).read_bytes() for name in old} == old
 
 
 def test_concurrent_profile_edit_is_retained_and_stops_publish(tmp_path: Path) -> None:
@@ -434,6 +560,46 @@ def test_resume_rejects_review_of_unrelated_parent(tmp_path: Path) -> None:
             reviewed_publication=tmp_path / "new-review",
         )
     assert {name: (admin / name).read_bytes() for name in old} == old
+
+
+def test_resume_concurrent_setting_edit_is_not_overwritten(tmp_path: Path) -> None:
+    admin = tmp_path / "admin"
+    old = _admin(admin)
+    stopped_run = tmp_path / "stopped"
+    stopped_run.mkdir()
+    (stopped_run / "review_refresh_required.json").write_text(
+        json.dumps(
+            {
+                "ticker": "AAA",
+                "prepared_parent": str(tmp_path / "parent"),
+                "previous_publication": "/old/aaa",
+            }
+        )
+    )
+    records = {name: () for name in ("candidates", "decisions", "quality_decisions")}
+
+    def reader(path):
+        if str(path) != "/old/aaa":
+            (admin / "analysis_profiles.json").write_text('{"concurrent":"edit"}')
+        return SimpleNamespace(
+            review_manifest={"parent": str(tmp_path / "parent")}, records=lambda name: records[name]
+        )
+
+    with (
+        patch(
+            "sec_xbrl.longitudinal.disclosure_review.ReviewedPublicationReader", side_effect=reader
+        ),
+        pytest.raises(ValueError, match="setting changed"),
+    ):
+        u4.resume_reviewed_publication(
+            admin=admin,
+            stopped_run=stopped_run,
+            ticker="AAA",
+            reviewed_publication=tmp_path / "new-review",
+        )
+    assert (admin / "analysis_profiles.json").read_text() == '{"concurrent":"edit"}'
+    for name in ("companies.csv", "decisions.csv", "target_status.json", "analysis_current.json"):
+        assert (admin / name).read_bytes() == old[name]
 
 
 def test_resume_accepts_real_publish_review_chain(tmp_path: Path, monkeypatch) -> None:

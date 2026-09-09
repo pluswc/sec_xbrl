@@ -140,3 +140,10 @@ live 단계는 승인된 네트워크 작업으로 따로 수행한다. checkout
 U3 companion과 동일 renderer를 검증한 뒤 최종 pointer를 마지막에 바꾼다.
 중단된 exact review의 명시적 재개와 crash recovery도 그 계약을 따른다. 신규 live
 accession 증거 전에는 U4를 `COMPLETE`로 바꾸지 않는다.
+
+기존 관리자 quality WARN/BLOCK은 최종 분석 bundle에서 일반적으로 materialize됐다고
+증명할 수 없으므로 U4 wrapper가 정확한 결정 범위와 함께 `REVIEW_REQUIRED`로
+중단한다. RELEASE를 위해 이전 결정을 삭제하지 않고 모든 과거 행과 U4 snapshot을
+보존한다. 일반 quality overlay 구현은 남은 범위다. 현재 미완성 연도의 적법한 분기는
+기존 연간 HTML gate를 거치지 않고 prepared consumer로 전달하되, 기간/Q4 정책은
+그대로 유지한다.

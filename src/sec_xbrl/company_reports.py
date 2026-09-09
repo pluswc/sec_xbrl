@@ -478,7 +478,7 @@ def report(root: Path, *, review_as_of: date) -> Path:
 def refresh(root: Path, *, as_of: date, review_as_of: date, workspace: Path,
             source_runs: tuple[Path, ...] = (), submissions_roots: tuple[Path, ...] = (),
             offline: bool = False, bootstrap_taxonomy: bool = False,
-            tickers: tuple[str, ...] | None = None) -> Path:
+            tickers: tuple[str, ...] | None = None, render_report: bool = True) -> Path:
     """Collect/build using the existing history workflow, then use the same report path."""
     original_settings = (root / "companies.csv").read_bytes()
     companies = _read_csv(root / "companies.csv", COMPANY_FIELDS, original_settings)
@@ -554,7 +554,7 @@ def refresh(root: Path, *, as_of: date, review_as_of: date, workspace: Path,
     if (root / "companies.csv").read_bytes() != original_settings:
         raise ValueError("company settings changed during refresh; generated history retained, retry with current settings")
     _csv(root / "companies.csv", COMPANY_FIELDS, companies)
-    return report(root, review_as_of=review_as_of)
+    return report(root, review_as_of=review_as_of) if render_report else run
 
 
 def _validate_companies(companies: list[dict[str, str]]) -> None:

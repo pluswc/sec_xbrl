@@ -84,3 +84,23 @@ Layer 2 selection, or review economics. Unit tests use synthetic producer
 doubles and explicit fault points. Cached six-company evidence and one live new
 filing are reported separately; U4 remains incomplete until the lead supplies
 and accepts the new-filing evidence.
+
+Every legacy `admin/runs/*/decisions.csv` snapshot is copied into the private
+administrator before refresh validation. Successful U4 runs also append an
+integrity-checked external decision snapshot to `u4_decision_history.json`.
+Deletion or editing fails before any producer runs; a later exact `RELEASE` may
+proceed while retaining the preceding WARN/BLOCK row. The registry index is
+committed and recovered with company/status files before the final pointer.
+
+The existing prepared analysis producer does not materialize arbitrary active
+administrator quality WARN/BLOCK decisions. U4 therefore stops with an exact
+`REVIEW_REQUIRED` exception instead of publishing a consumer that might ignore
+one. Building a general quality overlay is outside this delivery. Effective
+RELEASE histories and empty quality histories can continue.
+
+`company_reports.refresh(..., render_report=False)` is a backwards-compatible
+producer option used by U4. It avoids the older complete-year HTML report gate
+after history build, so a legitimate current incomplete year can reach
+`prepare_catalog`; the default remains `True`. Final U4 display still uses the
+same H1/H2 renderer after all companions are complete. No missing quarter or Q4
+is invented by this option.

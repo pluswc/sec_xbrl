@@ -15,14 +15,15 @@ from typing import Any
 from sec_xbrl.analysis import open_analysis, prepare_catalog
 from sec_xbrl.analytics.axis_timeseries import AxisReviewInput, prepare_axis_timeseries
 from sec_xbrl.analytics.hierarchy_publication import prepare_hierarchy
-from sec_xbrl.company_reports import COMPANY_FIELDS, _csv, _read_csv, refresh
+from sec_xbrl.company_reports import COMPANY_FIELDS, _csv, _read_csv, read_decisions, refresh
 from sec_xbrl.display.hierarchy import render_hierarchy
 
 VERSION = "u4-continuous-refresh-v1"
 SOURCE_MODES = {"LIVE", "CACHE", "REUSED", "SYNTHETIC"}
 SETTINGS = ("companies.csv", "decisions.csv", "analysis_profiles.json", "target_status.json")
-SNAPSHOT_FILES = (*SETTINGS, "analysis_current.json")
-COMMIT_FILES = ("companies.csv", "target_status.json", "analysis_current.json")
+DECISION_HISTORY = "u4_decision_history.json"
+SNAPSHOT_FILES = (*SETTINGS, DECISION_HISTORY, "analysis_current.json")
+COMMIT_FILES = ("companies.csv", "target_status.json", DECISION_HISTORY, "analysis_current.json")
 INTENT = ".continuous-refresh-commit.json"
 
 
@@ -56,6 +57,7 @@ def run_continuous_refresh(
         raise ValueError("choose a new U4 workspace")
     _validate_sources(stage_sources)
     _validate_plan(companion_plan)
+    active_quality = _validate_admin_decision_history(admin, review_as_of)
     run_root = workspace
     private_admin = run_root / "admin"
     private_admin.mkdir(parents=True)
@@ -72,12 +74,20 @@ def run_continuous_refresh(
         "declared_stage_sources": dict(sorted(stage_sources.items())),
         "companion_plan_sha256": _sha_json(companion_plan),
         "settings": {name: _bytes_identity(value) for name, value in input_bytes.items()},
+        "effective_admin_quality_decisions": active_quality,
     }
     _write_json(run_root / "request.json", request)
     _write_json(run_root / "companion_plan.snapshot.json", companion_plan)
     _write_json(run_root / "stage_sources.snapshot.json", stage_sources)
     stages: list[dict[str, Any]] = []
+    active_stage = "history_review"
     try:
+        if unresolved := [row for row in active_quality if row["decision"] in {"WARN", "BLOCK"}]:
+            raise ValueError(
+                "REVIEW_REQUIRED: final analytical consumer cannot yet attest effective admin "
+                f"quality decisions: {json.dumps(unresolved, sort_keys=True)}"
+            )
+        active_stage = "history_review"
         source_report = refresh(
             private_admin,
             workspace=run_root / "history",
@@ -88,6 +98,7 @@ def run_continuous_refresh(
             submissions_roots=submissions_roots,
             offline=offline,
             bootstrap_taxonomy=bootstrap_taxonomy,
+            render_report=False,
         )
         _stage(
             stages,
@@ -99,6 +110,7 @@ def run_continuous_refresh(
 
         # A targeted collection run still republishes every active registered
         # company, preserving the previous catalogue's usable cohort.
+        active_stage = "consumer"
         base = prepare_catalog(
             catalog=private_admin,
             destination=run_root / "consumer-base",
@@ -118,6 +130,7 @@ def run_continuous_refresh(
             {str(Path(k)): str(Path(v)) for k, v in hierarchy_cfg["package_roots"].items()},
             run_root / "history" / "packages",
         )
+        active_stage = "hierarchy"
         hierarchy = prepare_hierarchy(
             baseline=base,
             destination=run_root / "consumer-hierarchy",
@@ -147,6 +160,7 @@ def run_continuous_refresh(
             )
             for item in companion_plan["axis_reviews"]
         )
+        active_stage = "axis"
         final = prepare_axis_timeseries(
             source_bundle=hierarchy,
             destination=run_root / "consumer-final",
@@ -160,6 +174,7 @@ def run_continuous_refresh(
             observed={"mode": "GENERATED", "review_inputs": len(axis_inputs)},
         )
 
+        active_stage = "render"
         rendered = run_root / "report"
         render_hierarchy(open_analysis(final), destination=rendered)
         _stage(
@@ -169,8 +184,10 @@ def run_continuous_refresh(
             rendered,
             observed={"mode": "GENERATED_FROM_VERIFIED_FINAL_PUBLICATION"},
         )
+        active_stage = "verify"
         manifest = _verify_complete(final, rendered)
 
+        active_stage = "commit"
         _assert_settings_unchanged(admin, input_bytes)
         statuses = json.loads((private_admin / "target_status.json").read_text())
         for outcome in statuses.values():
@@ -180,14 +197,20 @@ def run_continuous_refresh(
                     "consumer_bundle": str(final),
                     "publication_id": manifest["publication_id"],
                 }
+        decision_snapshot = run_root / "settings" / "decisions.csv"
+        decision_snapshot.parent.mkdir()
+        decision_snapshot.write_bytes(input_bytes["decisions.csv"])
+        decision_history = _next_decision_history(input_bytes, decision_snapshot, request["run_id"])
         new_files = {
             "companies.csv": (private_admin / "companies.csv").read_bytes(),
             "target_status.json": _json_bytes(statuses),
+            DECISION_HISTORY: _json_bytes(decision_history),
             "analysis_current.json": _json_bytes(
                 {"bundle_path": str(final), "publication_id": manifest["publication_id"]}
             ),
         }
         _commit_admin(admin, run_root, input_bytes, new_files)
+        active_stage = "finalize"
         _write_json(
             run_root / "run_manifest.json",
             {
@@ -201,11 +224,10 @@ def run_continuous_refresh(
         (admin / INTENT).unlink()
         return RefreshResult(run_root, final, rendered, manifest["publication_id"])
     except Exception as exc:
-        stage = stages[-1]["stage"] if stages else "history_review"
         pending_commit = (admin / INTENT).exists()
         _append_exception(
             run_root,
-            stage=stage,
+            stage=active_stage,
             classification=_exception_classification(exc),
             source=_exception_source(run_root, exc),
             impact=(
@@ -260,6 +282,9 @@ def resume_reviewed_publication(
     ticker = ticker.upper()
     if (admin / INTENT).exists():
         raise ValueError("pending administrator commit; recover before resume")
+    old = {name: (admin / name).read_bytes() for name in SNAPSHOT_FILES if (admin / name).exists()}
+    if "target_status.json" not in old or "analysis_current.json" not in old:
+        raise ValueError("resume requires existing target status and consumer pointer")
     artifacts = [
         path
         for path in stopped_run.rglob("review_refresh_required.json")
@@ -283,20 +308,13 @@ def resume_reviewed_publication(
         new_rows = {_sha_json(row) for row in reviewed.records(name)}
         if not prior_rows <= new_rows:
             raise ValueError(f"reviewed publication deleted or edited prior {name}")
-    companies = _read_csv(admin / "companies.csv", COMPANY_FIELDS)
+    companies = _read_csv(admin / "companies.csv", COMPANY_FIELDS, content=old["companies.csv"])
     company = next((row for row in companies if row["ticker"] == ticker), None)
     if company is None:
         raise ValueError("resume ticker is not registered")
     if Path(company["publication"]).resolve() != Path(stopped["previous_publication"]).resolve():
         raise ValueError("stopped run is stale; current registration no longer matches it")
     company["publication"] = str(Path(reviewed_publication).resolve())
-    old = {
-        name: (admin / name).read_bytes()
-        for name in (*SETTINGS, "analysis_current.json")
-        if (admin / name).exists()
-    }
-    if "target_status.json" not in old or "analysis_current.json" not in old:
-        raise ValueError("resume requires existing target status and consumer pointer")
     resume_id = uuid.uuid4().hex
     resume_root = stopped_run / ("resume-commit-" + resume_id)
     private = resume_root / "private"
@@ -312,6 +330,7 @@ def resume_reviewed_publication(
             "reviewed_publication": str(Path(reviewed_publication).resolve()),
         },
     }
+    _assert_settings_unchanged(admin, old)
     _commit_admin(
         admin,
         resume_root,
@@ -319,6 +338,9 @@ def resume_reviewed_publication(
         {
             "companies.csv": (private / "companies.csv").read_bytes(),
             "target_status.json": _json_bytes(statuses),
+            DECISION_HISTORY: old.get(
+                DECISION_HISTORY, _json_bytes({"version": VERSION, "snapshots": []})
+            ),
             "analysis_current.json": old["analysis_current.json"],
         },
     )
@@ -380,7 +402,78 @@ def _snapshot_settings(admin: Path, private: Path) -> dict[str, bytes]:
     # prepare_catalog must publish only to the private catalogue.
     if not (private / "target_status.json").exists():
         (private / "target_status.json").write_text("{}\n")
+    _copy_decision_histories(admin, private, values)
     return values
+
+
+def _validate_admin_decision_history(admin: Path, review_as_of: date) -> list[dict[str, str]]:
+    """Validate both legacy run snapshots and durable U4 snapshot references."""
+    active = read_decisions(admin, review_as_of=review_as_of)
+    current = {
+        row["decision_id"]: row
+        for row in _read_csv(admin / "decisions.csv", tuple(_decision_fields()))
+    }
+    index_path = admin / DECISION_HISTORY
+    if not index_path.exists():
+        return active
+    index = json.loads(index_path.read_text())
+    if index.get("version") != VERSION or not isinstance(index.get("snapshots"), list):
+        raise ValueError("invalid U4 decision history index")
+    for entry in index["snapshots"]:
+        path = Path(entry["path"])
+        payload = path.read_bytes()
+        if hashlib.sha256(payload).hexdigest() != entry["sha256"]:
+            raise ValueError("U4 decision history snapshot changed")
+        for row in _read_csv(path, tuple(_decision_fields()), content=payload):
+            if current.get(row["decision_id"]) != row:
+                raise ValueError("published U4 decisions cannot be edited or deleted")
+    return active
+
+
+def _copy_decision_histories(admin: Path, private: Path, settings: dict[str, bytes]) -> None:
+    """Give existing report validation the same immutable history as real admin."""
+    copied: set[str] = set()
+    for snapshot in sorted((admin / "runs").glob("*/decisions.csv")):
+        relative = snapshot.relative_to(admin)
+        destination = private / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(snapshot.read_bytes())
+        copied.add(str(snapshot.resolve()))
+    if DECISION_HISTORY not in settings:
+        return
+    index = json.loads(settings[DECISION_HISTORY])
+    for entry in index["snapshots"]:
+        source = Path(entry["path"])
+        if str(source.resolve()) in copied:
+            continue
+        destination = private / "runs" / ("u4-" + entry["sha256"][:16]) / "decisions.csv"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(source.read_bytes())
+
+
+def _next_decision_history(
+    settings: dict[str, bytes], snapshot: Path, run_id: str
+) -> dict[str, Any]:
+    if DECISION_HISTORY in settings:
+        result = json.loads(settings[DECISION_HISTORY])
+    else:
+        result = {"version": VERSION, "snapshots": []}
+    payload = snapshot.read_bytes()
+    result["snapshots"].append(
+        {
+            "run_id": run_id,
+            "path": str(snapshot.resolve()),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size": len(payload),
+        }
+    )
+    return result
+
+
+def _decision_fields() -> tuple[str, ...]:
+    from sec_xbrl.company_reports import DECISION_FIELDS
+
+    return DECISION_FIELDS
 
 
 def _assert_settings_unchanged(admin: Path, snapshot: dict[str, bytes]) -> None:
