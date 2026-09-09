@@ -117,7 +117,7 @@ def _producer_mocks(admin: Path, *, fail: str | None = None):
     )
 
 
-def _run(admin: Path, workspace: Path, *, tickers=("AAA",)):
+def _run(admin: Path, workspace: Path, *, tickers=("AAA",), **kwargs):
     return u4.run_continuous_refresh(
         admin=admin,
         workspace=workspace,
@@ -127,6 +127,7 @@ def _run(admin: Path, workspace: Path, *, tickers=("AAA",)):
         stage_sources=SOURCES,
         tickers=tickers,
         offline=True,
+        **kwargs,
     )
 
 
@@ -160,6 +161,33 @@ def test_complete_run_publishes_final_companion_last_and_keeps_catalog_cohort(
     manifest = json.loads((tmp_path / "run" / "run_manifest.json").read_text())
     assert manifest["status"] == "PUBLISHED"
     assert [stage["declared_source_mode"] for stage in manifest["stages"]] == ["SYNTHETIC"] * 5
+
+
+def test_consumer_fiscal_bounds_are_exact_and_do_not_change_collection_scope(
+    tmp_path: Path,
+) -> None:
+    admin = tmp_path / "admin"
+    _admin(admin)
+    mocks = _producer_mocks(admin)
+    with (
+        mocks[0] as refresh_mock,
+        mocks[1] as catalog,
+        mocks[2],
+        mocks[3],
+        mocks[4],
+        mocks[5],
+        mocks[6],
+        mocks[7],
+        mocks[8],
+    ):
+        _run(admin, tmp_path / "run", fiscal_start=2023, fiscal_end=2026)
+    assert catalog.call_args.kwargs["fiscal_start"] == 2023
+    assert catalog.call_args.kwargs["fiscal_end"] == 2026
+    assert "fiscal_start" not in refresh_mock.call_args.kwargs
+    assert "fiscal_end" not in refresh_mock.call_args.kwargs
+    request = json.loads((tmp_path / "run" / "request.json").read_text())
+    assert request["consumer_fiscal_start"] == 2023
+    assert request["consumer_fiscal_end"] == 2026
 
 
 def test_second_run_rejects_edit_to_first_u4_decision_snapshot(tmp_path: Path) -> None:

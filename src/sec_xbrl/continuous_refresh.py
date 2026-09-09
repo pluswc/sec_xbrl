@@ -44,6 +44,8 @@ def run_continuous_refresh(
     companion_plan: dict[str, Any],
     stage_sources: dict[str, str],
     tickers: tuple[str, ...] | None = None,
+    fiscal_start: int | None = None,
+    fiscal_end: int | None = None,
     source_runs: tuple[Path, ...] = (),
     submissions_roots: tuple[Path, ...] = (),
     offline: bool = False,
@@ -72,6 +74,8 @@ def run_continuous_refresh(
         "as_of": as_of.isoformat(),
         "review_as_of": review_as_of.isoformat(),
         "tickers": sorted(t.upper() for t in tickers) if tickers else None,
+        "consumer_fiscal_start": fiscal_start,
+        "consumer_fiscal_end": fiscal_end,
         "catalog_scope": "ALL_ACTIVE_REGISTERED_COMPANIES",
         "source_runs": [_source_identity(p) for p in source_runs],
         "submissions_roots": [_source_identity(p) for p in submissions_roots],
@@ -119,6 +123,8 @@ def run_continuous_refresh(
             catalog=private_admin,
             destination=run_root / "consumer-base",
             tickers=None,
+            fiscal_start=fiscal_start,
+            fiscal_end=fiscal_end,
         )
         _stage(
             stages,
@@ -773,6 +779,8 @@ def main() -> None:
     run.add_argument("--companion-plan", type=Path, required=True)
     run.add_argument("--stage-sources", type=Path, required=True)
     run.add_argument("--ticker", action="append")
+    run.add_argument("--fiscal-start", type=int)
+    run.add_argument("--fiscal-end", type=int)
     run.add_argument("--source-run", type=Path, action="append", default=[])
     run.add_argument("--submissions-root", type=Path, action="append", default=[])
     run.add_argument("--offline", action="store_true")
@@ -795,6 +803,8 @@ def main() -> None:
             companion_plan=json.loads(args.companion_plan.read_text()),
             stage_sources=json.loads(args.stage_sources.read_text()),
             tickers=tuple(args.ticker) if args.ticker else None,
+            fiscal_start=args.fiscal_start,
+            fiscal_end=args.fiscal_end,
             source_runs=tuple(args.source_run),
             submissions_roots=tuple(args.submissions_root),
             offline=args.offline,
