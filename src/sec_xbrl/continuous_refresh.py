@@ -57,11 +57,15 @@ def run_continuous_refresh(
         raise ValueError("choose a new U4 workspace")
     _validate_sources(stage_sources)
     _validate_plan(companion_plan)
-    active_quality = _validate_admin_decision_history(admin, review_as_of)
+    # This first check catches an already-invalid administrator before creating
+    # run output. Publication policy below is deliberately derived again from
+    # the exact copied snapshot, never from this potentially stale read.
+    _validate_admin_decision_history(admin, review_as_of)
     run_root = workspace
     private_admin = run_root / "admin"
     private_admin.mkdir(parents=True)
     input_bytes = _snapshot_settings(admin, private_admin)
+    active_quality = _validate_admin_decision_history(private_admin, review_as_of)
     request = {
         "version": VERSION,
         "run_id": uuid.uuid4().hex,

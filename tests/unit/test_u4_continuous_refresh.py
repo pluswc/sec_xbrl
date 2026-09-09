@@ -294,6 +294,58 @@ def test_effective_block_stops_with_exact_review_exception(tmp_path: Path) -> No
     assert {name: (admin / name).read_bytes() for name in old} == old
 
 
+def test_quality_gate_uses_exact_snapshot_when_decision_changes_after_precheck(
+    tmp_path: Path,
+) -> None:
+    admin = tmp_path / "admin"
+    _admin(admin)
+    block = _quality_decision("block", "BLOCK", "2026-09-01T00:00:00+09:00")
+    original_snapshot = u4._snapshot_settings
+
+    def change_then_snapshot(real_admin, private):
+        _csv(admin / "decisions.csv", DECISION_FIELDS, [block])
+        return original_snapshot(real_admin, private)
+
+    with (
+        patch.object(u4, "_snapshot_settings", side_effect=change_then_snapshot),
+        patch.object(u4, "refresh", side_effect=AssertionError("producer")),
+        pytest.raises(ValueError, match="cannot yet attest effective admin quality decisions"),
+    ):
+        _run(admin, tmp_path / "run")
+    request = json.loads((tmp_path / "run" / "request.json").read_text())
+    assert request["effective_admin_quality_decisions"] == [block]
+    assert u4.read_exceptions(tmp_path / "run")[0]["classification"] == "REVIEW_REQUIRED"
+
+
+def test_quality_gate_uses_exact_released_snapshot_after_precheck(tmp_path: Path) -> None:
+    admin = tmp_path / "admin"
+    _admin(admin)
+    block = _quality_decision("block", "BLOCK", "2026-09-01T00:00:00+09:00")
+    release = _quality_decision("release", "RELEASE", "2026-09-02T00:00:00+09:00")
+    original_snapshot = u4._snapshot_settings
+
+    def change_then_snapshot(real_admin, private):
+        _csv(admin / "decisions.csv", DECISION_FIELDS, [block, release])
+        return original_snapshot(real_admin, private)
+
+    mocks = _producer_mocks(admin)
+    with (
+        patch.object(u4, "_snapshot_settings", side_effect=change_then_snapshot),
+        mocks[0],
+        mocks[1],
+        mocks[2],
+        mocks[3],
+        mocks[4],
+        mocks[5],
+        mocks[6],
+        mocks[7],
+        mocks[8],
+    ):
+        _run(admin, tmp_path / "run")
+    request = json.loads((tmp_path / "run" / "request.json").read_text())
+    assert request["effective_admin_quality_decisions"] == [release]
+
+
 def test_concurrent_profile_edit_is_retained_and_stops_publish(tmp_path: Path) -> None:
     admin = tmp_path / "admin"
     old = _admin(admin)

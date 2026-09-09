@@ -95,8 +95,11 @@ committed and recovered with company/status files before the final pointer.
 The existing prepared analysis producer does not materialize arbitrary active
 administrator quality WARN/BLOCK decisions. U4 therefore stops with an exact
 `REVIEW_REQUIRED` exception instead of publishing a consumer that might ignore
-one. Building a general quality overlay is outside this delivery. Effective
-RELEASE histories and empty quality histories can continue.
+one. The effective decision is resolved from the same byte-exact private
+settings/history snapshot used for the run; an earlier preflight read cannot
+authorize publication if the setting changes before capture. Building a general
+quality overlay is outside this delivery. Effective RELEASE histories and empty
+quality histories can continue.
 
 `company_reports.refresh(..., render_report=False)` is a backwards-compatible
 producer option used by U4. It avoids the older complete-year HTML report gate
