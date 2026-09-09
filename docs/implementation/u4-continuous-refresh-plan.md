@@ -1,8 +1,10 @@
 # U4 계속 갱신 — 제안 실행 계획
 
 기준일 2026-09-09. 상태: **기존 U4 제안의 복구·문서 설계**.
-이번 승인은 문서 7개와 로컬 커밋뿐이며, U4 코드·수집 실행·회계 승인 재사용·
-원격 작업을 승인하지 않는다. 별도 U4 작업트리의 존재도 완료 증거가 아니다.
+이 문장을 포함한 원래 승인은 문서 7개와 로컬 커밋뿐이었다. 2026-09-09 후속
+승인은 [U4 전달 계약](u4-continuous-refresh-delivery.md)의 제한된 구현, cached
+검증과 로컬 커밋으로 확대됐다. live 신규 공시, 새 회계 승인, 원격 작업은 계속
+제외된다. 별도 작업트리나 cached 성공도 전체 완료 증거가 아니다.
 [계획 등록부](../planning/README.md)와 [U 로드맵](../planning/investor-analysis-roadmap.md)을 따른다.
 
 ## 목적과 그대로 지킬 계약
@@ -130,3 +132,11 @@ live 단계는 승인된 네트워크 작업으로 따로 수행한다. checkout
 문서 작업에서 수행하지 않는다. 상세 missing reason UX는 U3 재개 조건이 아니며,
 실제 series bridge는 주요 분석 공백에 한정해 별도 Layer 2 근거 검토로 다룬다.
 검토자는 구체 실행 범위와 회계 판단·발행 경계를 확정한 뒤 구현을 위임한다.
+
+## 2026-09-09 후속 구현 연결
+
+후속 범위와 현재 제한은 [U4 전달 계약](u4-continuous-refresh-delivery.md)에 있다.
+`sec_xbrl.continuous_refresh`는 기존 producer를 private admin에서 호출하고 완성된
+U3 companion과 동일 renderer를 검증한 뒤 최종 pointer를 마지막에 바꾼다.
+중단된 exact review의 명시적 재개와 crash recovery도 그 계약을 따른다. 신규 live
+accession 증거 전에는 U4를 `COMPLETE`로 바꾸지 않는다.
