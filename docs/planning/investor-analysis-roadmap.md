@@ -83,8 +83,11 @@ Axis 전체 구성을 같은 실제 표에서 제공하는 데까지 포함한�
 **664 passed / 16 skipped**, Ruff PASS, 실제 6사 **84 Axis / 10,824 화면 셀**
 검증 후 2026-09-09 로컬 COMPLETE 인수. closeout 문서 SHA는
 `32212caba5daf8273663d70ba3075db5d1d56fc7`. 당시 `main`에는 U3가 없었다.
-2026-09-10 사용자가 U3–U5 누적 main 통합을 승인했으며 현재 전달 상태는
-[U3–U5 main 전달](../implementation/u3-u5-main-delivery.md)에서 관리한다.
+이후 U3–U5 누적 이력은 2026-09-10
+[PR #63](https://github.com/pluswc/sec_xbrl/pull/63), merge
+`9708508ec953ee4323ae29318c639abc9e0650b6`로 `main`에 포함됐다. 현재 전달
+상태와 CI 근거는 [U3–U5 main 전달](../implementation/u3-u5-main-delivery.md)에서
+관리한다.
 
 남은 표시 과제: 상세 missing reason UX는 이후 공통 UI/Excel에서 검토한다.
 이는 U3 차단 사유가 아니다. 실제 데이터 연결은 별도 Layer 2 근거 검토이며
@@ -122,6 +125,8 @@ v2는 별도 승인된 share ≥10%, share change ≥5pp, YoY ≥25%와 정확�
 신규 2공시 입력, 최종 14공시 offline orchestration, 관리자 quality overlay와 동일
 API/화면을 별도 검증했다. 이는 무인 경제 승인이나 main 병합이 아니다. 정확한 범위와
 증거는 [U4 완료·인수](../implementation/u4-completion-and-acceptance.md)에 있다.
+그 뒤 U4는 U3·U5와 함께 PR #63의 merge
+`9708508ec953ee4323ae29318c639abc9e0650b6`로 `main`에 포함됐다.
 
 남은 작업/수락안/입력/재현은 [U4 실행 제안](../implementation/u4-continuous-refresh-plan.md)의
 격차 표와 연결된 실제 흐름에서 정의한다. 미래 구현자는 먼저 구체 실행/검토 범위와
@@ -150,9 +155,10 @@ API/화면을 별도 검증했다. 이는 무인 경제 승인이나 main 병합
 CSV/HTML/JSON/XLSX와 오프라인 저장 범위는
 [U5 전달 계약](../implementation/u5-consumer-export.md), 검증·제약·재작업 근거는
 [U5 완료·인수](../implementation/u5-completion-and-acceptance.md)에 기록한다.
-이 로컬 인수 시점에는 `main`에 병합되지 않았다. 이후 승인된 U3–U5 통합의 실제
-PR/CI/merge 상태는 [main 전달 기록](../implementation/u3-u5-main-delivery.md)에서
-구분한다.
+이 로컬 인수 시점에는 `main`에 병합되지 않았다. 이후 U3–U5 통합은
+[PR #63](https://github.com/pluswc/sec_xbrl/pull/63), merge
+`9708508ec953ee4323ae29318c639abc9e0650b6`로 완료됐으며 PR/main CI 근거는
+[main 전달 기록](../implementation/u3-u5-main-delivery.md)에서 구분한다.
 
 ## 계속 유지할 잔여 범위와 제외 사항
 
