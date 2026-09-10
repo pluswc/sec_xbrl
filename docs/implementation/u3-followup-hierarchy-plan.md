@@ -1,7 +1,7 @@
 # U3 follow-up: governed statement and segment hierarchy
 
-Status: implemented candidate for H1, U3-R, H2, and H3; independent frozen verification required. See `u3-followup-delivery.md`.  
-Baseline: immutable U3 commit `09309c80700fed2115e2b18eddd2c21dc5e200e3`  
+Status: implemented candidate for H1, U3-R, H2, and H3; independent frozen verification required. See `u3-followup-delivery.md`.\
+Baseline: immutable U3 commit `09309c80700fed2115e2b18eddd2c21dc5e200e3`\
 Implementation branch: `codex/u3-followup-hierarchy`
 
 ## Scope and acceptance
