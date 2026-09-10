@@ -1,6 +1,6 @@
 # 계획 등록부 — 단일 진입점
 
-기준일: **2026-09-09**. 이 등록부는 목적·계약·현 상태·증거의 위치를 연결한다.
+기준일: **2026-09-10**. 이 등록부는 목적·계약·현 상태·증거의 위치를 연결한다.
 규범적 계획은 Git 추적 문서이며, 임시 계획 파일이나 특정 도구를 읽거나 설치할
 필요가 없다. 이 등록부를 만든 과거 변경은 문서 설계만 승인했다. 2026-09-09
 후속 승인은 [U4 전달 계약](../implementation/u4-continuous-refresh-delivery.md)의
@@ -16,6 +16,8 @@
 | [공통 전달·계획 관리](../implementation/delivery-workflow.md) | 권한·단일 작성자·독립 검증·동결·상태 기록 규칙 |
 | [분석 데이터 모델](../architecture/analytical-data-model.md) | 데이터 평면과 소비자 경계 |
 | [투자자 API 계약](../implementation/investor-analysis-interface.md) | 이미 존재하는 조회·준비·등록·갱신 계약 |
+| [투자자 이용 가이드](../usage/investor-analysis.md) | 준비 bundle 조회·Axis·trace·export와 관리자 준비의 실행 예시 |
+| [U3–U5 main 전달](../implementation/u3-u5-main-delivery.md) | 사용자 승인된 누적 통합의 범위, fresh checkout 조건과 PR/CI/merge 상태 경계 |
 | [회사 관리](../implementation/company-report-administration.md), [공시 검토](../implementation/disclosure-review.md) | 회사별 설정과 정확한 출처의 검토 결정·재발행 |
 | [U3 v1](../implementation/u3-important-items-plan.md), [후속 v2 전달](../implementation/u3-followup-delivery.md), [Axis 전달](../implementation/u3-axis-timeseries-delivery.md) | 승인 정책, 구현·검증 계약과 한계. 로드맵이 수치를 재승인하지 않음 |
 | [U3 완료·우선순위](../implementation/u3-closeout-and-followup-priority.md) | 완료 결정과 날짜가 있는 정정 기록 |
@@ -37,6 +39,11 @@
 | U3 중요도·구조·Axis 시계열 | 승인 범위까지 확장·납품 | 명시적 U3 범위 | `3098be6` | 664 passed / 16 skipped, Ruff, 실제 6사 PASS | 2026-09-09 COMPLETE | **미병합; main에 포함되지 않음** |
 | U4 계속 갱신 | 복구된 제안과 후속 전달 계약 | bounded orchestration·복구·재개·live 입력·quality materialization; 원격 제외 | `3236778` | 675 passed / 37 skipped, Ruff, 6사 21, 실제 NFLX 14공시·동일 API/화면 PASS | **2026-09-10 LOCAL_ACCEPTED** | **미병합; main에 포함되지 않음** |
 | U5 보관·공유 | 복구된 기존 제안 | `51c196f` 기준 로컬 구현 승인 | product `8867229`; canonical snapshot + CSV/HTML/JSON/XLSX + offline 저장 controls | 679 passed / 37 skipped, cached 21, Ruff, 80 snapshots·320 formats·4,844 cells·24 downloads PASS | **2026-09-10 LOCAL_ACCEPTED** | **미병합; main에 포함되지 않음** |
+
+현재 전달 상태(2026-09-10): 사용자가 U3–U5 누적 이력의 `main` 통합을 승인했다.
+[U3–U5 main 전달](../implementation/u3-u5-main-delivery.md)은 PR 준비 범위와 fresh
+checkout 조건을 기록한다. 위 표는 각 단계의 역사적 로컬 인수를 보존한다. 실제
+PR, CI와 merge SHA가 생기기 전에는 `MERGED`로 바꾸지 않는다.
 
 정확한 식별:
 

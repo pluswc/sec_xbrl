@@ -17,6 +17,10 @@ As recorded on 2026-09-09: U1/U2 are merged through PR #62 at
 not in `main`. U5 “보관·공유” is locally accepted at product SHA
 `8867229455f9441807117a4a4a3e1ebaa8ae7eee` and remains unmerged; see
 [U5 completion and acceptance](implementation/u5-completion-and-acceptance.md).
+The user subsequently authorized an accumulated U3–U5 main integration. Its
+current pre-PR status, included revisions and fresh-checkout requirements are
+tracked in [U3–U5 main delivery](implementation/u3-u5-main-delivery.md); no merge
+SHA or CI result is claimed before GitHub records it.
 
 ## Historical M0 — Repository and accession discovery contracts
 The original bootstrap work established repository contracts, CI skeleton, and

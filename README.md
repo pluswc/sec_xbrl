@@ -39,14 +39,20 @@ and `docs/implementation/m0-data-contract.md` for quality and release policy.
 For evidence-based discovery of company-specific products, segments, regions
 and related details, see `docs/implementation/consumer-exploration-contract.md`.
 
-## Excel status
+## Investor use and exports
 
-Excel is one consumer of the analytical model.  The current direct-ZIP Excel
-builders are legacy/prototype paths retained for comparison while governed
-analytical data is built.  They must not become a second parser or an implicit
-period/recast/calculation policy engine.  In particular, Excel never derives
-Q4; the target workbook reads governed Analytical Facts and Layer 2-derived
-candidates/Metrics only.
+The governed consumer API now provides the U1 core overview, U2/U3 breakdown
+and Axis exploration, cell trace, and U5 canonical JSON/CSV/HTML/XLSX exports.
+The offline hierarchy screen saves the selected prepared table without parsing
+SEC files or inventing accounting policy. Direct-ZIP Excel builders remain
+legacy/prototype paths; the governed U5 workbook consumes the canonical
+prepared snapshot.
+
+Start with the [Korean investor usage guide](docs/usage/investor-analysis.md).
+It distinguishes a ready bundle from U4 registration/preparation and includes
+working overview, Axis, trace, export and offline-render examples. Current
+integration status is tracked in
+[U3–U5 main delivery](docs/implementation/u3-u5-main-delivery.md).
 
 ## Existing accession process
 This project assumes accession discovery already exists. The downstream pipeline consumes that output via an adapter contract rather than reimplementing discovery. See `docs/implementation/accession-contract.md`.

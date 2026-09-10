@@ -82,8 +82,9 @@ Axis 전체 구성을 같은 실제 표에서 제공하는 데까지 포함한�
 상태: `3098be6db7622f2ec444a9979732b7dfaa685641`에서 독립
 **664 passed / 16 skipped**, Ruff PASS, 실제 6사 **84 Axis / 10,824 화면 셀**
 검증 후 2026-09-09 로컬 COMPLETE 인수. closeout 문서 SHA는
-`32212caba5daf8273663d70ba3075db5d1d56fc7`. **main에는 U3가 없다.**
-원격 반영은 별도 권한/전달 판단이며 완료 결정을 재개하지 않는다.
+`32212caba5daf8273663d70ba3075db5d1d56fc7`. 당시 `main`에는 U3가 없었다.
+2026-09-10 사용자가 U3–U5 누적 main 통합을 승인했으며 현재 전달 상태는
+[U3–U5 main 전달](../implementation/u3-u5-main-delivery.md)에서 관리한다.
 
 남은 표시 과제: 상세 missing reason UX는 이후 공통 UI/Excel에서 검토한다.
 이는 U3 차단 사유가 아니다. 실제 데이터 연결은 별도 Layer 2 근거 검토이며
@@ -149,7 +150,9 @@ API/화면을 별도 검증했다. 이는 무인 경제 승인이나 main 병합
 CSV/HTML/JSON/XLSX와 오프라인 저장 범위는
 [U5 전달 계약](../implementation/u5-consumer-export.md), 검증·제약·재작업 근거는
 [U5 완료·인수](../implementation/u5-completion-and-acceptance.md)에 기록한다.
-`main`에는 병합되지 않았다.
+이 로컬 인수 시점에는 `main`에 병합되지 않았다. 이후 승인된 U3–U5 통합의 실제
+PR/CI/merge 상태는 [main 전달 기록](../implementation/u3-u5-main-delivery.md)에서
+구분한다.
 
 ## 계속 유지할 잔여 범위와 제외 사항
 
