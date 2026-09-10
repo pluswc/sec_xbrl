@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
   "arelle-release",
   "httpx",
+  "openpyxl>=3.1",
   "polars",
   "pydantic>=2",
 ]
@@ -23,6 +24,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sec_xbrl"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/sec_xbrl/display/hierarchy.html" = "sec_xbrl/display/hierarchy.html"
+"src/sec_xbrl/display/hierarchy.css" = "sec_xbrl/display/hierarchy.css"
+"src/sec_xbrl/display/hierarchy.js" = "sec_xbrl/display/hierarchy.js"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

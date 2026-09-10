@@ -8,11 +8,28 @@ Metrics planes, and supports:
 2. Layer 2 — Longitudinal canonicalization within the same company.
 3. Layer 3 — Cross-company semantic comparison.
 
+The product goal is company-agnostic operation: it must support administrator
+registration and preparation of any supported SEC filer without ticker-specific
+engine changes. The existing five companies are regression fixtures, not the
+intended supported-company boundary.
+
 Excel, API, and dashboard views are consumers of governed Analytical and
 Derived Metrics data.  They are not SEC parsers, recast-selection engines, or
 business-calculation policy engines.
 
 10-K is the annual baseline. 10-Q updates the current state. 10-K/A and 10-Q/A are preserved as amendments and never overwrite raw facts.
+
+## Planning entry and status
+Start planning and handoffs at [docs/planning/README.md](docs/planning/README.md). It indexes the M
+architecture roadmap, U investor roadmap, execution contracts, status and evidence.
+Use tracked `docs/` for normative plans and substantive decisions. Tool/session
+plans under `.omx/`, `.codex/`, or `work/` are optional historical or working
+material, never authority or prerequisites for understanding the checkout.
+Promote decisions into tracked docs before handoff; no particular skill, CLI or
+orchestrator is required. Keep proposal, approval, implementation, independent
+verification, local acceptance and main merge status separate. Future acceptance
+criteria do not authorize implementation. Follow the tool-independent planning
+rules in `docs/implementation/delivery-workflow.md`.
 
 ## Source of truth
 Read these before implementing related code:
@@ -71,6 +88,13 @@ Before coding:
 4. Implement the smallest vertical slice.
 5. Run unit + relevant integration/golden tests.
 6. Report changed files, test results and deviations from contracts.
+
+### Default model operation
+- Treat the assignments below as the current project defaults, not permanent model rankings or guarantees: the lead uses GPT-6 Astra (`gpt-6-astra`), implementation uses GPT-5.6 Sol (`gpt-5.6-sol`), independent read-only verification uses a separate Astra, and evidence comparison may use GPT-5.6 Terra (`gpt-5.6-terra`) when needed.
+- The lead owns requirements, accounting judgment, acceptance criteria, delegation, and final acceptance. Simple explanations and read-only lookups may be handled directly without delegation.
+- Before implementation, follow the delegation contract in `docs/implementation/delivery-workflow.md`; keep one writer for the same implementation scope, and do not broaden accounting meaning or approved scope without lead approval.
+- If a requested model is unavailable, disclose the fallback instead of substituting silently, and preserve role independence. Higher-authority instructions and an explicit user model request take precedence.
+- A written default does not change the model actually selected by the execution environment. Do not claim speed, cost, or quality improvements without measurement; evaluate this policy under the workflow document before expanding it.
 
 ## Git workflow
 - `main` should remain passing.

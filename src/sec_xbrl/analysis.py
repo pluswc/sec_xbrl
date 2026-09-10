@@ -19,6 +19,12 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
+from sec_xbrl.analytics.importance import (
+    DEFAULT_TOP,
+    POLICY_ID,
+    POLICY_VERSION,
+    materialize_importance,
+)
 from sec_xbrl.analytics.investor_metrics import materialize_metrics
 from sec_xbrl.history import HistoryPublicationReader, _write_records, open_history_publication
 
@@ -100,6 +106,9 @@ class AnalysisClient:
         if self.manifest["version"] != VERSION:
             raise ValueError("unsupported analysis bundle")
         self._cache: dict[tuple, list[dict]] = {}
+        from sec_xbrl.analytics.axis_timeseries_queries import load_axis_manifest
+        self.axis_manifest = load_axis_manifest(self.root, self.manifest)
+        self._axis_cache: dict[tuple, dict[str, Any]] = {}
 
     def _records(self, ticker: str, view: str, name: str) -> list[dict]:
         key = (ticker.upper(), view, name)
@@ -162,18 +171,20 @@ class AnalysisClient:
                               "metrics": selected(self._records(ticker, view, "metrics")),
                               "warnings": ["LATEST_REPORTED는 재작성 비교가능 확정이 아닙니다.", "분기 금액과 기말 잔액은 별도 기간 종류입니다."]})
 
-    def list_breakdowns(self, row_id: str, *, context: dict) -> dict:
+    def list_breakdowns(self, row_id: str, *, context: dict, include_hidden: bool = False) -> dict:
         ticker, view, periods = self._validate_context(context)
-        groups = [n for n in self._records(ticker, view, "nodes") if n.get("anchor_row_id") == row_id and n["kind"] == "LENS" and not n.get("hidden")]
+        groups = [n for n in self._records(ticker, view, "nodes") if n.get("anchor_row_id") == row_id and n["kind"] == "LENS" and (include_hidden or not n.get("hidden"))]
         edges = self._records(ticker, view, "edges")
         groups = [g for g in groups if any(e["parent_id"] == g["node_id"] and any(tuple(p) in periods for p in e["periods"]) for e in edges)]
         groups.sort(key=lambda g: (g.get("display_order") or 0, g.get("label") or "", g["node_id"]))
         return copy.deepcopy({"context": context, "groups": groups, "warning": "서로 다른 관점은 합산하지 않습니다."})
 
     def children(self, node_id: str, *, context: dict, cursor: str | None = None, limit: int = 5,
-                 path: tuple[str, ...] = ()) -> dict:
+                 path: tuple[str, ...] = (), selection: str = "important",
+                 reference_period: tuple[int, int] | None = None) -> dict:
         ticker, view, periods = self._validate_context(context)
-        if not 1 <= limit <= 1000 or node_id in path:
+        requested_periods = set(periods)
+        if not 1 <= limit <= 1000 or node_id in path or selection not in {"important", "all"}:
             raise ValueError("invalid page size or cycle in exploration path")
         nodes = {n["node_id"]: n for n in self._records(ticker, view, "nodes")}
         if node_id not in nodes:
@@ -185,20 +196,74 @@ class AnalysisClient:
         for parent, child in pairwise(chain):
             periods &= {tuple(p) for e in edges if e["parent_id"] == parent and e["child_id"] == child for p in e["periods"]}
         edges = [e for e in edges if any(tuple(p) in periods for p in e["periods"])]
-        linked = sorted({e["child_id"] for e in edges if e["parent_id"] == node_id and e["child_id"] not in (*path, node_id)})
+        linked_all = sorted({e["child_id"] for e in edges if e["parent_id"] == node_id and e["child_id"] not in (*path, node_id)})
+        if reference_period is None:
+            reference_period = max(requested_periods)
+        if not isinstance(reference_period, (tuple, list)) or len(reference_period) != 2 or any(not isinstance(value, int) or isinstance(value, bool) for value in reference_period):
+            raise ValueError("malformed reference period")
+        if tuple(reference_period) not in requested_periods:
+            raise ValueError("reference period is outside the prepared query context")
+        importance, legacy = self._importance(ticker, view, node_id, periods, tuple(reference_period), linked_all)
+        critical = {"USER_PINNED", "SIGN_TRANSITION", "BASIS_WARNING", "CRITICAL_SOURCE_WARNING",
+                    "ABRUPT_RATE_AND_MATERIAL_CHANGE", "REFERENCE_PERIOD_UNAVAILABLE_FORMER_TOP_AMOUNT"}
+        selecting = {*critical, "TOP_AMOUNT", "STRUCTURAL_NAVIGATION"}
+        selected_reasons: dict[str, list[str]] = {}
+        display_importance: dict[str, dict | None] = {}
+        fallback_keys: dict[str, tuple] = {}
+        for child_id in linked_all:
+            current = importance.get((child_id, tuple(reference_period)))
+            reasons = list(current.get("reasons", [])) if current else []
+            history = [importance.get((child_id, period)) or {} for period in periods]
+            if any(row.get("pinned") for row in history):
+                reasons.append("USER_PINNED")
+            historical = [(period, importance.get((child_id, period))) for period in periods if period < tuple(reference_period)
+                          and (importance.get((child_id, period)) or {}).get("present")]
+            latest_historical = max(historical, default=(None, None), key=lambda row: row[0] or (-1, -1))
+            historical_top = latest_historical[1] is not None and (latest_historical[1].get("amount_rank") or DEFAULT_TOP + 1) <= DEFAULT_TOP
+            if (current is None or not current.get("present")) and historical_top:
+                reasons.append("REFERENCE_PERIOD_UNAVAILABLE_FORMER_TOP_AMOUNT")
+                display_importance[child_id] = {**latest_historical[1], "requested_reference_period": list(reference_period),
+                                                "ordering_reference_period": list(latest_historical[0]),
+                                                "reference_period_status": "UNAVAILABLE"}
+                fallback_keys[child_id] = (-latest_historical[0][0], -latest_historical[0][1],
+                                           latest_historical[1].get("amount_rank") or 10**9, child_id)
+            else:
+                display_importance[child_id] = current
+            selected_reasons[child_id] = sorted(set(reasons))
+        if selection == "all" or legacy:
+            linked = linked_all
+        else:
+            linked = [child_id for child_id in linked_all if set(selected_reasons[child_id]) & selecting and (
+                not (importance.get((child_id, tuple(reference_period))) or {}).get("presentation_excluded")
+                or bool(set(selected_reasons[child_id]) & critical)
+            )]
+        linked.sort(key=lambda child_id: (
+            child_id in fallback_keys,
+            (importance.get((child_id, tuple(reference_period))) or {}).get("amount_rank") or 10**9,
+            fallback_keys.get(child_id, (0, 0, 0, child_id)), child_id,
+        ))
         offset = 0
+        scope = stable(context, node_id, path, POLICY_VERSION if not legacy else "legacy-node-order", selection, reference_period)
         if cursor:
-            payload = json.loads(cursor)
-            if payload["scope"] != stable(context, node_id, path):
+            try:
+                payload = json.loads(cursor)
+                offset = payload["offset"]
+            except (json.JSONDecodeError, KeyError, TypeError) as exc:
+                raise ValueError("malformed cursor") from exc
+            if payload.get("scope") != scope:
                 raise ValueError("cursor belongs to another query/path")
-            offset = int(payload["offset"])
-            if offset < 0:
+            if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
                 raise ValueError("invalid cursor")
         ids = linked[offset:offset+limit]
         allowed = {(e["child_id"], *p) for e in edges if e["parent_id"] == node_id and e["child_id"] in ids for p in e["periods"] if tuple(p) in periods}
         values = [dict(c, node_id=i) for i in ids for c in self._records(ticker, view, "cells")
                   if c["node_id"] == (nodes[i].get("value_node_id") or i) and (i, c["fiscal_year"], c["fiscal_quarter"]) in allowed]
-        result = [{**nodes[i], "has_children": any(e["parent_id"] == i and e["child_id"] not in (*path, node_id) for e in edges)} for i in ids]
+        result = [{**nodes[i], "has_children": any(e["parent_id"] == i and e["child_id"] not in (*path, node_id) for e in edges),
+                   "importance": copy.deepcopy(display_importance.get(i)),
+                   "importance_history": copy.deepcopy(sorted(
+                       [row for (child_id, _), row in importance.items() if child_id == i],
+                       key=lambda row: (row["fiscal_year"], row["fiscal_quarter"]), reverse=True)),
+                   "importance_reasons": selected_reasons[i]} for i in ids]
         active_years = {p[0] for e in edges if e["parent_id"] == node_id for p in e["periods"] if tuple(p) in periods}
         kinds = {nodes[i].get("period_class") for i in ids} - {None}
         columns = sorted([c for c in self._records(ticker, view, "columns") if (c["fiscal_year"], c["fiscal_quarter"]) in periods and c["fiscal_year"] in active_years and (not kinds or c["period_class"] in kinds)], key=lambda c: (c["period_class"], c["fiscal_year"], c["fiscal_quarter"]))
@@ -206,11 +271,106 @@ class AnalysisClient:
         parent_cells = [c for c in self._records(ticker, view, "cells") if c["node_id"] == (parent.get("value_node_id") or node_id) and (c["fiscal_year"], c["fiscal_quarter"]) in periods]
         if parent["kind"] == "LENS" and not parent.get("source_parent_concept"):
             parent_cells = [c for c in self._records(ticker, view, "core_cells") if c["row_id"] == parent.get("anchor_row_id") and (c["fiscal_year"], c["fiscal_quarter"]) in periods]
+        excluded = [child_id for child_id in linked_all if child_id not in linked]
+        ordinary_warnings = [{"child_id": child_id, "warnings": (importance.get((child_id, tuple(reference_period))) or {}).get("warnings", [])}
+                             for child_id in excluded if (importance.get((child_id, tuple(reference_period))) or {}).get("warnings")]
         return copy.deepcopy({"context": context, "parent": nodes[node_id], "children": result, "cells": values,
                               "columns": columns, "parent_cells": parent_cells,
                               "path": [*path, node_id], "hidden_count": max(0, len(linked)-offset-len(ids)),
-                              "next_cursor": json.dumps({"scope": stable(context, node_id, path), "offset": offset+limit}) if offset+limit < len(linked) else None,
+                              "excluded_count": len(excluded), "excluded": [{"child_id": i, "reasons": ["PRESENTATION_EXCLUDED"] if (importance.get((i, tuple(reference_period))) or {}).get("presentation_excluded") else ["OUTSIDE_IMPORTANT_SELECTION"]} for i in excluded],
+                              "excluded_warnings": ordinary_warnings,
+                              "selection": selection, "reference_period": list(reference_period),
+                              "importance_policy": {"policy_id": POLICY_ID, "policy_version": POLICY_VERSION, "legacy_fallback": legacy},
+                              "next_cursor": json.dumps({"scope": scope, "offset": offset+limit}) if offset+limit < len(linked) else None,
                               "evidence": [e for e in edges if e["parent_id"] == node_id and e["child_id"] in ids]})
+
+    def _importance(self, ticker: str, view: str, parent_id: str, periods: set[tuple[int, int]],
+                    reference_period: tuple[int, int], linked: list[str]) -> tuple[dict[tuple[str, tuple[int, int]], dict], bool]:
+        files = self.manifest["companies"][ticker]["views"][view]["files"]
+        if "importance" not in files:
+            # Explicit compatibility path for immutable pre-U3 publications.
+            return {}, True
+        records = self._records(ticker, view, "importance")
+        selected = {(row["child_id"], (row["fiscal_year"], row["fiscal_quarter"])): row for row in records
+                    if row["parent_id"] == parent_id and (row["fiscal_year"], row["fiscal_quarter"]) in periods and row["child_id"] in linked}
+        return selected, False
+
+    def _hierarchy_records(self, ticker: str, name: str, filing_id: str | None = None) -> list[dict]:
+        key = (ticker.upper(), "HIERARCHY", filing_id, name)
+        if key not in self._cache:
+            try:
+                info = self.manifest["companies"][ticker.upper()]["hierarchy"]
+                files = info["filings"][filing_id]["files"] if filing_id else info["files"]
+                self._cache[key] = _table(self.root, files[name])
+            except KeyError as exc:
+                raise ValueError("hierarchy dataset not prepared in this publication") from exc
+        return self._cache[key]
+
+    def statement_catalog(self, ticker: str, *, section: str | None = None) -> dict:
+        from sec_xbrl.analytics.hierarchy_queries import statement_catalog
+        return statement_catalog(self, ticker, section=section)
+
+    def statement(self, ticker: str, table_id: str) -> dict:
+        from sec_xbrl.analytics.hierarchy_queries import statement
+        return statement(self, ticker, table_id)
+
+    def pre_table(self, ticker: str, table_id: str) -> dict:
+        from sec_xbrl.analytics.hierarchy_queries import pre_table
+        return pre_table(self, ticker, table_id)
+
+    def axes(self, ticker: str, filing_id: str, *, raw_concept_id: str | None = None) -> dict:
+        from sec_xbrl.analytics.hierarchy_queries import axes
+        return axes(self, ticker, filing_id, raw_concept_id=raw_concept_id)
+
+    def member_metrics(self, ticker: str, filing_id: str, *, axis_id: str, member_id: str | None,
+                       typed_value: str | None = None, raw_concept_id: str | None = None) -> dict:
+        from sec_xbrl.analytics.hierarchy_queries import member_metrics
+        return member_metrics(self, ticker, filing_id, axis_id=axis_id, member_id=member_id,
+                              typed_value=typed_value, raw_concept_id=raw_concept_id)
+
+    def importance_v2(self, ticker: str, *, view: str = "LATEST_REPORTED") -> dict:
+        return copy.deepcopy({"policy": self.manifest["importance_v2_policy"],
+                              "records": self._records(ticker, view, "importance_v2")})
+
+    def axis_timeseries(self, ticker: str, lens_id: str, *, context: dict[str, Any]) -> dict[str, Any]:
+        from sec_xbrl.analytics.axis_timeseries_queries import axis_timeseries
+        return axis_timeseries(self, ticker, lens_id, context=context)
+
+    def overview_snapshot(self, ticker: str, **selection: Any) -> dict[str, Any]:
+        """Create a canonical U5 snapshot from one prepared overview response."""
+        from sec_xbrl.consumer.export import prepare_overview_snapshot
+
+        return prepare_overview_snapshot(self, ticker, **selection)
+
+    def axis_snapshot(self, ticker: str, lens_id: str, *, context: dict[str, Any],
+                      **selection: Any) -> dict[str, Any]:
+        """Create a canonical U5 snapshot from one prepared Axis response."""
+        from sec_xbrl.consumer.export import prepare_axis_snapshot
+
+        return prepare_axis_snapshot(self, ticker, lens_id, context=context, **selection)
+
+    def _axis_json(self, relative: str, expected_sha256: str) -> dict[str, Any]:
+        identity = self.axis_manifest or {}
+        key = (identity.get("publication_id"), identity.get("decision_cutoff"), relative, expected_sha256)
+        if key not in self._axis_cache:
+            path = self.root / relative
+            if not path.is_file() or path.is_symlink() or self.root.resolve() not in path.resolve().parents:
+                raise ValueError("axis review path is outside the publication")
+            payload = path.read_bytes()
+            if hashlib.sha256(payload).hexdigest() != expected_sha256:
+                raise ValueError("axis review checksum mismatch")
+            self._axis_cache[key] = json.loads(payload)
+        return copy.deepcopy(self._axis_cache[key])
+
+    def target_status(self, ticker: str) -> dict:
+        """Return the persisted preparation outcome without interpreting absence."""
+        ticker = ticker.upper()
+        outcome = self.manifest.get("targets", {}).get(ticker)
+        if outcome is None and ticker in self.manifest.get("companies", {}):
+            outcome = {"status": "READY", "reason": None}
+        if outcome is None:
+            raise ValueError("target is not registered in this catalogue publication")
+        return copy.deepcopy({"ticker": ticker, **outcome})
 
     def trace(self, cell_id: str, *, context: dict) -> dict:
         ticker, view, periods = self._validate_context(context)
@@ -275,9 +435,74 @@ def _compact(cell: dict, row: dict, column: dict, *, ticker: str, view: str, nod
             "semantic_id": lineage.get("company_canonical_concept_id"), "source_fact_id": lineage.get("selected_source_fact_id")}
 
 
+def _materialize_prepared_quality(
+    *,
+    ticker: str,
+    compact: dict,
+    source_cell: dict,
+    concepts: dict,
+    decisions: list[dict[str, str]],
+    matched: set[str],
+) -> None:
+    """Apply the existing administrative overlay to one analytical cell."""
+    from sec_xbrl.company_reports import materialize_quality
+
+    lineage = source_cell.get("value_lineage", {})
+    dimensions = [
+        {
+            "axis": concepts.get(dim[0], {}).get("qname", dim[0]),
+            "member": concepts.get(dim[1], {}).get("qname", dim[1]),
+            "typed_member": dim[2],
+            "dimension_type": dim[3],
+            "is_default": dim[4],
+        }
+        for dim in lineage.get("raw_dimension_signature", [])
+    ]
+    inputs = lineage.get("source_inputs", []) or [lineage]
+    source_scopes = [
+        {
+            "accession": source.get("accession"),
+            "concept": source.get("raw_concept_qname"),
+            "resolved_issue_ids": source.get("resolved_issue_ids", []),
+            "dimensions": [
+                {
+                    "axis": concepts.get(dim[0], {}).get("qname", dim[0]),
+                    "member": concepts.get(dim[1], {}).get("qname", dim[1]),
+                }
+                for dim in source.get("raw_dimension_signature", [])
+            ],
+        }
+        for source in inputs
+    ]
+    # Match only the explicit source scopes below. They carry resolved issue
+    # identities for direct, interpreted, and derived observations.
+    quality_lineage = {**lineage, "accession": None}
+    overlay = materialize_quality(
+        ticker=ticker,
+        cell={**source_cell, "value_lineage": quality_lineage},
+        dimensions=dimensions,
+        decisions=decisions,
+        source_scopes=source_scopes,
+    )
+    matched.update(row["decision_id"] for row in overlay["decisions"])
+    compact.update(
+        raw_value=compact.get("value"),
+        raw_text=source_cell.get("value_text"),
+        analytical_value=overlay["analytical_value"],
+        analytical_text=overlay["analytical_text"],
+        quality_status=overlay["quality_status"],
+        quality_reasons=overlay["quality_reasons"],
+        quality_decisions=overlay["decisions"],
+        value=overlay["analytical_value"],
+    )
+
+
+
+
 def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str, ...],
                      configuration: dict | None = None, fiscal_years: int = 3,
-                     fiscal_start: int | None = None, fiscal_end: int | None = None) -> Path:
+                     fiscal_start: int | None = None, fiscal_end: int | None = None,
+                     quality_decisions: list[dict[str, str]] | None = None) -> Path:
     """Materialize a consumer bundle. This is the only raw-reading/build boundary."""
     if destination.exists() or fiscal_years < 1:
         raise ValueError("new destination and positive fiscal scope required")
@@ -288,7 +513,12 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
     source_hashes = {"history_manifest_sha256": hashlib.sha256((reader.root / "history_manifest.json").read_bytes()).hexdigest()}
     if (publication / "review_manifest.json").exists():
         source_hashes["review_manifest_sha256"] = hashlib.sha256((publication / "review_manifest.json").read_bytes()).hexdigest()
-    manifest = {"version": VERSION, "publication_id": uuid.uuid4().hex, "companies": {}, "configuration": configuration, "source_manifest_hashes": source_hashes}
+    quality_decisions = copy.deepcopy(quality_decisions or [])
+    manifest = {"version": VERSION, "publication_id": uuid.uuid4().hex, "companies": {}, "targets": {},
+                "configuration": configuration, "source_manifest_hashes": source_hashes}
+    if quality_decisions:
+        manifest["quality_overlay"] = {"version": "admin-quality-v1", "matched_decision_ids": []}
+    matched_quality: set[str] = set()
     for ticker in tickers:
         ticker = ticker.upper()
         settings = configuration.get(ticker, {})
@@ -309,6 +539,8 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
         info = {"views": {}, "source_publication": str(publication.absolute()), "as_of": None,
                 "review_cutoff": getattr(reader, "review_manifest", {}).get("review_as_of"), "years": years}
         manifest["companies"][ticker] = info
+        manifest["targets"][ticker] = {"status": "READY", "reason": None,
+                                       "evidence": {"source_publication": str(publication.absolute())}}
         for view in ("AS_FILED", "LATEST_REPORTED"):
             columns, cells, traces, nodes, edges, core_cells = [], [], [], {}, {}, []
             source_index: dict[tuple, list[tuple]] = defaultdict(list)
@@ -328,10 +560,17 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
                     column = selected_columns[cell["fiscal_time_series_column_id"]]
                     nid = stable(ticker, view, period, row["fiscal_time_series_row_id"])
                     compact = _compact(cell, row, column, ticker=ticker, view=view, node_id=nid)
+                    if quality_decisions:
+                        _materialize_prepared_quality(ticker=ticker, compact=compact, source_cell=cell, concepts=concepts,
+                                                      decisions=quality_decisions, matched=matched_quality)
                     cells.append(compact)
                     trace = {"cell_id": compact["cell_id"], "fiscal_year": column["fiscal_year"], "fiscal_quarter": column["fiscal_quarter"],
                              "value_lineage": lineage, "source_publication": str(publication.absolute()),
                              "definition": {k: row.get(k) for k in ("raw_concept_qname", "canonical_dimension_signature", "basis_version")}}
+                    if quality_decisions:
+                        trace["quality_overlay"] = {key: copy.deepcopy(compact[key]) for key in
+                                                    ("quality_status", "quality_reasons", "quality_decisions",
+                                                     "raw_value", "raw_text", "analytical_value", "analytical_text")}
                     traces.append(trace)
                     raw_dimensions = [[concepts.get(d[0], {}).get("qname", d[0]), concepts.get(d[1], {}).get("qname", d[1]), *d[2:]] for d in lineage.get("raw_dimension_signature", [])]
                     displayed = lineage.get("analytical_dimensions") or raw_dimensions
@@ -435,15 +674,21 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
                         traces[-1]["availability_evidence"] = {"path": str(evidence_path.absolute()), "sha256": hashlib.sha256(evidence_path.read_bytes()).hexdigest()}
             metrics = materialize_metrics(core_cells)
             _apply_lens_preferences(nodes, settings.get("lens_preferences", []))
+            importance = materialize_importance(nodes=list(nodes.values()), edges=list(edges.values()), cells=cells,
+                                                core_cells=core_cells, configuration=settings.get("importance", {}),
+                                                review_cutoff=info["review_cutoff"], traces=traces)
             files = {}
             datasets = {"columns": columns, "core_rows": profile, "core_cells": core_cells, "cells": cells,
-                        "nodes": list(nodes.values()), "edges": list(edges.values()), "metrics": metrics}
+                        "nodes": list(nodes.values()), "edges": list(edges.values()), "metrics": metrics,
+                        "importance": importance}
             for digit in "0123456789abcdef":
                 datasets["trace_" + digit] = [t for t in traces if stable(t["cell_id"])[0] == digit]
             for name, records in datasets.items():
                 relative = f"{ticker}/{view}/{name}.parquet"
                 files[name] = {"path": relative, **_write_records(staging / relative, tuple(records))}
             info["views"][view] = {"files": files}
+    if quality_decisions:
+        manifest["quality_overlay"]["matched_decision_ids"] = sorted(matched_quality)
     (staging / "analysis_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     staging.rename(destination)
     return destination
@@ -544,7 +789,8 @@ def _reviewed_hierarchies(rules, nodes, cells, traces, add_edge, *, view, review
 
 
 def prepare_catalog(*, catalog: Path, destination: Path, tickers: tuple[str, ...] | None = None,
-                    fiscal_start: int | None = None, fiscal_end: int | None = None) -> Path:
+                    fiscal_start: int | None = None, fiscal_end: int | None = None,
+                    quality_decisions: list[dict[str, str]] | None = None) -> Path:
     """Prepare registered company sources; callers need not know source paths."""
     import csv
     if destination.exists():
@@ -558,14 +804,35 @@ def prepare_catalog(*, catalog: Path, destination: Path, tickers: tuple[str, ...
     config = json.loads(config_path.read_text()) if config_path.exists() else {}
     staging = destination.parent / (".partial-" + uuid.uuid4().hex)
     staging.mkdir(parents=True)
-    manifest = {"version": VERSION, "publication_id": uuid.uuid4().hex, "companies": {}, "configuration": config}
+    status_path = catalog / "target_status.json"
+    statuses = json.loads(status_path.read_text()) if status_path.exists() else {}
+    targets = {company["ticker"]: (copy.deepcopy(statuses[company["ticker"]])
+               if statuses.get(company["ticker"], {}).get("status") in {"UNSUPPORTED", "PREPARATION_FAILED", "REVIEW_REQUIRED", "DISCLOSURE_MISSING"}
+               else {"status": "NOT_PREPARED", "reason": "NOT_INCLUDED_IN_PREPARED_BUNDLE",
+                     "evidence": {"registered_source_publication": company.get("publication") or None}})
+               for company in companies}
+    manifest = {"version": VERSION, "publication_id": uuid.uuid4().hex, "companies": {}, "targets": targets,
+                "configuration": config}
     for company in selected:
         ticker = company["ticker"]
         sub = staging / ticker
-        prepare_analysis(publication=Path(company["publication"]), destination=sub, tickers=(ticker,), configuration=config,
-                         fiscal_years=int(company["recent_fiscal_years"]),
-                         fiscal_start=fiscal_start if fiscal_start is not None else int(company["fiscal_start"]) if company.get("fiscal_start") else None,
-                         fiscal_end=fiscal_end if fiscal_end is not None else int(company["fiscal_end"]) if company.get("fiscal_end") else None)
+        if not company.get("publication"):
+            from sec_xbrl.company_reports import set_target_status
+            set_target_status(catalog, ticker=ticker, status="NOT_PREPARED", reason="REGISTERED_COLLECTION_TARGET")
+            raise ValueError(f"{ticker}: registered target has no prepared publication")
+        try:
+            prepare_analysis(publication=Path(company["publication"]), destination=sub, tickers=(ticker,), configuration=config,
+                             fiscal_years=int(company["recent_fiscal_years"]),
+                             fiscal_start=fiscal_start if fiscal_start is not None else int(company["fiscal_start"]) if company.get("fiscal_start") else None,
+                             fiscal_end=fiscal_end if fiscal_end is not None else int(company["fiscal_end"]) if company.get("fiscal_end") else None,
+                             quality_decisions=quality_decisions)
+        except Exception as exc:
+            from sec_xbrl.company_reports import set_target_status
+            prior = statuses.get(ticker, {})
+            if prior.get("status") != "REVIEW_REQUIRED":
+                set_target_status(catalog, ticker=ticker, status="PREPARATION_FAILED", reason=str(exc),
+                                  evidence={"source_publication": company["publication"]})
+            raise
         child = json.loads((sub / "analysis_manifest.json").read_text())
         info = child["companies"][ticker]
         info["source_manifest_hashes"] = child["source_manifest_hashes"]
@@ -573,6 +840,14 @@ def prepare_catalog(*, catalog: Path, destination: Path, tickers: tuple[str, ...
             for file in view["files"].values():
                 file["path"] = ticker + "/" + file["path"]
         manifest["companies"][ticker] = info
+        if child.get("quality_overlay"):
+            overlay = manifest.setdefault("quality_overlay", {"version": "admin-quality-v1", "matched_decision_ids": []})
+            overlay["matched_decision_ids"].extend(child["quality_overlay"]["matched_decision_ids"])
+        if manifest["targets"].get(ticker, {}).get("status") != "REVIEW_REQUIRED":
+            manifest["targets"][ticker] = {"status": "READY", "reason": None,
+                                           "evidence": {"source_publication": info["source_publication"]}}
+    if manifest.get("quality_overlay"):
+        manifest["quality_overlay"]["matched_decision_ids"] = sorted(set(manifest["quality_overlay"]["matched_decision_ids"]))
     (staging / "analysis_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
     staging.rename(destination)
     # Publish the lightweight catalogue pointer only after the entire bundle
@@ -580,6 +855,13 @@ def prepare_catalog(*, catalog: Path, destination: Path, tickers: tuple[str, ...
     pointer = catalog / (".analysis-current-" + uuid.uuid4().hex)
     pointer.write_text(json.dumps({"bundle_path": str(destination.absolute()), "publication_id": manifest["publication_id"]}))
     pointer.replace(catalog / "analysis_current.json")
+    from sec_xbrl.company_reports import set_target_status
+    for company in selected:
+        ticker = company["ticker"]
+        if manifest["targets"][ticker]["status"] != "REVIEW_REQUIRED":
+            set_target_status(catalog, ticker=ticker, status="READY", reason=None,
+                              evidence={"consumer_bundle": str(destination.absolute()),
+                                        "publication_id": manifest["publication_id"]})
     return destination
 
 
@@ -627,33 +909,37 @@ def render_analysis(client: AnalysisClient, *, ticker: str, destination: Path, f
                 chunks.append(f"<td>{value}</td>")
             chunks.append("</tr>")
         chunks.append("</table></div>")
-    chunks.append("<h2>필요한 구성만 펼쳐보기</h2><p>관점 사이에는 합산하지 않습니다. 금액 단위: 백만 USD(주당·주식 수 제외).</p>")
-    for row in data["rows"]:
-        groups = client.list_breakdowns(row["row_id"], context=data["context"])["groups"]
+    chunks.append("<h2>필요한 구성만 펼쳐보기</h2><p>기준 분기의 금액 상위 5개와 중요한 변화·경고를 먼저 봅니다. 구성비는 별도 경제적 분해 검토가 없으면 계산하지 않습니다.</p>")
+    for selection, selection_label in (("important", "중요 항목"), ("all", "모든 항목·숨긴 관점 포함")):
+      chunks.append(f"<details class='selection'><summary>{selection_label}</summary>")
+      for row in data["rows"]:
+        groups = client.list_breakdowns(row["row_id"], context=data["context"], include_hidden=selection == "all")["groups"]
         if not groups:
             continue
         chunks.append(f"<details><summary>{esc(row['label'])} · {len(groups)}개 관점</summary>")
         for group in groups:
-            chunks.append(f'<details class="branch" data-node="{stable(group["node_id"], ())}"><summary>{esc(group["label"])} · {esc(group.get("basis_version") or group["lens_type"])}</summary></details>')
-            pending = [(group["node_id"], ())]
+            chunks.append(f'<details class="branch" data-node="{stable(group["node_id"], (), selection)}"><summary>{esc(group["label"])} · {esc(group.get("basis_version") or group["lens_type"])}</summary></details>')
+            pending = [(group["node_id"], (), selection)]
             while pending:
-                nid, path = pending.pop()
-                branch_key = stable(nid, path)
+                nid, path, branch_selection = pending.pop()
+                branch_key = stable(nid, path, branch_selection)
                 if branch_key in branches:
                     continue
-                result = client.children(nid, context=data["context"], limit=1000, path=path)
+                result = client.children(nid, context=data["context"], limit=1000, path=path, selection=branch_selection)
                 all_children, all_cells = list(result["children"]), list(result["cells"])
                 while result["next_cursor"]:
-                    result = client.children(nid, context=data["context"], cursor=result["next_cursor"], limit=1000, path=path)
+                    result = client.children(nid, context=data["context"], cursor=result["next_cursor"], limit=1000, path=path, selection=branch_selection)
                     all_children.extend(result["children"])
                     all_cells.extend(result["cells"])
                 for cell in [*all_cells, *result["parent_cells"]]:
                     cell["display_value"] = number(cell)
                 for child in all_children:
-                    child["branch_key"] = stable(child["node_id"], (*path, nid))
-                branches[branch_key] = {"children": all_children, "cells": all_cells, "columns": result["columns"], "parent_cells": result["parent_cells"]}
-                pending.extend((c["node_id"], (*path, nid)) for c in all_children if c["has_children"])
+                    child["branch_key"] = stable(child["node_id"], (*path, nid), branch_selection)
+                branches[branch_key] = {"children": all_children, "cells": all_cells, "columns": result["columns"], "parent_cells": result["parent_cells"],
+                                        "excluded_count": result["excluded_count"], "excluded_warnings": result["excluded_warnings"], "selection": branch_selection}
+                pending.extend((c["node_id"], (*path, nid), branch_selection) for c in all_children if c["has_children"])
         chunks.append("</details>")
+      chunks.append("</details>")
     payload = json.dumps({"branches": branches, "traces": traces}, ensure_ascii=False).replace("<", "\\u003c")
     chunks.append('<dialog id="trace"><button id="close">닫기</button><pre></pre></dialog><script type="application/json" id="bundle">' + payload + '</script>')
     chunks.append("""<script>
@@ -665,9 +951,12 @@ function expand(el){if(el.dataset.loaded)return;el.dataset.loaded='1';let id=el.
 let data=D.branches[id];if(!data)return;let offset=0;
 function tableFor(cells){let box=document.createElement('div');box.className='scroll';let table=document.createElement('table'),head=document.createElement('tr'),row=document.createElement('tr');let kind=cells[0]?.period_class;for(let col of data.columns.filter(c=>!kind||c.period_class===kind)){let c=cells.find(x=>x.column_id===col.fiscal_time_series_column_id),th=document.createElement('th'),td=document.createElement('td');th.textContent='FY'+col.fiscal_year+' Q'+col.fiscal_quarter;td.innerHTML=c?c.display_value:'—';td.title=c?(c.start||'')+' ~ '+c.display_end+' · '+c.status:'이 경로에 해당 기간 관측 없음';head.append(th);row.append(td);}table.append(head,row);box.append(table);return box;}
 if(data.parent_cells.length){let caption=document.createElement('p');caption.textContent='상위 항목의 값(관점별 수치는 서로 합산하지 않음)';el.append(caption,tableFor(data.parent_cells));}
+if(data.excluded_count){let note=document.createElement('p');note.textContent=data.excluded_count+'개 항목은 현재 중요 항목 목록에서 제외됨';el.append(note);}
 function page(){let group=data.children.slice(offset,offset+5);offset+=group.length;
-for(let n of group){let det=document.createElement('details'),summary=document.createElement('summary');summary.textContent=n.label;det.append(summary);
+for(let n of group){let det=document.createElement('details'),summary=document.createElement('summary'),ev=n.importance||{},labels={TOP_AMOUNT:'금액 상위',USER_PINNED:'고정 항목',SIGN_TRANSITION:'손익 부호 전환',BASIS_WARNING:'보고 기준 변경',CRITICAL_SOURCE_WARNING:'원천 검토 경고',ABRUPT_RATE_AND_MATERIAL_CHANGE:'큰 금액·비율 변화',REFERENCE_PERIOD_UNAVAILABLE_FORMER_TOP_AMOUNT:'최신 분기 값 미준비 · 과거 주요 항목',STRUCTURAL_NAVIGATION:'세부 경로'};summary.textContent=n.label+' · '+(n.importance_reasons||[]).map(x=>labels[x]||x).join(', ')+(ev.parent_share===null?' · 구성비 검토 필요':ev.parent_share?' · 구성비 '+Number(ev.parent_share).toFixed(1)+'%':'');det.append(summary);
 let cells=data.cells.filter(c=>c.node_id===n.node_id);if(cells.length)det.append(tableFor(cells));
+let reason=document.createElement('p');reason.textContent=(n.importance_reasons||[]).map(x=>labels[x]||x).join(' · ');det.append(reason);
+let proof=document.createElement('details'),proofTitle=document.createElement('summary'),evidence=document.createElement('pre');proofTitle.textContent='중요도 판단 근거';evidence.textContent=JSON.stringify({importance_reasons:n.importance_reasons,reference_importance:ev,importance_history:n.importance_history},null,2);proof.append(proofTitle,evidence);det.append(proof);
 if(n.has_children){det.classList.add('branch');det.dataset.node=n.branch_key;det.dataset.path=JSON.stringify([...path,id]);}el.append(det);}
 if(offset<data.children.length){let more=document.createElement('button');more.textContent='다음 5개 펼치기 ('+(data.children.length-offset)+'개 남음)';more.onclick=()=>{more.remove();page();};el.append(more);}}
 page();}

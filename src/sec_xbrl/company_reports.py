@@ -30,6 +30,7 @@ DECISION_FIELDS = ("decision_id", "issue_id", "ticker", "accession", "concept", 
                    "decision", "reviewer", "reason", "evidence", "known_at")
 SECTIONS = {"IS": "손익계산서", "BS": "재무상태표", "CF": "현금흐름표", "EQ": "자본변동표"}
 PERIODS = {"QTD_3M": "분기", "FY": "연간", "YTD_6M": "6개월 누적", "YTD_9M": "9개월 누적", "INSTANT": "기말 잔액"}
+TARGET_STATUSES = {"UNSUPPORTED", "PREPARATION_FAILED", "NOT_PREPARED", "REVIEW_REQUIRED", "DISCLOSURE_MISSING", "READY"}
 LABELS = {"Revenues": "매출", "RevenueFromContractWithCustomerExcludingAssessedTax": "매출",
           "OperatingIncomeLoss": "영업이익", "NetIncomeLoss": "순이익", "GrossProfit": "매출총이익",
           "Assets": "자산", "Liabilities": "부채", "StockholdersEquity": "자본",
@@ -79,6 +80,31 @@ def init_admin(root: Path) -> None:
     for name, fields in (("companies.csv", COMPANY_FIELDS), ("decisions.csv", DECISION_FIELDS)):
         if not (root / name).exists():
             _csv(root / name, fields, [])
+    if not (root / "target_status.json").exists():
+        _json(root / "target_status.json", {})
+
+
+def set_target_status(root: Path, *, ticker: str, status: str, reason: str | None,
+                      evidence: dict[str, Any] | None = None) -> None:
+    """Persist an explicit administrator/preparation outcome without inferring absence."""
+    if status not in TARGET_STATUSES or status in {"DISCLOSURE_MISSING", "REVIEW_REQUIRED"} and not evidence:
+        raise ValueError("target outcome or required evidence is invalid")
+    init_admin(root)
+    path = root / "target_status.json"
+    values = json.loads(path.read_text())
+    values[ticker.upper()] = {"status": status, "reason": reason, "evidence": evidence}
+    temporary = root / (".target-status-" + uuid.uuid4().hex)
+    _json(temporary, values)
+    temporary.replace(path)
+
+
+def read_target_status(root: Path, *, ticker: str) -> dict[str, Any]:
+    """Read an administrator target outcome before any consumer bundle exists."""
+    path = root / "target_status.json"
+    outcome = json.loads(path.read_text()).get(ticker.upper()) if path.exists() else None
+    if outcome is None:
+        raise ValueError("target is not registered")
+    return {"ticker": ticker.upper(), **outcome}
 
 
 def register_company(root: Path, *, ticker: str, publication: Path | None = None,
@@ -99,6 +125,11 @@ def register_company(root: Path, *, ticker: str, publication: Path | None = None
     rows.append(dict(zip(COMPANY_FIELDS, ("true" if active else "false", ticker, str(recent_fiscal_years),
                                          fiscal_start or "", fiscal_end or "", str(publication.absolute()) if publication else previous.get("publication", "")))))
     _csv(root / "companies.csv", COMPANY_FIELDS, rows)
+    prior_status = json.loads((root / "target_status.json").read_text()).get(ticker, {})
+    if prior_status.get("status") != "REVIEW_REQUIRED":
+        set_target_status(root, ticker=ticker, status="NOT_PREPARED",
+                          reason="SOURCE_REGISTERED" if publication or previous.get("publication") else "REGISTERED_COLLECTION_TARGET",
+                          evidence={"source_publication": str(publication.absolute())} if publication else None)
 
 
 def read_decisions(root: Path, *, review_as_of: date, content: bytes | None = None) -> list[dict[str, str]]:
@@ -447,7 +478,7 @@ def report(root: Path, *, review_as_of: date) -> Path:
 def refresh(root: Path, *, as_of: date, review_as_of: date, workspace: Path,
             source_runs: tuple[Path, ...] = (), submissions_roots: tuple[Path, ...] = (),
             offline: bool = False, bootstrap_taxonomy: bool = False,
-            tickers: tuple[str, ...] | None = None) -> Path:
+            tickers: tuple[str, ...] | None = None, render_report: bool = True) -> Path:
     """Collect/build using the existing history workflow, then use the same report path."""
     original_settings = (root / "companies.csv").read_bytes()
     companies = _read_csv(root / "companies.csv", COMPANY_FIELDS, original_settings)
@@ -464,12 +495,17 @@ def refresh(root: Path, *, as_of: date, review_as_of: date, workspace: Path,
         if company["fiscal_start"]:
             count = max(count, as_of.year - int(company["fiscal_start"]) + 2)
         scope = run / company["ticker"]
-        plan = history.discover_history(workspace=scope / "discovery", tickers=(company["ticker"],), as_of=as_of,
-                                        recent_fiscal_years=count, submissions_roots=submissions_roots, offline=offline)
-        intake = history.ingest_history(plan_path=plan, source_runs=source_runs, output_run=scope / "intake",
-                                        package_cache=workspace / "packages", index_cache=workspace / "indices",
-                                        taxonomy_cache=workspace / "taxonomy", bootstrap_taxonomy=bootstrap_taxonomy)
-        publication = history.build_history(intake_manifest=intake, output_root=scope / "analytical")
+        try:
+            plan = history.discover_history(workspace=scope / "discovery", tickers=(company["ticker"],), as_of=as_of,
+                                            recent_fiscal_years=count, submissions_roots=submissions_roots, offline=offline)
+            intake = history.ingest_history(plan_path=plan, source_runs=source_runs, output_run=scope / "intake",
+                                            package_cache=workspace / "packages", index_cache=workspace / "indices",
+                                            taxonomy_cache=workspace / "taxonomy", bootstrap_taxonomy=bootstrap_taxonomy)
+            publication = history.build_history(intake_manifest=intake, output_root=scope / "analytical")
+        except Exception as exc:
+            set_target_status(root, ticker=company["ticker"], status="PREPARATION_FAILED", reason=str(exc),
+                              evidence={"stage_root": str(scope.absolute())})
+            raise
         if company.get("publication") and (Path(company["publication"]) / "review_manifest.json").exists():
             # Preserve exact-source decisions and quarantines. New filing
             # identities never inherit a one-off interpretation approval.
@@ -507,12 +543,18 @@ def refresh(root: Path, *, as_of: date, review_as_of: date, workspace: Path,
                     "new_accessions_requiring_review": new_accessions,
                     "policy": "EXACT_SOURCE_APPROVAL_ONLY_REGISTRATION_UNCHANGED",
                 }, indent=2))
+                set_target_status(root, ticker=company["ticker"], status="REVIEW_REQUIRED", reason=str(exc),
+                                  evidence={"prepared_parent": str(publication.absolute()),
+                                            "new_accessions": new_accessions})
                 raise ValueError(f"{company['ticker']}: review rebind required; previous registration preserved; prepared data: {scope}") from exc
         company["publication"] = str(publication.absolute())
+        set_target_status(root, ticker=company["ticker"], status="NOT_PREPARED",
+                          reason="ANALYTICAL_READY_CONSUMER_NOT_PREPARED",
+                          evidence={"source_publication": company["publication"]})
     if (root / "companies.csv").read_bytes() != original_settings:
         raise ValueError("company settings changed during refresh; generated history retained, retry with current settings")
     _csv(root / "companies.csv", COMPANY_FIELDS, companies)
-    return report(root, review_as_of=review_as_of)
+    return report(root, review_as_of=review_as_of) if render_report else run
 
 
 def _validate_companies(companies: list[dict[str, str]]) -> None:
