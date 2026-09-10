@@ -36,14 +36,16 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | U1 핵심 요약 | 기존 제안에서 납품 | 기존 제한 범위 | `9eb37d4`에 존재 | 해당 후보 PASS | 완료 | PR #62, `7f8cc523` |
 | U2 단계별 탐색 | 기존 제안에서 납품 | 기존 제한 범위 | `9eb37d4`에 존재 | 해당 후보 PASS | 완료 | PR #62, `7f8cc523` |
-| U3 중요도·구조·Axis 시계열 | 승인 범위까지 확장·납품 | 명시적 U3 범위 | `3098be6` | 664 passed / 16 skipped, Ruff, 실제 6사 PASS | 2026-09-09 COMPLETE | **미병합; main에 포함되지 않음** |
-| U4 계속 갱신 | 복구된 제안과 후속 전달 계약 | bounded orchestration·복구·재개·live 입력·quality materialization; 원격 제외 | `3236778` | 675 passed / 37 skipped, Ruff, 6사 21, 실제 NFLX 14공시·동일 API/화면 PASS | **2026-09-10 LOCAL_ACCEPTED** | **미병합; main에 포함되지 않음** |
-| U5 보관·공유 | 복구된 기존 제안 | `51c196f` 기준 로컬 구현 승인 | product `8867229`; canonical snapshot + CSV/HTML/JSON/XLSX + offline 저장 controls | 679 passed / 37 skipped, cached 21, Ruff, 80 snapshots·320 formats·4,844 cells·24 downloads PASS | **2026-09-10 LOCAL_ACCEPTED** | **미병합; main에 포함되지 않음** |
+| U3 중요도·구조·Axis 시계열 | 승인 범위까지 확장·납품 | 명시적 U3 범위 | `3098be6` | 664 passed / 16 skipped, Ruff, 실제 6사 PASS | 2026-09-09 COMPLETE | PR #63, `9708508` |
+| U4 계속 갱신 | 복구된 제안과 후속 전달 계약 | bounded orchestration·복구·재개·live 입력·quality materialization; 원격 제외 | `3236778` | 675 passed / 37 skipped, Ruff, 6사 21, 실제 NFLX 14공시·동일 API/화면 PASS | **2026-09-10 LOCAL_ACCEPTED** | PR #63, `9708508` |
+| U5 보관·공유 | 복구된 기존 제안 | `51c196f` 기준 로컬 구현 승인 | product `8867229`; canonical snapshot + CSV/HTML/JSON/XLSX + offline 저장 controls | 679 passed / 37 skipped, cached 21, Ruff, 80 snapshots·320 formats·4,844 cells·24 downloads PASS | **2026-09-10 LOCAL_ACCEPTED** | PR #63, `9708508` |
 
-현재 전달 상태(2026-09-10): 사용자가 U3–U5 누적 이력의 `main` 통합을 승인했다.
-[U3–U5 main 전달](../implementation/u3-u5-main-delivery.md)은 PR 준비 범위와 fresh
-checkout 조건을 기록한다. 위 표는 각 단계의 역사적 로컬 인수를 보존한다. 실제
-PR, CI와 merge SHA가 생기기 전에는 `MERGED`로 바꾸지 않는다.
+현재 전달 상태(2026-09-10): U3–U5 누적 이력은
+[PR #63](https://github.com/pluswc/sec_xbrl/pull/63)으로 `main`에 병합됐다. merge
+SHA는 `9708508ec953ee4323ae29318c639abc9e0650b6`이고, 병합 시각은
+03:12:14 UTC(12:12:14 KST)다. PR CI와 병합 후 main CI는 모두 성공했으며 상세
+링크와 fresh checkout 확인법은 [main 전달 기록](../implementation/u3-u5-main-delivery.md)에
+있다. 위 로컬 인수 열은 각 단계의 당시 상태를 보존한다.
 
 정확한 식별:
 

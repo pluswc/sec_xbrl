@@ -7,20 +7,23 @@ are maintained in the [investor roadmap](planning/investor-analysis-roadmap.md).
 Read the registry's separate proposal/approval/implementation/verification/local
 acceptance/merge status and the linked execution contracts before starting work.
 
-As recorded on 2026-09-09: U1/U2 are merged through PR #62 at
+As recorded on 2026-09-09: U1/U2 were merged through PR #62 at
 `7f8cc5232d0df3d4c184de55827111e599b94dbd`; U3 is locally accepted at
 `3098be6db7622f2ec444a9979732b7dfaa685641` with closeout documentation at
-`32212caba5daf8273663d70ba3075db5d1d56fc7`, and is **not in main**. U4
+`32212caba5daf8273663d70ba3075db5d1d56fc7`. U4
 “계속 갱신” was subsequently locally accepted on 2026-09-10 at product SHA
 `3236778e57872b8ea41e421534e4a9d9ea0d58ff`; see the
-[U4 acceptance record](implementation/u4-completion-and-acceptance.md). It is
-not in `main`. U5 “보관·공유” is locally accepted at product SHA
-`8867229455f9441807117a4a4a3e1ebaa8ae7eee` and remains unmerged; see
+[U4 acceptance record](implementation/u4-completion-and-acceptance.md). U5
+“보관·공유” was locally accepted at product SHA
+`8867229455f9441807117a4a4a3e1ebaa8ae7eee`; see
 [U5 completion and acceptance](implementation/u5-completion-and-acceptance.md).
-The user subsequently authorized an accumulated U3–U5 main integration. Its
-current pre-PR status, included revisions and fresh-checkout requirements are
-tracked in [U3–U5 main delivery](implementation/u3-u5-main-delivery.md); no merge
-SHA or CI result is claimed before GitHub records it.
+Those dated statements preserve the historical local-acceptance boundary.
+U3–U5 subsequently merged through
+[PR #63](https://github.com/pluswc/sec_xbrl/pull/63) at
+`9708508ec953ee4323ae29318c639abc9e0650b6` on 2026-09-10; both PR and
+post-merge `main` CI passed. See
+[U3–U5 main delivery](implementation/u3-u5-main-delivery.md) for the recorded
+CI links and fresh-checkout requirements.
 
 ## Historical M0 — Repository and accession discovery contracts
 The original bootstrap work established repository contracts, CI skeleton, and
