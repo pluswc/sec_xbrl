@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 
 SEC_TRANSFORM_NAMESPACE = "http://www.sec.gov/inlineXBRL/transformation/2015-08-31"
 
@@ -42,6 +42,9 @@ _FILER_CATEGORIES = {
     "smaller reporting company": "Smaller Reporting Company",
     "emerging growth company": "Emerging Growth Company",
 }
+_SEC_DECIMAL_RE = re.compile(
+    r"^[ \t\n\r]*[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)[ \t\n\r]*$"
+)
 
 
 def register_sec_inline_transforms() -> None:
@@ -50,6 +53,7 @@ def register_sec_inline_transforms() -> None:
 
     registry: dict[str, Callable[[str], str]] = {
         "durday": lambda value: _decimal_duration(value, "D"),
+        "durweek": _week_duration,
         "durmonth": lambda value: _decimal_duration(value, "M"),
         "duryear": lambda value: _decimal_duration(value, "Y"),
         "durwordsen": _word_duration,
@@ -60,6 +64,29 @@ def register_sec_inline_transforms() -> None:
         "boolballotbox": _bool_ballot_box,
     }
     FunctionIxt.ixtNamespaceFunctions.setdefault(SEC_TRANSFORM_NAMESPACE, {}).update(registry)
+
+
+def _week_duration(value: str) -> str:
+    """Convert SEC ``durweek`` lexical input to a days-only XSD duration.
+
+    SEC's transform truncates fractional days after multiplying the absolute
+    week magnitude by seven.  The dedicated path deliberately does not reuse
+    ``_decimal_duration`` because its day behavior rounds half up.
+    """
+
+    if not isinstance(value, str) or _SEC_DECIMAL_RE.fullmatch(value) is None:
+        raise ValueError(f"unsupported SEC week duration: {value}")
+    lexical = value.strip()
+    digit_count = sum(character.isascii() and character.isdigit() for character in lexical)
+    with localcontext() as context:
+        # Decimal construction is exact.  Multiplication by seven can add one
+        # coefficient digit, so this bound is exact regardless of ambient
+        # decimal precision, including unusually large SEC lexical values.
+        context.prec = max(28, digit_count + 1)
+        number = Decimal(lexical)
+        days = int(abs(number) * 7)
+    sign = "-" if number < 0 and days > 0 else ""
+    return f"{sign}P{days}D"
 
 
 def _decimal_duration(value: str, unit: str) -> str:

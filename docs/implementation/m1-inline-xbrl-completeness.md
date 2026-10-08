@@ -148,9 +148,15 @@ transform names still fail closed; registration does not suppress validation.
 
 The registered `boolballotbox` transform follows the SEC EFM ballot-box rule:
 `☐` is `false`, while `☑` and `☒` are `true`. Other values are rejected rather
-than coerced. Because this expands the set of filings that can be parsed,
-successful snapshots and parse-state events use the distinct Layer 1 parser
-version `m2-layer1-v2`; existing `m2-layer1-v1` artifacts remain immutable.
+than coerced. The registered `durweek` transform accepts only the SEC decimal
+lexical grammar, converts the magnitude to days, and truncates fractional days
+toward zero. It emits a negative duration only when the truncated day count is
+nonzero. Unknown transform names and invalid lexical values still fail closed.
+
+Because each supported transform expands the set of filings that can be parsed,
+successful snapshots and parse-state events use a distinct Layer 1 parser
+version. `boolballotbox` introduced `m2-layer1-v2`; `durweek` introduces
+`m2-layer1-v3`. Existing v1 and v2 artifacts remain immutable.
 
 ## Validation procedure
 
