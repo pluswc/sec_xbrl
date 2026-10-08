@@ -28,3 +28,11 @@ def test_screening_ui_keeps_accessibility_and_compact_desktop_contract() -> None
     assert "aria-controls=\"criteria-form\"" in HTML
     assert ".criteria.compact" in CSS
     assert "다음 실행 데이터셋" in HTML
+
+
+def test_legacy_api_columns_map_to_ui_groups_without_revision_mutation() -> None:
+    assert 'company:["company","ticker","name","cik"]' in JS
+    assert 'sic:["sic","sic_code","sic_description"]' in JS
+    assert "columnEnabled(c.columns,x.value)" in JS
+    assert "columnEnabled(S.revision.content.columns,column)" in JS
+    assert ".columns=" not in JS
