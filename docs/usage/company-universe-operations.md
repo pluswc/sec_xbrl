@@ -38,6 +38,9 @@ The same run root may be resumed with identical inputs.  A changed request or
 changed company plan is refused.  Companies with fewer than four annual
 baselines retain an explicit actual report-date plan and receive
 `AVAILABLE_PERIODS_ONLY` capability.
+Existing wrapper-owned intake, attempt, status, temporary, and publication
+paths must be ordinary contained paths.  Symlink redirection fails preflight
+before discovery, ingestion, build, attempt logging, or status writes.
 
 Within a run, the wrapper owns these stable paths:
 

@@ -140,6 +140,12 @@ workspace and immutable history plan per company.  A caller may provide an
 already written plan, in which case collection reuses it without discovery.
 Changing a plan under the same identity is refused.  Preparation failure for
 one company is recorded and does not prevent other companies from preparing.
+Before any wrapper write or delegated ingest/build call, the operation verifies
+that the request contains the exact company membership, every company path is
+the fixed safe path under the run root, and no wrapper-owned run, intake,
+attempt, status, destination, or temporary-file path traverses a symlink.  A
+separate caller-declared publication root is permitted, but it and every
+generated company child must remain free of internal symlink redirection.
 
 Collection calls the existing `ingest_history` contract per prepared company.
 The default network scheduler is serial so existing SEC client throttles remain

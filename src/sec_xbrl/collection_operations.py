@@ -353,6 +353,76 @@ def _require_fixed_path(raw: Any, expected: Path, *, root: Path, label: str) -> 
     return path
 
 
+def _require_safe_mutation_path(path: Path, *, root: Path, label: str) -> None:
+    root = root.absolute()
+    path = path.absolute()
+    try:
+        relative = path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"{label} escapes its declared root") from exc
+    current = root
+    if current.is_symlink():
+        raise ValueError(f"{label} has a symlinked mutation path")
+    for part in relative.parts:
+        current /= part
+        if current.is_symlink():
+            raise ValueError(f"{label} has a symlinked mutation path")
+
+
+def _preflight_status_paths(output_root: Path) -> None:
+    paths = [output_root]
+    for name in ("collection_status.json", "company_readiness.csv", "index.html"):
+        path = output_root / name
+        paths.extend((path, path.with_suffix(path.suffix + ".partial")))
+    for path in paths:
+        _require_safe_mutation_path(path, root=output_root, label="status output")
+
+
+def _preflight_run_mutations(run_root: Path, tickers: Sequence[str]) -> None:
+    paths = [
+        run_root,
+        run_root / "companies",
+        run_root / "collection_request.json",
+        run_root / "collection_request.json.partial",
+        run_root / "collection_manifest.json",
+        run_root / "collection_manifest.json.partial",
+        run_root / "status",
+    ]
+    for ticker in tickers:
+        company_root = run_root / "companies" / ticker
+        paths.extend(
+            (
+                company_root,
+                company_root / "plan.json",
+                company_root / "plan.json.partial",
+                company_root / "plan_identity.json",
+                company_root / "plan_identity.json.partial",
+                company_root / "company_tickers.json",
+                company_root / "company_tickers.json.partial",
+                company_root / "submissions",
+                company_root / "discovery_state",
+                company_root / "intake",
+                company_root / "operation_attempts",
+                company_root / "build_manifest.json",
+                company_root / "build_manifest.json.partial",
+            )
+        )
+    for path in paths:
+        _require_safe_mutation_path(path, root=run_root, label="collection run")
+    _preflight_status_paths(run_root / "status")
+
+
+def _preflight_publication_paths(output_root: Path, tickers: Sequence[str]) -> None:
+    _require_safe_mutation_path(output_root, root=output_root, label="publication root")
+    for ticker in tickers:
+        destination = output_root / ticker
+        _require_safe_mutation_path(destination, root=output_root, label="company publication")
+        if destination.exists():
+            for child in destination.rglob("*"):
+                if child.is_symlink():
+                    raise ValueError(f"company publication has a symlinked child: {ticker}")
+
+
 def _attest_run(manifest_path: Path) -> _RunAttestation:
     """Validate immutable run scope before any operation performs writes."""
     run_root = manifest_path.parent
@@ -586,6 +656,7 @@ def prepare_universe(
     unknown = set(supplied) - {company.ticker for company in config.companies}
     if unknown:
         raise ValueError("existing plans contain unconfigured tickers: " + ", ".join(sorted(unknown)))
+    _preflight_run_mutations(run_root, tuple(company.ticker for company in config.companies))
     request_path = run_root / "collection_request.json"
     manifest_path = run_root / "collection_manifest.json"
     if manifest_path.exists():
@@ -715,6 +786,9 @@ def collect_universe(
     """Run serial per-company Layer 1 intake while isolating company failures."""
     attested = _attest_run(manifest_path)
     manifest = attested.manifest
+    _preflight_run_mutations(
+        manifest_path.parent, tuple(company.ticker for company in attested.config.companies)
+    )
     configured = {company.ticker for company in attested.config.companies}
     unknown = set(source_runs or {}) - configured
     if unknown:
@@ -893,6 +967,9 @@ def build_universe(
     """Explicitly publish governed history for raw-complete companies."""
     attested = _attest_run(manifest_path)
     manifest = attested.manifest
+    tickers = tuple(company.ticker for company in attested.config.companies)
+    _preflight_run_mutations(manifest_path.parent, tickers)
+    _preflight_publication_paths(output_root, tickers)
     intake_by_ticker: dict[str, _IntakeAttestation] = {}
     for company in manifest["companies"]:
         if company.get("plan_status") != "PREPARED":
@@ -1123,6 +1200,7 @@ def _status_dict(status: UniverseStatus) -> dict[str, Any]:
 def write_status_outputs(*, manifest_path: Path, output_root: Path) -> tuple[Path, Path, Path]:
     """Persist deterministic JSON, CSV, and HTML views of offline status."""
     status = read_universe_status(manifest_path=manifest_path)
+    _preflight_status_paths(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
     json_path = output_root / "collection_status.json"
     csv_path = output_root / "company_readiness.csv"

@@ -16,6 +16,15 @@ def _write(path: Path, payload: object) -> Path:
     return path
 
 
+def _replace_directory_with_symlink(path: Path, target: Path) -> None:
+    if path.exists():
+        for child in path.iterdir():
+            child.unlink()
+        path.rmdir()
+    target.mkdir(parents=True)
+    path.symlink_to(target, target_is_directory=True)
+
+
 def _config(path: Path, *tickers: str, as_of: str = "2026-10-08") -> Path:
     return _write(
         path,
@@ -498,6 +507,120 @@ def test_scope_corruption_fails_preflight_before_ingest(
             taxonomy_cache=tmp_path / "taxonomy",
         )
     assert tuple((tmp_path / "run/companies/AAA/operation_attempts").iterdir()) == attempts
+
+
+@pytest.mark.parametrize("owned_directory", ("intake", "operation_attempts"))
+def test_collect_rejects_symlinked_owned_directory_before_ingest_or_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, owned_directory: str
+) -> None:
+    manifest = operations.prepare_universe(
+        config_path=_config(tmp_path / "config.json", "AAA"),
+        run_root=tmp_path / "run",
+        existing_plans={"AAA": _full_plan(tmp_path / "plan.json", "AAA", "0000000001")},
+    )
+    outside = tmp_path / f"outside-{owned_directory}"
+    _replace_directory_with_symlink(
+        tmp_path / f"run/companies/AAA/{owned_directory}", outside
+    )
+    monkeypatch.setattr(
+        operations.history,
+        "ingest_history",
+        lambda **kwargs: pytest.fail("symlink preflight must run before ingestion"),
+    )
+    with pytest.raises(ValueError, match="symlinked mutation path"):
+        operations.collect_universe(
+            manifest_path=manifest,
+            package_cache=tmp_path / "packages",
+            index_cache=tmp_path / "indexes",
+            taxonomy_cache=tmp_path / "taxonomy",
+        )
+    assert list(outside.iterdir()) == []
+
+
+def test_status_rejects_symlinked_output_before_write(tmp_path: Path) -> None:
+    manifest = operations.prepare_universe(
+        config_path=_config(tmp_path / "config.json", "AAA"),
+        run_root=tmp_path / "run",
+        existing_plans={"AAA": _full_plan(tmp_path / "plan.json", "AAA", "0000000001")},
+    )
+    outside = tmp_path / "outside-status"
+    _replace_directory_with_symlink(tmp_path / "run/status", outside)
+    with pytest.raises(ValueError, match="symlinked mutation path"):
+        operations.write_status_outputs(
+            manifest_path=manifest, output_root=tmp_path / "run/status"
+        )
+    assert list(outside.iterdir()) == []
+
+
+def test_status_rejects_symlinked_partial_file_before_write(tmp_path: Path) -> None:
+    manifest = operations.prepare_universe(
+        config_path=_config(tmp_path / "config.json", "AAA"),
+        run_root=tmp_path / "run",
+        existing_plans={"AAA": _full_plan(tmp_path / "plan.json", "AAA", "0000000001")},
+    )
+    outside = tmp_path / "outside-status-partial"
+    outside.write_text("sentinel", encoding="utf-8")
+    partial = tmp_path / "run/status/collection_status.json.partial"
+    partial.symlink_to(outside)
+    with pytest.raises(ValueError, match="symlinked mutation path"):
+        operations.write_status_outputs(
+            manifest_path=manifest, output_root=tmp_path / "run/status"
+        )
+    assert outside.read_text(encoding="utf-8") == "sentinel"
+
+
+@pytest.mark.parametrize("owned_directory", ("intake", "operation_attempts", "status"))
+def test_prepare_existing_run_rejects_owned_symlink_before_attempt_write(
+    tmp_path: Path, owned_directory: str
+) -> None:
+    config = _config(tmp_path / "config.json", "AAA")
+    external_plan = _full_plan(tmp_path / "plan.json", "AAA", "0000000001")
+    run_root = tmp_path / "run"
+    operations.prepare_universe(
+        config_path=config,
+        run_root=run_root,
+        existing_plans={"AAA": external_plan},
+    )
+    path = (
+        run_root / "status"
+        if owned_directory == "status"
+        else run_root / f"companies/AAA/{owned_directory}"
+    )
+    outside = tmp_path / f"prepare-outside-{owned_directory}"
+    _replace_directory_with_symlink(path, outside)
+    with pytest.raises(ValueError, match="symlinked mutation path"):
+        operations.prepare_universe(
+            config_path=config,
+            run_root=run_root,
+            existing_plans={"AAA": external_plan},
+        )
+    assert list(outside.iterdir()) == []
+
+
+@pytest.mark.parametrize("symlink_child", (False, True))
+def test_build_rejects_symlinked_declared_publication_paths_before_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, symlink_child: bool
+) -> None:
+    manifest = operations.prepare_universe(
+        config_path=_config(tmp_path / "config.json", "AAA"),
+        run_root=tmp_path / "run",
+        existing_plans={"AAA": _full_plan(tmp_path / "plan.json", "AAA", "0000000001")},
+    )
+    output_root = tmp_path / "publication"
+    outside = tmp_path / "outside-publication"
+    if symlink_child:
+        output_root.mkdir()
+        _replace_directory_with_symlink(output_root / "AAA", outside)
+    else:
+        _replace_directory_with_symlink(output_root, outside)
+    monkeypatch.setattr(
+        operations.history,
+        "build_history",
+        lambda **kwargs: pytest.fail("symlink preflight must run before build"),
+    )
+    with pytest.raises(ValueError, match="symlink"):
+        operations.build_universe(manifest_path=manifest, output_root=output_root)
+    assert list(outside.iterdir()) == []
 
 
 @pytest.mark.parametrize("intake_case", ("missing_publication", "failed_complete"))
