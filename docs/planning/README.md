@@ -25,7 +25,7 @@
 | [U4 완료·인수](../implementation/u4-completion-and-acceptance.md) | 후속 사용자 승인, 동결 소스, live/cache 구분, 독립 검증과 잔여 한계 |
 | [회사 universe 데이터 전달](../implementation/universe-data-delivery.md) | 21사 A/B/C 전달의 승인 범위, 입력·runtime 경계, 산출물과 인수 gate |
 | [회사 universe 완료 기록](../implementation/universe-data-delivery-completion.md) | A/B/C 후보 이력, 최종 동결 소스, 실제 runtime·browser 독립 검증, 로컬 인수와 잔여 원격 상태 |
-| [스크리닝 대시보드 로드맵](screening-dashboard-roadmap.md), [v1 구현 전달 계약](../implementation/screening-dashboard-delivery.md), [사용자 시나리오 인수 계약](../implementation/screening-dashboard-user-acceptance.md) | annual-first 지표 가용성 gate, 영속 screen/run/decision 계약, S01–S08 실제 사용자 검증과 reference 기반 화면 방향. **2026-10-09 P0–P6 로컬 구현 승인; 구현 진행 중, P7·원격 미승인** |
+| [스크리닝 대시보드 로드맵](screening-dashboard-roadmap.md), [v1 구현 전달 계약](../implementation/screening-dashboard-delivery.md), [사용자 시나리오 인수 계약](../implementation/screening-dashboard-user-acceptance.md), [이용 가이드](../usage/screening-dashboard.md) | annual-first 지표 가용성 gate, 영속 screen/run/decision 계약, S01–S08 실제 사용자 검증과 reference 기반 화면 방향. **2026-10-09 P0–P6 로컬 구현 writer 검증 완료; 독립 검증·인수 대기, P7·원격 미승인** |
 | [기간 규칙](../implementation/period-rules.md), [Layer 2 연결](../implementation/layer2-longitudinal.md), [공시 발견 계약](../implementation/accession-contract.md) | 표시 계획으로 바꿀 수 없는 의미·입력 경계 |
 
 충돌 시 적용되는 사용자 결정과 승인 범위를 먼저 확인하고, 해당 평면의 계약을
@@ -43,7 +43,7 @@
 | U4 계속 갱신 | 복구된 제안과 후속 전달 계약 | bounded orchestration·복구·재개·live 입력·quality materialization; 원격 제외 | `3236778` | 675 passed / 37 skipped, Ruff, 6사 21, 실제 NFLX 14공시·동일 API/화면 PASS | **2026-09-10 LOCAL_ACCEPTED** | PR #63, `9708508` |
 | U5 보관·공유 | 복구된 기존 제안 | `51c196f` 기준 로컬 구현 승인 | product `8867229`; canonical snapshot + CSV/HTML/JSON/XLSX + offline 저장 controls | 679 passed / 37 skipped, cached 21, Ruff, 80 snapshots·320 formats·4,844 cells·24 downloads PASS | **2026-09-10 LOCAL_ACCEPTED** | PR #63, `9708508` |
 | 21사 universe A/B/C 전달 | [전달 계약](../implementation/universe-data-delivery.md) | **2026-10-08 APPROVED**; A/B/C, SEC duration 표준 교정, 4종 supported-lexical 보완, 381건 fresh v5 재생성 및 governed source-binding 보완 | final product `8320ef06292c3855f57f2b01f4ce6b6c85ea03b7`; source-binding producer `eff3bff3`; parser `c1fdc21`; A/B/C 검증 후보 이력은 [완료 기록](../implementation/universe-data-delivery-completion.md)에 보존 | final consumer 1,288 passed / 31 skipped, focused 41, Ruff PASS; 실제 21사·381공시·741 history Parquet 및 browser PASS | **2026-10-08 LOCALLY_ACCEPTED** | 미병합; push·PR·remote CI 미수행 |
-| 스크리닝 대시보드 | [로드맵](screening-dashboard-roadmap.md), [구현 전달 계약](../implementation/screening-dashboard-delivery.md), [S01–S08 인수 계약](../implementation/screening-dashboard-user-acceptance.md) | **2026-10-09 APPROVED**; P0–P6 로컬 v1, 기존 annual reported metric만. P7·새 회계 정책·원격 제외 | 구현 진행 중 | 미수행; dashboard browser `PASS` 주장 없음 | 미인수 | 미병합 |
+| 스크리닝 대시보드 | [로드맵](screening-dashboard-roadmap.md), [구현 전달 계약](../implementation/screening-dashboard-delivery.md), [S01–S08 인수 계약](../implementation/screening-dashboard-user-acceptance.md) | **2026-10-09 APPROVED**; P0–P6 로컬 v1, 기존 annual reported metric만. P7·새 회계 정책·원격 제외 | source `8b3e8e18d7548af6e5cf48b8bf433770150d3efc`; writer test·실제 21사 browser 통과 | **대기**; 별도 검증 미수행 | 미인수 | 미병합 |
 
 현재 전달 상태(2026-09-10): U3–U5 누적 이력은
 [PR #63](https://github.com/pluswc/sec_xbrl/pull/63)으로 `main`에 병합됐다. merge
@@ -77,6 +77,10 @@ SHA는 `9708508ec953ee4323ae29318c639abc9e0650b6`이고, 병합 시각은
 - 스크리닝 대시보드 제안의 제품·문서 기준은 각각 `8320ef06292c3855f57f2b01f4ce6b6c85ea03b7`과
   `473521560fa9e47aa00d6a273cbaa90c708ad366`이다. `main`은
   `201acf9aec2f8183acb7dd843579938db14236cd`이며 서로 다른 상태를 유지한다.
+- 스크리닝 대시보드 v1 writer source 후보는
+  `8b3e8e18d7548af6e5cf48b8bf433770150d3efc`다. 1,309 passed / 38 skipped와
+  Ruff, 실제 21사 browser 흐름은 writer 검증이며 독립 검증·lead 인수·원격
+  상태를 대신하지 않는다.
 - 이번 계획 설계의 기준 부모는 위 `32212ca`다. 단일 작성자 로컬 문서 커밋 후
   별도 읽기 전용 검증을 받는다. 독립 검증·인수·병합을 미리 완료로 표시하지 않는다.
 

@@ -4,16 +4,18 @@
 
 이 계약의 기준일은 **2026-10-09 KST**다. 사용자는 이 날짜에 P0–P6의 로컬
 구현과 실제 21사 prepared data 실행을 승인했다. 이 문서는 구현 계약이며 현재
-상태는 **APPROVED / IMPLEMENTATION IN PROGRESS**다. 독립 검증, 로컬 인수,
+상태는 **IMPLEMENTED / WRITER VERIFIED**다. 제품 source 후보는
+`8b3e8e18d7548af6e5cf48b8bf433770150d3efc`다. 독립 검증, lead 로컬 인수,
 push, PR, remote CI, `main` 병합은 아직 완료되지 않았다.
 
 2026-10-09의 writer 역할은 겹치지 않게 분리한다. 이 구현 writer는 prepared
 source integrity, dataset/store/service/server/CLI, test와 문서를 소유한다. 별도
 GPT-5.6 Sol 구현 writer는 checkpoint
 `e1d19c63d3e7f87a595b6e7695ed1a8ae87bc276`에서 만든 격리 worktree에서
-`src/sec_xbrl/screening/ui.py`와 UI 전용 test만 소유한다. UI commit을 동결한 뒤
-이 브랜치에 cherry-pick하고 통합 검증한다. 이는 구현 병렬화 상태이며 독립 검증
-또는 로컬 인수 완료를 뜻하지 않는다.
+`src/sec_xbrl/screening/ui.py`와 UI 전용 test만 소유했다. 동결된 UI commit
+`426592e8f3b2bcc0ba94d69c4259dc95aa2c5b5d`와 polish
+`84d92039403e2770bdab7535ce784b699272ba37`을 이 브랜치에 순서대로 통합했다.
+이 역할 분리는 독립 검증 또는 로컬 인수 완료를 뜻하지 않는다.
 
 구현 브랜치의 부모는 문서 기준 `d53b9f8e5c9d38e18c93ed75b821b912c1820bfe`다.
 그 부모는 locally accepted 회사-universe 제품
@@ -232,3 +234,24 @@ source commit을 동결한다. 별도 agent가 frozen commit을 읽기 전용 �
 root가 실제 21사 publisher와 browser를 실행해 S01–S08 evidence를 남긴 뒤에만
 로컬 인수 여부를 판단한다. 자동 browser PASS는 사람이 UX를 직접 인수했다는
 뜻이 아니다. push/PR/CI/main merge는 후속 사용자·lead 결정이다.
+
+### 2026-10-09 writer 검증 기록
+
+source 후보 `8b3e8e18d7548af6e5cf48b8bf433770150d3efc`에는 P1 dataset publisher/reader,
+SQLite journal, executor/service/export, loopback HTTP/UI와 선택형 Windows/WSL
+adapter가 함께 있다. writer 검증은 다음을 통과했다.
+
+- screening 집중 test **28 passed**
+- 저장소 전체 **1,309 passed / 38 skipped**
+- 저장소 전체 Ruff와 두 JavaScript file의 Node syntax check
+- 실제 21사 prepared input의 브라우저 흐름: target 21 = PASS 11 + FAIL 7 +
+  UNDETERMINED 3, quality block 0; 4개년 series, 실제 날짜가 다른 SIC peer,
+  metadata-only 7,995개 검색, 판단 event, selected CSV, 재시작, 동일 revision
+  재실행 `UNCHANGED`
+- 임시 양쪽 loopback 통합: actual `/api/status` 200, 외부 Origin 403,
+  same-origin POST가 backend 검증까지 전달됨
+
+실제 검증 publication은 source 동결 뒤 새 immutable 목적지에 다시 발행해야 한다.
+위 writer 실행의 `/tmp` 경로와 browser screenshot은 최종 전달 전제조건이나
+독립 oracle이 아니다. native Windows Chrome에서의 bridge/export·한글 font 확인,
+별도 agent 검증과 lead 인수는 계속 **PENDING**이다.
