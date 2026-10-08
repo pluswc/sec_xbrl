@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import ClassVar
 
 import pytest
+from arelle.ModelValue import INVALIDixVALUE
+from arelle.XmlValidateConst import INVALID, UNVALIDATED
 
 from sec_xbrl.facts.layer1 import Layer1ExtractionError, Layer1Extractor, Layer1Tables
 from sec_xbrl.filing.contracts import FilingRef
@@ -134,6 +136,28 @@ class _EarlyFailingFacts:
         raise RuntimeError("fixture extractor stopped early")
 
 
+class _LateInvalidFacts:
+    parser_version = "test-late-invalid-facts"
+
+    def extract(self, model: object, filing: FilingRef, **_: object) -> Layer1Tables:
+        tables = Layer1Extractor().extract(model, filing)
+        model.errors.append("xmlSchema:valueError")  # type: ignore[attr-defined]
+        return tables
+
+
+class _LazyInvalidFact(_Fact):
+    def __init__(self, identifier: str, errors: list[str]) -> None:
+        super().__init__(identifier)
+        self._errors = errors
+        self.xValid = UNVALIDATED
+
+    @property
+    def value(self) -> object:
+        self._errors.append("xmlSchema:valueError")
+        self.xValid = INVALID
+        return INVALIDixVALUE
+
+
 class _FailingLoader:
     def load(self, resolved: ResolvedFiling, destination: Path) -> object:
         raise RuntimeError("Arelle fixture load failed")
@@ -193,7 +217,15 @@ def test_complete_inline_fixture_publishes_dimensional_fact_and_definition_relat
     assert manifest.relationship_count == 1
 
 
-@pytest.mark.parametrize("error", ["IOerror: taxonomy unavailable", "invalidTransformation: ixt missing"])
+@pytest.mark.parametrize(
+    "error",
+    [
+        "IOerror: taxonomy unavailable",
+        "invalidTransformation: ixt missing",
+        "ix:transformValueError",
+        "xmlSchema:valueError",
+    ],
+)
 def test_ingestion_refuses_resolution_or_inline_transform_errors_before_writing(
     tmp_path: Path, error: str
 ) -> None:
@@ -207,6 +239,90 @@ def test_ingestion_refuses_resolution_or_inline_transform_errors_before_writing(
     state = json.loads(next((tmp_path / "parse_state").rglob("*.json")).read_text())
     assert state["stage"] == "VALIDATION"
     assert state["retryable"] is True
+
+
+def test_ingestion_forces_lazy_fact_value_and_rejects_transform_error_sentinel(
+    tmp_path: Path,
+) -> None:
+    errors: list[str] = []
+    fact = _LazyInvalidFact("one", errors)
+    model = type("LazyInvalidModel", (), {"facts": (fact,), "errors": errors})()
+    ingestor = Layer1Ingestor(tmp_path / "snapshots", relationship_extractor=_Relationships())
+
+    with pytest.raises(Layer1IngestionError, match="Inline transform errors"):
+        ingestor.ingest(_resolved(tmp_path), model)
+
+    assert fact.xValid == INVALID
+    assert not (tmp_path / "snapshots" / "0000000001" / "000000000125000001").exists()
+    states = [json.loads(path.read_text()) for path in (tmp_path / "parse_state").rglob("*.json")]
+    assert len(states) == 1
+    assert states[0]["stage"] == "VALIDATION"
+    assert states[0]["quality_gate"] == "TAXONOMY_AND_TRANSFORM_RESOLUTION"
+    assert states[0]["outcome"] == "FAILED"
+    assert states[0]["retryable"] is True
+
+
+def test_ingestion_rejects_invalid_fact_status_without_model_error(tmp_path: Path) -> None:
+    fact = _Fact("one")
+    fact.xValid = INVALID
+    model = type("InvalidFactModel", (), {"facts": (fact,), "errors": ()})()
+    ingestor = Layer1Ingestor(tmp_path / "snapshots", relationship_extractor=_Relationships())
+
+    with pytest.raises(Layer1IngestionError, match="invalid Inline transform/schema values"):
+        ingestor.ingest(_resolved(tmp_path), model)
+
+    assert not (tmp_path / "snapshots" / "0000000001" / "000000000125000001").exists()
+
+
+def test_ingestion_rejects_transform_error_sentinel_without_validity_status(
+    tmp_path: Path,
+) -> None:
+    fact = _Fact("one")
+    fact.value = INVALIDixVALUE
+    model = type("SentinelFactModel", (), {"facts": (fact,), "errors": ()})()
+    ingestor = Layer1Ingestor(tmp_path / "snapshots", relationship_extractor=_Relationships())
+
+    with pytest.raises(Layer1IngestionError, match="transform-error sentinel"):
+        ingestor.ingest(_resolved(tmp_path), model)
+
+    assert not (tmp_path / "snapshots" / "0000000001" / "000000000125000001").exists()
+
+
+def test_post_extract_validation_rejects_late_value_error_before_publication(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("polars")
+    model = type("LateInvalidModel", (), {"facts": (_Fact("one"),), "errors": []})()
+    ingestor = Layer1Ingestor(
+        tmp_path / "snapshots",
+        fact_extractor=_LateInvalidFacts(),
+        relationship_extractor=_Relationships(),
+    )
+
+    with pytest.raises(Layer1IngestionError, match="Inline transform errors"):
+        ingestor.ingest(_resolved(tmp_path), model)
+
+    assert not (tmp_path / "snapshots" / "0000000001" / "000000000125000001").exists()
+    states = [json.loads(path.read_text()) for path in (tmp_path / "parse_state").rglob("*.json")]
+    assert len(states) == 1
+    assert states[0]["stage"] == "VALIDATION"
+    assert states[0]["quality_gate"] == "TAXONOMY_AND_TRANSFORM_RESOLUTION"
+    assert states[0]["outcome"] == "FAILED"
+
+
+def test_ingestion_preserves_nonfatal_model_warnings(tmp_path: Path) -> None:
+    pytest.importorskip("polars")
+    model = type(
+        "WarningModel",
+        (),
+        {"facts": (_Fact("one"),), "errors": ("xbrl.5.2.5.2:calcInconsistency",)},
+    )()
+    ingestor = Layer1Ingestor(tmp_path / "snapshots", relationship_extractor=_Relationships())
+
+    manifest = ingestor.ingest(_resolved(tmp_path), model)
+
+    assert manifest.materialized_fact_count == 1
+    assert ingestor.snapshot_dir(_resolved(tmp_path)).is_dir()
 
 
 def test_ingestion_refuses_unresolved_concept_before_writing(tmp_path: Path) -> None:

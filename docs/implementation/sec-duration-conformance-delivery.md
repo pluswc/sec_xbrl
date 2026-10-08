@@ -227,6 +227,47 @@ independent verification or cohort acceptance. The skipped tests retain their
 existing optional/cache/environment semantics; this run did not download a
 filing or bootstrap a taxonomy.
 
+### First independent verification finding and corrective candidate
+
+Independent verification of commit
+`d3e431301ce15e959d895dc6f67c9618e0fb9d50` returned **FAIL** on one
+fail-closed gate while its arithmetic, cached replay, adversarial lexical, and
+preservation checks passed. In a temporary copy of AMD
+`0000002488-23-000047`, the verifier changed the `duryear` source from `4.55`
+to `4.55years`. Arelle exposed `xmlSchema:valueError`, set the target Fact to
+`xValid=INVALID`, and returned its `(ixTransformValueError)` sentinel, but the
+ingestor published 1,378 Facts and recorded success. That commit is not an
+accepted candidate and its result remains preserved as the first verification
+record.
+
+The corrective candidate expands only the existing Layer 1
+taxonomy/transform validity gate. Before acceptance it forces each selected
+Fact value to be evaluated, then rejects:
+
+- the existing taxonomy, reference, and transformation errors;
+- `xmlSchema:valueError` and transformation-value error codes;
+- any source Fact whose Arelle `xValid` state is `INVALID`;
+- Arelle's internal `InvalidValue` transformation sentinel; and
+- an exception raised while lazily evaluating a Fact value.
+
+The gate runs again immediately after extraction and before table writes, so a
+lazy error cannot become a normal numeric or text Raw Fact. A gate failure
+writes one retryable `TAXONOMY_AND_TRANSFORM_RESOLUTION` failure and publishes
+no snapshot. It does not treat every Arelle warning as fatal; an ordinary
+calculation inconsistency remains permissible model evidence.
+
+The writer reran the verifier's offline mutation with network access denied.
+The unknown namespace, unknown transform name, and invalid `4.55years` cases
+each produced one retryable taxonomy/transform failure, zero successful state
+events, and zero published Parquet tables. The unchanged `4.55` Fact remained
+`P4Y6M18D` with `reported_or_derived=REPORTED`. Fresh corrected-gate replays of
+the four cached filings again completed at 742/742, 1,378/1,378, 1,417/1,417,
+and 3,236/3,236 Facts. The combined focused ingestion/transform tests reported
+131 passed; the complete offline suite reported 802 passed and 37 skipped; and
+repository-wide Ruff reported no findings. These are corrective writer
+self-tests. A new frozen commit still requires a complete independent
+read-only verification and `PASS` before cohort reprocessing or acceptance.
+
 After the writer freezes a commit, a separate Astra verifier must perform
 read-only independent verification and report `PASS` or `FAIL`. Only after that
 result may the lead decide whether to run the approved A/B/C cohort

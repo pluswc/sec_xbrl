@@ -19,6 +19,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from arelle.ModelValue import INVALIDixVALUE, InvalidValue
+from arelle.XmlValidateConst import INVALID
+
 from sec_xbrl.facts.layer1 import (
     Layer1ExtractionError,
     Layer1Extractor,
@@ -168,6 +171,21 @@ class Layer1Ingestor:
                     source_url=resolved.index.source_url,
                     package_hash=package_sha256,
                 )
+                # Inline Fact values can be evaluated lazily. Re-run the model
+                # gate after extraction has touched every value so a transform
+                # error can never be serialized as a normal Raw Fact.
+                try:
+                    self._validate_model(model)
+                except Layer1IngestionError as exc:
+                    self._write_parse_state(
+                        resolved,
+                        stage="VALIDATION",
+                        quality_gate=_quality_gate_for_validation_failure(str(exc)),
+                        outcome="FAILED",
+                        message=str(exc),
+                    )
+                    state_recorded = True
+                    raise
                 if len(facts.facts) != corpus.source_count:
                     raise Layer1IngestionError(
                         "Layer 1 Fact count does not match validated source corpus: "
@@ -176,16 +194,17 @@ class Layer1Ingestor:
                 relationships = self.relationship_extractor.extract(model, resolved.filing)
                 facts = _merge_relationship_concepts(facts, relationships.concepts)
             except Exception as exc:
-                self._write_parse_state(
-                    resolved,
-                    stage="LAYER1_EXTRACT",
-                    quality_gate="RAW_CORPUS_COMPLETENESS",
-                    outcome="FAILED",
-                    expected_count=corpus.source_count,
-                    actual_count=len(facts.facts) if facts is not None else None,
-                    message=str(exc),
-                )
-                state_recorded = True
+                if not state_recorded:
+                    self._write_parse_state(
+                        resolved,
+                        stage="LAYER1_EXTRACT",
+                        quality_gate="RAW_CORPUS_COMPLETENESS",
+                        outcome="FAILED",
+                        expected_count=corpus.source_count,
+                        actual_count=len(facts.facts) if facts is not None else None,
+                        message=str(exc),
+                    )
+                    state_recorded = True
                 raise
             facts.write_parquet(temporary)
             relationships.write_parquet(temporary)
@@ -336,6 +355,47 @@ class Layer1Ingestor:
                 f"(first ordinals: {unresolved[:5]})"
             )
 
+        # Arelle may defer an Inline transformation until ``fact.value`` is
+        # accessed. Force that evaluation before accepting the model, then
+        # inspect both the errors it emitted and the per-Fact validity state.
+        values: list[Any] = []
+        value_failures: list[str] = []
+        for index, fact in enumerate(corpus.facts):
+            try:
+                values.append(getattr(fact, "value", None))
+            except Exception as exc:  # noqa: BLE001 - transform plugins raise provider-specific errors.
+                values.append(None)
+                value_failures.append(f"{index}:{type(exc).__name__}")
+
+        errors = tuple(str(error) for error in (getattr(model, "errors", None) or ()))
+        fatal = tuple(error for error in errors if _is_resolution_or_transform_error(error))
+        if fatal:
+            raise Layer1IngestionError(
+                "Arelle model has unresolved taxonomy or Inline transform errors: " + "; ".join(fatal)
+            )
+        if value_failures:
+            raise Layer1IngestionError(
+                "Inline transform Fact value evaluation failed "
+                f"(first ordinals and errors: {value_failures[:5]})"
+            )
+
+        invalid = [
+            index
+            for index, fact in enumerate(corpus.facts)
+            if getattr(fact, "xValid", None) == INVALID
+        ]
+        sentinels = [
+            index
+            for index, value in enumerate(values)
+            if value is INVALIDixVALUE or isinstance(value, InvalidValue)
+        ]
+        if invalid or sentinels:
+            raise Layer1IngestionError(
+                "Fact corpus contains invalid Inline transform/schema values "
+                f"(invalid xValid ordinals: {invalid[:5]}, "
+                f"transform-error sentinel ordinals: {sentinels[:5]})"
+            )
+
 
 def _merge_relationship_concepts(
     facts: Layer1Tables, relationship_concepts: tuple[dict[str, Any], ...]
@@ -362,6 +422,8 @@ def _is_resolution_or_transform_error(error: str) -> bool:
         "unresolved",
         "invalidtransformation",
         "transformation",
+        "transformvalueerror",
+        "xmlschema:valueerror",
         "taxonomy",
         "schemaref",
     )

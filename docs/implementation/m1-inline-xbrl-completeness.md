@@ -153,6 +153,14 @@ lexical grammar, converts the magnitude to days, and truncates fractional days
 toward zero. It emits a negative duration only when the truncated day count is
 nonzero. Unknown transform names and invalid lexical values still fail closed.
 
+The taxonomy/transform gate forces every selected Fact value to be evaluated
+before acceptance because Arelle may defer an Inline transformation until that
+property is read. It rejects `xmlSchema:valueError`, transformation-value
+errors, a Fact with Arelle `xValid=INVALID`, and Arelle's internal
+`InvalidValue` sentinel. The same gate runs again after Fact extraction and
+before any table is published. Ordinary nonfatal validation warnings remain
+available as evidence and do not by themselves fail ingestion.
+
 Because each supported transform expands the set of filings that can be parsed,
 successful snapshots and parse-state events use a distinct Layer 1 parser
 version. `boolballotbox` introduced `m2-layer1-v2`; `durweek` introduces
