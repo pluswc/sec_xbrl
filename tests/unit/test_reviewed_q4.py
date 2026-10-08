@@ -11,6 +11,7 @@ import pytest
 
 from sec_xbrl.analysis import _apply_reviewed_q4, open_analysis, prepare_analysis
 from sec_xbrl.analytics import reviewed_q4 as module
+from sec_xbrl.analytics.axis_timeseries_queries import _apply_reviewed_q4_exclusions
 from sec_xbrl.analytics.reviewed_q4 import (
     ReviewedQ4Reader,
     generate_reviewed_q4,
@@ -37,6 +38,9 @@ def _lineage(period: str, value: str, fact: str, filing: str, accession: str) ->
         "company_canonical_concept_id": "concept:revenue",
         "canonical_dimension_signature": [["axis", "member", None, "EXPLICIT", "false"]],
         "raw_dimension_signature": [["raw-axis", "raw-member", None, "EXPLICIT", "false"]],
+        "raw_concept_qname": "us-gaap:Revenues",
+        "raw_concept_data_type": "xbrli:monetaryItemType",
+        "raw_concept_period_type": "duration",
         "unit_numerator_measures": '["iso4217:USD"]',
         "unit_denominator_measures": "[]",
         "basis_version": "products-v1",
@@ -80,14 +84,17 @@ def _inputs(tmp_path: Path) -> tuple[Path, Path, Path, dict, dict]:
     }
     parent_sha = hashlib.sha256((history / "history_manifest.json").read_bytes()).hexdigest()
     evidence = {
+        "schema_version": module.SOURCE_EVIDENCE_SCHEMA,
         "history_publication": str(history.resolve()),
         "history_manifest_sha256": parent_sha,
         "pairs": [pair],
         "tables": [
-            {"accession": fy["accession"], "fact_id": "fy-table", "text": "annual product table",
-             "raw_fact": {"fact_id": "fy-table"}},
-            {"accession": ytd["accession"], "fact_id": "ytd-table", "text": "nine month product table",
-             "raw_fact": {"fact_id": "ytd-table"}},
+            {"accession": fy["accession"], "fact_id": "fy-table",
+             "text": "customer table The following table summarizes revenue by specialized markets: Revenue by End Market: Data Center 100 Total revenue 100",
+             "raw_fact": {"fact_id": "fy-table", "value_text": "other text customer table The following table summarizes revenue by specialized markets: Revenue by End Market: Data Center 100 Total revenue 100"}},
+            {"accession": ytd["accession"], "fact_id": "ytd-table",
+             "text": "customer table The following table summarizes revenue by specialized markets: Revenue by End Market: Data Center 70 Total revenue 70",
+             "raw_fact": {"fact_id": "ytd-table", "value_text": "other text customer table The following table summarizes revenue by specialized markets: Revenue by End Market: Data Center 70 Total revenue 70"}},
         ],
     }
     source = tmp_path / "source.json"
@@ -97,14 +104,18 @@ def _inputs(tmp_path: Path) -> tuple[Path, Path, Path, dict, dict]:
              "ytd_fact_id": "ytd-fact"}
     approval = {
         "decision_id": "review", "scope": scope, "decision": module.APPROVAL, "reviewer": "lead",
-        "known_at": "2026-10-08T00:00:00+00:00", "purpose": "product revenue Q4",
-        "policy_version": "review-v1", "additivity": "REVENUE_DURATION_AMOUNT",
+        "known_at": "2026-10-08T00:00:00+00:00", "purpose": module.REVIEW_PURPOSE,
+        "policy_version": module.REVIEW_POLICY, "additivity": module.ADDITIVITY,
         "basis_compatibility": "exact same scope", "fy_accession": fy["accession"],
+        "basis_compatibility_status": module.BASIS_COMPATIBILITY,
+        "semantic_role": module.SEMANTIC_ROLE, "permitted_currency": module.PERMITTED_CURRENCY,
         "ytd_accession": ytd["accession"], "fy_snapshot_manifest_sha256": "a" * 64,
         "ytd_snapshot_manifest_sha256": "b" * 64, "fy_evidence_fact_id": "fy-table",
         "ytd_evidence_fact_id": "ytd-table", "approved_expected_value": "300",
     }
     ledger_data = {
+        "schema_version": module.REVIEW_LEDGER_SCHEMA,
+        "review_cutoff": "2026-10-08T00:30:00+00:00",
         "source_evidence_path": str(source.resolve()),
         "source_evidence_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
         "history_publication": str(history.resolve()), "history_manifest_sha256": parent_sha,
@@ -126,9 +137,21 @@ def attested(monkeypatch):
     monkeypatch.setattr(module, "_attest_parent_cell", lambda *args, **kwargs: None)
     def snapshot(source, lineage, cache, snapshots):
         table_id = source["table_textblock_fact_id"]
+        amount = "100" if lineage["period_class"] == "FY" else "70"
+        table_text = ("other text customer table The following table summarizes revenue by "
+                      f"specialized markets: Revenue by End Market: Data Center {amount} "
+                      f"Total revenue {amount}")
         cache[Path(source["snapshot_path"])] = SimpleNamespace(
-            records=lambda name: [source["raw_fact"], {"fact_id": table_id}]
+            records=lambda name: [source["raw_fact"], {"fact_id": table_id, "value_text": table_text}]
         )
+        return {
+            "concept": {"qname": lineage.get("raw_concept_qname"), "is_standard": True,
+                        "data_type": lineage.get("raw_concept_data_type"),
+                        "period_type": lineage.get("raw_concept_period_type")},
+            "unit": {"numerator_measures": lineage.get("unit_numerator_measures"),
+                     "denominator_measures": lineage.get("unit_denominator_measures")},
+            "context": {"period_kind": "DURATION"},
+        }
     monkeypatch.setattr(module, "_attest_snapshot", snapshot)
     monkeypatch.setattr(module, "_q4_materialized", lambda *args, **kwargs: False)
     return reader
@@ -211,6 +234,121 @@ def test_full_structural_scope_rejects_defects(tmp_path: Path, attested, defect:
         generate_reviewed_q4(history_publication=history, source_evidence=source, review_ledger=ledger)
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("known_at", "not-a-date", "ISO-8601"),
+        ("known_at", "2026-10-08T00:00:00", "timezone"),
+        ("purpose", "product revenue Q4", "purpose"),
+        ("policy_version", "unrecognized-policy", "policy version"),
+        ("additivity", "NON_ADDITIVE_RATIO", "additivity"),
+        ("basis_compatibility_status", "INCOMPATIBLE", "basis compatibility"),
+        ("semantic_role", "OPERATING_INCOME", "semantic role"),
+        ("permitted_currency", "iso4217:INVALID", "currency"),
+    ],
+)
+def test_review_policy_fields_are_exact(
+    tmp_path: Path, attested, field: str, value: str, message: str
+) -> None:
+    history, source, ledger, _, ledger_data = _inputs(tmp_path)
+    ledger_data["approvals"][0][field] = value
+    ledger.write_text(json.dumps(ledger_data))
+    with pytest.raises(ValueError, match=message):
+        generate_reviewed_q4(history_publication=history, source_evidence=source, review_ledger=ledger)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("continuity_break", True, "CONTINUITY_BREAK"),
+        ("recast_review_required", True, "RECAST_REVIEW_REQUIRED"),
+        ("raw_concept_data_type", "xbrli:pureItemType", "SUPPORTED_REVENUE_CONCEPT_REQUIRED"),
+        ("unit_numerator_measures", '["iso4217:INVALID"]', "MONETARY_NUMERATOR_REQUIRED"),
+    ],
+)
+def test_source_semantics_reject_continuity_ratio_and_bad_currency(
+    tmp_path: Path, attested, field: str, value: object, reason: str
+) -> None:
+    history, source, ledger, evidence, ledger_data = _inputs(tmp_path)
+    for source_name in ("fy", "ytd_9m"):
+        evidence["pairs"][0][source_name]["value_lineage"][field] = value
+    evidence["pairs"][0]["fy_cell"]["value_lineage"] = evidence["pairs"][0]["fy"]["value_lineage"]
+    evidence["pairs"][0]["ytd_cell"]["value_lineage"] = evidence["pairs"][0]["ytd_9m"]["value_lineage"]
+    source.write_text(json.dumps(evidence))
+    ledger_data["source_evidence_sha256"] = hashlib.sha256(source.read_bytes()).hexdigest()
+    ledger.write_text(json.dumps(ledger_data))
+    with pytest.raises(ValueError, match=reason):
+        generate_reviewed_q4(history_publication=history, source_evidence=source, review_ledger=ledger)
+
+
+def test_review_cutoff_is_aware_and_bounds_decisions(tmp_path: Path, attested) -> None:
+    history, source, ledger, _, ledger_data = _inputs(tmp_path)
+    ledger_data["review_cutoff"] = "2026-10-08T00:00:00"
+    ledger.write_text(json.dumps(ledger_data))
+    with pytest.raises(ValueError, match="timezone"):
+        generate_reviewed_q4(history_publication=history, source_evidence=source, review_ledger=ledger)
+    ledger_data["review_cutoff"] = "2026-10-07T23:59:59+00:00"
+    ledger.write_text(json.dumps(ledger_data))
+    with pytest.raises(ValueError, match="later than the review cutoff"):
+        generate_reviewed_q4(history_publication=history, source_evidence=source, review_ledger=ledger)
+    ledger_data["review_cutoff"] = "2999-01-01T00:00:00+00:00"
+    ledger.write_text(json.dumps(ledger_data))
+    with pytest.raises(ValueError, match="future"):
+        generate_reviewed_q4(history_publication=history, source_evidence=source, review_ledger=ledger)
+
+
+def test_parent_cell_attestation_binds_fiscal_column() -> None:
+    cell = {"fiscal_time_series_cell_id": "cell", "fiscal_time_series_column_id": "column"}
+    panel = SimpleNamespace(
+        cells=[cell],
+        columns=[{"fiscal_time_series_column_id": "column", "fiscal_year": 2025,
+                  "fiscal_quarter": 4, "period_class": "FY"}],
+    )
+    reader = SimpleNamespace(load=lambda **kwargs: panel)
+    module._attest_parent_cell(reader, {}, "TEST", "AS_FILED", "FY", 2025, 4, cell)
+    with pytest.raises(ValueError, match="fiscal column"):
+        module._attest_parent_cell(reader, {}, "TEST", "AS_FILED", "FY", 2024, 4, cell)
+
+
+def test_analysis_constructor_rejects_mismatched_reviewed_q4_identity(tmp_path: Path) -> None:
+    root = tmp_path / "analysis"
+    root.mkdir()
+    (root / "analysis_manifest.json").write_text(json.dumps({
+        "version": "consumer-focused-analysis-v1",
+        "publication_id": "analysis",
+        "reviewed_q4": {"publication_id": "reviewed", "review_cutoff": "2026-10-08T01:00:00+00:00"},
+        "companies": {"TEST": {"reviewed_q4_publication_id": "other",
+                                "reviewed_q4_cutoff": "2026-10-08T01:00:00+00:00"}},
+    }))
+    with pytest.raises(ValueError, match="identity mismatch"):
+        open_analysis(root)
+
+
+def test_scoped_q4_exclusion_preserves_other_quarters_and_existing_reason() -> None:
+    rows = [{
+        "mapping_epoch": "epoch",
+        "cells": [
+            {"fiscal_year": 2025, "fiscal_quarter": 2, "period_class": "QTD_3M",
+             "status": "UNAVAILABLE", "reason": "PERIOD_NOT_DISCLOSED_FOR_PREPARED_ROW_IDENTITY"},
+            {"fiscal_year": 2025, "fiscal_quarter": 4, "period_class": "QTD_3M",
+             "status": "UNAVAILABLE", "reason": "PERIOD_NOT_DISCLOSED_FOR_PREPARED_ROW_IDENTITY"},
+            {"fiscal_year": 2026, "fiscal_quarter": 4, "period_class": "QTD_3M",
+             "status": "UNAVAILABLE", "reason": "CONFLICTING_PREPARED_DECISION"},
+        ],
+    }]
+    decisions = [{
+        "exclusion_id": "excluded", "mapping_epoch": "epoch", "fiscal_year": 2025,
+        "fiscal_quarter": 4, "period_class": "QTD_3M", "selection_view": "AS_FILED",
+        "selection_as_of_date": "2026-09-06", "reason": "MAPPING_REVIEW_REQUIRED_DIFFERENT_EPOCHS",
+    }]
+    _apply_reviewed_q4_exclusions(
+        rows, decisions, view="AS_FILED", as_of="2026-09-06"
+    )
+    assert rows[0]["cells"][0]["reason"] == "PERIOD_NOT_DISCLOSED_FOR_PREPARED_ROW_IDENTITY"
+    assert rows[0]["cells"][1]["reason"] == "MAPPING_REVIEW_REQUIRED_DIFFERENT_EPOCHS"
+    assert rows[0]["cells"][2]["reason"] == "CONFLICTING_PREPARED_DECISION"
+
+
 def test_consumer_direct_cell_precedence_and_trace() -> None:
     dimensions = [["axis", "member", None, "EXPLICIT", "false"]]
     node = {"node_id": "node", "row_id": "epoch", "period_class": "QTD_3M",
@@ -249,9 +387,15 @@ def test_consumer_direct_cell_precedence_and_trace() -> None:
 def test_cached_nvda_source_to_api_snapshot_xlsx(tmp_path: Path) -> None:
     evidence_root = Path("/home/plusbdw/user_work/projects/sec_xbrl/data/processed/universe_runs/20261008_initial/q4_lead_review")
     history = Path("/home/plusbdw/user_work/projects/sec_xbrl/data/processed/analytical/history/five_company_custom_continuity_v5/panels")
-    q4 = publish_reviewed_q4(history_publication=history, source_evidence=evidence_root / "source_pairs.json",
-                             review_ledger=evidence_root / "lead_approval.json", destination=tmp_path / "reviewed-q4")
+    q4 = publish_reviewed_q4(history_publication=history, source_evidence=evidence_root / "source_pairs_v2.json",
+                             review_ledger=evidence_root / "lead_approval_v3.json", destination=tmp_path / "reviewed-q4")
     reviewed = ReviewedQ4Reader(q4).records("derived")
+    reader = ReviewedQ4Reader(q4)
+    assert reader.manifest["review_cutoff"] == "2026-10-08T01:57:04.940118+00:00"
+    assert len([row for row in reader.records("exclusion") if row.get("ticker")]) == 6
+    fy2025 = [row for row in reader.records("candidate") if row["fiscal_year"] == 2025]
+    assert all(row["source_table_evidence"][0]["target_table"]["normalized_start"] > 0
+               for row in fy2025)
     for view in ("AS_FILED", "LATEST_REPORTED"):
         values = {(row["fiscal_year"], row["member_qname"]): Decimal(row["value_numeric"])
                   for row in reviewed if row["selection_view"] == view}
@@ -268,6 +412,13 @@ def test_cached_nvda_source_to_api_snapshot_xlsx(tmp_path: Path) -> None:
     derived = []
     for view in ("AS_FILED", "LATEST_REPORTED"):
         overview = client.overview("NVDA", fiscal_start=2024, fiscal_end=2026, view=view)
+        assert overview["context"]["as_of"] == "2026-09-06"
+        assert overview["context"]["reviewed_q4_cutoff"] == "2026-10-08T01:57:04.940118+00:00"
+        with pytest.raises(ValueError, match="reviewed_q4_cutoff"):
+            client.overview(
+                "NVDA", fiscal_start=2024, fiscal_end=2026, view=view,
+                reviewed_q4_cutoff="2999-01-01T00:00:00+00:00",
+            )
         groups = client.list_breakdowns("revenue", context=overview["context"], include_hidden=True)["groups"]
         groups = [group for group in groups if group.get("lens_type") == "DIMENSIONAL_VIEW"]
         for group in groups:

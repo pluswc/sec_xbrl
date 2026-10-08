@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from openpyxl import load_workbook
 
-from sec_xbrl.analysis import open_analysis, prepare_analysis
+from sec_xbrl.analysis import open_analysis, prepare_analysis, render_analysis
 from sec_xbrl.consumer.export import export_snapshot, prepare_axis_snapshot
 
 
@@ -113,6 +113,14 @@ def test_annual_bundle_isolated_fy_axis_and_xlsx_label(tmp_path: Path, monkeypat
     headers = [cell.value for cell in load_workbook(output, read_only=True)["Table"][1]]
     assert "FY2024" in headers and "FY2025" in headers
     assert not any("Q4" in str(value) for value in headers)
+    html = tmp_path / "annual.html"
+    render_analysis(client, ticker="TEST", destination=html, fiscal_start=2024, fiscal_end=2025)
+    rendered = html.read_text(encoding="utf-8")
+    assert "<h2>연간 금액</h2>" in rendered
+    assert "<h2>분기 금액</h2>" not in rendered
+    assert "기준 연도의 금액" in rendered
+    assert ">FY2024<br>" in rendered and ">FY2025<br>" in rendered
+    assert "FY2024 Q4" not in rendered and "FY2025 Q4" not in rendered
     mixed = copy.deepcopy(next(row for row in client._records("TEST", "AS_FILED", "nodes")
                                if row.get("period_class") == "FY" and row.get("kind") == "VALUE"))
     mixed.update(node_id="mixed", period_class="QTD_3M")
@@ -136,3 +144,11 @@ def test_quarterly_mode_remains_default_and_rejects_annual_q4_companion(tmp_path
             period_mode="ANNUAL",
             reviewed_q4_publication=tmp_path / "reviewed-q4",
         )
+
+
+def test_hierarchy_javascript_uses_period_mode_for_all_analytical_labels() -> None:
+    source = (Path(__file__).parents[2] / "src/sec_xbrl/display/hierarchy.js").read_text(encoding="utf-8")
+    assert "ctx.period_mode==='ANNUAL'?`FY${p[0]}`" in source
+    assert "periodNoun=ctx.period_mode==='ANNUAL'?'개 연도':'분기'" in source
+    assert ".map(p=>analyticalPeriodLabel(ctx,p))" in source
+    assert "text('th',analyticalPeriodLabel(ctx,period))" in source

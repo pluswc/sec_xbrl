@@ -29,6 +29,7 @@ def prepare_overview_snapshot(
     view: str = "LATEST_REPORTED",
     as_of: str | None = None,
     review_cutoff: str | None = None,
+    reviewed_q4_cutoff: str | None = None,
     recent_quarters: int = 8,
     periods: Iterable[tuple[int, int]] | None = None,
     row_ids: Iterable[str] | None = None,
@@ -41,6 +42,7 @@ def prepare_overview_snapshot(
         view=view,
         as_of=as_of,
         review_cutoff=review_cutoff,
+        reviewed_q4_cutoff=reviewed_q4_cutoff,
         recent_quarters=recent_quarters,
     )
     rows = response["rows"]
@@ -80,10 +82,16 @@ def prepare_overview_snapshot(
     ]
     lineage_cells = _metric_input_cells(client, ticker, response, selected_metrics, view)
     excluded_cell_warnings = _excluded_cell_warnings(cells, selected_ids, period_keys)
+    publication = {"analysis_publication_id": response["context"]["publication_id"]}
+    if response["context"].get("reviewed_q4_publication_id"):
+        publication.update({
+            "reviewed_q4_publication_id": response["context"]["reviewed_q4_publication_id"],
+            "reviewed_q4_cutoff": response["context"]["reviewed_q4_cutoff"],
+        })
     return _finish(
         kind="OVERVIEW",
         context=response["context"],
-        publication={"analysis_publication_id": response["context"]["publication_id"]},
+        publication=publication,
         columns=selected_periods,
         rows=selected_rows,
         cells=snapshot_cells,

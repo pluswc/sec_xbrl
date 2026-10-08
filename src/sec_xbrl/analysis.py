@@ -13,7 +13,7 @@ import json
 import re
 import uuid
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from itertools import pairwise
 from pathlib import Path
@@ -111,6 +111,22 @@ class AnalysisClient:
         self.manifest = json.loads((self.root / "analysis_manifest.json").read_text())
         if self.manifest["version"] != VERSION:
             raise ValueError("unsupported analysis bundle")
+        reviewed_q4 = self.manifest.get("reviewed_q4")
+        if reviewed_q4 is not None:
+            cutoff = reviewed_q4.get("review_cutoff")
+            publication_id = reviewed_q4.get("publication_id")
+            try:
+                parsed_cutoff = datetime.fromisoformat(cutoff)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("analysis reviewed-Q4 cutoff is invalid") from exc
+            if parsed_cutoff.tzinfo is None or parsed_cutoff.utcoffset() is None or not publication_id:
+                raise ValueError("analysis reviewed-Q4 identity is incomplete")
+            if any(
+                info.get("reviewed_q4_cutoff") != cutoff
+                or info.get("reviewed_q4_publication_id") != publication_id
+                for info in self.manifest["companies"].values()
+            ):
+                raise ValueError("analysis company reviewed-Q4 identity mismatch")
         self._cache: dict[tuple, list[dict]] = {}
         from sec_xbrl.analytics.axis_timeseries_queries import load_axis_manifest
         self.axis_manifest = load_axis_manifest(self.root, self.manifest)
@@ -128,7 +144,8 @@ class AnalysisClient:
 
     def _context(self, ticker: str, view: str, *, fiscal_start: int | None = None,
                  fiscal_end: int | None = None, as_of: str | None = None,
-                 review_cutoff: str | None = None, recent_quarters: int = 8) -> dict:
+                 review_cutoff: str | None = None, reviewed_q4_cutoff: str | None = None,
+                 recent_quarters: int = 8) -> dict:
         ticker = ticker.upper()
         info = self.manifest["companies"].get(ticker)
         if info is None or view not in info["views"]:
@@ -137,6 +154,8 @@ class AnalysisClient:
             raise ValueError("as_of needs an exact prepared publication, not a query-time date filter")
         if review_cutoff is not None and review_cutoff != info["review_cutoff"]:
             raise ValueError("review_cutoff needs an exact prepared publication")
+        if reviewed_q4_cutoff is not None and reviewed_q4_cutoff != info.get("reviewed_q4_cutoff"):
+            raise ValueError("reviewed_q4_cutoff needs an exact prepared publication")
         if (fiscal_start is None) != (fiscal_end is None) or recent_quarters < 1:
             raise ValueError("supply both fiscal year bounds, or a positive recent quarter count")
         columns = self._records(ticker, view, "columns")
@@ -150,6 +169,13 @@ class AnalysisClient:
         context = {"ticker": ticker, "view": view, "as_of": info["as_of"], "review_cutoff": info["review_cutoff"],
                    "periods": [list(p) for p in periods], "publication_id": self.manifest["publication_id"],
                    "source_publication": info["source_publication"]}
+        if "reviewed_q4_cutoff" in info:
+            context.update({
+                "reviewed_q4_cutoff": info["reviewed_q4_cutoff"],
+                "reviewed_q4_publication_id": info["reviewed_q4_publication_id"],
+            })
+        if self.manifest.get("period_mode") == "ANNUAL":
+            context["period_mode"] = "ANNUAL"
         context["context_id"] = stable(context)
         return context
 
@@ -160,15 +186,22 @@ class AnalysisClient:
         info = self.manifest["companies"][ticker]
         if context["as_of"] != info["as_of"] or context["review_cutoff"] != info["review_cutoff"]:
             raise ValueError("query cutoff mismatch")
+        if "reviewed_q4_cutoff" in info and (
+            context.get("reviewed_q4_cutoff") != info["reviewed_q4_cutoff"]
+            or context.get("reviewed_q4_publication_id") != info["reviewed_q4_publication_id"]
+        ):
+            raise ValueError("reviewed-Q4 query cutoff mismatch")
         return ticker, view, {tuple(p) for p in context["periods"]}
 
     def overview(self, ticker: str, *, fiscal_start: int | None = None, fiscal_end: int | None = None,
                  view: str = "LATEST_REPORTED", as_of: str | None = None, review_cutoff: str | None = None,
+                 reviewed_q4_cutoff: str | None = None,
                  profile: str = "core", recent_quarters: int = 8) -> dict:
         if profile != "core":
             raise ValueError("profile not prepared")
         context = self._context(ticker, view, fiscal_start=fiscal_start, fiscal_end=fiscal_end, as_of=as_of,
-                                review_cutoff=review_cutoff, recent_quarters=recent_quarters)
+                                review_cutoff=review_cutoff, reviewed_q4_cutoff=reviewed_q4_cutoff,
+                                recent_quarters=recent_quarters)
         ticker, view, periods = self._validate_context(context)
         selected = lambda rows: [r for r in rows if (r["fiscal_year"], r["fiscal_quarter"]) in periods]
         period_warning = ("연간 금액은 분기 금액과 별도 기간 종류입니다."
@@ -650,6 +683,7 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
             "manifest_sha256": hashlib.sha256(
                 (Path(reviewed_q4_publication) / "reviewed_q4_manifest.json").read_bytes()
             ).hexdigest(),
+            "review_cutoff": reviewed_q4.manifest["review_cutoff"],
         }
     if quality_decisions:
         manifest["quality_overlay"] = {"version": "admin-quality-v1", "matched_decision_ids": []}
@@ -673,6 +707,11 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
             raise ValueError("no prepared fiscal periods")
         info = {"views": {}, "source_publication": str(publication.absolute()), "as_of": None,
                 "review_cutoff": getattr(reader, "review_manifest", {}).get("review_as_of"), "years": years}
+        if reviewed_q4 is not None:
+            info.update({
+                "reviewed_q4_publication_id": reviewed_q4.manifest["publication_id"],
+                "reviewed_q4_cutoff": reviewed_q4.manifest["review_cutoff"],
+            })
         manifest["companies"][ticker] = info
         manifest["targets"][ticker] = {"status": "READY", "reason": None,
                                        "evidence": {"source_publication": str(publication.absolute())}}
@@ -1043,6 +1082,7 @@ def refresh_analysis(*, admin: Path, workspace: Path, as_of: date, review_as_of:
 def render_analysis(client: AnalysisClient, *, ticker: str, destination: Path, fiscal_start: int, fiscal_end: int) -> None:
     from sec_xbrl.company_reports import _end
     data = client.overview(ticker, fiscal_start=fiscal_start, fiscal_end=fiscal_end)
+    annual = client.manifest.get("period_mode") == "ANNUAL"
     esc = lambda v: html.escape(str(v))
     traces, branches = {}, {}
     def number(cell):
@@ -1056,11 +1096,18 @@ def render_analysis(client: AnalysisClient, *, ticker: str, destination: Path, f
         title = cell.get("availability_note") or "출처와 판단 근거"
         return f'<button class="number" data-cell="{esc(cid)}" title="{esc(title)}">{esc(value)}</button><small>{mark}</small>'
     chunks = ["<!doctype html><meta charset='utf-8'><style>body{font:15px system-ui,'Malgun Gothic',sans-serif;margin:24px;color:#183044;background:#f7f9fc}table{border-collapse:collapse;background:white;font-size:13px}td,th{padding:8px;border:1px solid #dce3ea;text-align:right;min-width:85px}th:first-child{text-align:left;position:sticky;left:0;background:white}pre{white-space:pre-wrap;max-width:900px}details{margin:10px 0;padding:8px;background:white}summary{cursor:pointer}.scroll{overflow:auto}.number{border:0;background:transparent;color:#075eac;cursor:pointer;font:inherit}small{color:#647586}dialog{max-width:85vw;max-height:80vh;border:1px solid #aab}h2{margin-top:32px}</style>", f"<h1>{esc(ticker)} 핵심 재무 분석</h1>", f"<p>FY{fiscal_start}–{fiscal_end} · 현재 선택 공시 기준 · 백만 USD(주당·주식 수 제외)</p>", "<p>공시값 산술 비교는 경제적 동일성·재작성 검증이 아닙니다. — 표시는 숫자를 임의 보완하지 않은 항목입니다. 숫자를 누르면 근거를 볼 수 있습니다.</p>", f"<details><summary>조회 범위와 발행본</summary><pre>{esc(json.dumps(data['context'],ensure_ascii=False,indent=2))}</pre></details>"]
-    chunks.extend([f"<title>{esc(ticker)} 핵심 재무 분석 · FY{fiscal_start}–{fiscal_end}</title>", '<label>산술 비교: <select id="comparison"><option value="YOY">전년 동기</option><option value="QOQ">전분기</option><option value="NONE">숨김</option></select></label><style>[data-metric="QOQ"]{display:none}</style>'])
-    chunks.append(f'<p><small>공시 기준 {esc(data["context"]["as_of"])} · 검토 기준 {esc(data["context"]["review_cutoff"] or "별도 검토 없음")} · D: 계산된 분기 · 검토: 원문 표 기준 확인</small></p>')
-    for period in ("QTD_3M", "INSTANT"):
+    comparison_options = ('<option value="YOY">전년</option><option value="NONE">숨김</option>' if annual
+                          else '<option value="YOY">전년 동기</option><option value="QOQ">전분기</option><option value="NONE">숨김</option>')
+    chunks.extend([f"<title>{esc(ticker)} 핵심 재무 분석 · FY{fiscal_start}–{fiscal_end}</title>", f'<label>산술 비교: <select id="comparison">{comparison_options}</select></label><style>[data-metric="QOQ"]{{display:none}}</style>'])
+    review_context = data["context"]
+    reviewed_q4 = (f' · Q4 검토 기준 {esc(review_context["reviewed_q4_cutoff"])} · 발행 {esc(review_context["reviewed_q4_publication_id"])}'
+                   if review_context.get("reviewed_q4_cutoff") else "")
+    derivation_label = "검토: 원문 표 기준 확인" if annual else "D: 계산된 분기 · 검토: 원문 표 기준 확인"
+    chunks.append(f'<p><small>공시 기준 {esc(review_context["as_of"])} · 원본 검토 기준 {esc(review_context["review_cutoff"] or "별도 검토 없음")}{reviewed_q4} · {derivation_label}</small></p>')
+    for period in (("FY",) if annual else ("QTD_3M", "INSTANT")):
         cols = [c for c in data["columns"] if c["period_class"] == period]
-        chunks.append(f"<h2>{'분기 금액' if period == 'QTD_3M' else '기말 잔액'}</h2><div class='scroll'><table><tr><th>항목</th>" + "".join(f"<th>{esc(c['fiscal_label'])}<br><small>{esc(_end(c.get('actual_end_date') or c.get('actual_instant_date')))}</small></th>" for c in cols) + "</tr>")
+        heading = "연간 금액" if period == "FY" else "분기 금액" if period == "QTD_3M" else "기말 잔액"
+        chunks.append(f"<h2>{heading}</h2><div class='scroll'><table><tr><th>항목</th>" + "".join(f"<th>{esc(c['fiscal_label'])}<br><small>{esc(_end(c.get('actual_end_date') or c.get('actual_instant_date')))}</small></th>" for c in cols) + "</tr>")
         for row in [r for r in data["rows"] if r["period_class"] == period]:
             chunks.append(f"<tr><th>{esc(row['label'])}</th>")
             for col in cols:
@@ -1074,7 +1121,8 @@ def render_analysis(client: AnalysisClient, *, ticker: str, destination: Path, f
                 chunks.append(f"<td>{value}</td>")
             chunks.append("</tr>")
         chunks.append("</table></div>")
-    chunks.append("<h2>필요한 구성만 펼쳐보기</h2><p>기준 분기의 금액 상위 5개와 중요한 변화·경고를 먼저 봅니다. 구성비는 별도 경제적 분해 검토가 없으면 계산하지 않습니다.</p>")
+    reference_period_label = "기준 연도" if annual else "기준 분기"
+    chunks.append(f"<h2>필요한 구성만 펼쳐보기</h2><p>{reference_period_label}의 금액 상위 5개와 중요한 변화·경고를 먼저 봅니다. 구성비는 별도 경제적 분해 검토가 없으면 계산하지 않습니다.</p>")
     for selection, selection_label in (("important", "중요 항목"), ("all", "모든 항목·숨긴 관점 포함")):
       chunks.append(f"<details class='selection'><summary>{selection_label}</summary>")
       for row in data["rows"]:

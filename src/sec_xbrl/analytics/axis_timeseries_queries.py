@@ -100,15 +100,10 @@ def axis_timeseries(client: Any, ticker: str, lens_id: str, *, context: dict[str
 
     files = client.manifest["companies"][ticker]["views"][view]["files"]
     if "reviewed_q4_exclusions" in files:
-        excluded = {(row.get("mapping_epoch"), row.get("fiscal_year")): row
-                    for row in client._records(ticker, view, "reviewed_q4_exclusions")
-                    if row.get("mapping_epoch") and row.get("fiscal_year")}
-        for row in rows:
-            for cell in row["cells"]:
-                decision = excluded.get((row.get("mapping_epoch"), cell["fiscal_year"]))
-                if decision is not None and cell.get("status") == "UNAVAILABLE":
-                    cell["reason"] = decision["reason"]
-                    cell["reviewed_q4_exclusion_id"] = decision["exclusion_id"]
+        _apply_reviewed_q4_exclusions(
+            rows, client._records(ticker, view, "reviewed_q4_exclusions"),
+            view=view, as_of=context["as_of"],
+        )
 
     for row in rows:
         cell_ids = {cell.get("cell_id") for cell in row["cells"]} - {None}
@@ -123,6 +118,11 @@ def axis_timeseries(client: Any, ticker: str, lens_id: str, *, context: dict[str
         "axis_publication_id": (client.axis_manifest or {}).get("publication_id"),
         "axis_decision_cutoff": (client.axis_manifest or {}).get("decision_cutoff"),
     }
+    if client.manifest.get("reviewed_q4"):
+        publication.update({
+            "reviewed_q4_publication_id": client.manifest["reviewed_q4"]["publication_id"],
+            "reviewed_q4_cutoff": client.manifest["reviewed_q4"]["review_cutoff"],
+        })
     for evidence in [*reviews, *source_comparisons]:
         evidence["publication"] = copy.deepcopy(publication)
     parent_by_child: dict[str, str] = {}
@@ -231,6 +231,34 @@ def _aligned(cells: list[dict[str, Any]], periods: list[tuple[int, int]], period
         else:
             result.append({**copy.deepcopy(cell), "row_id": row_id, "provenance": copy.deepcopy(traces.get(cell["cell_id"]))})
     return result
+
+
+def _apply_reviewed_q4_exclusions(
+    rows: list[dict[str, Any]], decisions: list[dict[str, Any]], *, view: str, as_of: str
+) -> None:
+    excluded = {}
+    for decision in decisions:
+        if (not decision.get("mapping_epoch") or not decision.get("fiscal_year")
+                or decision.get("selection_view") != view
+                or decision.get("selection_as_of_date") != as_of):
+            continue
+        key = (
+            decision["mapping_epoch"], decision["fiscal_year"],
+            decision.get("fiscal_quarter"), decision.get("period_class"),
+        )
+        if key in excluded:
+            raise ValueError("duplicate reviewed-Q4 exclusion for exact coordinate")
+        excluded[key] = decision
+    for row in rows:
+        for cell in row["cells"]:
+            decision = excluded.get((
+                row.get("mapping_epoch"), cell["fiscal_year"],
+                cell.get("fiscal_quarter"), cell.get("period_class"),
+            ))
+            if (decision is not None and cell.get("status") == "UNAVAILABLE"
+                    and cell.get("reason") == "PERIOD_NOT_DISCLOSED_FOR_PREPARED_ROW_IDENTITY"):
+                cell["reason"] = decision["reason"]
+                cell["reviewed_q4_exclusion_id"] = decision["exclusion_id"]
 
 
 def _trace_index(client: Any, ticker: str, view: str) -> dict[str, dict[str, Any]]:

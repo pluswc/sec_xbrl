@@ -7,9 +7,9 @@ Q4 companion and a separately labelled annual consumer bundle. The implementatio
 baseline is `201acf9aec2f8183acb7dd843579938db14236cd` on
 `codex/reviewed-dimensional-q4`.
 
-The current state is **APPROVED for implementation**. It is not yet
-`IMPLEMENTED`, `INDEPENDENTLY_VERIFIED`, `LOCALLY_ACCEPTED`, or `MERGED`.
-Those states require separate evidence under
+The current state is an **implemented candidate**. The exact frozen commit is
+recorded in the delivery handoff. It is not yet `INDEPENDENTLY_VERIFIED`,
+`LOCALLY_ACCEPTED`, or `MERGED`. Those states require separate evidence under
 [`delivery-workflow.md`](delivery-workflow.md).
 
 ## 2. Reviewed Q4 scope
@@ -28,8 +28,9 @@ immutable companion publication containing:
 
 `reviewed_q4_manifest.json` binds those datasets to the complete input files,
 the parent history manifest, the selection view and as-of date, and each source
-snapshot manifest. The reader verifies all hashes and rejects moved, changed,
-partial, or symlinked publications.
+snapshot manifest. It records the timezone-aware 2026-10-08 review cutoff,
+separately from the 2026-09-06 financial selection date. The reader verifies
+all hashes and rejects moved, changed, partial, or symlinked publications.
 
 An approval binds company, fiscal year, view, as-of date, mapping epoch, full
 raw and canonical dimensions, concept, numerator-only monetary unit, actual
@@ -37,6 +38,30 @@ period dates, FY and YTD raw Fact and filing identities, source snapshots,
 evidence table identities, reviewer, review time, purpose, policy version,
 additivity judgment, basis judgment, formula, and approved result. Missing or
 nonmatching approval remains unavailable and review-required.
+
+The source document declares
+`schema_version: reviewed-dimensional-q4-source-evidence-v1`. The ledger
+declares `schema_version: reviewed-dimensional-q4-review-ledger-v1` and a
+timezone-aware `review_cutoff`. Every initial approval uses purpose and
+additivity `REVENUE_DURATION_AMOUNT`, policy
+`reviewed-dimensional-q4-source-pairs-v1`, and affirmative
+`basis_compatibility_status: COMPATIBLE_REVIEWED_PAIR`. The free-text
+`basis_compatibility` remains human evidence and cannot substitute for the
+controlled status. Review timestamps after the cutoff or current time, naive
+timestamps, unknown policies, and merely truthy fields fail closed.
+
+The producer reloads each raw Fact's Concept, Unit, and Context. This initial
+policy accepts only standard `us-gaap:Revenues`, monetary duration contexts,
+USD numerator-only units, full dimensioned scope, and exact current-focus
+reported FY/YTD pairs. Either source carrying `continuity_break` or
+`recast_review_required` is rejected.
+
+TextBlock concepts are not treated as the table's semantics. The producer
+locates the unique specialized-market revenue-table marker inside normalized
+source TextBlock content, verifies that exact bounded text against the raw Fact,
+and persists its normalized offsets and SHA-256. This is material for the
+FY2025 annual TextBlock, which also contains a preceding customer-concentration
+table.
 
 The initial runtime target is the 16 lead-approved NVDA product-revenue source
 pairs in each of `AS_FILED` and `LATEST_REPORTED`, for 32 view-specific
@@ -52,6 +77,14 @@ has a real billing-location to headquarters-location basis change. It also
 rejects label bridges, Q1+Q2+Q3 aggregation, EPS, shares, ratios, pure units,
 denominator units, non-additive values, view substitution, as-of substitution,
 changed dimensions, changed dates, changed mappings, and changed source Facts.
+
+The FY2025 product exclusions are structured `excluded_scopes`, one per view
+and member. Each binds the exact parent FY cell, YTD-9M cell, and FY2025 Q3 QTD
+cell that identifies the prepared target mapping epoch. The producer checks the
+three parent columns, member, view, as-of date, different FY/YTD epochs,
+mapping-review evidence, and the absence of a Q4 value on that exact QTD row.
+Free-text `excluded_scope_notes` remain general policy evidence and never apply
+to a consumer coordinate.
 
 Compute and Networking are nested inside Data Center for FY2026. Their approved
 individual values may be displayed, but they may never be added to Data Center.
@@ -73,7 +106,10 @@ already materialized coordinate always wins; conflicting or unavailable cells
 are never overwritten. Prepared cells retain the source mapping epoch and carry
 the reviewed formula, both source inputs, review, and source-table evidence in
 their trace. Relevant exclusions refine an unavailable reason without asserting
-that the disclosure is missing.
+that the disclosure is missing. They match only the exact QTD-3M Q4 coordinate,
+year, mapping epoch, view, and as-of date, and only replace the generic prepared
+row absence reason. Q1-Q3 and existing conflicting unavailable decisions remain
+unchanged.
 
 Queries, HTML, snapshots, CSV, and XLSX only read the prepared result. They do
 not calculate Q4.
@@ -104,8 +140,9 @@ result remains unavailable rather than introducing a new annual metric policy.
 5. Annual output is isolated, labelled `ANNUAL`, contains FY duration data only,
    and permits FY-only axis queries while rejecting mixed classes.
 6. Synthetic tests cover approval, tampering, parent drift, full scope, units,
-   dates, mapping, future-as-of, direct-cell precedence, quarterly compatibility,
-   and annual isolation and labels.
+   dates, mapping, future-as-of, continuity/recast flags, malformed policy and
+   timestamps, raw monetary semantics, direct-cell precedence, exact Q4
+   exclusion scope, quarterly compatibility, and both annual display routes.
 7. A cached integration run traces all 32 approved view-specific decisions to
    16 economic Q4 cells per view through source, review, producer, API, snapshot,
    and XLSX without network access.
@@ -118,8 +155,8 @@ The first approved inputs are external runtime evidence and are never copied
 into engine code:
 
 - history: `data/processed/analytical/history/five_company_custom_continuity_v5/panels`;
-- source pairs: `data/processed/universe_runs/20261008_initial/q4_lead_review/source_pairs.json`;
-- approval ledger: `data/processed/universe_runs/20261008_initial/q4_lead_review/lead_approval.json`; and
+- source pairs: `data/processed/universe_runs/20261008_initial/q4_lead_review/source_pairs_v2.json`;
+- approval ledger: `data/processed/universe_runs/20261008_initial/q4_lead_review/lead_approval_v3.json`; and
 - snapshots: `data/processed/trailing_corpus_runs/20260827T051322Z/snapshots/<cik>/<accession-without-dashes>`.
 
 The runtime guide records exact commands and destination paths. Runtime data,

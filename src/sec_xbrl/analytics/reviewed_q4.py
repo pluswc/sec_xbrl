@@ -8,10 +8,12 @@ identity and measurement-scope field.
 from __future__ import annotations
 
 import hashlib
+import html
 import json
+import re
 import tempfile
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -22,6 +24,15 @@ from sec_xbrl.longitudinal.corpus_release import _load_declared_cohort_snapshot
 VERSION = "reviewed-dimensional-q4-v1"
 RULE_VERSION = "reviewed-exact-fy-ytd9m-residual-v1"
 APPROVAL = "APPROVE_EXACT_Q4_SOURCE_PAIR"
+SOURCE_EVIDENCE_SCHEMA = "reviewed-dimensional-q4-source-evidence-v1"
+REVIEW_LEDGER_SCHEMA = "reviewed-dimensional-q4-review-ledger-v1"
+REVIEW_POLICY = "reviewed-dimensional-q4-source-pairs-v1"
+REVIEW_PURPOSE = "REVENUE_DURATION_AMOUNT"
+ADDITIVITY = "REVENUE_DURATION_AMOUNT"
+BASIS_COMPATIBILITY = "COMPATIBLE_REVIEWED_PAIR"
+SEMANTIC_ROLE = "REVENUE"
+PERMITTED_CURRENCY = "iso4217:USD"
+SCOPED_EXCLUSION_REASONS = {"MAPPING_REVIEW_REQUIRED_DIFFERENT_EPOCHS"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,12 +58,21 @@ def generate_reviewed_q4(
     evidence_sha = _sha256(source_evidence)
     evidence = _read_json(source_evidence)
     ledger = _read_json(review_ledger)
+    if evidence.get("schema_version") != SOURCE_EVIDENCE_SCHEMA:
+        raise ValueError("unsupported reviewed-Q4 source evidence schema")
+    if ledger.get("schema_version") != REVIEW_LEDGER_SCHEMA:
+        raise ValueError("unsupported reviewed-Q4 review ledger schema")
+    review_cutoff = _aware_datetime(ledger.get("review_cutoff"), "review cutoff")
+    if review_cutoff > datetime.now(UTC):
+        raise ValueError("review cutoff cannot be in the future")
     if evidence.get("history_manifest_sha256") != parent_sha:
         raise ValueError("source evidence does not match parent history manifest")
     if Path(evidence.get("history_publication", "")).resolve() != history_publication.resolve():
         raise ValueError("source evidence names a different parent history publication")
     if ledger.get("source_evidence_sha256") != evidence_sha:
         raise ValueError("review ledger does not match exact source evidence")
+    if Path(ledger.get("source_evidence_path", "")).resolve() != source_evidence.resolve():
+        raise ValueError("review ledger names a different source evidence document")
     if ledger.get("history_manifest_sha256") != parent_sha:
         raise ValueError("review ledger does not match parent history manifest")
     if Path(ledger.get("history_publication", "")).resolve() != history_publication.resolve():
@@ -108,7 +128,9 @@ def generate_reviewed_q4(
         if approval is None:
             exclusions.append(_exclusion(candidate, "EXACT_SOURCE_PAIR_REVIEW_REQUIRED"))
             continue
-        review = _validate_approval(approval, candidate, table_index)
+        review = _validate_approval(
+            approval, candidate, table_index, review_cutoff=review_cutoff
+        )
         matched_approvals.add(key)
         reviews.append(review)
         derived.append(_derived(candidate, review))
@@ -116,6 +138,10 @@ def generate_reviewed_q4(
     extra = set(approval_index) - matched_approvals
     if extra:
         raise ValueError("review ledger contains approvals outside exact source candidates")
+    for note in ledger.get("excluded_scopes", []):
+        exclusions.append(_scoped_exclusion(
+            note, reader=reader, panel_cache=panel_cache, review_cutoff=review_cutoff
+        ))
     for note in ledger.get("excluded_scope_notes", []):
         if not isinstance(note, str) or not note:
             raise ValueError("excluded scope note must be non-empty text")
@@ -187,6 +213,7 @@ def publish_reviewed_q4(
         "counts": {name: len(records) for name, records in datasets.items()},
         "selection_as_of_dates": sorted({row["selection_as_of_date"] for row in build.candidates}),
         "views": sorted({row["selection_view"] for row in build.candidates}),
+        "review_cutoff": _read_json(review_ledger)["review_cutoff"],
     }
     (staging / "reviewed_q4_manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -206,6 +233,7 @@ class ReviewedQ4Reader:
         self.manifest = _read_json(self.root / "reviewed_q4_manifest.json")
         if self.manifest.get("version") != VERSION:
             raise ValueError("unsupported reviewed-Q4 publication")
+        _aware_datetime(self.manifest.get("review_cutoff"), "review cutoff")
 
     def records(self, name: str) -> tuple[dict[str, Any], ...]:
         if name not in {"candidate", "exclusion", "review", "derived"}:
@@ -275,12 +303,13 @@ def _candidate(
         raise ValueError("candidate mapping epoch differs from exact source cells")
     if any(source.get("label") != pair.get("member_qname") for source in (definition, ytd_definition)):
         raise ValueError("candidate member identity differs from source row")
-    _attest_parent_cell(reader, panel_cache, ticker, view, "FY", fy_cell)
-    _attest_parent_cell(reader, panel_cache, ticker, view, "YTD_9M", ytd_cell)
+    _attest_parent_cell(reader, panel_cache, ticker, view, "FY", year, 4, fy_cell)
+    _attest_parent_cell(reader, panel_cache, ticker, view, "YTD_9M", year, 3, ytd_cell)
+    source_semantics = []
     for source, lineage in ((pair.get("fy"), fy), (pair.get("ytd_9m"), ytd)):
         if not isinstance(source, dict) or source.get("value_lineage") != lineage:
             raise ValueError("candidate source record differs from exact history cell")
-        _attest_snapshot(source, lineage, snapshot_cache, snapshots)
+        source_semantics.append(_attest_snapshot(source, lineage, snapshot_cache, snapshots))
     evidence_ids = [pair["fy"].get("table_textblock_fact_id"), pair["ytd_9m"].get("table_textblock_fact_id")]
     evidence_tables = []
     sources = (pair["fy"], pair["ytd_9m"])
@@ -294,11 +323,13 @@ def _candidate(
         table_matches = [row for row in snapshot.records("fact") if row.get("fact_id") == fact_id]
         if len(table_matches) != 1 or table_matches[0] != table.get("raw_fact"):
             raise ValueError("candidate source table Fact differs from source snapshot")
+        target_table = _target_table_evidence(table)
         evidence_tables.append({
             "accession": accession,
             "fact_id": fact_id,
             "text_sha256": _text_sha256(table.get("text")),
             "raw_fact_sha256": _canonical_sha256(table.get("raw_fact")),
+            "target_table": target_table,
         })
 
     key = [view, pair.get("selection_as_of_date"), year, epoch, pair.get("member_qname"),
@@ -334,6 +365,7 @@ def _candidate(
         ],
         "source_cell_ids": [fy_cell.get("fiscal_time_series_cell_id"), ytd_cell.get("fiscal_time_series_cell_id")],
         "source_inputs": [fy, ytd],
+        "source_raw_semantics": source_semantics,
         "source_table_evidence": evidence_tables,
         "status": "STRUCTURAL_CANDIDATE_REVIEW_REQUIRED",
         "reported_or_derived": "CANDIDATE",
@@ -369,6 +401,10 @@ def _structural_problem(
         return "SOURCE_NOT_CURRENT_FOCUS_REPORTED"
     if any(row.get("mapping_review_required") is not False for row in (fy, ytd)):
         return "MAPPING_REVIEW_REQUIRED"
+    if any(row.get("continuity_break") is True for row in (fy, ytd)):
+        return "CONTINUITY_BREAK"
+    if any(row.get("recast_review_required") is True for row in (fy, ytd)):
+        return "RECAST_REVIEW_REQUIRED"
     if fy.get("context_start_date") != ytd.get("context_start_date"):
         return "ACTUAL_START_DATE_MISMATCH"
     if candidate["selection_as_of_date"] != fy.get("selection_as_of_date") or candidate["selection_as_of_date"] != ytd.get("selection_as_of_date"):
@@ -387,12 +423,25 @@ def _structural_problem(
         return "INCOMPATIBLE_UNIT_NUMERATOR"
     if candidate["unit_denominator_measures"] != _json_list(ytd.get("unit_denominator_measures")):
         return "INCOMPATIBLE_UNIT_DENOMINATOR"
-    if len(candidate["unit_numerator_measures"]) != 1 or not str(candidate["unit_numerator_measures"][0]).startswith("iso4217:"):
+    if candidate["unit_numerator_measures"] != ["iso4217:USD"]:
         return "MONETARY_NUMERATOR_REQUIRED"
     if candidate["unit_denominator_measures"]:
         return "DENOMINATOR_UNIT_NOT_ADDITIVE"
     if not candidate["canonical_dimension_signature"]:
         return "DIMENSIONED_SCOPE_REQUIRED"
+    for raw in candidate["source_raw_semantics"]:
+        concept = raw["concept"]
+        unit = raw["unit"]
+        context = raw["context"]
+        if (concept.get("qname") != "us-gaap:Revenues"
+                or concept.get("is_standard") is not True
+                or concept.get("data_type") != "xbrli:monetaryItemType"):
+            return "SUPPORTED_REVENUE_CONCEPT_REQUIRED"
+        if concept.get("period_type") != "duration" or context.get("period_kind") != "DURATION":
+            return "DURATION_CONCEPT_AND_CONTEXT_REQUIRED"
+        if (_json_list(unit.get("numerator_measures")) != ["iso4217:USD"]
+                or _json_list(unit.get("denominator_measures"))):
+            return "SOURCE_USD_UNIT_REQUIRED"
     try:
         days = (date.fromisoformat(fy["context_end_date"]) - date.fromisoformat(ytd["context_end_date"])).days
     except (TypeError, ValueError):
@@ -405,10 +454,30 @@ def _structural_problem(
 def _validate_approval(
     approval: dict[str, Any], candidate: dict[str, Any],
     table_index: dict[tuple[Any, ...], dict[str, Any]],
+    *, review_cutoff: datetime,
 ) -> dict[str, Any]:
-    required = ("decision_id", "reviewer", "known_at", "purpose", "policy_version", "additivity", "basis_compatibility")
+    required = ("decision_id", "reviewer", "known_at", "purpose", "policy_version", "additivity",
+                "basis_compatibility", "basis_compatibility_status", "semantic_role",
+                "permitted_currency")
     if approval.get("decision") != APPROVAL or any(not approval.get(field) for field in required):
         raise ValueError("review decision lacks required approval fields")
+    known_at = _aware_datetime(approval["known_at"], "review decision known_at")
+    if known_at > review_cutoff:
+        raise ValueError("review decision is later than the review cutoff")
+    if known_at > datetime.now(UTC):
+        raise ValueError("review decision known_at cannot be in the future")
+    if approval["purpose"] != REVIEW_PURPOSE:
+        raise ValueError("unsupported reviewed-Q4 purpose")
+    if approval["policy_version"] != REVIEW_POLICY:
+        raise ValueError("unsupported reviewed-Q4 policy version")
+    if approval["additivity"] != ADDITIVITY:
+        raise ValueError("reviewed-Q4 additivity is not affirmatively supported")
+    if approval["basis_compatibility_status"] != BASIS_COMPATIBILITY:
+        raise ValueError("reviewed-Q4 basis compatibility is not affirmative")
+    if approval["semantic_role"] != SEMANTIC_ROLE:
+        raise ValueError("unsupported reviewed-Q4 semantic role")
+    if approval["permitted_currency"] != PERMITTED_CURRENCY:
+        raise ValueError("unsupported reviewed-Q4 currency")
     if approval.get("approved_expected_value") != candidate["value_numeric"]:
         raise ValueError("reviewed expected value differs from exact residual")
     if approval.get("fy_accession") != candidate["source_accessions"][0] or approval.get("ytd_accession") != candidate["source_accessions"][1]:
@@ -452,6 +521,9 @@ def _derived(candidate: dict[str, Any], review: dict[str, Any]) -> dict[str, Any
         "review_policy_version": review["policy_version"],
         "additivity": review["additivity"],
         "basis_compatibility": review["basis_compatibility"],
+        "basis_compatibility_status": review["basis_compatibility_status"],
+        "semantic_role": review["semantic_role"],
+        "permitted_currency": review["permitted_currency"],
         "status": "DERIVED",
         "reported_or_derived": "DERIVED",
         "semantic_review_state": "REVIEWED_EXACT_SOURCE_PAIR",
@@ -475,8 +547,100 @@ def _exclusion(candidate: dict[str, Any], reason: str) -> dict[str, Any]:
     }
 
 
+def _scoped_exclusion(
+    note: dict[str, Any], *, reader: Any, panel_cache: dict[tuple[str, str, str], Any],
+    review_cutoff: datetime,
+) -> dict[str, Any]:
+    if not isinstance(note, dict):
+        raise TypeError("scoped exclusion must be an object")
+    required = (
+        "exclusion_id", "ticker", "selection_view", "selection_as_of_date", "fiscal_year",
+        "member_qname", "target_qtd_cell_id", "fy_cell_id", "ytd_cell_id", "reason",
+        "detail", "reviewer", "known_at",
+    )
+    if any(not note.get(field) for field in required):
+        raise ValueError("scoped exclusion lacks required attestation fields")
+    if note["reason"] not in SCOPED_EXCLUSION_REASONS:
+        raise ValueError("unsupported scoped exclusion reason")
+    known_at = _aware_datetime(note["known_at"], "scoped exclusion known_at")
+    if known_at > review_cutoff or known_at > datetime.now(UTC):
+        raise ValueError("scoped exclusion is later than its review cutoff")
+    ticker = str(note["ticker"]).upper()
+    view = note["selection_view"]
+    year = note["fiscal_year"]
+    if view not in {"AS_FILED", "LATEST_REPORTED"} or not isinstance(year, int):
+        raise ValueError("scoped exclusion has invalid view or fiscal year")
+    fy, fy_column = _parent_cell_by_id(
+        reader, panel_cache, ticker, view, "FY", note["fy_cell_id"]
+    )
+    ytd, ytd_column = _parent_cell_by_id(
+        reader, panel_cache, ticker, view, "YTD_9M", note["ytd_cell_id"]
+    )
+    target, target_column = _parent_cell_by_id(
+        reader, panel_cache, ticker, view, "QTD_3M", note["target_qtd_cell_id"]
+    )
+    expected_columns = ((fy_column, 4), (ytd_column, 3), (target_column, 3))
+    if any(column.get("fiscal_year") != year or column.get("fiscal_quarter") != quarter
+           for column, quarter in expected_columns):
+        raise ValueError("scoped exclusion source cells differ from attested fiscal columns")
+    cells = (fy, ytd, target)
+    labels = {(cell.get("definition") or {}).get("label") for cell in cells}
+    if labels != {note["member_qname"]}:
+        raise ValueError("scoped exclusion member differs from attested parent rows")
+    if any((cell.get("value_lineage") or {}).get("selection_as_of_date") != note["selection_as_of_date"]
+           or (cell.get("value_lineage") or {}).get("selection_view") != view for cell in cells):
+        raise ValueError("scoped exclusion selection scope differs from parent rows")
+    source_epochs = {fy.get("fiscal_time_series_row_id"), ytd.get("fiscal_time_series_row_id")}
+    if len(source_epochs) != 2 or not (
+        (ytd.get("value_lineage") or {}).get("mapping_review_required") is True
+        or (target.get("value_lineage") or {}).get("mapping_review_required") is True
+    ):
+        raise ValueError("scoped mapping exclusion lacks different-epoch review evidence")
+    target_epoch = target.get("fiscal_time_series_row_id")
+    if _q4_materialized(reader, panel_cache, ticker, view, year, target_epoch):
+        raise ValueError("scoped exclusion target Q4 is already materialized")
+    return {
+        "exclusion_id": note["exclusion_id"],
+        "candidate_id": None,
+        "ticker": ticker,
+        "selection_view": view,
+        "selection_as_of_date": note["selection_as_of_date"],
+        "fiscal_year": year,
+        "fiscal_quarter": 4,
+        "period_class": "QTD_3M",
+        "mapping_epoch": target_epoch,
+        "member_qname": note["member_qname"],
+        "reason": note["reason"],
+        "detail": note["detail"],
+        "value_numeric": None,
+        "reviewer": note["reviewer"],
+        "known_at": note["known_at"],
+        "source_cell_ids": [note["fy_cell_id"], note["ytd_cell_id"], note["target_qtd_cell_id"]],
+        "source_mapping_epochs": sorted(source_epochs),
+    }
+
+
+def _parent_cell_by_id(
+    reader: Any, cache: dict[tuple[str, str, str], Any], ticker: str, view: str,
+    period_class: str, cell_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    key = (ticker, view, period_class)
+    if key not in cache:
+        cache[key] = reader.load(ticker=ticker, period_class=period_class, view=view)
+    panel = cache[key]
+    cells = [row for row in panel.cells if row.get("fiscal_time_series_cell_id") == cell_id]
+    if len(cells) != 1:
+        raise ValueError("scoped exclusion source cell is not unique in parent history")
+    column_id = cells[0].get("fiscal_time_series_column_id")
+    columns = [row for row in panel.columns if row.get("fiscal_time_series_column_id") == column_id]
+    if len(columns) != 1 or columns[0].get("period_class") != period_class:
+        raise ValueError("scoped exclusion source column is not unique in parent history")
+    return cells[0], columns[0]
+
+
 def _attest_parent_cell(reader: Any, cache: dict[tuple[str, str, str], Any], ticker: str,
-                        view: str, period_class: str, expected: dict[str, Any]) -> None:
+                        view: str, period_class: str, fiscal_year: int, fiscal_quarter: int,
+                        expected: dict[str, Any]) -> None:
     key = (ticker, view, period_class)
     if key not in cache:
         cache[key] = reader.load(ticker=ticker, period_class=period_class, view=view)
@@ -484,6 +648,13 @@ def _attest_parent_cell(reader: Any, cache: dict[tuple[str, str, str], Any], tic
                if row.get("fiscal_time_series_cell_id") == expected.get("fiscal_time_series_cell_id")]
     if len(matches) != 1 or matches[0] != expected:
         raise ValueError("source evidence cell differs from parent history publication")
+    column_id = expected.get("fiscal_time_series_column_id")
+    columns = [row for row in cache[key].columns
+               if row.get("fiscal_time_series_column_id") == column_id]
+    if (len(columns) != 1 or columns[0].get("fiscal_year") != fiscal_year
+            or columns[0].get("fiscal_quarter") != fiscal_quarter
+            or columns[0].get("period_class") != period_class):
+        raise ValueError("source evidence cell differs from attested fiscal column")
 
 
 def _q4_materialized(reader: Any, cache: dict[tuple[str, str, str], Any], ticker: str,
@@ -499,7 +670,7 @@ def _q4_materialized(reader: Any, cache: dict[tuple[str, str, str], Any], ticker
 
 
 def _attest_snapshot(source: dict[str, Any], lineage: dict[str, Any], cache: dict[Path, Any],
-                     snapshots: dict[Path, dict[str, str]]) -> None:
+                     snapshots: dict[Path, dict[str, str]]) -> dict[str, dict[str, Any]]:
     path = Path(source.get("snapshot_path", ""))
     accession = source.get("accession")
     cik = str(lineage.get("source_snapshot_id", "")).split(":")[1]
@@ -515,8 +686,32 @@ def _attest_snapshot(source: dict[str, Any], lineage: dict[str, Any], cache: dic
     matches = [row for row in snapshot.records("fact") if row.get("fact_id") == lineage.get("selected_source_fact_id")]
     if len(matches) != 1 or matches[0] != raw_fact:
         raise ValueError("candidate raw Fact differs from source snapshot")
+    concept = _one_raw_record(snapshot, "concept", "raw_concept_id", raw_fact.get("raw_concept_id"))
+    unit = _one_raw_record(snapshot, "unit", "unit_id", raw_fact.get("unit_id"))
+    context = _one_raw_record(snapshot, "context", "context_id", raw_fact.get("context_id"))
+    if (raw_fact.get("filing_id") != lineage.get("source_filing_id")
+            or raw_fact.get("fact_id") != lineage.get("selected_source_fact_id")):
+        raise ValueError("candidate raw Fact identity differs from history lineage")
+    if (concept.get("qname") != lineage.get("raw_concept_qname")
+            or concept.get("data_type") != lineage.get("raw_concept_data_type")
+            or concept.get("period_type") != lineage.get("raw_concept_period_type")):
+        raise ValueError("candidate raw Concept differs from history lineage")
+    if (_json_list(unit.get("numerator_measures")) != _json_list(lineage.get("unit_numerator_measures"))
+            or _json_list(unit.get("denominator_measures")) != _json_list(lineage.get("unit_denominator_measures"))):
+        raise ValueError("candidate raw Unit differs from history lineage")
+    if (context.get("start_date") != lineage.get("context_start_date")
+            or context.get("end_date") != lineage.get("context_end_date")):
+        raise ValueError("candidate raw Context differs from history lineage")
     snapshots[path] = {"path": str(path.resolve()), "manifest_sha256": expected_sha,
                        "snapshot_id": snapshot.input.snapshot_id}
+    return {"concept": concept, "unit": unit, "context": context}
+
+
+def _one_raw_record(snapshot: Any, dataset: str, id_field: str, identity: Any) -> dict[str, Any]:
+    matches = [row for row in snapshot.records(dataset) if row.get(id_field) == identity]
+    if len(matches) != 1:
+        raise ValueError(f"candidate raw {dataset.title()} identity is not unique")
+    return matches[0]
 
 
 def _ticker(reader: Any, cik: str | None) -> str:
@@ -571,10 +766,54 @@ def _text_sha256(value: Any) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+def _target_table_evidence(table: dict[str, Any]) -> dict[str, Any]:
+    excerpt = _normalized_text(table.get("text"))
+    marker_pattern = re.compile(
+        r"The following table summarizes (?:information pertaining to our )?revenue by "
+        r"(?:each of the )?specialized markets(?: we serve)?:"
+    )
+    matches = list(marker_pattern.finditer(excerpt))
+    if len(matches) != 1:
+        raise ValueError("source evidence does not identify one specialized-market revenue table")
+    marker = matches[0].group(0)
+    target = excerpt[matches[0].start():]
+    raw = _normalized_text((table.get("raw_fact") or {}).get("value_text"))
+    if raw.count(target) != 1:
+        raise ValueError("bounded target table is not unique in the source TextBlock")
+    start = raw.index(target)
+    return {
+        "locator_method": "NORMALIZED_TEXT_RANGE",
+        "normalized_start": start,
+        "normalized_end": start + len(target),
+        "normalized_text_sha256": hashlib.sha256(target.encode()).hexdigest(),
+        "semantic_marker": marker,
+    }
+
+
+def _normalized_text(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("source table text is missing")
+    unescaped = html.unescape(value)
+    without_markup = re.sub(r"<[^>]*>", " ", unescaped)
+    return " ".join(without_markup.split())
+
+
 def _canonical_sha256(value: Any) -> str:
     if not isinstance(value, dict):
         raise TypeError("source table raw Fact is missing")
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+
+
+def _aware_datetime(value: Any, label: str) -> datetime:
+    if not isinstance(value, str):
+        raise TypeError(f"{label} must be an ISO-8601 timestamp with timezone")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{label} must be an ISO-8601 timestamp with timezone") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{label} must be an ISO-8601 timestamp with timezone")
+    return parsed.astimezone(UTC)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
