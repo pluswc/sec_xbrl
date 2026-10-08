@@ -818,6 +818,43 @@ def _source_runs_for(
     return tuple(Path(path) for path in (source_runs or {}).get(ticker, ()))
 
 
+def _operation_tickers(
+    selected_tickers: Sequence[str] | None, configured_tickers: Sequence[str]
+) -> tuple[str, ...]:
+    configured = tuple(configured_tickers)
+    if selected_tickers is None:
+        return configured
+    if isinstance(selected_tickers, (str, bytes)):
+        raise TypeError("selected_tickers must be a sequence of ticker strings")
+    selected: list[str] = []
+    for raw_ticker in selected_tickers:
+        if type(raw_ticker) is not str or not raw_ticker.strip():
+            raise TypeError("selected_tickers must contain nonempty strings")
+        ticker = raw_ticker.strip().upper()
+        if not SAFE_TICKER.fullmatch(ticker):
+            raise ValueError(f"unsafe selected ticker: {ticker!r}")
+        if ticker in selected:
+            raise ValueError(f"selected_tickers must be unique: {ticker}")
+        selected.append(ticker)
+    if not selected:
+        raise ValueError("selected_tickers must not be empty")
+    unknown = set(selected) - set(configured)
+    if unknown:
+        raise ValueError(
+            "selected_tickers contain unconfigured tickers: " + ", ".join(sorted(unknown))
+        )
+    return tuple(selected)
+
+
+def _operation_scope(
+    selected_tickers: Sequence[str], configured_tickers: Sequence[str]
+) -> dict[str, Any]:
+    return {
+        "selected_tickers": list(selected_tickers),
+        "request_tickers": list(configured_tickers),
+    }
+
+
 def collect_universe(
     *,
     manifest_path: Path,
@@ -826,15 +863,16 @@ def collect_universe(
     taxonomy_cache: Path,
     source_runs: Mapping[str, Sequence[Path]] | None = None,
     bootstrap_taxonomy: bool = False,
+    selected_tickers: Sequence[str] | None = None,
 ) -> Path:
-    """Run serial per-company Layer 1 intake while isolating company failures."""
+    """Run serial Layer 1 intake for all or selected configured companies."""
     attested = _attest_run(manifest_path)
     manifest = attested.manifest
-    _preflight_run_mutations(
-        manifest_path.parent, tuple(company.ticker for company in attested.config.companies)
-    )
-    configured = {company.ticker for company in attested.config.companies}
-    unknown = set(source_runs or {}) - configured
+    configured_tickers = tuple(company.ticker for company in attested.config.companies)
+    operation_tickers = _operation_tickers(selected_tickers, configured_tickers)
+    operation_scope = _operation_scope(operation_tickers, configured_tickers)
+    _preflight_run_mutations(manifest_path.parent, configured_tickers)
+    unknown = set(source_runs or {}) - set(configured_tickers)
     if unknown:
         raise ValueError("source runs contain unconfigured tickers: " + ", ".join(sorted(unknown)))
     started_at = _now()
@@ -842,6 +880,8 @@ def collect_universe(
         if company.get("plan_status") != "PREPARED":
             continue
         ticker = company["ticker"]
+        if ticker not in operation_tickers:
+            continue
         company_root = manifest_path.parent / "companies" / ticker
         result: dict[str, Any]
         try:
@@ -873,7 +913,12 @@ def collect_universe(
         _append_attempt(
             company_root,
             "collect",
-            {"started_at": started_at, "completed_at": _now(), "result": result},
+            {
+                "started_at": started_at,
+                "completed_at": _now(),
+                "operation_scope": operation_scope,
+                "result": result,
+            },
         )
     write_status_outputs(manifest_path=manifest_path, output_root=manifest_path.parent / "status")
     return manifest_path.parent / "status" / "collection_status.json"
@@ -1007,11 +1052,14 @@ def build_universe(
     manifest_path: Path,
     output_root: Path,
     views: Sequence[str] = ("AS_FILED", "LATEST_REPORTED"),
+    selected_tickers: Sequence[str] | None = None,
 ) -> Path:
-    """Explicitly publish governed history for raw-complete companies."""
+    """Publish governed history for all or selected raw-complete companies."""
     attested = _attest_run(manifest_path)
     manifest = attested.manifest
     tickers = tuple(company.ticker for company in attested.config.companies)
+    operation_tickers = _operation_tickers(selected_tickers, tickers)
+    operation_scope = _operation_scope(operation_tickers, tickers)
     _preflight_run_mutations(manifest_path.parent, tickers)
     _preflight_publication_paths(output_root, tickers)
     intake_by_ticker: dict[str, _IntakeAttestation] = {}
@@ -1019,6 +1067,8 @@ def build_universe(
         if company.get("plan_status") != "PREPARED":
             continue
         ticker = company["ticker"]
+        if ticker not in operation_tickers:
+            continue
         company_root = manifest_path.parent / "companies" / ticker
         intake_path = company_root / "intake" / "history_intake.json"
         intake = _attest_intake(intake_path, attested.plans[ticker])
@@ -1048,6 +1098,8 @@ def build_universe(
         if company.get("plan_status") != "PREPARED":
             continue
         ticker = company["ticker"]
+        if ticker not in operation_tickers:
+            continue
         company_root = manifest_path.parent / "companies" / ticker
         intake = company_root / "intake" / "history_intake.json"
         intake_attestation = intake_by_ticker[ticker]
@@ -1061,7 +1113,12 @@ def build_universe(
             _append_attempt(
                 company_root,
                 "build",
-                {"started_at": started_at, "completed_at": _now(), "result": result},
+                {
+                    "started_at": started_at,
+                    "completed_at": _now(),
+                    "operation_scope": operation_scope,
+                    "result": result,
+                },
             )
             continue
         try:
@@ -1091,7 +1148,12 @@ def build_universe(
         _append_attempt(
             company_root,
             "build",
-            {"started_at": started_at, "completed_at": _now(), "result": result},
+            {
+                "started_at": started_at,
+                "completed_at": _now(),
+                "operation_scope": operation_scope,
+                "result": result,
+            },
         )
     write_status_outputs(manifest_path=manifest_path, output_root=manifest_path.parent / "status")
     return manifest_path.parent / "status" / "collection_status.json"
@@ -1328,11 +1390,13 @@ def main() -> None:
     collect.add_argument("--index-cache", type=Path, required=True)
     collect.add_argument("--taxonomy-cache", type=Path, required=True)
     collect.add_argument("--source-run", action="append", default=[])
+    collect.add_argument("--ticker", action="append", default=[])
     collect.add_argument("--bootstrap-taxonomy", action="store_true")
     build = commands.add_parser("build")
     build.add_argument("--manifest", type=Path, required=True)
     build.add_argument("--output-root", type=Path, required=True)
     build.add_argument("--views", nargs="+", default=["AS_FILED", "LATEST_REPORTED"])
+    build.add_argument("--ticker", action="append", default=[])
     status_parser = commands.add_parser("status")
     status_parser.add_argument("--manifest", type=Path, required=True)
     status_parser.add_argument("--output-root", type=Path)
@@ -1354,6 +1418,7 @@ def main() -> None:
             taxonomy_cache=args.taxonomy_cache,
             source_runs=_keyed_paths(args.source_run, repeated=True),
             bootstrap_taxonomy=args.bootstrap_taxonomy,
+            selected_tickers=tuple(args.ticker) or None,
         )
         status = read_universe_status(manifest_path=args.manifest)
     elif args.command == "build":
@@ -1361,6 +1426,7 @@ def main() -> None:
             manifest_path=args.manifest,
             output_root=args.output_root,
             views=tuple(args.views),
+            selected_tickers=tuple(args.ticker) or None,
         )
         status = read_universe_status(manifest_path=args.manifest)
     else:
@@ -1368,13 +1434,17 @@ def main() -> None:
         result = write_status_outputs(manifest_path=args.manifest, output_root=output_root)[0]
         status = read_universe_status(manifest_path=args.manifest)
     print(result)
+    operation_rows = status.companies
+    if args.command in {"collect", "build"} and args.ticker:
+        selected = {ticker.strip().upper() for ticker in args.ticker}
+        operation_rows = tuple(row for row in status.companies if row.ticker in selected)
     if args.command == "prepare" and any(row.state == "PREPARE_FAILED" for row in status.companies):
         raise SystemExit(1)
     if args.command == "collect" and any(
-        row.state not in {"RAW_COMPLETE", "READY"} for row in status.companies
+        row.state not in {"RAW_COMPLETE", "READY"} for row in operation_rows
     ):
         raise SystemExit(1)
-    if args.command == "build" and any(row.state != "READY" for row in status.companies):
+    if args.command == "build" and any(row.state != "READY" for row in operation_rows):
         raise SystemExit(1)
     if args.command == "status" and status.failed_companies:
         raise SystemExit(1)

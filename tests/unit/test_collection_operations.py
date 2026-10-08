@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -321,6 +322,222 @@ def test_collect_isolates_failures_retries_and_reconciles_reuse_counts(
     assert second.raw_complete_companies == 2
     assert second.failed_companies == 0
     assert len(list((tmp_path / "run/companies/BBB/operation_attempts").glob("collect-*.json"))) == 2
+
+
+def test_collect_subset_preserves_full_request_status_and_records_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = operations.prepare_universe(
+        config_path=_config(tmp_path / "config.json", "AAA", "BBB"),
+        run_root=tmp_path / "run",
+        existing_plans={
+            "AAA": _full_plan(tmp_path / "AAA.json", "AAA", "0000000001"),
+            "BBB": _full_plan(tmp_path / "BBB.json", "BBB", "0000000002"),
+        },
+    )
+    calls: list[str] = []
+
+    def ingest(**kwargs: object) -> Path:
+        plan = json.loads(Path(kwargs["plan_path"]).read_text())
+        ticker = plan["companies"][0]["ticker"]
+        calls.append(ticker)
+        result = Path(kwargs["output_run"]) / "history_intake.json"
+        return _write(
+            result,
+            {
+                "plan": plan,
+                "complete": True,
+                "filings": [
+                    {"filing": filing, "status": "REUSED"}
+                    for filing in plan["companies"][0]["filings"]
+                ],
+            },
+        )
+
+    monkeypatch.setattr(operations.history, "ingest_history", ingest)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "collection_operations",
+            "collect",
+            "--manifest",
+            str(manifest),
+            "--package-cache",
+            str(tmp_path / "packages"),
+            "--index-cache",
+            str(tmp_path / "indexes"),
+            "--taxonomy-cache",
+            str(tmp_path / "taxonomy"),
+            "--ticker",
+            "aaa",
+        ],
+    )
+    operations.main()
+
+    assert calls == ["AAA"]
+    status = operations.read_universe_status(manifest_path=manifest)
+    assert status.requested_companies == 2
+    assert status.requested_filings == status.selected_filings == 10
+    assert status.raw_complete_companies == 1
+    assert status.held_filings == 5
+    assert status.pending_filings == 5
+    assert {row.ticker: row.state for row in status.companies} == {
+        "AAA": "RAW_COMPLETE",
+        "BBB": "PREPARED",
+    }
+    assert not list((tmp_path / "run/companies/BBB/operation_attempts").glob("collect-*.json"))
+    attempt = json.loads(
+        next((tmp_path / "run/companies/AAA/operation_attempts").glob("collect-*.json")).read_text()
+    )
+    assert attempt["operation_scope"] == {
+        "selected_tickers": ["AAA"],
+        "request_tickers": ["AAA", "BBB"],
+    }
+
+
+def test_build_subset_preserves_other_company_state_and_records_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = operations.prepare_universe(
+        config_path=_config(tmp_path / "config.json", "AAA", "BBB"),
+        run_root=tmp_path / "run",
+        existing_plans={
+            "AAA": _full_plan(tmp_path / "AAA.json", "AAA", "0000000001"),
+            "BBB": _full_plan(tmp_path / "BBB.json", "BBB", "0000000002"),
+        },
+    )
+    for ticker in ("AAA", "BBB"):
+        company_root = tmp_path / f"run/companies/{ticker}"
+        plan = json.loads((company_root / "plan.json").read_text())
+        _write(
+            company_root / "intake/history_intake.json",
+            {
+                "plan": plan,
+                "complete": True,
+                "filings": [
+                    {"filing": filing, "status": "REUSED"}
+                    for filing in plan["companies"][0]["filings"]
+                ],
+            },
+        )
+    calls: list[str] = []
+
+    def build(**kwargs: object) -> Path:
+        output_root = Path(kwargs["output_root"])
+        ticker = output_root.name
+        calls.append(ticker)
+        intake_path = Path(kwargs["intake_manifest"])
+        intake = json.loads(intake_path.read_text())
+        publication = output_root / "panels"
+        relative = Path(intake["plan"]["companies"][0]["cik"]) / "LATEST_REPORTED/QTD_3M/rows.parquet"
+        info = operations.history._write_records(publication / relative, ({"row_id": ticker},))
+        _write(
+            publication / "history_manifest.json",
+            {
+                "version": operations.history.HISTORY_VERSION,
+                "plan": intake["plan"],
+                "views": list(kwargs["views"]),
+                "source_intake": str(intake_path.absolute()),
+                "tables": [{"files": {"rows": {**info, "path": str(relative)}}}],
+            },
+        )
+        return publication
+
+    monkeypatch.setattr(operations.history, "build_history", build)
+    operations.build_universe(
+        manifest_path=manifest,
+        output_root=tmp_path / "publications",
+        selected_tickers=("BBB",),
+    )
+
+    assert calls == ["BBB"]
+    status = operations.read_universe_status(manifest_path=manifest)
+    assert status.requested_companies == 2
+    assert status.requested_filings == status.selected_filings == 10
+    assert status.ready_companies == 1
+    assert status.raw_complete_companies == 2
+    assert {row.ticker: row.state for row in status.companies} == {
+        "AAA": "RAW_COMPLETE",
+        "BBB": "READY",
+    }
+    assert not list((tmp_path / "run/companies/AAA/operation_attempts").glob("build-*.json"))
+    attempt = json.loads(
+        next((tmp_path / "run/companies/BBB/operation_attempts").glob("build-*.json")).read_text()
+    )
+    assert attempt["operation_scope"] == {
+        "selected_tickers": ["BBB"],
+        "request_tickers": ["AAA", "BBB"],
+    }
+
+
+@pytest.mark.parametrize("operation", ("collect", "build"))
+@pytest.mark.parametrize(
+    ("selected_tickers", "error"),
+    (
+        ((), "must not be empty"),
+        (("AAA", "AAA"), "must be unique"),
+        (("ZZZ",), "unconfigured"),
+        (("../outside",), "unsafe selected ticker"),
+    ),
+)
+def test_invalid_operation_subset_fails_before_calls_or_writes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    selected_tickers: tuple[str, ...],
+    error: str,
+) -> None:
+    manifest = operations.prepare_universe(
+        config_path=_config(tmp_path / "config.json", "AAA", "BBB"),
+        run_root=tmp_path / "run",
+        existing_plans={
+            "AAA": _full_plan(tmp_path / "AAA.json", "AAA", "0000000001"),
+            "BBB": _full_plan(tmp_path / "BBB.json", "BBB", "0000000002"),
+        },
+    )
+    attempts = {
+        ticker: tuple((tmp_path / f"run/companies/{ticker}/operation_attempts").iterdir())
+        for ticker in ("AAA", "BBB")
+    }
+    monkeypatch.setattr(
+        operations.history,
+        "ingest_history",
+        lambda **kwargs: pytest.fail("invalid subset reached ingestion"),
+    )
+    monkeypatch.setattr(
+        operations.history,
+        "build_history",
+        lambda **kwargs: pytest.fail("invalid subset reached build"),
+    )
+    monkeypatch.setattr(
+        operations,
+        "write_status_outputs",
+        lambda **kwargs: pytest.fail("invalid subset reached status writes"),
+    )
+
+    with pytest.raises(ValueError, match=error):
+        if operation == "collect":
+            operations.collect_universe(
+                manifest_path=manifest,
+                package_cache=tmp_path / "packages",
+                index_cache=tmp_path / "indexes",
+                taxonomy_cache=tmp_path / "taxonomy",
+                selected_tickers=selected_tickers,
+            )
+        else:
+            operations.build_universe(
+                manifest_path=manifest,
+                output_root=tmp_path / "publications",
+                selected_tickers=selected_tickers,
+            )
+
+    for ticker in ("AAA", "BBB"):
+        assert tuple((tmp_path / f"run/companies/{ticker}/operation_attempts").iterdir()) == attempts[
+            ticker
+        ]
+    assert not (tmp_path / "publications").exists()
+    assert not (tmp_path / "outside").exists()
 
 
 def test_status_is_offline_and_outputs_are_deterministic(

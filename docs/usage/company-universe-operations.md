@@ -70,11 +70,35 @@ PYTHONPATH=src .venv/bin/python -m sec_xbrl.collection_operations collect \
   --source-run AMD=/absolute/path/to/prior-amd-run
 ```
 
+For bounded memory use, select one or more companies with repeatable `--ticker`
+arguments.  Each command still validates the full immutable request and writes
+the aggregate 21-company status, while ingestion runs only for the selected
+companies:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m sec_xbrl.collection_operations collect \
+  --manifest data/processed/universe_runs/20261008_initial/collection/collection_manifest.json \
+  --package-cache data/raw/history_packages \
+  --index-cache data/raw/history_indexes \
+  --taxonomy-cache data/taxonomy_cache \
+  --ticker AMD
+```
+
+Run each company in a separate process when parser memory should be released
+between companies.  Repeat the same command for a retry; the immutable intake
+and append-only attempt history determine what can be reused.  The selected
+ticker list and the full request ticker list are recorded in every new
+operation attempt.  An empty, duplicate, unsafe, or unconfigured selection is
+rejected before any write.  Without `--ticker`, collection retains its serial
+all-company behavior.
+
 One company's error is recorded without cancelling later companies.  The
-command exits nonzero while any company is failed.  Retrying appends operational
-attempt records and the underlying history intake archives its prior manifest.
-A company reaches `RAW_COMPLETE` only when every filing in its immutable plan
-has a successful `INGESTED` or verified `REUSED` outcome.
+full-cohort command exits nonzero while any company is incomplete or failed; a
+filtered command bases its exit code on the selected companies while its status
+files continue to report the full cohort.  Retrying appends operational attempt
+records and the underlying history intake archives its prior manifest.  A
+company reaches `RAW_COMPLETE` only when every filing in its immutable plan has
+a successful `INGESTED` or verified `REUSED` outcome.
 
 ## Build governed publications
 
@@ -84,12 +108,15 @@ publications required by the delivery:
 ```bash
 PYTHONPATH=src .venv/bin/python -m sec_xbrl.collection_operations build \
   --manifest data/processed/universe_runs/20261008_initial/collection/collection_manifest.json \
-  --output-root data/processed/universe_runs/20261008_initial/history
+  --output-root data/processed/universe_runs/20261008_initial/history \
+  --ticker AMD
 ```
 
 `RAW_COMPLETE` does not mean `READY`.  `READY` requires a successful build
 marker for the immutable destination.  A different destination under the same
-run identity is refused.
+run identity is refused.  Repeat `--ticker` to select several companies, or
+omit it for the original serial all-company build.  Separate one-company build
+processes bound peak memory and preserve the full request and aggregate status.
 
 ## Inspect without network or parsing
 

@@ -155,6 +155,16 @@ launch uncoordinated request processes.  An existing verified snapshot may be
 reused from a declared source run.  Every retry appends an attempt record and
 retains the previous outcome.
 
+Collection and build accept an optional nonempty, unique subset of safe tickers
+from the attested request.  The subset narrows only that invocation's company
+loop; the immutable request, company manifest, full-run preflight, and aggregate
+status continue to cover the complete cohort.  This permits one-company
+processes so parser or publication memory is released between companies.  An
+unknown, duplicate, unsafe, or empty subset fails before any wrapper write or
+delegated ingest/build call.  Every selected-company attempt records both the
+operation subset and full request ticker list.  Omitting the subset preserves
+the serial all-company behavior.
+
 Build is an explicit optional phase.  A complete raw intake is
 `RAW_COMPLETE`; it becomes `READY` only after requested governed publications
 are built and verified.  An incomplete company never appears as successful or
@@ -195,7 +205,10 @@ calculation.
    manifests.
 5. Network collection is serial by default, and status performs no network or
    parser work.
-6. Relevant history-workflow tests and Ruff pass at a frozen commit.
+6. Offline tests prove that a validated company subset changes only the invoked
+   collection/build loop, preserves full-cohort counts and other-company state,
+   and rejects invalid scope before calls or writes.
+7. Relevant history-workflow tests and Ruff pass at a frozen commit.
 
 ### B gates
 
