@@ -11,7 +11,11 @@ runtime artifacts.  The implementation baseline is
 The current delivery state is **APPROVED with feature-branch implementation in
 progress**.  A candidate `24df803`, B candidate `1e5a398`, parser compatibility
 candidate `192ee424`, C repair candidate `9646771`, and numeric-duration
-conformance candidate `9b2c402` passed their separate independent verification.
+conformance/fail-closed candidate `9b2c402` passed their separate independent
+verification.  The broader SEC supported-lexical and exact word-duration
+grammar repair `c1fdc21` also passed independent verification.  The combined
+integration and fresh runtime still require their own verification and
+acceptance.
 The first combined candidate `f897045` remains
 historical evidence and is not accepted because the subsequent raw-accuracy
 audit found nonconforming numeric-duration values.  The whole delivery is not yet
@@ -24,9 +28,10 @@ architecture roadmap or U investor roadmap.
 On 2026-10-08 the user then authorized the SEC numeric-duration standards
 correction and fresh data generation.  The old v2/v3 raw snapshots, histories,
 and combined artifacts remain immutable.  This delivery now also requires a
-fresh `m2-layer1-v4` replay of all 381 selected source packages, fresh governed
+fresh `m2-layer1-v5` replay of all 381 selected source packages, fresh governed
 histories, and an assessment that verifies normalized duration values against
-the approved rule.  Matching filing counts alone cannot clear this gate.
+the approved duration rule plus the bounded supported-lexical repairs.  Matching
+filing counts alone cannot clear this gate.
 The parser and fail-closed ingestion contract is
 [`sec-duration-conformance-delivery.md`](sec-duration-conformance-delivery.md).
 
@@ -144,8 +149,13 @@ path such as `data/processed/universe_runs/<run-id>/` and contains:
 - a reproducible runtime README with source revision, commands, input
   locations, as-of date, source observation times, and rule versions.
 
-The duration migration uses new sibling roots such as `operations_v4`,
-`freshraw_v4`, and `analyzed_v4`.  It does not rewrite or delete the earlier
+The supported-transform migration uses a new ignored root
+`data/processed/universe_runs/20261008_sec_transform_v5/` for its operations,
+fresh Layer 1 snapshots, governed histories, Q4 publications, evidence, and
+completion view.  The current runtime subroots are `ops_v5`,
+`analysis_history_v5`, `q4_delivery_v5`, and `completion_v5`.  It reuses the immutable cached source packages under
+`data/raw/universe_runs/20261008_duration_v4/` without rewriting them.  It does
+not rewrite or delete the earlier
 operations, raw, retry, analysis, Q4, or completion artifacts.
 
 No runtime report may embed `SEC_USER_AGENT`, secrets, or mutable cache
@@ -219,14 +229,15 @@ scope must equal the immutable A universe ID, financial as-of date, collection
 request and collection-manifest SHA-256 values, requested-company count,
 selected-filing count, and every governed-history manifest digest.
 
-A `PASS` assessment binds `m2-layer1-v4`, rule
-`sec-duration-conformance-v1`, the frozen 40-character source commit, all 381
+A `PASS` assessment binds `m2-layer1-v5`, duration rule
+`sec-duration-conformance-v1`, supported-lexical policy
+`sec-supported-lexical-repairs-v1`, the frozen 40-character source commit, all 381
 verified source packages with none missing, and independent verification of
 that same commit.  It declares SHA-256 identities for its evidence files and
 must prove:
 
 - one unique `PASS` check for every accession in the immutable A plans,
-  including its source-package hash, v4 snapshot-manifest hash, duration-Fact
+  including its source-package hash, v5 snapshot-manifest hash, duration-Fact
   count, and zero normalized mismatches, including filings with zero duration
   Facts;
 - `TAXONOMY_AND_TRANSFORM_RESOLUTION`, `RAW_CORPUS_COMPLETENESS`, and
@@ -237,17 +248,35 @@ must prove:
 - actual normalized-value checks equal their expected values, including AMD
   accession `0000002488-23-000047`, source `4.55`, old `P4Y7M`, and corrected
   `P4Y6M18D`; and
-- foreign-change counts are zero for non-duration facts, duration source
+- unapproved foreign-change counts are zero for non-duration facts, duration source
   lexicals, monetary values, Contexts, Units, dimensions, and relationship
   keys.
+
+The fail-closed replay exposed 104 preexisting valid SEC lexicals that the local
+helpers did not support: 48 `exchnameen` `Nasdaq` values, 19
+`stateprovnameen` `Idaho` values, five `durwordsen` values containing U+2011,
+and 32 `numwordsen` `nil` zeros.  An allowed repair must appear in the distinct
+hashed `sec-approved-inline-transform-corrections-v1` record set and match the
+hashed 104-row source index.  The publisher checks every record against the
+actual v5 Fact and Concept tables, including planned CIK/accession, stable
+source ID, Fact ID, Context ID, source QName, concept data type, Inline XBRL
+element type, transform namespace/name, lexical, sign, scale, primary-document
+hash, old sentinel, expected raw value, actual raw value, `is_nil=false`, and
+the exact named repair policy.  The numeric corrections are reported as 22
+monetary zeros and 10 share zeros; they are reported values, not XBRL nil.
+This bounded allowlist does not relax the zero count for every unapproved
+difference, and old snapshots retain the sentinel unchanged.
 
 For the 381-filing cohort, the exact verified source index contains 3,842
 duration Facts: 481 `durday`, 391 `durmonth`, 2,902 `duryear`, and 68 `durweek`.
 The per-filing and per-transform totals must reconcile to those exact counts.
-The assessment binds the 381-row source index and external fact-level evidence
-by path and SHA-256 instead of duplicating thousands of Fact records.  This
-prevents a partial scan with zero mismatches from being reported as
-conformance.
+The assessment binds the 381-row filing index, its 3,842 source-Fact entries,
+and external fact-level evidence by path and SHA-256.  Every source entry must
+match CIK/accession/source ID/stable Fact ID/format/lexical and every evidence Fact ID must
+exist exactly once in the corresponding v5 snapshot with the declared
+normalized raw/text value, Context, reported/non-nil state, and Concept QName.
+This prevents a partial scan, invented Fact ID, or self-consistent but false
+value declaration from being reported as conformance.
 
 `BLOCKED` is an overall delivery block and `PENDING` keeps the overall delivery
 partial.  Both require an explicit reason.  Omitting the assessment preserves
@@ -324,7 +353,7 @@ outcomes rather than delivery failures; they must remain non-numeric and
 traceable.
 
 The duration-conformance threshold is a `PASS` assessment for the exact fresh
-381-filing v4 cohort.  Structural completion, unchanged counts, or a zero-error
+381-filing v5 cohort.  Structural completion, unchanged counts, or a zero-error
 parse run without normalized-value comparisons does not satisfy this gate.
 
 ## 7. Assumptions and unresolved cases

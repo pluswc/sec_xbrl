@@ -3,8 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 
+import polars as pl
 import pytest
 
 from sec_xbrl import collection_operations as operations
@@ -91,6 +93,28 @@ def _collection(tmp_path: Path) -> tuple[Path, Path]:
             "package_sha256": "c" * 64,
         },
     )
+    snapshot_root = (
+        intake_root / "snapshots/0000000123/000000012326000001"
+    )
+    pl.DataFrame(
+        {
+            "fact_id": ["fact-fixture"],
+            "raw_concept_id": ["concept-duration-fixture"],
+            "context_id": ["context-duration-fixture"],
+            "value_numeric": [None],
+            "value_text": ["P1Y6M"],
+            "is_nil": [False],
+            "raw_value": ["P1Y6M"],
+            "reported_or_derived": ["REPORTED"],
+        }
+    ).write_parquet(snapshot_root / "fact.parquet")
+    pl.DataFrame(
+        {
+            "raw_concept_id": ["concept-duration-fixture"],
+            "qname": ["test:ExpectedLife"],
+            "data_type": ["xbrli:durationItemType"],
+        }
+    ).write_parquet(snapshot_root / "concept.parquet")
     _write(
         intake_root / "history_intake.json",
         {
@@ -189,6 +213,20 @@ def _accuracy_assessment(
                     "primary_sha256": "e" * 64,
                 }
             ],
+            "duration_facts": [
+                {
+                    "ticker": "TEST",
+                    "cik": "0000000123",
+                    "accession": "0000000123-26-000001",
+                    "source_id": "source-duration-fixture",
+                    "fact_id": "fact-fixture",
+                    "format_qname": "ixt-sec:duryear",
+                    "format_namespace": universe_delivery.SEC_TRANSFORM_NAMESPACE,
+                    "source_lexical": "1.5",
+                    "concept_qname": "test:ExpectedLife",
+                    "context_ref": "source-context-duration-fixture",
+                }
+            ],
         },
     )
     source_index_sha = hashlib.sha256(source_index.read_bytes()).hexdigest()
@@ -202,7 +240,11 @@ def _accuracy_assessment(
                     "ticker": "TEST",
                     "cik": "0000000123",
                     "accession": "0000000123-26-000001",
+                    "source_id": "source-duration-fixture",
                     "fact_id": "fact-fixture",
+                    "context_id": "context-duration-fixture",
+                    "source_context_ref": "source-context-duration-fixture",
+                    "concept_qname": "test:ExpectedLife",
                     "transform": "duryear",
                     "lexical_input": "1.5",
                     "expected_value": "P1Y6M",
@@ -213,10 +255,28 @@ def _accuracy_assessment(
         },
     )
     fact_evidence_sha = hashlib.sha256(fact_evidence.read_bytes()).hexdigest()
+    approved_corrections = _write(
+        tmp_path / f"accuracy-{state.lower()}-approved-corrections.json",
+        {
+            "schema_version": "sec-approved-inline-transform-corrections-v1",
+            "record_count": 0,
+            "records": [],
+        },
+    )
+    approved_corrections_sha = hashlib.sha256(
+        approved_corrections.read_bytes()
+    ).hexdigest()
+    correction_source_index = _write(
+        tmp_path / f"accuracy-{state.lower()}-correction-source-index.json",
+        {"fact_count": 0, "facts": [], "unmatched": []},
+    )
+    correction_source_index_sha = hashlib.sha256(
+        correction_source_index.read_bytes()
+    ).hexdigest()
     assessment: dict[str, object] = {
         "schema_version": universe_delivery.ACCURACY_SCHEMA,
         "state": state,
-        "reason": None if state == "PASS" else "fresh v4 cohort is not accepted",
+        "reason": None if state == "PASS" else "fresh v5 cohort is not accepted",
         "scope": {
             "universe_id": "one-company-delivery",
             "financial_as_of": "2026-10-08",
@@ -231,6 +291,14 @@ def _accuracy_assessment(
             {"path": str(verification.absolute()), "sha256": verification_sha},
             {"path": str(source_index.absolute()), "sha256": source_index_sha},
             {"path": str(fact_evidence.absolute()), "sha256": fact_evidence_sha},
+            {
+                "path": str(approved_corrections.absolute()),
+                "sha256": approved_corrections_sha,
+            },
+            {
+                "path": str(correction_source_index.absolute()),
+                "sha256": correction_source_index_sha,
+            },
         ],
     }
     if state == "PASS":
@@ -238,6 +306,9 @@ def _accuracy_assessment(
             {
                 "parser_version": universe_delivery.ACCURACY_PARSER_VERSION,
                 "parser_rule_version": universe_delivery.ACCURACY_RULE_VERSION,
+                "supported_lexical_repair_policy": (
+                    universe_delivery.SUPPORTED_LEXICAL_REPAIR_POLICY
+                ),
                 "frozen_commit_sha": "a" * 40,
                 "source_packages": {"expected": 1, "verified": 1, "missing": 0},
                 "filing_checks": [
@@ -283,6 +354,13 @@ def _accuracy_assessment(
                     "path": str(fact_evidence.absolute()),
                     "sha256": fact_evidence_sha,
                     "record_count": 1,
+                },
+                "approved_transform_corrections": {
+                    "path": str(approved_corrections.absolute()),
+                    "sha256": approved_corrections_sha,
+                    "record_count": 0,
+                    "source_index_path": str(correction_source_index.absolute()),
+                    "source_index_sha256": correction_source_index_sha,
                 },
                 "normalized_value_checks": [
                     {
@@ -524,7 +602,7 @@ def test_one_company_completion_joins_statuses_and_c_scope_labels(
     assert "기업·산업·원자료·분석준비·Q4범위" in rendered
     assert "기준일을 분리해서 읽기" in rendered
     assert "MAPPING_REVIEW_REQUIRED_DIFFERENT_EPOCHS" in rendered
-    assert "Raw duration 정확성" in rendered
+    assert "Raw SEC transform 정확성" in rendered
     assert "FY2025 Q4" in rendered
     assert published.readiness_csv.read_text().count("\n") == 2
     assert "does not" in published.readme.read_text(encoding="utf-8")
@@ -746,7 +824,7 @@ def test_duration_conformance_pass_binds_current_governed_histories(
     assert not (tmp_path / "completion").exists()
 
 
-def test_duration_conformance_pass_binds_actual_v4_snapshot_hashes(
+def test_duration_conformance_pass_binds_actual_v5_snapshot_hashes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     paths = _inputs(tmp_path, monkeypatch)
@@ -754,7 +832,7 @@ def test_duration_conformance_pass_binds_actual_v4_snapshot_hashes(
     payload["filing_checks"][0]["source_package_sha256"] = "f" * 64
     foreign = _write(tmp_path / "foreign-snapshot-accuracy.json", payload)
 
-    with pytest.raises(ValueError, match="differs from v4 snapshot"):
+    with pytest.raises(ValueError, match="differs from v5 snapshot"):
         universe_delivery.publish_universe_delivery(
             config_path=paths["config"],
             collection_manifest=paths["collection"],
@@ -765,15 +843,29 @@ def test_duration_conformance_pass_binds_actual_v4_snapshot_hashes(
     assert not (tmp_path / "completion").exists()
 
 
-def test_duration_conformance_loads_fact_level_values_before_pass(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("tamper", "error"),
+    (
+        ("fact_id", "differs from source index"),
+        ("matching_wrong_value", "value differs from v5 Fact or Concept"),
+    ),
+)
+def test_duration_conformance_binds_fact_evidence_to_actual_v5_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tamper: str,
+    error: str,
 ) -> None:
     paths = _inputs(tmp_path, monkeypatch)
     payload = json.loads(paths["accuracy"].read_text())
     fact_declaration = payload["fact_level_evidence"]
     fact_path = Path(fact_declaration["path"])
     facts = json.loads(fact_path.read_text())
-    facts["records"][0]["actual_value"] = "P1Y7M"
+    if tamper == "fact_id":
+        facts["records"][0]["fact_id"] = "fact-rehashed-fake"
+    else:
+        facts["records"][0]["expected_value"] = "P1Y7M"
+        facts["records"][0]["actual_value"] = "P1Y7M"
     _write(fact_path, facts)
     changed_sha = hashlib.sha256(fact_path.read_bytes()).hexdigest()
     fact_declaration["sha256"] = changed_sha
@@ -782,7 +874,7 @@ def test_duration_conformance_loads_fact_level_values_before_pass(
             evidence["sha256"] = changed_sha
     inaccurate = _write(tmp_path / "inaccurate-fact-evidence.json", payload)
 
-    with pytest.raises(ValueError, match="fact-level normalized value is invalid"):
+    with pytest.raises(ValueError, match=error):
         universe_delivery.publish_universe_delivery(
             config_path=paths["config"],
             collection_manifest=paths["collection"],
@@ -791,3 +883,248 @@ def test_duration_conformance_loads_fact_level_values_before_pass(
             destination=tmp_path / "completion",
         )
     assert not (tmp_path / "completion").exists()
+
+
+@pytest.mark.parametrize(
+    (
+        "family",
+        "rule",
+        "transform",
+        "lexical",
+        "concept_qname",
+        "data_type",
+        "element_type",
+        "source_sign",
+        "source_scale",
+        "actual",
+        "value_class",
+    ),
+    (
+        (
+            "SEC_EXCHNAMEEN_NASDAQ",
+            "sec-inline-2015-exchnameen-nasdaq",
+            "exchnameen",
+            "Nasdaq",
+            "dei:SecurityExchangeName",
+            "dei:edgarExchangeCodeItemType",
+            "nonNumeric",
+            None,
+            None,
+            "NASDAQ",
+            "metadata_text",
+        ),
+        (
+            "SEC_STATEPROVNAMEEN_IDAHO",
+            "sec-inline-2015-stateprovnameen-idaho",
+            "stateprovnameen",
+            "Idaho",
+            "dei:EntityAddressStateOrProvince",
+            "dei:stateOrProvinceItemType",
+            "nonNumeric",
+            None,
+            None,
+            "ID",
+            "metadata_text",
+        ),
+        (
+            "SEC_DURWORDSEN_UNICODE_HYPHEN",
+            "sec-inline-2015-durwordsen-unicode-hyphen",
+            "durwordsen",
+            "three\u2011year",
+            "test:ExpectedLife",
+            "xbrli:durationItemType",
+            "nonNumeric",
+            None,
+            None,
+            "P3Y",
+            "duration",
+        ),
+        (
+            "SEC_NUMWORDSEN_NIL_ZERO",
+            "sec-inline-2015-numwordsen-nil-zero",
+            "numwordsen",
+            "nil",
+            "us-gaap:GainLoss",
+            "xbrli:monetaryItemType",
+            "nonFraction",
+            "-",
+            "6",
+            "-0",
+            "monetary",
+        ),
+        (
+            "SEC_NUMWORDSEN_NIL_ZERO",
+            "sec-inline-2015-numwordsen-nil-zero",
+            "numwordsen",
+            "nil",
+            "us-gaap:TreasuryStockSharesRetired",
+            "xbrli:sharesItemType",
+            "nonFraction",
+            None,
+            None,
+            "0",
+            "shares",
+        ),
+    ),
+)
+def test_approved_transform_corrections_are_source_and_snapshot_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    family: str,
+    rule: str,
+    transform: str,
+    lexical: str,
+    concept_qname: str,
+    data_type: str,
+    element_type: str,
+    source_sign: str | None,
+    source_scale: str | None,
+    actual: str,
+    value_class: str,
+) -> None:
+    paths = _inputs(tmp_path, monkeypatch)
+    payload = json.loads(paths["accuracy"].read_text())
+    declaration = payload["approved_transform_corrections"]
+    correction_path = Path(declaration["path"])
+    source_index_path = Path(declaration["source_index_path"])
+    snapshot = (
+        paths["collection"].parent
+        / "companies/TEST/intake/snapshots/0000000123/000000012326000001"
+    )
+    fact_id = "fact-supported-lexical"
+    source_id = "source-supported-lexical"
+    context_id = "context-supported-lexical"
+    raw_concept_id = "concept-supported-lexical"
+    source_record = {
+        "ticker": "TEST",
+        "cik": "0000000123",
+        "accession": "0000000123-26-000001",
+        "source_id": source_id,
+        "fact_id": fact_id,
+        "context_id": context_id,
+        "raw_concept_id": raw_concept_id,
+        "concept_qname": concept_qname,
+        "concept_data_type_qname": data_type,
+        "source_element_type": element_type,
+        "source_lexical": lexical,
+        "format_qname": f"ixt-sec:{transform}",
+        "format_namespace": universe_delivery.SEC_TRANSFORM_NAMESPACE,
+        "source_scale": source_scale,
+        "source_sign": source_sign,
+        "primary_sha256": "e" * 64,
+    }
+    _write(
+        source_index_path,
+        {"fact_count": 1, "facts": [source_record], "unmatched": []},
+    )
+    correction_record = {
+        "ticker": "TEST",
+        "cik": "0000000123",
+        "accession": "0000000123-26-000001",
+        "source_id": source_id,
+        "fact_id": fact_id,
+        "context_id": context_id,
+        "concept_qname": concept_qname,
+        "concept_data_type_qname": data_type,
+        "source_element_type": element_type,
+        "transform_namespace": universe_delivery.SEC_TRANSFORM_NAMESPACE,
+        "transform": transform,
+        "lexical_input": lexical,
+        "source_scale": source_scale,
+        "source_sign": source_sign,
+        "source_primary_sha256": "e" * 64,
+        "previous_raw_value": "(ixTransformValueError)",
+        "expected_raw_value": actual,
+        "actual_raw_value": actual,
+        "actual_is_nil": False,
+        "repair_family": family,
+        "repair_rule": rule,
+        "value_class": value_class,
+        "status": "APPROVED",
+        "rule_reference": "SEC staff inline transformation reference",
+    }
+    _write(
+        correction_path,
+        {
+            "schema_version": "sec-approved-inline-transform-corrections-v1",
+            "record_count": 1,
+            "records": [correction_record],
+        },
+    )
+    pl.concat(
+        [
+            pl.read_parquet(snapshot / "fact.parquet"),
+            pl.DataFrame(
+                {
+                    "fact_id": [fact_id],
+                    "raw_concept_id": [raw_concept_id],
+                    "context_id": [context_id],
+                    "value_numeric": [
+                        Decimal(0) if value_class in {"monetary", "shares"} else None
+                    ],
+                    "value_text": [
+                        None if value_class in {"monetary", "shares"} else actual
+                    ],
+                    "is_nil": [False],
+                    "raw_value": [actual],
+                    "reported_or_derived": ["REPORTED"],
+                }
+            ),
+        ],
+        how="diagonal_relaxed",
+    ).write_parquet(snapshot / "fact.parquet")
+    pl.concat(
+        [
+            pl.read_parquet(snapshot / "concept.parquet"),
+            pl.DataFrame(
+                {
+                    "raw_concept_id": [raw_concept_id],
+                    "qname": [concept_qname],
+                    "data_type": [data_type],
+                }
+            ),
+        ],
+        how="vertical_relaxed",
+    ).write_parquet(snapshot / "concept.parquet")
+    changed_sha = hashlib.sha256(correction_path.read_bytes()).hexdigest()
+    source_index_sha = hashlib.sha256(source_index_path.read_bytes()).hexdigest()
+    declaration.update(
+        sha256=changed_sha,
+        record_count=1,
+        source_index_sha256=source_index_sha,
+    )
+    for evidence in payload["evidence_files"]:
+        if evidence["path"] == str(correction_path):
+            evidence["sha256"] = changed_sha
+        elif evidence["path"] == str(source_index_path):
+            evidence["sha256"] = source_index_sha
+    valid = _write(tmp_path / f"valid-{family}-{value_class}.json", payload)
+
+    publication = universe_delivery.publish_universe_delivery(
+        config_path=paths["config"],
+        collection_manifest=paths["collection"],
+        metadata_publication=paths["metadata"],
+        accuracy_assessment=valid,
+        destination=tmp_path / "completion-valid",
+    )
+    report = json.loads(publication.readiness_json.read_text())
+    assert report["assessments"]["duration_conformance"][
+        "approved_correction_summary"
+    ]["value_classes"] == {value_class: 1}
+
+    facts = pl.read_parquet(snapshot / "fact.parquet").with_columns(
+        pl.when(pl.col("fact_id") == fact_id)
+        .then(pl.lit("foreign-value"))
+        .otherwise(pl.col("raw_value"))
+        .alias("raw_value")
+    )
+    facts.write_parquet(snapshot / "fact.parquet")
+    with pytest.raises(ValueError, match="differs from v5 Fact or Concept"):
+        universe_delivery.publish_universe_delivery(
+            config_path=paths["config"],
+            collection_manifest=paths["collection"],
+            metadata_publication=paths["metadata"],
+            accuracy_assessment=valid,
+            destination=tmp_path / "completion-invalid",
+        )
+    assert not (tmp_path / "completion-invalid").exists()

@@ -148,11 +148,11 @@ opening SEC data or rerunning analysis:
 ```bash
 PYTHONPATH=src .venv/bin/python -m sec_xbrl.universe_delivery \
   --config /absolute/path/to/final-pilot-config.json \
-  --collection-manifest /absolute/path/to/operations_final/collection_manifest.json \
+  --collection-manifest /absolute/path/to/20261008_sec_transform_v5/ops_v5/collection_manifest.json \
   --metadata-publication /absolute/path/to/company_metadata_v2 \
-  --reviewed-q4-publication /absolute/path/to/q4_delivery/companion \
-  --quarterly-analysis /absolute/path/to/q4_delivery/quarterly \
-  --annual-analysis /absolute/path/to/q4_delivery/annual \
+  --reviewed-q4-publication /absolute/path/to/20261008_sec_transform_v5/q4_delivery_v5/companion \
+  --quarterly-analysis /absolute/path/to/20261008_sec_transform_v5/q4_delivery_v5/quarterly \
+  --annual-analysis /absolute/path/to/20261008_sec_transform_v5/q4_delivery_v5/annual \
   --accuracy-assessment /absolute/path/to/sec_duration_conformance_assessment.json \
   --destination /absolute/path/to/completion
 ```
@@ -165,10 +165,12 @@ digest before creating the destination.
 
 The accuracy input is optional for backward-compatible use on unrelated
 cohorts.  It is required for the 2026-10-08 delivery.  `PASS` must bind the
-exact A request and fresh v4 381-filing scope, verify actual normalized
+exact A request and fresh v5 381-filing scope, verify actual normalized
 duration values including the known AMD `4.55` result, bind every governed
-history manifest and one check per planned accession, attest zero foreign
-changes, reconcile the exact 3,842 duration Facts to external evidence, and
+history manifest and one check per planned accession, attest all 104 approved
+SEC transform repairs against their source index and fresh v5 Fact/Concept
+tables, require zero unapproved foreign changes, reconcile the exact 3,842
+duration Facts to external evidence, and
 include independent-verification evidence.  `BLOCKED` is shown as
 an overall block; `PENDING` keeps the publication partial.  Counts without
 normalized-value checks are rejected.
@@ -181,11 +183,12 @@ records or all 21 ticker/hash entries; they are not valid literal JSON:
   "schema_version": "sec-duration-conformance-assessment-v1",
   "state": "PASS",
   "reason": null,
-  "parser_version": "m2-layer1-v4",
+  "parser_version": "m2-layer1-v5",
   "parser_rule_version": "sec-duration-conformance-v1",
-  "frozen_commit_sha": "9b2c4022c64dee2327da082a38777684c96271be",
+  "supported_lexical_repair_policy": "sec-supported-lexical-repairs-v1",
+  "frozen_commit_sha": "c1fdc21a267545c3c67ad4bdce8c74137ee340e1",
   "scope": {
-    "universe_id": "pilot-21-20261008",
+    "universe_id": "pilot-21-20261008-sec-transform-v5",
     "financial_as_of": "2026-10-08",
     "collection_request_sha256": "<sha256>",
     "collection_manifest_sha256": "<sha256>",
@@ -230,6 +233,13 @@ records or all 21 ticker/hash entries; they are not valid literal JSON:
     "sha256": "<sha256>",
     "record_count": 3842
   },
+  "approved_transform_corrections": {
+    "path": "/absolute/path/to/approved_inline_transform_corrections.json",
+    "sha256": "<sha256>",
+    "record_count": 104,
+    "source_index_path": "/absolute/path/to/supported_lexical_correction_source_index.json",
+    "source_index_sha256": "<sha256>"
+  },
   "normalized_value_checks": [
     {
       "ticker": "AMD",
@@ -254,13 +264,15 @@ records or all 21 ticker/hash entries; they are not valid literal JSON:
   },
   "independent_verification": {
     "state": "PASS",
-    "frozen_commit_sha": "9b2c4022c64dee2327da082a38777684c96271be",
+    "frozen_commit_sha": "c1fdc21a267545c3c67ad4bdce8c74137ee340e1",
     "evidence_path": "/absolute/path/to/verification-report.json",
     "evidence_sha256": "<sha256>"
   },
   "evidence_files": [
     {"path": "/absolute/path/to/duration_source_index.json", "sha256": "<sha256>"},
     {"path": "/absolute/path/to/duration_fact_checks.json", "sha256": "<sha256>"},
+    {"path": "/absolute/path/to/approved_inline_transform_corrections.json", "sha256": "<sha256>"},
+    {"path": "/absolute/path/to/supported_lexical_correction_source_index.json", "sha256": "<sha256>"},
     {"path": "/absolute/path/to/verification-report.json", "sha256": "<sha256>"}
   ]
 }
@@ -273,10 +285,72 @@ every digest is re-read before the completion destination is created.
 `duration_fact_checks.json` is a
 `sec-duration-fact-checks-v1` object with `record_count` and a `records` list.
 Each record contains ticker, CIK, accession, unique Fact ID, transform,
-source lexical, expected normalized value, actual normalized value, and
-`status: PASS`.  The publisher loads all records, requires expected and actual
-values to match, and reconciles the per-filing and per-transform totals to the
-loaded source index.
+source ID, source Context reference, v5 Context ID, concept QName, source
+lexical, expected normalized value, actual normalized value, and `status:
+PASS`.  The source index includes one `duration_facts` record per observed
+source Fact with the exact CIK/accession/source ID, stable Fact ID, format namespace/name,
+lexical, concept QName, and source Context reference.  The publisher loads all
+3,842 records, requires exact source-index coverage, then finds each Fact ID
+exactly once in the corresponding v5 snapshot and verifies its normalized raw
+and text values, Context ID, reported/non-nil state, and Concept QName.  It
+also reconciles the per-filing and per-transform totals to the loaded source
+index.
+
+`approved_inline_transform_corrections.json` is a
+`sec-approved-inline-transform-corrections-v1` object with `record_count` and
+a `records` list.  Every record binds the planned ticker/CIK/accession, stable
+source ID, Fact ID, Context ID, concept QName and data type, Inline XBRL source
+element type, SEC transform namespace and name, lexical, sign, scale, source
+primary-document hash, old `(ixTransformValueError)`, expected and actual raw
+value, `actual_is_nil: false`, repair family/rule, value class,
+`status: APPROVED`, and an official rule reference.  The four accepted
+families are `Nasdaq`→`NASDAQ`, `Idaho`→`ID`, U+2011
+`three‑year`/`five‑year`→`P3Y`/`P5Y`, and `nil`→reported numeric zero.  The
+last family contains 22 monetary and 10 share values; a source minus sign must
+produce raw `-0`, otherwise raw `0`.  The publisher loads the hashed 104-row
+source index, requires exact source-field equality, and then verifies every
+new Fact and Concept row.  Every other difference remains part of the
+zero-valued unapproved foreign-change counts.
+
+One correction record has this exact field shape (the values shown illustrate
+a source-signed monetary zero):
+
+```json
+{
+  "ticker": "PCAR",
+  "cik": "0000075362",
+  "accession": "<planned-accession>",
+  "source_id": "<stable-inline-source-id>",
+  "fact_id": "<stable-fact-id>",
+  "context_id": "<stable-context-id>",
+  "concept_qname": "us-gaap:<source-concept>",
+  "concept_data_type_qname": "xbrli:monetaryItemType",
+  "source_element_type": "nonFraction",
+  "transform_namespace": "http://www.sec.gov/inlineXBRL/transformation/2015-08-31",
+  "transform": "numwordsen",
+  "lexical_input": "nil",
+  "source_scale": "6",
+  "source_sign": "-",
+  "source_primary_sha256": "<sha256>",
+  "previous_raw_value": "(ixTransformValueError)",
+  "expected_raw_value": "-0",
+  "actual_raw_value": "-0",
+  "actual_is_nil": false,
+  "repair_family": "SEC_NUMWORDSEN_NIL_ZERO",
+  "repair_rule": "sec-inline-2015-numwordsen-nil-zero",
+  "value_class": "monetary",
+  "status": "APPROVED",
+  "rule_reference": "<official SEC staff rule reference>"
+}
+```
+
+The other exact repair rules are
+`sec-inline-2015-exchnameen-nasdaq`,
+`sec-inline-2015-stateprovnameen-idaho`, and
+`sec-inline-2015-durwordsen-unicode-hyphen`.  Their repair-family values are
+`SEC_EXCHNAMEEN_NASDAQ`, `SEC_STATEPROVNAMEEN_IDAHO`, and
+`SEC_DURWORDSEN_UNICODE_HYPHEN`; their value classes are `metadata_text`,
+`metadata_text`, and `duration` respectively.
 
 The destination contains `index.html`, `company_readiness.json`,
 `company_readiness.csv`, `README.md`, and `universe_delivery_manifest.json`.  The JSON keeps
@@ -285,8 +359,10 @@ analytical selection as-of, and Q4 review cutoff as separate fields.  The Q4
 table comes from `ReviewedQ4Reader` records and includes exact source accession,
 snapshot, and fact identities; the HTML does not calculate a residual.
 It labels the Q4 parent as `CURRENT_A_HISTORY` or
-`SEPARATE_APPROVED_REFERENCE`, so preserved monetary Q4 evidence is not
-mistaken for fresh v4 raw lineage.
+`SEPARATE_APPROVED_REFERENCE`, so reviewed monetary Q4 evidence is not
+mistaken for the current A lineage.  This delivery's final C reference is
+fresh v5 NVDA history selected as of 2026-09-06; the Q4 review cutoff remains
+the separate 2026-10-08 provenance date.
 
 The C paths may be omitted while creating a clearly `PARTIAL` prototype.  A
 quarterly bundle cannot be supplied without its exact reviewed-Q4 companion.

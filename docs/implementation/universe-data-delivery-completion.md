@@ -17,15 +17,24 @@ The independently verified component candidates are:
 - C reviewed Q4: source candidate
   `964677136ef15c0bea833b2cfb3cd89dcd749380`; and
 - SEC numeric-duration conformance and fail-closed ingestion: source candidate
-  `9b2c4022c64dee2327da082a38777684c96271be`.
+  `9b2c4022c64dee2327da082a38777684c96271be`; and
+- exact SEC supported-lexical and word-duration grammar: final source
+  candidate `c1fdc21a267545c3c67ad4bdce8c74137ee340e1`.
+
+The subsequent complete old-sentinel audit found 104 valid SEC supported
+lexicals across four bounded transform families.  Their `m2-layer1-v5` source
+candidate passed independent verification.  This replacement integration,
+fresh runtime, and final joined publication still require separate verification;
+the prior v4 candidate remains evidence rather than final acceptance.
 
 Combined candidate `f897045f122463a3754cc5d3e765ceee77d956d7` remains
 historical implementation evidence.  A subsequent raw audit found the
 numeric-duration accuracy blocker, so it is not a final accepted source or
 runtime publication.  The user authorized the standards correction and fresh
-v4 data generation.  The replacement parser passed independent verification;
-the 381-filing v4 migration, updated combined integration, and final runtime
-publication remain pending.
+v5 data generation.  The duration arithmetic, fail-closed gate, four-family
+supported-lexical repair, and exact word-duration grammar passed independent
+verification; the 381-filing v5 migration, updated combined integration, and
+final runtime publication remain pending.
 Runtime completion counts and the final report identity remain **PENDING**
 until the fresh operations, duration-conformance assessment, metadata,
 reviewed-Q4, quarterly, and annual publications have all been verified
@@ -72,7 +81,8 @@ Before writing, the publisher verifies:
 6. when supplied, the duration-conformance assessment matches the exact A
    scope, governed-history manifests, and evidence hashes; `PASS` additionally
    proves fail-closed ingestion gates, normalized values, the known AMD
-   regression, zero foreign changes, and independent verification;
+   regression, all source-bound supported-lexical corrections, zero unapproved
+   foreign changes, and independent verification;
    and
 7. no output company row is duplicated by a ticker alias.
 
@@ -99,8 +109,11 @@ they are not converted to zero or treated as a failed raw filing.
 
 The report also labels whether the reviewed-Q4 parent is a current A governed
 history or a separate approved historical reference.  A separate reference is
-never presented as fresh v4 lineage; for this migration it is acceptable only
-with the bound duration assessment's zero monetary-value foreign-change result.
+never presented as fresh v5 lineage.  Final C must use a fresh v5 NVDA
+historical reference as of 2026-09-06 and separately preserve the 2026-10-08
+Q4 review cutoff.  Its monetary source facts must match that reference; the
+assessment separately discloses the 22 approved `numwordsen` monetary zeros and
+requires zero unapproved monetary differences.
 
 The final-run A `REUSED` count means the new run verified and adopted existing
 raw snapshots.  It does not restate how many filings originally came from an
@@ -112,9 +125,9 @@ from replay/adoption status.
 
 The intended runtime roots are caller inputs, not constants in the renderer.
 For the current run they are expected under
-`data/processed/universe_runs/20261008_duration_v4/`, including fresh
-`operations_v4`, `analysis_history_v4`, and `q4_delivery_v4` roots.  Fresh raw
-snapshots and their source index live under the separate ignored
+`data/processed/universe_runs/20261008_sec_transform_v5/`, including fresh
+`ops_v5`, `analysis_history_v5`, `q4_delivery_v5`, and `completion_v5` roots
+declared by the runtime manifests.  Cached source packages remain read-only under the separate ignored
 `data/raw/universe_runs/20261008_duration_v4/` boundary.  The unaffected B
 `company_metadata_v2` publication is reused read-only from the initial run.
 Earlier `operations_final`, raw, analysis, Q4, and report artifacts remain
@@ -128,9 +141,11 @@ manifest and readiness data prove:
   for every configured company (raw completion alone remains a green
   foundation with overall `PARTIAL` status);
 - a scope-bound `PASS` duration-conformance assessment that validates actual
-  normalized values across the fresh 381-filing v4 cohort, preserves source
-  lexicals, binds all v4 snapshot manifests plus the 3,842-Fact external
-  evidence, and reports zero foreign changes;
+  normalized values across the fresh 381-filing v5 cohort, preserves source
+  lexicals, binds all v5 snapshot manifests plus the 3,842-Fact external
+  duration evidence, verifies the 104 supported-lexical repairs against the
+  source index and actual Fact/Concept tables, discloses 22 monetary and 10
+  share zeros, and reports zero unapproved foreign changes;
 - B identity and SEC SIC present for every pilot company, with an explicit
   status for all broader candidate issuers;
 - the approved reviewed-Q4 economic/view thresholds plus explicit exclusions;

@@ -32,8 +32,10 @@ READINESS_CSV = "company_readiness.csv"
 REPORT_HTML = "index.html"
 REPRO_README = "README.md"
 ACCURACY_SCHEMA = "sec-duration-conformance-assessment-v1"
-ACCURACY_PARSER_VERSION = "m2-layer1-v4"
+ACCURACY_PARSER_VERSION = "m2-layer1-v5"
 ACCURACY_RULE_VERSION = "sec-duration-conformance-v1"
+SUPPORTED_LEXICAL_REPAIR_POLICY = "sec-supported-lexical-repairs-v1"
+SEC_TRANSFORM_NAMESPACE = "http://www.sec.gov/inlineXBRL/transformation/2015-08-31"
 _COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -138,6 +140,7 @@ class _AccuracyAttestation:
     parser_rule_version: str | None
     frozen_commit_sha: str | None
     evidence_files: tuple[dict[str, Any], ...]
+    approved_correction_summary: dict[str, dict[str, int]]
     payload: dict[str, Any]
 
 
@@ -331,14 +334,20 @@ def _attest_accuracy(
     rule_version = payload.get("parser_rule_version")
     commit_sha = payload.get("frozen_commit_sha")
     evidence_files = _attest_accuracy_evidence(payload.get("evidence_files", []))
+    approved_correction_summary: dict[str, dict[str, int]] = {
+        "repair_families": {},
+        "value_classes": {},
+    }
     if state == "PASS":
         if parser_version != ACCURACY_PARSER_VERSION:
-            raise ValueError("duration-conformance parser version is not v4")
+            raise ValueError("duration-conformance parser version is not v5")
         if rule_version != ACCURACY_RULE_VERSION:
             raise ValueError("duration-conformance rule version differs")
+        if payload.get("supported_lexical_repair_policy") != SUPPORTED_LEXICAL_REPAIR_POLICY:
+            raise ValueError("supported lexical repair policy differs")
         if type(commit_sha) is not str or _COMMIT_SHA.fullmatch(commit_sha) is None:
             raise ValueError("duration-conformance frozen commit SHA is invalid")
-        _validate_accuracy_pass(
+        approved_correction_summary = _validate_accuracy_pass(
             payload,
             requested_companies=requested_companies,
             selected_filings=selected_filings,
@@ -357,6 +366,7 @@ def _attest_accuracy(
         parser_rule_version=rule_version if isinstance(rule_version, str) else None,
         frozen_commit_sha=commit_sha if isinstance(commit_sha, str) else None,
         evidence_files=evidence_files,
+        approved_correction_summary=approved_correction_summary,
         payload=payload,
     )
 
@@ -432,6 +442,7 @@ def _collection_snapshot_scope(
                 "snapshot_manifest_sha256": _sha256(manifest_path),
                 "source_package_sha256": str(manifest.get("package_sha256")),
                 "parser_version": str(manifest.get("layer1_parser_version")),
+                "snapshot_root": str(manifest_path.parent),
             }
     return snapshots
 
@@ -466,7 +477,7 @@ def _validate_accuracy_pass(
     commit_sha: str,
     evidence_files: tuple[dict[str, Any], ...],
     history_manifest_sha256s: dict[str, str],
-) -> None:
+) -> dict[str, dict[str, int]]:
     packages = payload.get("source_packages")
     if packages != {
         "expected": selected_filings,
@@ -509,7 +520,7 @@ def _validate_accuracy_pass(
             or check["snapshot_manifest_sha256"]
             != snapshot.get("snapshot_manifest_sha256")
         ):
-            raise ValueError("duration-conformance filing check differs from v4 snapshot")
+            raise ValueError("duration-conformance filing check differs from v5 snapshot")
     if (
         len(history_manifest_sha256s) != requested_companies
         or payload.get("history_manifest_sha256s") != history_manifest_sha256s
@@ -559,7 +570,7 @@ def _validate_accuracy_pass(
             raise ValueError(f"duration-conformance {label} is not declared")
     if source_index.get("duration_fact_count") != examined_facts:
         raise ValueError("duration-conformance source index fact count differs")
-    source_counts, source_primary_hashes = _validate_accuracy_source_index(
+    source_counts, source_primary_hashes, duration_sources = _validate_accuracy_source_index(
         Path(source_index["path"]), planned_filings=planned_filings
     )
     if source_counts != {
@@ -572,7 +583,10 @@ def _validate_accuracy_pass(
     ):
         raise ValueError("duration-conformance primary document hash differs")
     fact_counts, fact_scope_counts = _validate_fact_level_evidence(
-        Path(fact_level["path"]), expected_records=examined_facts
+        Path(fact_level["path"]),
+        expected_records=examined_facts,
+        duration_sources=duration_sources,
+        snapshot_scope=snapshot_scope,
     )
     if fact_counts != source_counts:
         raise ValueError("duration-conformance fact evidence differs from source index")
@@ -581,6 +595,32 @@ def _validate_accuracy_pass(
         for key in planned_filings
     ):
         raise ValueError("duration-conformance fact evidence differs from filing checks")
+    approved_corrections = payload.get("approved_transform_corrections")
+    if (
+        not isinstance(approved_corrections, dict)
+        or type(approved_corrections.get("path")) is not str
+        or type(approved_corrections.get("sha256")) is not str
+        or type(approved_corrections.get("source_index_path")) is not str
+        or type(approved_corrections.get("source_index_sha256")) is not str
+        or type(approved_corrections.get("record_count")) is not int
+        or approved_corrections["record_count"] < 0
+        or evidence_index.get(str(Path(approved_corrections["path"]).resolve()))
+        != approved_corrections["sha256"]
+        or evidence_index.get(
+            str(Path(approved_corrections["source_index_path"]).resolve())
+        )
+        != approved_corrections["source_index_sha256"]
+    ):
+        raise ValueError("approved transform corrections are not declared")
+    approved_correction_summary = _validate_approved_transform_corrections(
+        Path(approved_corrections["path"]),
+        expected_records=approved_corrections["record_count"],
+        planned_filings=set(planned_filings),
+        snapshot_scope=snapshot_scope,
+        source_index_path=Path(approved_corrections["source_index_path"]),
+        source_index_sha256=approved_corrections["source_index_sha256"],
+        evidence_index=evidence_index,
+    )
     normalized = payload.get("normalized_value_checks")
     if not isinstance(normalized, list) or not normalized:
         raise ValueError("duration-conformance requires normalized-value checks")
@@ -644,16 +684,22 @@ def _validate_accuracy_pass(
     independent_path = str(Path(independent["evidence_path"]).resolve())
     if evidence_index.get(independent_path) != independent["evidence_sha256"]:
         raise ValueError("duration-conformance independent evidence is not declared")
+    return approved_correction_summary
 
 
 def _validate_accuracy_source_index(
     path: Path,
     *,
     planned_filings: tuple[tuple[str, str, str], ...],
-) -> tuple[dict[str, int], dict[tuple[str, str, str], str]]:
+) -> tuple[
+    dict[str, int],
+    dict[tuple[str, str, str], str],
+    dict[tuple[str, str, str, str], dict[str, Any]],
+]:
     source = _read_json(_regular_file(path, "duration source index"))
     documents = source.get("primary_documents")
     format_counts = source.get("format_counts")
+    duration_facts = source.get("duration_facts")
     if (
         source.get("primary_document_count") != len(planned_filings)
         or source.get("missing_primary_documents") != 0
@@ -662,6 +708,8 @@ def _validate_accuracy_source_index(
         or not isinstance(format_counts, dict)
         or set(format_counts) != {"durday", "durmonth", "duryear", "durweek"}
         or any(type(value) is not int or value < 0 for value in format_counts.values())
+        or not isinstance(duration_facts, list)
+        or len(duration_facts) != sum(format_counts.values())
     ):
         raise ValueError("duration source index scope is invalid")
     hashes: dict[tuple[str, str, str], str] = {}
@@ -682,13 +730,48 @@ def _validate_accuracy_source_index(
         hashes[key] = document["primary_sha256"]
     if tuple(sorted(hashes)) != planned_filings:
         raise ValueError("duration source index differs from immutable plans")
-    return {key: int(value) for key, value in format_counts.items()}, hashes
+    indexed_facts: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    calculated_counts = {name: 0 for name in ("durday", "durmonth", "duryear", "durweek")}
+    for fact in duration_facts:
+        if not isinstance(fact, dict):
+            raise TypeError("duration source index Fact is invalid")
+        filing_key = (
+            str(fact.get("ticker")),
+            str(fact.get("cik")),
+            str(fact.get("accession")),
+        )
+        source_id = fact.get("source_id")
+        format_qname = fact.get("format_qname")
+        transform = format_qname.removeprefix("ixt-sec:") if isinstance(format_qname, str) else ""
+        key = (*filing_key, str(source_id))
+        if (
+            filing_key not in hashes
+            or type(source_id) is not str
+            or not source_id
+            or key in indexed_facts
+            or type(fact.get("fact_id")) is not str
+            or not fact["fact_id"]
+            or transform not in calculated_counts
+            or fact.get("format_namespace") != SEC_TRANSFORM_NAMESPACE
+            or type(fact.get("source_lexical")) is not str
+            or type(fact.get("concept_qname")) is not str
+            or type(fact.get("context_ref")) is not str
+            or not fact["context_ref"]
+        ):
+            raise ValueError("duration source index Fact is invalid")
+        indexed_facts[key] = fact
+        calculated_counts[transform] += 1
+    if calculated_counts != format_counts:
+        raise ValueError("duration source index Fact counts differ")
+    return calculated_counts, hashes, indexed_facts
 
 
 def _validate_fact_level_evidence(
     path: Path,
     *,
     expected_records: int,
+    duration_sources: dict[tuple[str, str, str, str], dict[str, Any]],
+    snapshot_scope: dict[tuple[str, str, str], dict[str, str]],
 ) -> tuple[dict[str, int], dict[tuple[str, str, str], int]]:
     evidence = _read_json(_regular_file(path, "duration fact-level evidence"))
     records = evidence.get("records")
@@ -701,13 +784,19 @@ def _validate_fact_level_evidence(
         raise ValueError("duration fact-level evidence scope is invalid")
     transform_counts = {name: 0 for name in ("durday", "durmonth", "duryear", "durweek")}
     filing_counts: dict[tuple[str, str, str], int] = {}
-    identities: set[tuple[str, str, str, str]] = set()
+    source_identities: set[tuple[str, str, str, str]] = set()
+    fact_identities: set[tuple[str, str, str, str]] = set()
+    records_by_filing: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
     for record in records:
         if (
             not isinstance(record, dict)
             or record.get("transform") not in transform_counts
             or record.get("status") != "PASS"
+            or type(record.get("source_id")) is not str
             or type(record.get("fact_id")) is not str
+            or type(record.get("context_id")) is not str
+            or type(record.get("source_context_ref")) is not str
+            or type(record.get("concept_qname")) is not str
             or type(record.get("lexical_input")) is not str
             or type(record.get("expected_value")) is not str
             or record.get("actual_value") != record.get("expected_value")
@@ -718,13 +807,309 @@ def _validate_fact_level_evidence(
             str(record.get("cik")),
             str(record.get("accession")),
         )
-        identity = (*filing_key, record["fact_id"])
-        if identity in identities:
-            raise ValueError("duration fact-level evidence repeats a Fact")
-        identities.add(identity)
+        source_identity = (*filing_key, record["source_id"])
+        fact_identity = (*filing_key, record["fact_id"])
+        source = duration_sources.get(source_identity)
+        if (
+            source is None
+            or source_identity in source_identities
+            or fact_identity in fact_identities
+            or source.get("fact_id") != record["fact_id"]
+            or source.get("format_qname") != f"ixt-sec:{record['transform']}"
+            or source.get("source_lexical") != record["lexical_input"]
+            or source.get("concept_qname") != record["concept_qname"]
+            or source.get("context_ref") != record["source_context_ref"]
+        ):
+            raise ValueError("duration fact-level evidence differs from source index")
+        source_identities.add(source_identity)
+        fact_identities.add(fact_identity)
         transform_counts[record["transform"]] += 1
         filing_counts[filing_key] = filing_counts.get(filing_key, 0) + 1
+        records_by_filing.setdefault(filing_key, []).append(record)
+    if source_identities != set(duration_sources):
+        raise ValueError("duration fact-level evidence does not cover the source index")
+
+    for filing_key, filing_records in records_by_filing.items():
+        snapshot = snapshot_scope.get(filing_key)
+        if snapshot is None or type(snapshot.get("snapshot_root")) is not str:
+            raise ValueError("duration Fact has no v5 snapshot")
+        snapshot_root = Path(snapshot["snapshot_root"])
+        facts = pl.read_parquet(_regular_file(snapshot_root / "fact.parquet", "v5 Fact table"))
+        concepts = pl.read_parquet(
+            _regular_file(snapshot_root / "concept.parquet", "v5 Concept table")
+        )
+        fact_ids = [record["fact_id"] for record in filing_records]
+        selected = facts.filter(pl.col("fact_id").is_in(fact_ids)).to_dicts()
+        selected_by_id = {row.get("fact_id"): row for row in selected}
+        if len(selected) != len(filing_records) or len(selected_by_id) != len(selected):
+            raise ValueError("duration Fact evidence identity is absent or repeated in v5")
+        concept_ids = {row.get("raw_concept_id") for row in selected}
+        concept_rows = concepts.filter(pl.col("raw_concept_id").is_in(concept_ids)).to_dicts()
+        concepts_by_id = {row.get("raw_concept_id"): row for row in concept_rows}
+        if len(concepts_by_id) != len(concept_ids):
+            raise ValueError("duration Fact Concept identity is absent from v5")
+        for record in filing_records:
+            fact = selected_by_id[record["fact_id"]]
+            concept = concepts_by_id.get(fact.get("raw_concept_id"))
+            if (
+                fact.get("context_id") != record["context_id"]
+                or fact.get("raw_value") != record["actual_value"]
+                or fact.get("value_text") != record["actual_value"]
+                or fact.get("value_numeric") is not None
+                or fact.get("is_nil") is not False
+                or fact.get("reported_or_derived") != "REPORTED"
+                or concept is None
+                or concept.get("qname") != record["concept_qname"]
+            ):
+                raise ValueError("duration fact-level value differs from v5 Fact or Concept")
     return transform_counts, filing_counts
+
+
+def _validate_approved_transform_corrections(
+    path: Path,
+    *,
+    expected_records: int,
+    planned_filings: set[tuple[str, str, str]],
+    snapshot_scope: dict[tuple[str, str, str], dict[str, str]],
+    source_index_path: Path,
+    source_index_sha256: str,
+    evidence_index: dict[str, str],
+) -> dict[str, dict[str, int]]:
+    evidence = _read_json(_regular_file(path, "approved inline transform corrections"))
+    records = evidence.get("records")
+    if (
+        evidence.get("schema_version")
+        != "sec-approved-inline-transform-corrections-v1"
+        or evidence.get("record_count") != expected_records
+        or not isinstance(records, list)
+        or len(records) != expected_records
+    ):
+        raise ValueError("approved transform correction scope is invalid")
+    source_index_path = _regular_file(
+        source_index_path, "supported lexical correction source index"
+    )
+    if (
+        _sha256(source_index_path) != source_index_sha256
+        or evidence_index.get(str(source_index_path.resolve())) != source_index_sha256
+    ):
+        raise ValueError("supported lexical correction source index is not bound")
+    source_index = _read_json(source_index_path)
+    source_records = source_index.get("facts")
+    if (
+        source_index.get("fact_count") != expected_records
+        or source_index.get("unmatched") != []
+        or not isinstance(source_records, list)
+        or len(source_records) != expected_records
+    ):
+        raise ValueError("supported lexical correction source index is incomplete")
+
+    indexed_sources: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+    for source in source_records:
+        if not isinstance(source, dict):
+            raise TypeError("supported lexical correction source record is invalid")
+        key = (
+            str(source.get("ticker")),
+            str(source.get("cik")),
+            str(source.get("accession")),
+            str(source.get("source_id")),
+            str(source.get("fact_id")),
+        )
+        if (
+            key[:3] not in planned_filings
+            or key in indexed_sources
+            or type(source.get("context_id")) is not str
+            or type(source.get("raw_concept_id")) is not str
+            or type(source.get("concept_qname")) is not str
+            or type(source.get("concept_data_type_qname")) is not str
+            or source.get("source_element_type") not in {"nonNumeric", "nonFraction"}
+            or type(source.get("source_lexical")) is not str
+            or type(source.get("format_qname")) is not str
+            or source.get("format_namespace") != SEC_TRANSFORM_NAMESPACE
+            or source.get("source_scale") is not None
+            and type(source.get("source_scale")) is not str
+            or source.get("source_sign") is not None
+            and type(source.get("source_sign")) is not str
+            or type(source.get("primary_sha256")) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", source["primary_sha256"]) is None
+        ):
+            raise ValueError("supported lexical correction source record is invalid")
+        indexed_sources[key] = source
+
+    identities: set[tuple[str, str, str, str, str]] = set()
+    families: dict[str, int] = {}
+    value_classes: dict[str, int] = {}
+    records_by_filing: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for record in records:
+        filing_key = (
+            str(record.get("ticker")),
+            str(record.get("cik")),
+            str(record.get("accession")),
+        ) if isinstance(record, dict) else ("", "", "")
+        identity = (
+            *filing_key,
+            str(record.get("source_id")),
+            str(record.get("fact_id")),
+        ) if isinstance(record, dict) else (*filing_key, "", "")
+        source = indexed_sources.get(identity)
+        if (
+            not isinstance(record, dict)
+            or filing_key not in planned_filings
+            or type(record.get("source_id")) is not str
+            or type(record.get("fact_id")) is not str
+            or source is None
+            or record.get("context_id") != source.get("context_id")
+            or record.get("concept_qname") != source.get("concept_qname")
+            or record.get("concept_data_type_qname")
+            != source.get("concept_data_type_qname")
+            or record.get("source_element_type") != source.get("source_element_type")
+            or record.get("transform_namespace") != source.get("format_namespace")
+            or f"ixt-sec:{record.get('transform')}" != source.get("format_qname")
+            or record.get("lexical_input") != source.get("source_lexical")
+            or record.get("source_scale") != source.get("source_scale")
+            or record.get("source_sign") != source.get("source_sign")
+            or record.get("source_primary_sha256") != source.get("primary_sha256")
+            or record.get("previous_raw_value") != "(ixTransformValueError)"
+            or record.get("expected_raw_value") != record.get("actual_raw_value")
+            or record.get("actual_is_nil") is not False
+            or record.get("status") != "APPROVED"
+            or type(record.get("rule_reference")) is not str
+            or not record["rule_reference"]
+        ):
+            raise ValueError("approved transform correction record is invalid")
+        policy = _supported_lexical_repair_policy(record)
+        if policy is None:
+            raise ValueError("approved transform correction policy is invalid")
+        family, value_class = policy
+        source_identity = (*filing_key, record["source_id"], record["fact_id"])
+        if source_identity in identities:
+            raise ValueError("approved transform correction repeats a source identity")
+        identities.add(source_identity)
+        families[family] = families.get(family, 0) + 1
+        value_classes[value_class] = value_classes.get(value_class, 0) + 1
+        records_by_filing.setdefault(filing_key, []).append(record)
+    if len(identities) != len(indexed_sources):
+        raise ValueError("approved corrections do not cover the source index")
+    for filing_key, filing_records in records_by_filing.items():
+        snapshot = snapshot_scope.get(filing_key)
+        if snapshot is None or type(snapshot.get("snapshot_root")) is not str:
+            raise ValueError("approved correction has no v5 snapshot")
+        snapshot_root = Path(snapshot["snapshot_root"])
+        facts = pl.read_parquet(_regular_file(snapshot_root / "fact.parquet", "v5 Fact table"))
+        concepts = pl.read_parquet(
+            _regular_file(snapshot_root / "concept.parquet", "v5 Concept table")
+        )
+        for record in filing_records:
+            fact_rows = facts.filter(pl.col("fact_id") == record["fact_id"]).to_dicts()
+            if len(fact_rows) != 1:
+                raise ValueError("approved correction Fact is absent from v5 snapshot")
+            fact = fact_rows[0]
+            concept_rows = concepts.filter(
+                pl.col("raw_concept_id") == fact.get("raw_concept_id")
+            ).to_dicts()
+            if (
+                len(concept_rows) != 1
+                or fact.get("context_id") != record["context_id"]
+                or fact.get("is_nil") is not False
+                or fact.get("raw_value") != record["actual_raw_value"]
+                or fact.get("reported_or_derived") != "REPORTED"
+                or concept_rows[0].get("qname") != record["concept_qname"]
+                or concept_rows[0].get("data_type")
+                != record["concept_data_type_qname"]
+            ):
+                raise ValueError("approved correction differs from v5 Fact or Concept")
+            if record["value_class"] in {"monetary", "shares"}:
+                if (
+                    fact.get("value_numeric") is None
+                    or fact["value_numeric"] != 0
+                    or fact.get("value_text") is not None
+                ):
+                    raise ValueError("approved numeric correction is not a reported zero")
+            elif fact.get("value_text") != record["actual_raw_value"] or fact.get(
+                "value_numeric"
+            ) is not None:
+                raise ValueError("approved text correction value differs from v5 Fact")
+    return {
+        "repair_families": dict(sorted(families.items())),
+        "value_classes": dict(sorted(value_classes.items())),
+    }
+
+
+def _supported_lexical_repair_policy(record: dict[str, Any]) -> tuple[str, str] | None:
+    transform = record.get("transform")
+    lexical = record.get("lexical_input")
+    concept = record.get("concept_qname")
+    data_type = record.get("concept_data_type_qname")
+    element_type = record.get("source_element_type")
+    sign = record.get("source_sign")
+    scale = record.get("source_scale")
+    actual = record.get("actual_raw_value")
+    family = record.get("repair_family")
+    rule = record.get("repair_rule")
+    value_class = record.get("value_class")
+    if (
+        family == "SEC_EXCHNAMEEN_NASDAQ"
+        and rule == "sec-inline-2015-exchnameen-nasdaq"
+        and transform == "exchnameen"
+        and lexical == "Nasdaq"
+        and concept == "dei:SecurityExchangeName"
+        and data_type == "dei:edgarExchangeCodeItemType"
+        and element_type == "nonNumeric"
+        and sign is None
+        and scale is None
+        and actual == "NASDAQ"
+        and value_class == "metadata_text"
+    ):
+        return family, value_class
+    if (
+        family == "SEC_STATEPROVNAMEEN_IDAHO"
+        and rule == "sec-inline-2015-stateprovnameen-idaho"
+        and transform == "stateprovnameen"
+        and lexical == "Idaho"
+        and concept == "dei:EntityAddressStateOrProvince"
+        and data_type == "dei:stateOrProvinceItemType"
+        and element_type == "nonNumeric"
+        and sign is None
+        and scale is None
+        and actual == "ID"
+        and value_class == "metadata_text"
+    ):
+        return family, value_class
+    if (
+        family == "SEC_DURWORDSEN_UNICODE_HYPHEN"
+        and rule == "sec-inline-2015-durwordsen-unicode-hyphen"
+        and transform == "durwordsen"
+        and lexical in {"three\u2011year", "five\u2011year"}
+        and type(concept) is str
+        and concept
+        and data_type == "xbrli:durationItemType"
+        and element_type == "nonNumeric"
+        and sign is None
+        and scale is None
+        and actual == {"three\u2011year": "P3Y", "five\u2011year": "P5Y"}[lexical]
+        and value_class == "duration"
+    ):
+        return family, value_class
+    expected_zero = "-0" if sign == "-" else "0"
+    if (
+        family == "SEC_NUMWORDSEN_NIL_ZERO"
+        and rule == "sec-inline-2015-numwordsen-nil-zero"
+        and transform == "numwordsen"
+        and lexical == "nil"
+        and type(concept) is str
+        and concept
+        and data_type in {"xbrli:monetaryItemType", "xbrli:sharesItemType"}
+        and element_type == "nonFraction"
+        and sign in {None, "-"}
+        and (scale is None or type(scale) is str)
+        and actual == expected_zero
+        and value_class
+        == {
+            "xbrli:monetaryItemType": "monetary",
+            "xbrli:sharesItemType": "shares",
+        }[data_type]
+    ):
+        return family, value_class
+    return None
 
 
 def _validate_collection_scope(config: Any, status: Any) -> None:
@@ -1229,6 +1614,11 @@ def _readiness_model(
                 "parser_rule_version": (
                     accuracy.parser_rule_version if accuracy else None
                 ),
+                "supported_lexical_repair_policy": (
+                    accuracy.payload.get("supported_lexical_repair_policy")
+                    if accuracy
+                    else None
+                ),
                 "frozen_commit_sha": accuracy.frozen_commit_sha if accuracy else None,
                 "source_packages": (
                     accuracy.payload.get("source_packages") if accuracy else None
@@ -1241,6 +1631,14 @@ def _readiness_model(
                 ),
                 "fact_level_evidence": (
                     accuracy.payload.get("fact_level_evidence") if accuracy else None
+                ),
+                "approved_transform_corrections": (
+                    accuracy.payload.get("approved_transform_corrections")
+                    if accuracy
+                    else None
+                ),
+                "approved_correction_summary": (
+                    accuracy.approved_correction_summary if accuracy else None
                 ),
                 "transform_checks": (
                     accuracy.payload.get("transform_checks") if accuracy else None
@@ -1285,7 +1683,14 @@ def _readiness_model(
             "scope_note": "승인된 정확한 FY/YTD-9M 원천쌍만 표시하며 HTML에서 Q4를 계산하지 않습니다.",
         },
         "warnings": [
-            f"Raw numeric-duration conformance 판정은 {accuracy_state}입니다.",
+            f"Raw SEC transform conformance 판정은 {accuracy_state}입니다.",
+            (
+                "승인된 SEC 표기 지원 보완은 "
+                f"{accuracy.payload.get('approved_transform_corrections', {}).get('record_count', 0) if accuracy else 0}건이며, "
+                f"그중 monetary {accuracy.approved_correction_summary.get('value_classes', {}).get('monetary', 0) if accuracy else 0}건, "
+                f"shares {accuracy.approved_correction_summary.get('value_classes', {}).get('shares', 0) if accuracy else 0}건입니다. "
+                "그 밖의 미승인 foreign change는 0이어야 합니다."
+            ),
             (
                 "Q4 원천 parent는 현재 A history입니다."
                 if q4_parent_relation == "CURRENT_A_HISTORY"
@@ -1498,11 +1903,12 @@ def _render_html(report: dict[str, Any]) -> str:
                 f"준비 회사 {len(assessments['annual_analysis']['companies'])}",
             ),
             (
-                "Raw duration 정확성",
+                "Raw SEC transform 정확성",
                 assessments["duration_conformance"],
                 (
                     f"parser {assessments['duration_conformance']['parser_version'] or '미제공'} · "
-                    f"검증 commit {assessments['duration_conformance']['frozen_commit_sha'] or '미제공'}"
+                    f"검증 commit {assessments['duration_conformance']['frozen_commit_sha'] or '미제공'} · "
+                    f"승인된 SEC 표기 지원 보완 {(assessments['duration_conformance']['approved_transform_corrections'] or {}).get('record_count', 0)}"
                 ),
             ),
         )
