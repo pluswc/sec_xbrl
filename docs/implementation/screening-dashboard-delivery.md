@@ -4,9 +4,11 @@
 
 이 계약의 기준일은 **2026-10-09 KST**다. 사용자는 이 날짜에 P0–P6의 로컬
 구현과 실제 21사 prepared data 실행을 승인했다. 이 문서는 구현 계약이며 현재
-상태는 **IMPLEMENTED / WRITER VERIFIED**다. 제품 source 후보는
-`8b3e8e18d7548af6e5cf48b8bf433770150d3efc`다. 독립 검증, lead 로컬 인수,
-push, PR, remote CI, `main` 병합은 아직 완료되지 않았다.
+상태는 **IMPLEMENTED / INDEPENDENT PASS / LOCALLY_ACCEPTED**다. 최종 제품
+source는 `acce036d1f8feef2f268b1df740009a11ce537e5`다. 실제 publication,
+S01–S08, 독립 검증과 lead 로컬 인수는
+[완료·로컬 인수 기록](screening-dashboard-completion.md)에 고정한다. 사용자의
+직접 UX walkthrough, push, PR, remote CI, `main` 병합은 아직 완료되지 않았다.
 
 2026-10-09의 writer 역할은 겹치지 않게 분리한다. 이 구현 writer는 prepared
 source integrity, dataset/store/service/server/CLI, test와 문서를 소유한다. 별도
@@ -267,3 +269,17 @@ adapter가 함께 있다. writer 검증은 다음을 통과했다.
 위 writer 실행의 `/tmp` 경로와 browser screenshot은 최종 전달 전제조건이나
 독립 oracle이 아니다. native Windows Chrome에서의 bridge/export·한글 font 확인,
 별도 agent 검증과 lead 인수는 계속 **PENDING**이다.
+
+### 2026-10-09 최종 검증·로컬 인수 후속
+
+위 `8b3e8e1` 기록은 당시 writer 후보의 역사적 상태다. 이후 독립 검증에서
+revision/decision 관계 무결성, legacy column 표시, 반복 HTTP export 파일명
+충돌을 차례로 발견해 해당 후보의 최종 PASS 주장을 하지 않았다. 각 결함을 새
+후보에서 수리하고 원래 실패 증거를 보존했다.
+
+최종 `acce036d1f8feef2f268b1df740009a11ce537e5`는 별도 읽기 전용 검증에서
+전체 **1,322 passed / 35 skipped**, focused **38 passed**, Ruff·JS/CJS·diff,
+실제 S01–S08과 native Windows 증거 검토를 통과했다. lead는 P0–P6를
+**LOCALLY_ACCEPTED**로 판정했다. 정확한 publication identity, scenario 결과,
+증거 hash와 남은 범위는
+[완료·로컬 인수 기록](screening-dashboard-completion.md)을 따른다.

@@ -15,7 +15,7 @@
 | 추적 문서 기준 | `473521560fa9e47aa00d6a273cbaa90c708ad366` |
 | `main` 기준 | `201acf9aec2f8183acb7dd843579938db14236cd`; 이번 로컬 전달은 push·PR·remote CI·merge를 수행하지 않음 |
 | 최초 계획 산출물 | `4735215` 시점에는 로드맵, 사용자 시나리오 인수 계약, 계획 등록부 링크뿐이었으며 제품·테스트·데이터 변경이 없었음 |
-| 2026-10-09 구현 후속 | 사용자가 P0–P6를 승인했고 source 후보 `8b3e8e18d7548af6e5cf48b8bf433770150d3efc`가 writer 검증을 통과함. 독립 검증·lead 인수·원격 병합은 대기 |
+| 2026-10-09 구현 후속 | 사용자가 승인한 P0–P6의 최종 source `acce036d1f8feef2f268b1df740009a11ce537e5`가 독립 PASS했고 lead가 `LOCALLY_ACCEPTED`로 판정함. [완료 기록](../implementation/screening-dashboard-completion.md) 참조. 직접 UX walkthrough와 원격 병합은 대기 |
 
 기존 회사 universe 결과는 21개 회사, 381개 공시와 21개 governed history가
 `READY`임을 증명한다. 이는 모든 회사에 같은 스크리닝 지표가 존재하거나 서로
@@ -82,7 +82,7 @@ observed time, 불가/차단 reason을 보존한다. 이 publication이 없으�
 
 | 단계 | 제안 작업 | 종료 증거 |
 | --- | --- | --- |
-| P0 기준 통합 gate | 로컬 accepted 제품과 추적 문서가 구현 브랜치의 명시적 부모인지 확인하고, 아직 수행하지 않은 remote PR/CI/merge를 별도 상태로 둔다. | 부모 SHA, 포함 관계, 원격 상태를 기록한 구현 계약. 현재는 **미수행** |
+| P0 기준 통합 gate | 로컬 accepted 제품과 추적 문서가 구현 브랜치의 명시적 부모인지 확인하고, 아직 수행하지 않은 remote PR/CI/merge를 별도 상태로 둔다. | 로컬 gate는 최종 완료 기록에서 **PASS**. remote PR/CI/merge는 **미수행** |
 | P1 지표 가용성·의미 | 연간 후보 지표별 21 × metric × period inventory와 실제 fiscal boundary, mapping 관계, unavailable/block reason을 publish한다. | 전체 CIK grain, 중복 0, 숨긴 회사 0, 독립 source/semantics 검토 |
 | P2 영속 계약 | screen definition/revision, immutable universe snapshot, execution run/row/predicate, decision event, export manifest를 정의한다. | schema·불변성·backup/restore·append-only 결정 이력 계약 |
 | P3 실행기 | 저장 조건을 deterministic하게 평가하고 독립 oracle의 예상 결과와 대조한다. | 실제 fixture의 전 CIK 결과, predicate별 상태·reason, 정렬·집계 증거 |

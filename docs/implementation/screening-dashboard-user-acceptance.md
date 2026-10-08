@@ -11,11 +11,14 @@
 이 후속 승인은 구현 완료·독립 검증·로컬 인수·원격 병합을 미리 주장하지 않으며,
 P7 live refresh와 새 cohort를 승인하지 않는다.
 
-**2026-10-09 구현 후속 상태:** source 후보
-`8b3e8e18d7548af6e5cf48b8bf433770150d3efc`는 writer의 network-free 전체 회귀,
-Ruff와 실제 21사 browser 흐름을 통과했다. 이 결과는 S01–S08을 검증할 수 있는
-구현 후보라는 뜻이며, 별도 독립 검증·native Windows walkthrough·lead 로컬
-인수·사용자의 직접 UX 인수는 아직 **PENDING**이다.
+**2026-10-09 최종 후속 상태:** source
+`acce036d1f8feef2f268b1df740009a11ce537e5`의 S01–S08이 실제 21사와 분리된
+cache/synthetic control에서 독립 **PASS**했고 lead가 P0–P6를
+**LOCALLY_ACCEPTED**로 판정했다. 정확한 결과와 증거는
+[완료·로컬 인수 기록](screening-dashboard-completion.md)에 있다. 과거
+`8b3e8e1`, `64ce126`, `6364688` 후보의 결함·철회 이력도 그 기록에서 보존한다.
+사용자의 직접 UX walkthrough와 push·PR·remote CI·`main` 병합은 계속
+**PENDING**이다.
 
 인수 목표는 “화면이 열린다”가 아니다. 사용자가 실제 조건을 저장하고 실행한
 뒤 모든 대상 회사의 결과와 이유를 보고, 값의 출처를 추적하고, 자신의 판단을

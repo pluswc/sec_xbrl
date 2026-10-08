@@ -1,5 +1,11 @@
 # 로컬 기업 스크리닝 대시보드 이용 가이드
 
+2026-10-09 실제 21사 publication, 최종 제품 SHA, 독립 S01–S08 결과와 현재
+loopback 운영 locator는
+[완료·로컬 인수 기록](../implementation/screening-dashboard-completion.md)에 있다.
+이 문서의 명령은 fresh checkout에서도 쓰는 일반 절차다. 현재 runtime의 ignored
+`RUNNING.md`는 해당 로컬 실행의 재시작 정보이며 이 가이드를 대신하지 않는다.
+
 ## 경계와 준비물
 
 이 대시보드는 준비된 annual `AnalysisClient` bundle을 screening 전용 immutable
