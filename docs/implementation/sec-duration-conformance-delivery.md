@@ -305,8 +305,10 @@ implementation:
 The SEC-staff reference governs these results: its exchange grammar accepts a
 bare Nasdaq name; its state/province table maps Idaho to `ID`; its English
 duration grammar accepts ASCII and the listed Unicode hyphen characters; and
-its English-number zero grammar accepts `nil`, including its case variants and
-surrounding XML whitespace. The repair adds only these supported forms to the
+its English-number zero grammar accepts `nil` and `Nil`, with surrounding XML
+whitespace. The `NIL` spelling is outside that grammar, and the alias belongs
+only to `numwordsen`; `durwordsen` continues to reject a `nil` amount for
+years, months, or days. The repair adds only these supported forms to the
 existing local transform paths. It does not broaden the state catalog or word
 grammar beyond that bounded evidence.
 
@@ -379,8 +381,17 @@ with `Mystery Exchange`, `Atlantis`, `three_year`, and `nilly`. Each model
 reported `xmlSchema:valueError`; ingestion wrote one retryable failure, zero
 success states, and zero Parquet tables.
 
-The focused transform/ingestion suite reported 161 passed. The complete
-offline suite reported 832 passed and 37 skipped, repository-wide Ruff passed,
+Lead source review of frozen writer candidate
+`1195427f8a7bc3771c3846f409244495b5615933` found that its `nil` check sat in
+the helper also used by `durwordsen`, which unintentionally accepted
+`nil years`. That candidate was not sent to independent verification. The
+superseding candidate moves the alias to the `numwordsen` registry entry,
+accepts only the reference spellings `nil` and `Nil`, and adds rejection tests
+for `NIL` and `nil` duration amounts. This scope correction does not change any
+of the 104 source-bound expected results.
+
+The focused transform/ingestion suite reported 163 passed. The complete
+offline suite reported 834 passed and 37 skipped, repository-wide Ruff passed,
 and `git diff --check` reported no errors. These are writer self-test results;
 the v5 commit still requires an independent read-only verification result.
 

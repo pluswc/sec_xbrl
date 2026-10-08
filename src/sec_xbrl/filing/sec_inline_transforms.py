@@ -45,7 +45,7 @@ _FILER_CATEGORIES = {
 _SEC_DECIMAL_RE = re.compile(
     r"^[ \t\n\r]*[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)[ \t\n\r]*$"
 )
-_SEC_NIL_RE = re.compile(r"^[ \t\n\r]*nil[ \t\n\r]*$", re.IGNORECASE)
+_SEC_NIL_RE = re.compile(r"^[ \t\n\r]*[Nn]il[ \t\n\r]*$")
 _SEC_WORD_HYPHEN_RE = re.compile(r"[\u058A\u05BE\u2010-\u2015\uFE58\uFE63\uFF0D-]")
 
 
@@ -59,7 +59,7 @@ def register_sec_inline_transforms() -> None:
         "durmonth": lambda value: _decimal_duration(value, "M"),
         "duryear": lambda value: _decimal_duration(value, "Y"),
         "durwordsen": _word_duration,
-        "numwordsen": _word_number,
+        "numwordsen": _number_words_transform,
         "stateprovnameen": lambda value: _lookup(value, _STATE_CODES, "state/province"),
         "exchnameen": _exchange_name,
         "entityfilercategoryen": lambda value: _lookup(value, _FILER_CATEGORIES, "filer category"),
@@ -164,8 +164,6 @@ def _duration_value(
 
 
 def _word_number(value: str) -> str:
-    if isinstance(value, str) and _SEC_NIL_RE.fullmatch(value):
-        return "0"
     tokens = re.findall(r"[a-z]+|\d+", value.casefold())
     if not tokens:
         raise ValueError("empty English number")
@@ -185,6 +183,13 @@ def _word_number(value: str) -> str:
         else:
             raise ValueError(f"unsupported English number token: {token}")
     return str(total + current)
+
+
+def _number_words_transform(value: str) -> str:
+    """Apply the SEC-only ``nil`` zero lexical before legacy word parsing."""
+    if isinstance(value, str) and _SEC_NIL_RE.fullmatch(value):
+        return "0"
+    return _word_number(value)
 
 
 def _word_duration(value: str) -> str:

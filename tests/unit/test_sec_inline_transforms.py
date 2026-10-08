@@ -69,7 +69,7 @@ def test_sec_state_name_still_rejects_unknown_values() -> None:
         FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["stateprovnameen"]("Atlantis")
 
 
-@pytest.mark.parametrize("source", ("nil", "Nil", "NIL", " \t\nNil\r "))
+@pytest.mark.parametrize("source", ("nil", "Nil", " \t\nNil\r "))
 def test_sec_english_number_accepts_official_nil(source: str) -> None:
     from arelle import FunctionIxt
 
@@ -88,6 +88,8 @@ def test_sec_english_number_still_rejects_unknown_words() -> None:
         transform("nilly")
     with pytest.raises(ValueError, match="unsupported English number token"):
         transform("nil!")
+    with pytest.raises(ValueError, match="unsupported English number token"):
+        transform("NIL")
 
 
 def test_sec_nil_preserves_negative_zero_when_inline_sign_and_scale_are_applied() -> None:
@@ -137,6 +139,16 @@ def test_sec_english_duration_still_rejects_unknown_separator() -> None:
 
     with pytest.raises(ValueError, match="unsupported English duration"):
         FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["durwordsen"]("three_year")
+
+
+@pytest.mark.parametrize("source", ("nil year", "Nil months", " \t\nNil days\r "))
+def test_sec_english_duration_does_not_inherit_numwordsen_nil_alias(source: str) -> None:
+    from arelle import FunctionIxt
+
+    register_sec_inline_transforms()
+
+    with pytest.raises(ValueError, match="unsupported English number token"):
+        FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["durwordsen"](source)
 
 
 def test_duration_conformance_has_distinct_immutable_layer1_parser_version() -> None:
