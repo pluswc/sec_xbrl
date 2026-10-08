@@ -19,12 +19,13 @@ and operational cohort reprocessing remain separate states.
 
 This delivery does not change filing discovery, source packages, Context
 dates, period classification, Q4 derivation or other business policy,
-analytical mappings, metadata enrichment, or dashboards. Other than the four
-named supported lexical forms in Section 6, it does not change non-numeric
-duration Inline transforms. It does not overwrite an old Raw snapshot or
-reinterpret a reported Fact as derived. The source lexical value remains in
-the immutable primary document and is reachable through the Fact's source
-document/locator trace; the normalized value remains a reported XBRL value.
+analytical mappings, metadata enrichment, or dashboards. For non-numeric
+duration transforms, it adds the named supported lexical forms in Section 6
+and enforces the SEC-staff whole-input grammar for `durwordsen`. It does not
+overwrite an old Raw snapshot or reinterpret a reported Fact as derived. The
+source lexical value remains in the immutable primary document and is
+reachable through the Fact's source document/locator trace; the normalized
+value remains a reported XBRL value.
 
 ## 2. Defect and primary reference
 
@@ -163,8 +164,10 @@ and day values, positive/negative/exact/tiny-zero rendering, unchanged exact
 integer behavior, strict grammar rejection for all four transforms, invalid
 unit rejection, and arithmetic under a deliberately small ambient Decimal
 precision. Existing non-duration transforms and `durweek` behavior remain
-covered. The focused test, full offline test suite, and Ruff must pass against
-the same frozen commit.
+covered. Word-duration coverage requires a complete ordered input, preserves
+valid single and compound year/month/day values, and rejects partial unit
+names and surrounding garbage. The focused test, full offline test suite, and
+Ruff must pass against the same frozen commit.
 
 ### Cached filing replay
 
@@ -385,15 +388,43 @@ Lead source review of frozen writer candidate
 `1195427f8a7bc3771c3846f409244495b5615933` found that its `nil` check sat in
 the helper also used by `durwordsen`, which unintentionally accepted
 `nil years`. That candidate was not sent to independent verification. The
-superseding candidate moves the alias to the `numwordsen` registry entry,
+next candidate moved the alias to the `numwordsen` registry entry,
 accepts only the reference spellings `nil` and `Nil`, and adds rejection tests
 for `NIL` and `nil` duration amounts. This scope correction does not change any
 of the 104 source-bound expected results.
 
-The focused transform/ingestion suite reported 163 passed. The complete
-offline suite reported 834 passed and 37 skipped, repository-wide Ruff passed,
+Independent verification of candidate
+`9cb0df0b40b5cef3db16960872d6fb0535202c89` then returned **FAIL** because
+the local `durwordsen` implementation searched for component substrings
+without requiring the match to consume the whole input. In temporary copies
+of Meta `0001326801-23-000013`, `three‑yearish` and
+`three‑years garbage` each became `P3Y`, remained `xValid=VALID`, and
+published eight tables with three success states. The failed verification
+report remains preserved at
+`/tmp/sec-transform-v5-independent-ixw20t3m/verification-report.json`.
+
+The superseding candidate normalizes only the SEC-supported hyphen characters
+and then requires one anchored, whole-input duration grammar. It accepts
+valid word or one-to-four-digit amounts in year, month, day order, including
+single components and compound values such as `one year and six months`.
+It follows the reference's lower-case or initial-capital word forms and rejects
+arbitrary all-caps words, prefix or trailing text, partial unit names, reverse
+unit order, unknown amounts, and `nil` duration amounts. This explicitly
+removes the old substring tolerance; unsupported ASCII and Unicode-hyphen
+spellings now fail closed rather than contributing a guessed partial duration.
+
+The writer replayed both independent Meta mutations against the superseding
+parser. Each produced `xmlSchema:valueError`, `xValid=INVALID`, one retryable
+taxonomy/transform failure, zero success states, and zero Parquet tables. The
+writer also reran all seven cached v5 filing comparisons above: every replay
+retained the same Fact count, approved repair count, duration-change count,
+row-equality boundary, and three successful quality-gate states.
+
+The focused transform/ingestion suite reported 176 passed. The complete
+offline suite reported 847 passed and 37 skipped, repository-wide Ruff passed,
 and `git diff --check` reported no errors. These are writer self-test results;
-the v5 commit still requires an independent read-only verification result.
+the superseding v5 commit still requires an independent read-only
+verification result.
 
 After the writer freezes a commit, a separate Astra verifier must perform
 read-only independent verification and report `PASS` or `FAIL`. Only after that

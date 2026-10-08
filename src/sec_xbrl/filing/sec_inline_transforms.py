@@ -49,6 +49,38 @@ _SEC_NIL_RE = re.compile(r"^[ \t\n\r]*[Nn]il[ \t\n\r]*$")
 _SEC_WORD_HYPHEN_RE = re.compile(r"[\u058A\u05BE\u2010-\u2015\uFE58\uFE63\uFF0D-]")
 
 
+def _initial_case_pattern(*words: str) -> str:
+    return "(?:" + "|".join(f"[{word[0].upper()}{word[0]}]{word[1:]}" for word in words) + ")"
+
+
+_WORD_DURATION_SMALL_NUMBER = _initial_case_pattern(
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+    "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
+    "eighteen", "nineteen",
+)
+_WORD_DURATION_TENS = _initial_case_pattern(
+    "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
+)
+_WORD_DURATION_ONES = _initial_case_pattern(
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+)
+_WORD_DURATION_SUB_HUNDRED = (
+    rf"(?:{_WORD_DURATION_SMALL_NUMBER}|{_WORD_DURATION_TENS}(?:\s+{_WORD_DURATION_ONES})?)"
+)
+_WORD_DURATION_AMOUNT = (
+    rf"(?:{_WORD_DURATION_ONES}\s+[Hh]undred(?:\s+(?:and\s+)?"
+    rf"{_WORD_DURATION_SUB_HUNDRED})?|{_WORD_DURATION_SUB_HUNDRED}|[Zz]ero|[Nn]o|[0-9]{{1,4}})"
+)
+_WORD_DURATION_SEPARATOR = r"(?:,?\s+(?:and\s+)?)"
+_WORD_DURATION_RE = re.compile(
+    rf"^[ \t\n\r]*(?:(?P<years>{_WORD_DURATION_AMOUNT})\s+[Yy]ears?"
+    rf"{_WORD_DURATION_SEPARATOR}?)?"
+    rf"(?:(?P<months>{_WORD_DURATION_AMOUNT})\s+[Mm]onths?"
+    rf"{_WORD_DURATION_SEPARATOR}?)?"
+    rf"(?:(?P<days>{_WORD_DURATION_AMOUNT})\s+[Dd]ays?)?[ \t\n\r]*$"
+)
+
+
 def register_sec_inline_transforms() -> None:
     """Register the SEC EFM transforms for the installed Arelle process."""
     from arelle import FunctionIxt
@@ -193,14 +225,18 @@ def _number_words_transform(value: str) -> str:
 
 
 def _word_duration(value: str) -> str:
-    normalized = _SEC_WORD_HYPHEN_RE.sub(" ", value.casefold())
-    match = re.findall(r"((?:[a-z]+|\d+)(?:\s+(?:[a-z]+|\d+))*)\s+(years?|months?|days?)", normalized)
-    if not match:
+    normalized = _SEC_WORD_HYPHEN_RE.sub(" ", value)
+    match = _WORD_DURATION_RE.fullmatch(normalized)
+    if match is None or not any(match.group(unit) for unit in ("years", "months", "days")):
         raise ValueError(f"unsupported English duration: {value}")
-    components: dict[str, int] = {"Y": 0, "M": 0, "D": 0}
-    for amount, label in match:
-        unit = "Y" if label.startswith("year") else "M" if label.startswith("month") else "D"
-        components[unit] += int(_word_number(amount))
+    components = {
+        unit: int(_word_number(amount)) if amount is not None else 0
+        for unit, amount in (
+            ("Y", match.group("years")),
+            ("M", match.group("months")),
+            ("D", match.group("days")),
+        )
+    }
     result = "P" + (f"{components['Y']}Y" if components["Y"] else "") + (f"{components['M']}M" if components["M"] else "") + (f"{components['D']}D" if components["D"] else "")
     return result if result != "P" else "P0D"
 

@@ -141,14 +141,57 @@ def test_sec_english_duration_still_rejects_unknown_separator() -> None:
         FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["durwordsen"]("three_year")
 
 
+@pytest.mark.parametrize(
+    "source",
+    (
+        "three-yearish",
+        "three yearish",
+        "three-years garbage",
+        "three years garbage",
+        "garbage three-years",
+        "garbage three years",
+        "one month six years",
+        "THREE YEARS",
+    ),
+)
+def test_sec_english_duration_rejects_partial_units_garbage_and_wrong_order(source: str) -> None:
+    from arelle import FunctionIxt
+
+    register_sec_inline_transforms()
+
+    with pytest.raises(ValueError, match="unsupported English duration"):
+        FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["durwordsen"](source)
+
+
 @pytest.mark.parametrize("source", ("nil year", "Nil months", " \t\nNil days\r "))
 def test_sec_english_duration_does_not_inherit_numwordsen_nil_alias(source: str) -> None:
     from arelle import FunctionIxt
 
     register_sec_inline_transforms()
 
-    with pytest.raises(ValueError, match="unsupported English number token"):
+    with pytest.raises(ValueError, match="unsupported English duration"):
         FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["durwordsen"](source)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    (
+        ("three-year", "P3Y"),
+        ("five\u2011year", "P5Y"),
+        ("Three Years", "P3Y"),
+        ("one year and six months", "P1Y6M"),
+        ("one year, six months and three days", "P1Y6M3D"),
+    ),
+)
+def test_sec_english_duration_consumes_valid_ordered_whole_input(
+    source: str,
+    expected: str,
+) -> None:
+    from arelle import FunctionIxt
+
+    register_sec_inline_transforms()
+
+    assert FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["durwordsen"](source) == expected
 
 
 def test_duration_conformance_has_distinct_immutable_layer1_parser_version() -> None:
