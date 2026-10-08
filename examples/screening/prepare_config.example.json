@@ -1,0 +1,14 @@
+{
+  "schema_version": "screening-prepare-config-v1",
+  "dataset_id": "replace-with-frozen-cohort-id",
+  "financial_as_of": "2026-10-08",
+  "completion_root": "/absolute/path/to/universe-completion",
+  "metadata_root": "/absolute/path/to/company-metadata-publication",
+  "companies": [
+    {
+      "ticker": "AMD",
+      "cik": "0000002488",
+      "analysis_root": "/absolute/path/to/annual-analysis/AMD"
+    }
+  ]
+}
