@@ -802,6 +802,29 @@ def test_completion_rejects_symlinked_destination_without_external_write(
 
 
 @pytest.mark.parametrize(
+    ("value", "raw_value", "accepted"),
+    (
+        ("0", "0", True),
+        ("-0", "-0", True),
+        (Decimal(0), "0", True),
+        (Decimal("-0"), "-0", True),
+        ("0", "-0", False),
+        ("-0", "0", False),
+        ("0.0", "0", False),
+        ("1", "0", False),
+        ("zero", "0", False),
+        (Decimal(1), "0", False),
+        (0, "0", False),
+        (None, "0", False),
+    ),
+)
+def test_approved_reported_zero_matches_raw_string_schema_and_sign(
+    value: object, raw_value: str, accepted: bool
+) -> None:
+    assert universe_delivery._is_approved_reported_zero(value, raw_value) is accepted
+
+
+@pytest.mark.parametrize(
     ("accuracy_state", "expected_delivery_state"),
     (("PENDING", "PARTIAL"), ("BLOCKED", "BLOCKED")),
 )
@@ -1264,7 +1287,7 @@ def test_approved_transform_corrections_are_source_and_snapshot_bound(
                     "raw_concept_id": [raw_concept_id],
                     "context_id": [context_id],
                     "value_numeric": [
-                        Decimal(0) if value_class in {"monetary", "shares"} else None
+                        actual if value_class in {"monetary", "shares"} else None
                     ],
                     "value_text": [
                         None if value_class in {"monetary", "shares"} else actual
@@ -1277,6 +1300,8 @@ def test_approved_transform_corrections_are_source_and_snapshot_bound(
         ],
         how="diagonal_relaxed",
     ).write_parquet(snapshot / "fact.parquet")
+    if value_class in {"monetary", "shares"}:
+        assert pl.read_parquet(snapshot / "fact.parquet").schema["value_numeric"] == pl.String
     pl.concat(
         [
             pl.read_parquet(snapshot / "concept.parquet"),

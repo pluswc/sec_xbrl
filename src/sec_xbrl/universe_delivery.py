@@ -15,6 +15,7 @@ import re
 import shutil
 import uuid
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -1186,8 +1187,9 @@ def _validate_approved_transform_corrections(
                 raise ValueError("approved correction differs from v5 Fact or Concept")
             if record["value_class"] in {"monetary", "shares"}:
                 if (
-                    fact.get("value_numeric") is None
-                    or fact["value_numeric"] != 0
+                    not _is_approved_reported_zero(
+                        fact.get("value_numeric"), record["actual_raw_value"]
+                    )
                     or fact.get("value_text") is not None
                 ):
                     raise ValueError("approved numeric correction is not a reported zero")
@@ -1199,6 +1201,17 @@ def _validate_approved_transform_corrections(
         "repair_families": dict(sorted(families.items())),
         "value_classes": dict(sorted(value_classes.items())),
     }
+
+
+def _is_approved_reported_zero(value: Any, raw_value: Any) -> bool:
+    """Match the Raw numeric scalar to the approved as-reported zero spelling."""
+    if raw_value not in {"0", "-0"}:
+        return False
+    if type(value) is str:
+        return value == raw_value
+    if isinstance(value, Decimal):
+        return value.is_zero() and value.is_signed() == (raw_value == "-0")
+    return False
 
 
 def _supported_lexical_repair_policy(record: dict[str, Any]) -> tuple[str, str] | None:
