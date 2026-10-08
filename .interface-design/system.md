@@ -11,3 +11,5 @@
 - Tables: sticky 11px headers, 9px by 12px cells, tabular numbers, blue selected-row tint. Company names open evidence; checkboxes select export scope.
 - Status: every state includes text. Amber means review/undetermined, red means failure/block, green means pass. Raw codes belong in expandable technical details where possible.
 - Evidence drawer: up to 570px wide, focus-trapped, Escape closes and returns focus. It shows one predicate metric at a time, with actual source dates and raw annual levels.
+- Criteria: expanded for new-condition editing, then reversibly compacted after a run opens or executes so the result matrix owns the viewport.
+- Data labels: primary views use Korean business labels and grouped USD figures; exact canonical strings, enums, full IDs, hashes, and parser metadata live in native disclosure details.

@@ -10,6 +10,9 @@ def test_screening_ui_exposes_governed_workflows_without_client_storage() -> Non
     assert "/api/runs/${encodeURIComponent(S.run.run_id)}/trace" in JS
     assert "download_url" in JS
     assert "ACTUAL_PERIOD_REQUIRED" in JS
+    assert "조건 펼치기" in JS
+    assert "실제 준비 자료" in JS and "검증용 자료" in JS
+    assert "canonical 원문" in JS
 
 
 def test_screening_ui_keeps_accessibility_and_compact_desktop_contract() -> None:
@@ -19,3 +22,5 @@ def test_screening_ui_keeps_accessibility_and_compact_desktop_contract() -> None
     assert 'S.lastFocus?.focus()' in JS
     assert "@media(max-width:1100px)" in CSS
     assert ":focus-visible" in CSS
+    assert "aria-controls=\"criteria-form\"" in HTML
+    assert ".criteria.compact" in CSS
