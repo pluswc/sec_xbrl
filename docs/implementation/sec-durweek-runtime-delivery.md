@@ -108,3 +108,10 @@ not fully mirror every arithmetic detail of the SEC-staff reference. Those
 pre-existing discrepancies are separately scoped parser work. This delivery
 does not alter them, reinterpret existing snapshots, or infer that their current
 outputs are SEC-equivalent.
+
+On 2026-10-08 the user subsequently authorized that separate correction. Its
+scope, exact arithmetic and rendering rules, immutable `m2-layer1-v4`
+migration, and verification gates are governed by the
+[SEC numeric-duration conformance delivery](sec-duration-conformance-delivery.md).
+This later status does not rewrite the v3 evidence above or mutate its Raw
+artifacts.

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from decimal import ROUND_HALF_UP, Decimal, localcontext
+from decimal import Decimal, localcontext
 
 SEC_TRANSFORM_NAMESPACE = "http://www.sec.gov/inlineXBRL/transformation/2015-08-31"
 
@@ -70,39 +70,95 @@ def _week_duration(value: str) -> str:
     """Convert SEC ``durweek`` lexical input to a days-only XSD duration.
 
     SEC's transform truncates fractional days after multiplying the absolute
-    week magnitude by seven.  The dedicated path deliberately does not reuse
-    ``_decimal_duration`` because its day behavior rounds half up.
+    week magnitude by seven. The dedicated path keeps week-to-day conversion
+    separate from ``durday``, whose fractional remainder spills into hours.
     """
 
-    if not isinstance(value, str) or _SEC_DECIMAL_RE.fullmatch(value) is None:
-        raise ValueError(f"unsupported SEC week duration: {value}")
-    lexical = value.strip()
-    digit_count = sum(character.isascii() and character.isdigit() for character in lexical)
+    number, precision = _sec_duration_number(value, "week")
     with localcontext() as context:
-        # Decimal construction is exact.  Multiplication by seven can add one
-        # coefficient digit, so this bound is exact regardless of ambient
-        # decimal precision, including unusually large SEC lexical values.
-        context.prec = max(28, digit_count + 1)
-        number = Decimal(lexical)
+        context.prec = precision
         days = int(abs(number) * 7)
-    sign = "-" if number < 0 and days > 0 else ""
-    return f"{sign}P{days}D"
+    return _duration_value(None, None, days, None, _duration_sign(number))
 
 
 def _decimal_duration(value: str, unit: str) -> str:
-    number = Decimal(value.strip())
-    sign = "-" if number < 0 else ""
-    magnitude = abs(number)
-    whole = int(magnitude)
-    fraction = magnitude - whole
-    if unit == "D":
-        return f"{sign}P{int(magnitude.to_integral_value(rounding=ROUND_HALF_UP))}D"
-    if unit == "M":
-        whole_months = int(magnitude)
-        days = int(((magnitude - whole_months) * 30).to_integral_value(rounding=ROUND_HALF_UP))
-        return f"{sign}P{whole_months}M" if days == 0 else f"{sign}P{whole_months}M{days}D"
-    months = int((fraction * 12).to_integral_value(rounding=ROUND_HALF_UP))
-    return f"{sign}P{whole}Y" if months == 0 else f"{sign}P{whole}Y{months}M"
+    unit_names = {"D": "day", "M": "month", "Y": "year"}
+    try:
+        unit_name = unit_names[unit]
+    except KeyError as exc:
+        raise ValueError(f"unsupported SEC duration unit: {unit}") from exc
+
+    number, precision = _sec_duration_number(value, unit_name)
+    sign = _duration_sign(number)
+    with localcontext() as context:
+        context.prec = precision
+        magnitude = abs(number)
+        whole = int(magnitude)
+        if unit == "D":
+            hours = int((magnitude - whole) * 24)
+            return _duration_value(None, None, whole, hours, sign)
+        if unit == "M":
+            days = int((magnitude - whole) * Decimal("30.4375"))
+            return _duration_value(None, whole, days, None, sign)
+
+        raw_months = (magnitude - whole) * 12
+        months = int(raw_months)
+        days = int((raw_months - months) * Decimal("30.4375"))
+        return _duration_value(whole, months, days, None, sign)
+
+
+def _sec_duration_number(value: str, unit_name: str) -> tuple[Decimal, int]:
+    """Parse the strict SEC decimal grammar with operation-safe precision."""
+    if not isinstance(value, str) or _SEC_DECIMAL_RE.fullmatch(value) is None:
+        raise ValueError(f"unsupported SEC {unit_name} duration: {value}")
+    lexical = value.strip()
+    digit_count = sum(character.isascii() and character.isdigit() for character in lexical)
+    # Decimal construction is exact. The largest fixed multiplier (30.4375)
+    # adds at most six coefficient digits; the extra margin also covers the
+    # subtraction steps without depending on the caller's decimal context.
+    return Decimal(lexical), max(28, digit_count + 8)
+
+
+def _duration_sign(number: Decimal) -> str:
+    return "-" if number < 0 else ""
+
+
+def _duration_value(
+    years: int | None,
+    months: int | None,
+    days: int | None,
+    hours: int | None,
+    sign: str,
+) -> str:
+    """Render components with SEC-staff ``durationValue`` zero semantics."""
+    if all(component == 0 or component is None for component in (years, months, days, hours)):
+        sign = ""
+        found_zero = False
+        if years is not None and years == 0:
+            found_zero = True
+        if months is not None and months == 0:
+            if found_zero:
+                months = None
+            else:
+                found_zero = True
+        if days is not None and days == 0:
+            if found_zero:
+                days = None
+            else:
+                found_zero = True
+        if hours is not None and hours == 0 and found_zero:
+            hours = None
+
+    output = sign + "P"
+    if years is not None:
+        output += f"{years}Y"
+    if months is not None and (months != 0 or years is None):
+        output += f"{months}M"
+    if days is not None and (days != 0 or (years is None and months is None)):
+        output += f"{days}D"
+    if hours is not None and (hours != 0 or (years is None and months is None and days is None)):
+        output += f"T{hours}H"
+    return output
 
 
 def _word_number(value: str) -> str:

@@ -156,7 +156,12 @@ nonzero. Unknown transform names and invalid lexical values still fail closed.
 Because each supported transform expands the set of filings that can be parsed,
 successful snapshots and parse-state events use a distinct Layer 1 parser
 version. `boolballotbox` introduced `m2-layer1-v2`; `durweek` introduces
-`m2-layer1-v3`. Existing v1 and v2 artifacts remain immutable.
+`m2-layer1-v3`. The subsequent
+[numeric-duration conformance delivery](sec-duration-conformance-delivery.md)
+corrects the SEC-staff component arithmetic and strict lexical handling for
+`durday`, `durmonth`, and `duryear` and introduces `m2-layer1-v4`. Existing v1,
+v2, and v3 artifacts remain immutable; correction requires a fresh v4
+destination under the same three Layer 1 quality gates.
 
 ## Validation procedure
 
