@@ -31,7 +31,8 @@ def axis_timeseries(client: Any, ticker: str, lens_id: str, *, context: dict[str
     if lens.get("kind") != "LENS" or lens.get("lens_type") != "DIMENSIONAL_VIEW":
         raise ValueError("axis time series requires a prepared dimensional lens")
     period_classes = {node.get("period_class") for node in page["children"] if node.get("period_class")}
-    if len(period_classes) != 1 or not period_classes <= {"QTD_3M", "INSTANT"}:
+    supported = {"FY"} if client.manifest.get("period_mode") == "ANNUAL" else {"QTD_3M", "INSTANT"}
+    if len(period_classes) != 1 or not period_classes <= supported:
         raise ValueError("axis lens must have one supported prepared period class")
     period_class = next(iter(period_classes))
 
@@ -96,6 +97,18 @@ def axis_timeseries(client: Any, ticker: str, lens_id: str, *, context: dict[str
                 "prepared_node": copy.deepcopy(node),
             }
         )
+
+    files = client.manifest["companies"][ticker]["views"][view]["files"]
+    if "reviewed_q4_exclusions" in files:
+        excluded = {(row.get("mapping_epoch"), row.get("fiscal_year")): row
+                    for row in client._records(ticker, view, "reviewed_q4_exclusions")
+                    if row.get("mapping_epoch") and row.get("fiscal_year")}
+        for row in rows:
+            for cell in row["cells"]:
+                decision = excluded.get((row.get("mapping_epoch"), cell["fiscal_year"]))
+                if decision is not None and cell.get("status") == "UNAVAILABLE":
+                    cell["reason"] = decision["reason"]
+                    cell["reviewed_q4_exclusion_id"] = decision["exclusion_id"]
 
     for row in rows:
         cell_ids = {cell.get("cell_id") for cell in row["cells"]} - {None}
@@ -243,6 +256,10 @@ def _total_label(client: Any, ticker: str, view: str, lens: dict[str, Any]) -> s
 
 def _reviews(client: Any, ticker: str, lens: dict[str, Any], rows: list[dict[str, Any]], total_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     if not client.axis_manifest:
+        return [], []
+    if any(cell.get("period_class") == "FY" for row in rows for cell in row.get("cells", [])):
+        # Existing reviewed axis decisions are explicitly quarterly. Annual
+        # preparation needs a separate review publication and decision scope.
         return [], []
     candidates = defaultdict(list)
     for row in rows:

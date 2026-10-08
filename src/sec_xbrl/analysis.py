@@ -72,6 +72,12 @@ def default_profile() -> list[dict]:
             for key, label, section, period, concepts in CORE]
 
 
+def annual_profile() -> list[dict]:
+    """Translate only duration core rows to a separate FY consumer profile."""
+    return [{**row, "period_class": "FY"} for row in default_profile()
+            if row["period_class"] == "QTD_3M"]
+
+
 def _apply_lens_preferences(nodes: dict[str, dict], preferences: list[dict]) -> None:
     """Only customize existing display nodes; never create edges or identity."""
     allowed = {"lens_type", "role_uri", "basis_version", "anchor_row_id", "node_id", "axis_signature"}
@@ -165,11 +171,14 @@ class AnalysisClient:
                                 review_cutoff=review_cutoff, recent_quarters=recent_quarters)
         ticker, view, periods = self._validate_context(context)
         selected = lambda rows: [r for r in rows if (r["fiscal_year"], r["fiscal_quarter"]) in periods]
+        period_warning = ("연간 금액은 분기 금액과 별도 기간 종류입니다."
+                          if self.manifest.get("period_mode") == "ANNUAL"
+                          else "분기 금액과 기말 잔액은 별도 기간 종류입니다.")
         return copy.deepcopy({"context": context, "rows": self._records(ticker, view, "core_rows"),
                               "columns": selected(self._records(ticker, view, "columns")),
                               "cells": selected(self._records(ticker, view, "core_cells")),
                               "metrics": selected(self._records(ticker, view, "metrics")),
-                              "warnings": ["LATEST_REPORTED는 재작성 비교가능 확정이 아닙니다.", "분기 금액과 기말 잔액은 별도 기간 종류입니다."]})
+                              "warnings": ["LATEST_REPORTED는 재작성 비교가능 확정이 아닙니다.", period_warning]})
 
     def list_breakdowns(self, row_id: str, *, context: dict, include_hidden: bool = False) -> dict:
         ticker, view, periods = self._validate_context(context)
@@ -497,17 +506,133 @@ def _materialize_prepared_quality(
     )
 
 
+def _apply_reviewed_q4(
+    *, ticker: str, view: str, as_of: str | None, derived: list[dict[str, Any]],
+    columns: list[dict[str, Any]], cells: list[dict[str, Any]], traces: list[dict[str, Any]],
+    nodes: dict[str, dict[str, Any]], years: set[int], source_publication: str,
+) -> None:
+    """Attach exact reviewed values before graph construction; never replace a cell."""
+    for row in derived:
+        if row["fiscal_year"] not in years:
+            continue
+        if row["selection_view"] != view or row["selection_as_of_date"] != as_of:
+            raise ValueError("reviewed-Q4 selection scope differs from consumer preparation")
+        matching_nodes = [node for node in nodes.values()
+                          if node.get("row_id") == row["mapping_epoch"]
+                          and node.get("period_class") == "QTD_3M"]
+        if len(matching_nodes) != 1:
+            raise ValueError("reviewed-Q4 mapping epoch is not one prepared quarterly row")
+        node = matching_nodes[0]
+        if node.get("canonical_concept_id") != row["company_canonical_concept_id"]:
+            raise ValueError("reviewed-Q4 canonical concept differs from prepared row")
+        if node.get("canonical_dimension_signature") != row["canonical_dimension_signature"]:
+            raise ValueError("reviewed-Q4 full dimensions differ from prepared row")
+        matching_columns = [column for column in columns
+                            if column["fiscal_year"] == row["fiscal_year"]
+                            and column["fiscal_quarter"] == 4
+                            and column["period_class"] == "QTD_3M"]
+        if len(matching_columns) != 1:
+            raise ValueError("reviewed-Q4 target column is not uniquely prepared")
+        column = matching_columns[0]
+        conflicts = [cell for cell in cells if cell["node_id"] == node["node_id"]
+                     and cell["column_id"] == column["fiscal_time_series_column_id"]]
+        if conflicts:
+            # A direct or previously materialized cell has unconditional precedence.
+            continue
+        source_inputs = copy.deepcopy(row["source_inputs"])
+        unit = [source_inputs[0].get("unit_numerator_measures"),
+                source_inputs[0].get("unit_denominator_measures")]
+        cell = {
+            "cell_id": row["derived_cell_id"],
+            "row_id": row["mapping_epoch"],
+            "node_id": node["node_id"],
+            "column_id": column["fiscal_time_series_column_id"],
+            "fiscal_year": row["fiscal_year"],
+            "fiscal_quarter": 4,
+            "period_class": "QTD_3M",
+            "start": row["actual_start_date"],
+            "end": row["actual_end_date"],
+            "value": row["value_numeric"],
+            "unit": unit,
+            "dimensions": copy.deepcopy(node["dimensions"]),
+            "basis_version": source_inputs[0].get("basis_version"),
+            "comparison_scope": None,
+            "margin_scope": None,
+            "source_filing_ids": copy.deepcopy(row["source_filing_ids"]),
+            "monetary": True,
+            "status": "DERIVED",
+            "reason": "REVIEWED_EXACT_SOURCE_PAIR",
+            "reviewed": True,
+            "selection_view": view,
+            "as_of": as_of,
+            "ticker": ticker,
+            "semantic_id": row["company_canonical_concept_id"],
+            "source_fact_id": None,
+            "review_id": row["review_id"],
+            "formula": row["formula"],
+            "derivation_rule_version": row["derivation_rule_version"],
+        }
+        cells.append(cell)
+        traces.append({
+            "cell_id": cell["cell_id"],
+            "fiscal_year": cell["fiscal_year"],
+            "fiscal_quarter": 4,
+            "value_lineage": {
+                "status": "DERIVED",
+                "source_type": "REVIEWED_DIMENSIONAL_Q4",
+                "reported_or_derived": "DERIVED",
+                "value_numeric": row["value_numeric"],
+                "formula": row["formula"],
+                "derivation_rule_version": row["derivation_rule_version"],
+                "source_inputs": source_inputs,
+                "source_fact_ids": copy.deepcopy(row["source_fact_ids"]),
+                "source_filing_ids": copy.deepcopy(row["source_filing_ids"]),
+                "source_snapshot_ids": copy.deepcopy(row["source_snapshot_ids"]),
+                "source_table_evidence": copy.deepcopy(row["source_table_evidence"]),
+                "company_canonical_concept_id": row["company_canonical_concept_id"],
+                "canonical_dimension_signature": copy.deepcopy(row["canonical_dimension_signature"]),
+                "selection_view": view,
+                "selection_as_of_date": as_of,
+                "review": {key: copy.deepcopy(row[key]) for key in (
+                    "review_id", "reviewer", "reviewed_at", "review_purpose",
+                    "review_policy_version", "additivity", "basis_compatibility"
+                )},
+            },
+            "definition": {
+                "mapping_epoch": row["mapping_epoch"],
+                "member_qname": row["member_qname"],
+                "canonical_dimension_signature": copy.deepcopy(row["canonical_dimension_signature"]),
+            },
+            "source_publication": source_publication,
+        })
+
+
 
 
 def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str, ...],
                      configuration: dict | None = None, fiscal_years: int = 3,
                      fiscal_start: int | None = None, fiscal_end: int | None = None,
-                     quality_decisions: list[dict[str, str]] | None = None) -> Path:
+                     quality_decisions: list[dict[str, str]] | None = None,
+                     reviewed_q4_publication: Path | None = None,
+                     period_mode: str = "QUARTERLY") -> Path:
     """Materialize a consumer bundle. This is the only raw-reading/build boundary."""
-    if destination.exists() or fiscal_years < 1:
+    if destination.exists() or fiscal_years < 1 or period_mode not in {"QUARTERLY", "ANNUAL"}:
         raise ValueError("new destination and positive fiscal scope required")
+    if period_mode == "ANNUAL" and reviewed_q4_publication is not None:
+        raise ValueError("reviewed Q4 is available only in a quarterly consumer bundle")
     configuration = copy.deepcopy(configuration or {})
     reader = open_history_publication(publication)
+    reviewed_q4 = None
+    if reviewed_q4_publication is not None:
+        from sec_xbrl.analytics.reviewed_q4 import ReviewedQ4Reader
+
+        reviewed_q4 = ReviewedQ4Reader(reviewed_q4_publication)
+        reviewed_q4.verify_all()
+        if (Path(reviewed_q4.manifest["history_publication"]).resolve() != Path(publication).resolve()
+                or reviewed_q4.manifest["history_manifest_sha256"] != hashlib.sha256(
+                    (reader.root / "history_manifest.json").read_bytes()
+                ).hexdigest()):
+            raise ValueError("reviewed-Q4 companion belongs to a different history publication")
     staging = destination.parent / (".partial-" + uuid.uuid4().hex)
     staging.mkdir(parents=True)
     source_hashes = {"history_manifest_sha256": hashlib.sha256((reader.root / "history_manifest.json").read_bytes()).hexdigest()}
@@ -516,13 +641,23 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
     quality_decisions = copy.deepcopy(quality_decisions or [])
     manifest = {"version": VERSION, "publication_id": uuid.uuid4().hex, "companies": {}, "targets": {},
                 "configuration": configuration, "source_manifest_hashes": source_hashes}
+    if period_mode == "ANNUAL":
+        manifest["period_mode"] = "ANNUAL"
+    if reviewed_q4 is not None:
+        manifest["reviewed_q4"] = {
+            "publication": str(Path(reviewed_q4_publication).resolve()),
+            "publication_id": reviewed_q4.manifest["publication_id"],
+            "manifest_sha256": hashlib.sha256(
+                (Path(reviewed_q4_publication) / "reviewed_q4_manifest.json").read_bytes()
+            ).hexdigest(),
+        }
     if quality_decisions:
         manifest["quality_overlay"] = {"version": "admin-quality-v1", "matched_decision_ids": []}
     matched_quality: set[str] = set()
     for ticker in tickers:
         ticker = ticker.upper()
         settings = configuration.get(ticker, {})
-        profile = settings.get("core_rows", default_profile())
+        profile = settings.get("core_rows", annual_profile() if period_mode == "ANNUAL" else default_profile())
         if len(profile) > 25 or len({r["row_id"] for r in profile}) != len(profile):
             raise ValueError("core profile must have at most 25 unique rows")
         concepts, relationships = _raw_material(reader, ticker)
@@ -545,11 +680,16 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
             columns, cells, traces, nodes, edges, core_cells = [], [], [], {}, {}, []
             source_index: dict[tuple, list[tuple]] = defaultdict(list)
             panels = {}
-            for period in ("QTD_3M", "INSTANT"):
+            for period in (("FY",) if period_mode == "ANNUAL" else ("QTD_3M", "INSTANT")):
                 panel = reader.load(ticker=ticker, period_class=period, view=view)
                 panels[period] = panel
                 info["as_of"] = panel.scope["selection_as_of_date"]
-                selected_columns = {c["fiscal_time_series_column_id"]: c for c in panel.columns if c["fiscal_year"] in years}
+                selected_columns = {
+                    c["fiscal_time_series_column_id"]: (
+                        {**c, "fiscal_label": f"FY{c['fiscal_year']}"} if period_mode == "ANNUAL" else c
+                    )
+                    for c in panel.columns if c["fiscal_year"] in years
+                }
                 columns.extend(selected_columns.values())
                 rows = {r["fiscal_time_series_row_id"]: r for r in panel.rows}
                 for cell in panel.cells:
@@ -580,9 +720,28 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
                                   "canonical_concept_id": lineage.get("company_canonical_concept_id"),
                                   "dimensions": displayed, "basis_version": lineage.get("basis_version"),
                                   "period_class": period, "mapping_review_required": row.get("mapping_review_required")}
+                    if reviewed_q4 is not None or period_mode == "ANNUAL":
+                        nodes[nid]["canonical_dimension_signature"] = lineage.get("canonical_dimension_signature") or []
                     nodes[nid]["origin_kind"] = "STANDARD" if lineage.get("raw_concept_is_standard") else "CUSTOM"
                     raw_key = (lineage.get("source_filing_id"), lineage.get("raw_concept_id"))
                     source_index[raw_key].append((nid, compact, lineage.get("raw_dimension_signature", [])))
+            reviewed_exclusions = []
+            if reviewed_q4 is not None:
+                reviewed_exclusions = [row for row in reviewed_q4.records("exclusion")
+                                       if row.get("ticker") == ticker and row.get("selection_view") == view]
+                _apply_reviewed_q4(
+                    ticker=ticker,
+                    view=view,
+                    as_of=info["as_of"],
+                    derived=[row for row in reviewed_q4.records("derived")
+                             if row["ticker"] == ticker and row["selection_view"] == view],
+                    columns=columns,
+                    cells=cells,
+                    traces=traces,
+                    nodes=nodes,
+                    years=set(years),
+                    source_publication=str(Path(reviewed_q4_publication).resolve()),
+                )
             # Core row selection uses declared exact concept identities, never a
             # dimensioned note or a guessed subtotal. Competing observations fail.
             for spec in profile:
@@ -643,7 +802,11 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
                                 nodes[lens_id] = {"node_id": lens_id, "kind": "LENS", "anchor_row_id": core["row_id"], "label": core.get("related_source_label") or rel["role_definition"], "lens_type": "RELATED_STATEMENT_COMPOSITION" if core.get("related_source_label") else "CAL_DECOMPOSITION", "role_uri": role, "dimensions": [], "source_parent_concept": nodes[pn]["concept"]}
                                 add_edge(lens_id, scoped_child, "CAL_CHILD", [pc["fiscal_year"], pc["fiscal_quarter"]], evidence)
             _definition_graph(graph_anchors, cells, traces, nodes, relationships, concepts, add_edge, ticker=ticker, view=view)
-            _reviewed_hierarchies(settings.get("hierarchies", []), nodes, cells, traces, add_edge, view=view, review_cutoff=info["review_cutoff"])
+            hierarchy_rules = [] if period_mode == "ANNUAL" else settings.get("hierarchies", [])
+            _reviewed_hierarchies(
+                hierarchy_rules, nodes, cells, traces, add_edge,
+                view=view, review_cutoff=info["review_cutoff"],
+            )
             # A primary statement presentation network supplies context only;
             # it never creates decomposition edges. Margin role pairs remain
             # explicitly allowlisted in the metric producer.
@@ -681,6 +844,8 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
             datasets = {"columns": columns, "core_rows": profile, "core_cells": core_cells, "cells": cells,
                         "nodes": list(nodes.values()), "edges": list(edges.values()), "metrics": metrics,
                         "importance": importance}
+            if reviewed_q4 is not None:
+                datasets["reviewed_q4_exclusions"] = reviewed_exclusions
             for digit in "0123456789abcdef":
                 datasets["trace_" + digit] = [t for t in traces if stable(t["cell_id"])[0] == digit]
             for name, records in datasets.items():
@@ -949,7 +1114,7 @@ document.querySelector('#close').onclick=()=>modal.close();
 document.addEventListener('click',e=>{let b=e.target.closest('[data-cell]');if(b){modal.querySelector('pre').textContent=JSON.stringify(D.traces[b.dataset.cell],null,2);modal.showModal();}});
 function expand(el){if(el.dataset.loaded)return;el.dataset.loaded='1';let id=el.dataset.node,path=JSON.parse(el.dataset.path||'[]');if(path.includes(id)){el.append('순환 경로: 탐색 종료');return;}
 let data=D.branches[id];if(!data)return;let offset=0;
-function tableFor(cells){let box=document.createElement('div');box.className='scroll';let table=document.createElement('table'),head=document.createElement('tr'),row=document.createElement('tr');let kind=cells[0]?.period_class;for(let col of data.columns.filter(c=>!kind||c.period_class===kind)){let c=cells.find(x=>x.column_id===col.fiscal_time_series_column_id),th=document.createElement('th'),td=document.createElement('td');th.textContent='FY'+col.fiscal_year+' Q'+col.fiscal_quarter;td.innerHTML=c?c.display_value:'—';td.title=c?(c.start||'')+' ~ '+c.display_end+' · '+c.status:'이 경로에 해당 기간 관측 없음';head.append(th);row.append(td);}table.append(head,row);box.append(table);return box;}
+function tableFor(cells){let box=document.createElement('div');box.className='scroll';let table=document.createElement('table'),head=document.createElement('tr'),row=document.createElement('tr');let kind=cells[0]?.period_class;for(let col of data.columns.filter(c=>!kind||c.period_class===kind)){let c=cells.find(x=>x.column_id===col.fiscal_time_series_column_id),th=document.createElement('th'),td=document.createElement('td');th.textContent=col.period_class==='FY'?'FY'+col.fiscal_year:'FY'+col.fiscal_year+' Q'+col.fiscal_quarter;td.innerHTML=c?c.display_value:'—';td.title=c?(c.start||'')+' ~ '+c.display_end+' · '+c.status:'이 경로에 해당 기간 관측 없음';head.append(th);row.append(td);}table.append(head,row);box.append(table);return box;}
 if(data.parent_cells.length){let caption=document.createElement('p');caption.textContent='상위 항목의 값(관점별 수치는 서로 합산하지 않음)';el.append(caption,tableFor(data.parent_cells));}
 if(data.excluded_count){let note=document.createElement('p');note.textContent=data.excluded_count+'개 항목은 현재 중요 항목 목록에서 제외됨';el.append(note);}
 function page(){let group=data.children.slice(offset,offset+5);offset+=group.length;

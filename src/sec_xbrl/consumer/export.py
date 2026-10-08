@@ -374,8 +374,11 @@ def _xlsx(snapshot: dict[str, Any], destination: Path) -> None:
     periods = list(dict.fromkeys(
         (column["fiscal_year"], column["fiscal_quarter"]) for column in snapshot["columns"]
     ))
+    annual = bool(snapshot["columns"]) and all(
+        column.get("period_class") == "FY" for column in snapshot["columns"]
+    )
     headers = ["label", "period_class", "unit", *[
-        f"FY{year} Q{quarter}" for year, quarter in periods
+        f"FY{year}" if annual else f"FY{year} Q{quarter}" for year, quarter in periods
     ], "row_warnings", "cell_statuses", "row_id", "depth"]
     table.append(headers)
     cell_index = {(cell["row_id"], cell["fiscal_year"], cell["fiscal_quarter"], cell["period_class"]): cell
