@@ -8,12 +8,16 @@ runtime artifacts.  The implementation baseline is
 `201acf9aec2f8183acb7dd843579938db14236cd` on
 `codex/company-universe-delivery`.
 
-The current state is **APPROVED for implementation**.  It is not yet
-`IMPLEMENTED`, `INDEPENDENTLY_VERIFIED`, `LOCALLY_ACCEPTED`, or `MERGED`.
-Those states require their own dated evidence under
-[`delivery-workflow.md`](delivery-workflow.md).  This contract does not create a
-new architectural Layer and does not replace the M architecture roadmap or U
-investor roadmap.
+The current delivery state is **APPROVED with feature-branch implementation in
+progress**.  A candidate `24df803` and B candidate `1e5a398` passed their
+separate independent verification; parser compatibility candidate `192ee424`
+also passed.  C repair candidate `9646771` and the combined completion publication
+still require their own independent results.  The whole delivery is not yet
+`LOCALLY_ACCEPTED` or `MERGED`.  Current evidence and remaining gates are in
+[`universe-data-delivery-completion.md`](universe-data-delivery-completion.md)
+under the state rules of [`delivery-workflow.md`](delivery-workflow.md).  This
+contract does not create a new architectural Layer and does not replace the M
+architecture roadmap or U investor roadmap.
 
 ## 2. Authorized A/B/C delivery
 
@@ -40,7 +44,9 @@ Runtime artifacts include one immutable plan and intake history per company,
 an aggregate deterministic status manifest, machine-readable JSON and CSV,
 and a human-readable HTML summary.  A later integration step may link those
 artifacts with B and C in one local completion view without changing their
-source contracts.
+source contracts.  That prepared-output integration is implemented by
+`src/sec_xbrl/universe_delivery.py`; its acceptance remains separate from A's
+already verified component candidate.
 
 ### B — Company master and SIC classification publication
 

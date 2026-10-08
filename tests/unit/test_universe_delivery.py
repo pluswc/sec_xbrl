@@ -1,0 +1,465 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+
+from sec_xbrl import collection_operations as operations
+from sec_xbrl import universe_delivery
+from sec_xbrl.analysis import VERSION as ANALYSIS_VERSION
+from sec_xbrl.analytics.reviewed_q4 import VERSION as Q4_VERSION
+from sec_xbrl.company_metadata import (
+    SnapshotInput,
+    build_company_metadata,
+    publish_company_metadata,
+)
+from sec_xbrl.history import HISTORY_VERSION, _write_records
+
+
+def _write(path: Path, payload: object) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def _collection(tmp_path: Path) -> tuple[Path, Path]:
+    config = _write(
+        tmp_path / "config.json",
+        {
+            "schema_version": 1,
+            "universe_id": "one-company-delivery",
+            "purpose": "completion fixture",
+            "as_of_date": "2026-10-08",
+            "source_observed_at": "2026-10-08T01:00:00+00:00",
+            "collection": {
+                "completed_fiscal_years": 4,
+                "analytical_fiscal_years": 3,
+                "include_subsequent_quarters": True,
+            },
+            "companies": [
+                {"ticker": "TEST", "cik": "0000000123", "groups": ["fixture"]}
+            ],
+        },
+    )
+    filing = {
+        "cik": "0000000123",
+        "accession": "0000000123-26-000001",
+        "form": "10-K",
+        "filed_date": "2026-03-01",
+        "report_date": "2025-12-31",
+        "primary_document": "test.htm",
+        "is_xbrl": True,
+        "is_inline_xbrl": True,
+        "source": "fixture",
+    }
+    plan = _write(
+        tmp_path / "plan.json",
+        {
+            "version": HISTORY_VERSION,
+            "as_of_date": "2026-10-08",
+            "report_start": "2025-12-31",
+            "report_end": "2025-12-31",
+            "recent_fiscal_years": None,
+            "companies": [
+                {
+                    "ticker": "TEST",
+                    "cik": "0000000123",
+                    "name": "Test Corp",
+                    "submissions": [],
+                    "filings": [filing],
+                }
+            ],
+        },
+    )
+    manifest = operations.prepare_universe(
+        config_path=config,
+        run_root=tmp_path / "operations",
+        existing_plans={"TEST": plan},
+    )
+    local_plan = json.loads((tmp_path / "operations/companies/TEST/plan.json").read_text())
+    _write(
+        tmp_path / "operations/companies/TEST/intake/history_intake.json",
+        {
+            "plan": local_plan,
+            "complete": True,
+            "filings": [{"filing": filing, "status": "REUSED"}],
+        },
+    )
+    return config, manifest
+
+
+def _mark_collection_ready(collection_manifest: Path) -> None:
+    run_root = collection_manifest.parent
+    company_root = run_root / "companies/TEST"
+    plan_path = company_root / "plan.json"
+    intake_path = company_root / "intake/history_intake.json"
+    plan = json.loads(plan_path.read_text())
+    output_root = run_root / "history"
+    publication = output_root / "panels"
+    publication.mkdir(parents=True)
+    data_path = publication / "fixture.parquet"
+    data_path.write_bytes(b"fixture-history-data")
+    data_sha = hashlib.sha256(data_path.read_bytes()).hexdigest()
+    history_manifest = _write(
+        publication / "history_manifest.json",
+        {
+            "plan": plan,
+            "source_intake": str(intake_path.absolute()),
+            "views": ["AS_FILED", "LATEST_REPORTED"],
+            "tables": [
+                {
+                    "files": {
+                        "fixture": {
+                            "path": "fixture.parquet",
+                            "sha256": data_sha,
+                        }
+                    }
+                }
+            ],
+        },
+    )
+    _write(
+        company_root / "build_manifest.json",
+        {
+            "version": operations.COLLECTION_VERSION,
+            "status": "READY",
+            "ticker": "TEST",
+            "output_root": str(output_root.absolute()),
+            "publication": str(publication.absolute()),
+            "views": ["AS_FILED", "LATEST_REPORTED"],
+            "plan_sha256": hashlib.sha256(plan_path.read_bytes()).hexdigest(),
+            "intake_manifest": str(intake_path.absolute()),
+            "intake_sha256": hashlib.sha256(intake_path.read_bytes()).hexdigest(),
+            "history_manifest": str(history_manifest.absolute()),
+            "history_manifest_sha256": hashlib.sha256(
+                history_manifest.read_bytes()
+            ).hexdigest(),
+            "declared_files": {"fixture.parquet": data_sha},
+            "completed_at": "2026-10-08T02:00:00+00:00",
+        },
+    )
+
+
+def _metadata(tmp_path: Path) -> Path:
+    snapshot = _write(
+        tmp_path / "metadata-input/0000000123/root.json",
+        {
+            "cik": "0000000123",
+            "name": "Test Corp",
+            "sic": "3571",
+            "sicDescription": "Electronic Computers",
+            "tickers": ["TEST", "TST.A"],
+            "exchanges": ["Nasdaq", "NYSE"],
+            "formerNames": [],
+            "filings": {"recent": {"form": ["10-K", "10-Q"]}},
+        },
+    )
+    observed = datetime(2026, 10, 8, 1, 0, tzinfo=UTC)
+    build = build_company_metadata(
+        [SnapshotInput(snapshot, observed)], cutoff=observed
+    )
+    return publish_company_metadata(build, tmp_path / "company-metadata").root
+
+
+def _reviewed_q4(tmp_path: Path) -> tuple[Path, Path]:
+    history = tmp_path / "history/panels"
+    history.mkdir(parents=True)
+    history_manifest = _write(history / "history_manifest.json", {"version": "fixture"})
+    root = tmp_path / "reviewed-q4"
+    root.mkdir()
+    derived = tuple(
+        {
+            "ticker": "TEST",
+            "cik": "0000000123",
+            "selection_view": view,
+            "selection_as_of_date": "2026-09-06",
+            "fiscal_year": 2025,
+            "fiscal_quarter": 4,
+            "member_qname": "test:ProductMember",
+            "canonical_dimension_signature": [["axis", "member"]],
+            "value_numeric": "300",
+            "status": "DERIVED",
+            "review_id": f"review-{view}",
+            "source_accessions": ["fy-accession", "ytd-accession"],
+            "source_snapshot_ids": ["fy-snapshot", "ytd-snapshot"],
+            "source_fact_ids": ["fy-fact", "ytd-fact"],
+        }
+        for view in ("AS_FILED", "LATEST_REPORTED")
+    )
+    exclusions = (
+        {
+            "ticker": "TEST",
+            "selection_view": "LATEST_REPORTED",
+            "fiscal_year": 2025,
+            "member_qname": "test:NeedsReviewMember",
+            "reason": "MAPPING_REVIEW_REQUIRED_DIFFERENT_EPOCHS",
+            "detail": "fixture pending scope",
+        },
+    )
+    records = {"candidate": (), "exclusion": exclusions, "review": (), "derived": derived}
+    files = {}
+    for name, rows in records.items():
+        relative = f"reviewed_q4_{name}.parquet"
+        files[name] = {"path": relative, **_write_records(root / relative, rows)}
+    _write(
+        root / "reviewed_q4_manifest.json",
+        {
+            "version": Q4_VERSION,
+            "rule_version": "fixture-rule",
+            "publication_id": "reviewed-q4-fixture",
+            "history_publication": str(history.resolve()),
+            "history_manifest_sha256": hashlib.sha256(history_manifest.read_bytes()).hexdigest(),
+            "source_evidence_path": str((tmp_path / "source.json").resolve()),
+            "source_evidence_sha256": "a" * 64,
+            "review_ledger_path": str((tmp_path / "ledger.json").resolve()),
+            "review_ledger_sha256": "b" * 64,
+            "source_snapshots": [],
+            "files": files,
+            "counts": {name: len(rows) for name, rows in records.items()},
+            "selection_as_of_dates": ["2026-09-06"],
+            "views": ["AS_FILED", "LATEST_REPORTED"],
+            "review_cutoff": "2026-10-08T01:30:00+00:00",
+        },
+    )
+    return root, history
+
+
+def _analysis_bundle(
+    tmp_path: Path,
+    *,
+    name: str,
+    history: Path,
+    q4: Path | None,
+    annual: bool,
+) -> Path:
+    root = tmp_path / name
+    root.mkdir()
+    views = {}
+    for view in ("AS_FILED", "LATEST_REPORTED"):
+        relative = f"TEST/{view}/columns.parquet"
+        info = _write_records(
+            root / relative,
+            ({"fiscal_year": 2025, "fiscal_quarter": 4, "period_class": "FY" if annual else "QTD_3M"},),
+        )
+        views[view] = {"files": {"columns": {"path": relative, **info}}}
+    history_sha = hashlib.sha256((history / "history_manifest.json").read_bytes()).hexdigest()
+    company = {
+        "views": views,
+        "source_publication": str(history.resolve()),
+        "as_of": "2026-09-06",
+        "review_cutoff": None,
+        "years": [2025],
+    }
+    manifest: dict[str, object] = {
+        "version": ANALYSIS_VERSION,
+        "publication_id": f"{name}-publication",
+        "companies": {"TEST": company},
+        "targets": {"TEST": {"status": "READY", "reason": None}},
+        "configuration": {},
+        "source_manifest_hashes": {"history_manifest_sha256": history_sha},
+    }
+    if annual:
+        manifest["period_mode"] = "ANNUAL"
+    if q4 is not None:
+        q4_manifest_path = q4 / "reviewed_q4_manifest.json"
+        q4_manifest = json.loads(q4_manifest_path.read_text())
+        manifest["reviewed_q4"] = {
+            "publication": str(q4.resolve()),
+            "publication_id": q4_manifest["publication_id"],
+            "manifest_sha256": hashlib.sha256(q4_manifest_path.read_bytes()).hexdigest(),
+            "review_cutoff": q4_manifest["review_cutoff"],
+        }
+        company["reviewed_q4_publication_id"] = q4_manifest["publication_id"]
+        company["reviewed_q4_cutoff"] = q4_manifest["review_cutoff"]
+    _write(root / "analysis_manifest.json", manifest)
+    return root
+
+
+def _inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
+    config, collection = _collection(tmp_path)
+    _mark_collection_ready(collection)
+    metadata = _metadata(tmp_path)
+    q4, history = _reviewed_q4(tmp_path)
+    quarterly = _analysis_bundle(
+        tmp_path, name="quarterly", history=history, q4=q4, annual=False
+    )
+    annual = _analysis_bundle(
+        tmp_path, name="annual", history=history, q4=None, annual=True
+    )
+    monkeypatch.setattr(universe_delivery.ReviewedQ4Reader, "verify_all", lambda self: None)
+    return {
+        "config": config,
+        "collection": collection,
+        "metadata": metadata,
+        "q4": q4,
+        "quarterly": quarterly,
+        "annual": annual,
+    }
+
+
+def test_one_company_completion_joins_statuses_and_c_scope_labels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _inputs(tmp_path, monkeypatch)
+    published = universe_delivery.publish_universe_delivery(
+        config_path=paths["config"],
+        collection_manifest=paths["collection"],
+        metadata_publication=paths["metadata"],
+        reviewed_q4_publication=paths["q4"],
+        quarterly_analysis=paths["quarterly"],
+        annual_analysis=paths["annual"],
+        destination=tmp_path / "completion",
+        expected_q4_economic_cells=1,
+        expected_q4_view_records=2,
+    )
+
+    report = json.loads(published.readiness_json.read_text())
+    assert report["assessment_state"] == "READY"
+    assert report["dates"] == {
+        "collection_source_observed_at": "2026-10-08T01:00:00+00:00",
+        "financial_as_of": "2026-10-08",
+        "metadata_candidate_inventory_observed_at": None,
+        "metadata_cutoff": "2026-10-08T01:00:00Z",
+        "metadata_observed_at": ["2026-10-08T01:00:00Z"],
+        "q4_review_cutoff": "2026-10-08T01:30:00+00:00",
+        "q4_selection_as_of_dates": ["2026-09-06"],
+    }
+    assert len(report["companies"]) == 1
+    company = report["companies"][0]
+    assert company["metadata_tickers"] == ["TEST", "TST.A"]
+    assert company["collection_state"] == "READY"
+    assert report["assessments"]["collection"]["state"] == "READY"
+    assert company["assessment_state"] == "ANALYSIS_PREPARED"
+    assert company["q4_scope"] == "REVIEWED_SCOPE"
+    assert report["assessments"]["reviewed_q4"]["economic_cells"] == 1
+    assert report["assessments"]["reviewed_q4"]["view_records"] == 2
+    assert len(report["reviewed_q4"]["rows"]) == 2
+    assert report["reviewed_q4"]["rows"][0]["source_accessions"]
+    rendered = published.report_html.read_text(encoding="utf-8")
+    assert "기업·산업·원자료·분석준비·Q4범위" in rendered
+    assert "기준일을 분리해서 읽기" in rendered
+    assert "MAPPING_REVIEW_REQUIRED_DIFFERENT_EPOCHS" in rendered
+    assert "FY2025 Q4" in rendered
+    assert published.readiness_csv.read_text().count("\n") == 2
+    assert "does not" in published.readme.read_text(encoding="utf-8")
+    reader = universe_delivery.UniverseDeliveryReader(published.root)
+    assert reader.publication_id == published.publication_id
+    published.report_html.write_text(rendered + "tampered", encoding="utf-8")
+    with pytest.raises(ValueError, match="integrity mismatch"):
+        universe_delivery.UniverseDeliveryReader(published.root)
+
+
+def test_completion_can_publish_explicit_partial_state_before_c_is_ready(
+    tmp_path: Path,
+) -> None:
+    config, collection = _collection(tmp_path)
+    metadata = _metadata(tmp_path)
+    published = universe_delivery.publish_universe_delivery(
+        config_path=config,
+        collection_manifest=collection,
+        metadata_publication=metadata,
+        destination=tmp_path / "completion",
+    )
+
+    report = json.loads(published.readiness_json.read_text())
+    assert report["assessment_state"] == "PARTIAL"
+    assert report["assessments"]["collection"]["state"] == "RAW_COMPLETE"
+    assert report["assessments"]["metadata"]["state"] == "READY"
+    assert report["assessments"]["reviewed_q4"]["state"] == "PENDING"
+    assert report["assessments"]["quarterly_analysis"]["state"] == "PENDING"
+    assert report["assessments"]["annual_analysis"]["state"] == "PENDING"
+    assert report["companies"][0]["assessment_state"] == "RAW_METADATA_READY"
+    assert "준비된 검토 Q4 publication이 없습니다" in published.report_html.read_text()
+
+
+@pytest.mark.parametrize("defect", ("config_cik", "q4_identity", "analysis_asof"))
+def test_completion_rejects_foreign_or_stale_input_before_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, defect: str
+) -> None:
+    paths = _inputs(tmp_path, monkeypatch)
+    if defect == "config_cik":
+        config = json.loads(paths["config"].read_text())
+        config["companies"][0]["cik"] = "0000000999"
+        paths["config"] = _write(tmp_path / "foreign-config.json", config)
+    elif defect == "q4_identity":
+        manifest_path = paths["quarterly"] / "analysis_manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["reviewed_q4"]["publication_id"] = "foreign-q4"
+        manifest["companies"]["TEST"]["reviewed_q4_publication_id"] = "foreign-q4"
+        _write(manifest_path, manifest)
+    else:
+        manifest_path = paths["annual"] / "analysis_manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["companies"]["TEST"]["as_of"] = "2026-09-05"
+        _write(manifest_path, manifest)
+
+    with pytest.raises(ValueError):
+        universe_delivery.publish_universe_delivery(
+            config_path=paths["config"],
+            collection_manifest=paths["collection"],
+            metadata_publication=paths["metadata"],
+            reviewed_q4_publication=paths["q4"],
+            quarterly_analysis=paths["quarterly"],
+            annual_analysis=paths["annual"],
+            destination=tmp_path / "completion",
+            expected_q4_economic_cells=1,
+            expected_q4_view_records=2,
+        )
+    assert not (tmp_path / "completion").exists()
+
+
+def test_reviewed_q4_ticker_cannot_borrow_another_configured_cik() -> None:
+    with pytest.raises(ValueError, match="ticker/CIK differs"):
+        universe_delivery._validate_q4_scope(
+            ({"ticker": "TEST", "cik": "0000000999"},),
+            {"TEST": "0000000123", "OTHER": "0000000999"},
+        )
+
+
+def test_completion_rejects_symlinked_prepared_dataset_before_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _inputs(tmp_path, monkeypatch)
+    dataset = paths["quarterly"] / "TEST/AS_FILED/columns.parquet"
+    outside = tmp_path / "outside-columns.parquet"
+    outside.write_bytes(dataset.read_bytes())
+    dataset.unlink()
+    dataset.symlink_to(outside)
+
+    with pytest.raises(ValueError, match="traverses a symlink"):
+        universe_delivery.publish_universe_delivery(
+            config_path=paths["config"],
+            collection_manifest=paths["collection"],
+            metadata_publication=paths["metadata"],
+            reviewed_q4_publication=paths["q4"],
+            quarterly_analysis=paths["quarterly"],
+            annual_analysis=paths["annual"],
+            destination=tmp_path / "completion",
+            expected_q4_economic_cells=1,
+            expected_q4_view_records=2,
+        )
+    assert outside.is_file()
+    assert not (tmp_path / "completion").exists()
+
+
+def test_completion_rejects_symlinked_destination_without_external_write(
+    tmp_path: Path,
+) -> None:
+    config, collection = _collection(tmp_path)
+    metadata = _metadata(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    destination = tmp_path / "completion"
+    destination.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="traverses a symlink"):
+        universe_delivery.publish_universe_delivery(
+            config_path=config,
+            collection_manifest=collection,
+            metadata_publication=metadata,
+            destination=destination,
+        )
+    assert list(outside.iterdir()) == []

@@ -139,3 +139,40 @@ Stage labels describe the operational source route: `LIVE` for a live
 discovery or newly ingested snapshot, `CACHE` for cached offline discovery, and
 `REUSED` for caller-supplied plans or existing Layer 1 snapshots.  The as-of
 date and source observation timestamp remain separate fields.
+
+## Publish the integrated completion view
+
+After A, B, and C have produced their immutable outputs, join them without
+opening SEC data or rerunning analysis:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m sec_xbrl.universe_delivery \
+  --config /absolute/path/to/final-pilot-config.json \
+  --collection-manifest /absolute/path/to/operations_final/collection_manifest.json \
+  --metadata-publication /absolute/path/to/company_metadata_v2 \
+  --reviewed-q4-publication /absolute/path/to/q4_delivery/companion \
+  --quarterly-analysis /absolute/path/to/q4_delivery/quarterly \
+  --annual-analysis /absolute/path/to/q4_delivery/annual \
+  --destination /absolute/path/to/completion
+```
+
+All paths are caller supplied.  The configuration used for completion must
+contain an explicit CIK for every requested company.  The publisher rejects a
+foreign or stale company/CIK scope, collection as-of, metadata identity,
+reviewed-Q4 parent, analytical selection date, period mode, or declared file
+digest before creating the destination.
+
+The destination contains `index.html`, `company_readiness.json`,
+`company_readiness.csv`, `README.md`, and `universe_delivery_manifest.json`.  The JSON keeps
+the collection financial as-of, metadata observation/cutoff, historical
+analytical selection as-of, and Q4 review cutoff as separate fields.  The Q4
+table comes from `ReviewedQ4Reader` records and includes exact source accession,
+snapshot, and fact identities; the HTML does not calculate a residual.
+
+The C paths may be omitted while creating a clearly `PARTIAL` prototype.  A
+quarterly bundle cannot be supplied without its exact reviewed-Q4 companion.
+The integrated assessment remains `PARTIAL` until every configured A company
+has a verified governed-history `READY` publication; `RAW_COMPLETE` is reported
+separately and does not imply analysis readiness.
+Use a new destination for each prototype or final publication.  Runtime SEC
+payloads, Parquet outputs, and generated completion views remain outside Git.
