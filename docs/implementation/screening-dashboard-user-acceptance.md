@@ -4,9 +4,12 @@
 
 기준일은 **2026-10-08 KST**다. 이 문서는
 [`screening-dashboard-roadmap.md`](../planning/screening-dashboard-roadmap.md)의
-미래 구현을 검증하기 위한 **PROPOSED** 계약이다. 대시보드 구현을 승인하거나
-완료·검증·인수됐다고 주장하지 않는다. 이번 계획 turn에는 새 대시보드도,
-browser test도, screenshot도 없다.
+미래 구현을 검증하기 위한 **PROPOSED** 계약으로 작성됐다. **2026-10-09 KST에
+사용자가 P0–P6 로컬 v1 구현과 실제 21사 실행을 승인했으므로 이제 이 S01–S08은
+해당 구현의 인수 계약이다.** 구현 범위는
+[`screening-dashboard-delivery.md`](screening-dashboard-delivery.md)에 고정한다.
+이 후속 승인은 구현 완료·독립 검증·로컬 인수·원격 병합을 미리 주장하지 않으며,
+P7 live refresh와 새 cohort를 승인하지 않는다.
 
 인수 목표는 “화면이 열린다”가 아니다. 사용자가 실제 조건을 저장하고 실행한
 뒤 모든 대상 회사의 결과와 이유를 보고, 값의 출처를 추적하고, 자신의 판단을
