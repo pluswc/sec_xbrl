@@ -10,18 +10,21 @@ authorized that bounded repair with: `진행해줘. 큰 문제는 아닌것 같�
 This delivery is therefore **APPROVED for local implementation**. It corrects
 the generic SEC Inline XBRL `durday`, `durmonth`, and `duryear` transforms and
 applies the already-governed strict numeric lexical contract to all four
-numeric-duration transforms, including `durweek`. It also advances the Layer 1
-parser identity so corrected Facts can be written only as a fresh immutable
-history. Implementation, independent verification, local acceptance, PR, CI,
-merge, and operational cohort reprocessing remain separate states.
+numeric-duration transforms, including `durweek`. The later fail-closed cohort
+diagnostic also corrects four supported SEC-staff lexical forms that the
+partial local transform registry had omitted. It advances the Layer 1 parser
+identity so corrected Facts can be written only as a fresh immutable history.
+Implementation, independent verification, local acceptance, PR, CI, merge,
+and operational cohort reprocessing remain separate states.
 
 This delivery does not change filing discovery, source packages, Context
 dates, period classification, Q4 derivation or other business policy,
-analytical mappings, metadata enrichment, dashboards, or non-duration Inline
-transforms. It does not overwrite an old Raw snapshot or reinterpret a
-reported Fact as derived. The source lexical value remains in the immutable
-primary document and is reachable through the Fact's source document/locator
-trace; the normalized value remains a reported XBRL value.
+analytical mappings, metadata enrichment, or dashboards. Other than the four
+named supported lexical forms in Section 6, it does not change non-numeric
+duration Inline transforms. It does not overwrite an old Raw snapshot or
+reinterpret a reported Fact as derived. The source lexical value remains in
+the immutable primary document and is reachable through the Fact's source
+document/locator trace; the normalized value remains a reported XBRL value.
 
 ## 2. Defect and primary reference
 
@@ -121,23 +124,30 @@ Required examples include:
 
 ## 5. Immutable parser-version migration
 
-`Layer1Extractor.parser_version` advances from `m2-layer1-v3` to
-`m2-layer1-v4`. Existing v1, v2, and v3 source packages, snapshots, manifests,
-and parse-state history remain byte-identical and readable. The corrected
-normalization is produced only by a fresh v4 destination; no in-place Raw
-correction is permitted.
+The numeric-duration candidate first advanced `Layer1Extractor.parser_version`
+from `m2-layer1-v3` to `m2-layer1-v4`. The cohort diagnostic then found four
+supported lexical gaps after 38 partial v4 snapshots had been written for AMD
+and Apple. The complete candidate therefore advances again to
+`m2-layer1-v5`. Existing v1 through v4 source packages, snapshots, manifests,
+and parse-state history remain byte-identical and readable. The complete
+normalization is produced only by a fresh v5 destination; no in-place Raw
+correction is permitted and the partial v4 histories are not accepted as the
+21-company result.
 
-Every v4 replay remains subject to the existing
+Every v5 replay remains subject to the existing
 `TAXONOMY_AND_TRANSFORM_RESOLUTION`, `RAW_CORPUS_COMPLETENESS`, and
 `ATOMIC_FILING_SNAPSHOT` gates. An invalid duration lexical value or unknown
 transform fails closed. The parser-version change does not relax taxonomy
 resolution, Fact completeness, relationship integrity, or atomic publication.
 
-The expected intentional differences from the same filing under v3 are only:
+The expected intentional differences from the same filing under an earlier
+parser version are only:
 
 1. normalized values of Facts that use `durday`, `durmonth`, or `duryear` and
    whose prior local result differs from this contract; and
-2. parser-version provenance and identifiers derived from that version where
+2. normalized values for the four supported lexical repairs enumerated in
+   Section 6; and
+3. parser-version provenance and identifiers derived from that version where
    the immutable schema requires it.
 
 Fact source lexicals, monetary and other numeric values, reported source type,
@@ -268,10 +278,116 @@ repository-wide Ruff reported no findings. These are corrective writer
 self-tests. A new frozen commit still requires a complete independent
 read-only verification and `PASS` before cohort reprocessing or acceptance.
 
+### Cohort diagnostic and four supported SEC lexical repairs
+
+The first approved 21-company v4 replay passed AMD and Apple, then stopped on
+all 16 Microsoft filings. Each filing reported three `xmlSchema:valueError`
+events. Read-only diagnosis of Microsoft accession
+`0001564590-22-035087` showed that the gate was working as specified: three
+reported `dei:SecurityExchangeName` Facts used `ixt-sec:exchnameen` with source
+lexical `Nasdaq`, and Arelle exposed each as `xValid=INVALID` with an
+`(ixTransformValueError)` sentinel. The local exchange-name table omitted the
+bare `Nasdaq` form even though the SEC-staff `exchnameen` grammar accepts it
+and returns `NASDAQ`.
+
+The legacy snapshot inventory then found 104 transformation-error sentinels in
+the full cohort. Source inspection and the SEC-staff transform reference showed
+that all 104 use supported source lexical forms omitted by the partial local
+implementation:
+
+| Transform | Source lexical | Required result | Affected Facts |
+| --- | --- | --- | ---: |
+| `exchnameen` | bare `Nasdaq` | `NASDAQ` | 48 |
+| `stateprovnameen` | `Idaho` | `ID` | 19 |
+| `durwordsen` | `three‑year` / `five‑year` with U+2011 | `P3Y` / `P5Y` | 5 |
+| `numwordsen` | `nil` | `0` | 32 |
+
+The SEC-staff reference governs these results: its exchange grammar accepts a
+bare Nasdaq name; its state/province table maps Idaho to `ID`; its English
+duration grammar accepts ASCII and the listed Unicode hyphen characters; and
+its English-number zero grammar accepts `nil`, including its case variants and
+surrounding XML whitespace. The repair adds only these supported forms to the
+existing local transform paths. It does not broaden the state catalog or word
+grammar beyond that bounded evidence.
+
+Unsupported exchange, state, English-duration, and English-number lexicals
+still raise a transform error and therefore fail the existing Fact-validity
+and atomic-publication gates. The repair does not relax
+`xmlSchema:valueError`, `xValid`, or sentinel checks and does not change any
+numeric-duration arithmetic.
+
+Before implementation the writer scanned all 381 cached primary documents in
+the approved cohort source index. It resolved 158,373 formatted Facts across
+30 namespace/local transform forms in the SEC and standard 2015, 2020, and
+2022 transformation namespaces, with no unknown format QName or namespace.
+The old sentinel inventory contained only the four SEC transform cases above;
+it contained no standard-namespace transformation sentinel. Nested PCAR
+Inline Facts explain why 23 displayed `nil` strings represent 32 distinct
+reported Facts and Contexts. The source-bound audit matched all 104 old Fact
+ordinals and IDs back to the primary documents with zero missing matches. Of
+the 32 PCAR `nil` Facts, three carry `sign="-"` and `scale="6"`; v5 preserves
+those source attributes and Arelle's normalized negative-zero spelling rather
+than replacing every `nil` occurrence with an invented unsigned literal.
+
+Acceptance covers each supported form, case/XML-whitespace behavior where the
+reference allows it, every reference hyphen character used by `durwordsen`,
+and unknown-value rejection. At least six fresh offline cached replays cover
+Microsoft, Micron, Meta, NVIDIA's 2026 annual filing, a PACCAR filing with
+`nil`, and AMD's confirmed `4.55` duration filing. The expected foreign-type
+exceptions are limited to the repaired Fact value fields: 48 exchange values
+become `NASDAQ`, 19 state values become `ID`, five word-duration values become
+XSD durations, and 32 source-bound numeric Facts change from a null/error
+sentinel to numeric zero, including three normalized negative-zero values.
+Fact identity, source sign and scale, source provenance, Contexts, Units,
+dimensions, relationships, and every other Fact field must compare equal. Any
+other field or type change blocks acceptance.
+
+The invalid-duration and unknown-transform mutation gates remain required. A
+temporary unknown exchange, state, English-duration, or English-number lexical
+must likewise fail without a snapshot or success state. The resulting v5
+commit supersedes the earlier frozen candidates and requires a new independent
+read-only `PASS` before cohort continuation into a fresh
+`20261008_sec_transform_v5` history.
+
+### v5 implementation self-test evidence — 2026-10-08
+
+The writer replayed seven cached filings with network access denied and a
+private copy of the taxonomy cache. Each replay wrote a separate fresh v5
+snapshot and three successful quality-gate states. Source Fact counts equaled
+materialized counts:
+
+| Filing | Package SHA-256 | Facts | Supported lexical repairs | Other approved duration changes |
+| --- | --- | ---: | ---: | ---: |
+| MSFT `0001564590-22-035087` | `bc2fb61221c8f4ed3d768ca9ed06f085a1d8551aac47e3f5c2acf7fa630e1bdd` | 1,191 | 3 | 0 |
+| MU `0000723125-22-000004` | `a508e7aa886b55cb27c5fa7d6392b0a3a195c8e423c6c5408b91d237abe7fee7` | 881 | 1 | 0 |
+| META `0001326801-23-000013` | `9937d23121deb36538a7b7f05f0e9287c2fe4846236e3a3528b9fb400fdeb2c5` | 1,247 | 1 | 5 |
+| NVDA `0001045810-26-000021` | `93baf1f59fe44d113e97f5f0f89d3c6a9fcb4df01f4614e9d73042f54e127906` | 1,305 | 1 | 14 |
+| PCAR `0001193125-26-191499` | `2dc502ceaec8f7019f072de8483dc18cfeaaca7998f5d52f4136c9d11970c68d` | 1,453 | 4 | 1 |
+| PCAR `0000950170-24-118960` | `5bd229d84415560fe1acefdb1491167fc3ce6b100f214c3b8d1b3e6a23ec2526` | 1,677 | 2 | 1 |
+| AMD `0000002488-23-000047` | `019d9c14883d14e9b65ccf3c70de0c8bd79faa827eaf5e6172ff33dfbd9bd182` | 1,378 | 0 | 11 |
+
+The two PACCAR replays include ordinary zero and a source Fact with
+`sign="-"` and `scale="6"`; their new numeric/raw values were respectively
+`0` and `-0`. Every supported correction matched its source-bound Fact ID.
+All other Fact columns were equal except the already-approved duration value
+columns, every non-Fact table was row-equal, and the Filing table differed
+only in `parser_version=m2-layer1-v5`. Source snapshots, packages, and the
+shared taxonomy cache remained unchanged.
+
+Separate temporary package mutations replaced the four supported source forms
+with `Mystery Exchange`, `Atlantis`, `three_year`, and `nilly`. Each model
+reported `xmlSchema:valueError`; ingestion wrote one retryable failure, zero
+success states, and zero Parquet tables.
+
+The focused transform/ingestion suite reported 161 passed. The complete
+offline suite reported 832 passed and 37 skipped, repository-wide Ruff passed,
+and `git diff --check` reported no errors. These are writer self-test results;
+the v5 commit still requires an independent read-only verification result.
+
 After the writer freezes a commit, a separate Astra verifier must perform
 read-only independent verification and report `PASS` or `FAIL`. Only after that
 result may the lead decide whether to run the approved A/B/C cohort
-reprocessing into fresh v4 histories. Push, PR, CI, merge, old-Raw overwrite,
+reprocessing into fresh v5 histories. Push, PR, CI, merge, old-Raw overwrite,
 and local acceptance are not part of this writer delivery.
 
 ## 7. Assumptions and unresolved cases
@@ -280,8 +396,8 @@ and local acceptance are not part of this writer delivery.
   SEC namespace; this change does not claim a new Transformation Registry rule.
 - Observed SEC numeric-duration lexicals fit the strict ASCII decimal grammar.
   Unsupported lexicals remain explicit validation failures.
-- The 26 not-yet-inspected older package roots remain an impact-audit limit;
-  they do not justify company-specific parser behavior.
+- The impact scan covers the 381 cached primary documents in the approved
+  cohort source index; it does not infer behavior for an uncached filing.
 - This parser correction does not decide whether a duration Fact is a fiscal
   quarter, fiscal year, expected life, or another business period. Context and
   analytical period policy continue to own those meanings.

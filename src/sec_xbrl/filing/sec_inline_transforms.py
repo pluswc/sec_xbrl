@@ -26,7 +26,7 @@ _STATE_CODES = {
     "delaware": "DE", "california": "CA", "washington": "WA", "new york": "NY",
     "texas": "TX", "virginia": "VA", "massachusetts": "MA", "new jersey": "NJ",
     "pennsylvania": "PA", "florida": "FL", "illinois": "IL", "colorado": "CO",
-    "connecticut": "CT", "maryland": "MD", "minnesota": "MN", "michigan": "MI",
+    "connecticut": "CT", "idaho": "ID", "maryland": "MD", "minnesota": "MN", "michigan": "MI",
     "ohio": "OH", "north carolina": "NC", "georgia": "GA", "arizona": "AZ",
     "nevada": "NV", "oregon": "OR", "utah": "UT", "ontario": "ON",
 }
@@ -45,6 +45,8 @@ _FILER_CATEGORIES = {
 _SEC_DECIMAL_RE = re.compile(
     r"^[ \t\n\r]*[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)[ \t\n\r]*$"
 )
+_SEC_NIL_RE = re.compile(r"^[ \t\n\r]*nil[ \t\n\r]*$", re.IGNORECASE)
+_SEC_WORD_HYPHEN_RE = re.compile(r"[\u058A\u05BE\u2010-\u2015\uFE58\uFE63\uFF0D-]")
 
 
 def register_sec_inline_transforms() -> None:
@@ -59,7 +61,7 @@ def register_sec_inline_transforms() -> None:
         "durwordsen": _word_duration,
         "numwordsen": _word_number,
         "stateprovnameen": lambda value: _lookup(value, _STATE_CODES, "state/province"),
-        "exchnameen": lambda value: _lookup(_normalize_exchange(value), _EXCHANGE_CODES, "exchange"),
+        "exchnameen": _exchange_name,
         "entityfilercategoryen": lambda value: _lookup(value, _FILER_CATEGORIES, "filer category"),
         "boolballotbox": _bool_ballot_box,
     }
@@ -162,6 +164,8 @@ def _duration_value(
 
 
 def _word_number(value: str) -> str:
+    if isinstance(value, str) and _SEC_NIL_RE.fullmatch(value):
+        return "0"
     tokens = re.findall(r"[a-z]+|\d+", value.casefold())
     if not tokens:
         raise ValueError("empty English number")
@@ -184,7 +188,7 @@ def _word_number(value: str) -> str:
 
 
 def _word_duration(value: str) -> str:
-    normalized = value.casefold().replace("-", " ")
+    normalized = _SEC_WORD_HYPHEN_RE.sub(" ", value.casefold())
     match = re.findall(r"((?:[a-z]+|\d+)(?:\s+(?:[a-z]+|\d+))*)\s+(years?|months?|days?)", normalized)
     if not match:
         raise ValueError(f"unsupported English duration: {value}")
@@ -201,6 +205,12 @@ def _lookup(value: str, mapping: dict[str, str], label: str) -> str:
     if key not in mapping:
         raise ValueError(f"unsupported SEC {label}: {value}")
     return mapping[key]
+
+
+def _exchange_name(value: str) -> str:
+    if isinstance(value, str) and re.fullmatch(r"[ \t\n\r]*nasdaq[ \t\n\r]*", value, re.IGNORECASE):
+        return "NASDAQ"
+    return _lookup(_normalize_exchange(value), _EXCHANGE_CODES, "exchange")
 
 
 def _bool_ballot_box(value: str) -> str:

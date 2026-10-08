@@ -167,9 +167,11 @@ version. `boolballotbox` introduced `m2-layer1-v2`; `durweek` introduces
 `m2-layer1-v3`. The subsequent
 [numeric-duration conformance delivery](sec-duration-conformance-delivery.md)
 corrects the SEC-staff component arithmetic and strict lexical handling for
-`durday`, `durmonth`, and `duryear` and introduces `m2-layer1-v4`. Existing v1,
-v2, and v3 artifacts remain immutable; correction requires a fresh v4
-destination under the same three Layer 1 quality gates.
+`durday`, `durmonth`, and `duryear` and first introduced `m2-layer1-v4`. The
+same delivery's cohort diagnostic then found four supported SEC lexical forms
+missing from the partial local registry, so the complete candidate advances to
+`m2-layer1-v5`. Existing v1 through v4 artifacts remain immutable; correction
+requires a fresh v5 destination under the same three Layer 1 quality gates.
 
 ## Validation procedure
 

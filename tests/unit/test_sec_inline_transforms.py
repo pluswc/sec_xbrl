@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import localcontext
+from decimal import Decimal, localcontext
 
 import pytest
 
@@ -29,8 +29,118 @@ def test_registers_sec_efm_transforms_used_by_inline_filings() -> None:
     assert transforms["entityfilercategoryen"]("Large accelerated filer") == "Large Accelerated Filer"
 
 
+@pytest.mark.parametrize("source", ("Nasdaq", "NASDAQ", " \t\nNasdaq\r "))
+def test_sec_exchange_name_accepts_official_bare_nasdaq(source: str) -> None:
+    from arelle import FunctionIxt
+
+    register_sec_inline_transforms()
+
+    assert FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["exchnameen"](source) == "NASDAQ"
+
+
+@pytest.mark.parametrize(
+    "source",
+    ("", "Mystery Exchange", "Nasdaq LLC", "NYSE Global Market"),
+)
+def test_sec_exchange_names_still_reject_unknown_values(source: str) -> None:
+    from arelle import FunctionIxt
+
+    register_sec_inline_transforms()
+
+    with pytest.raises(ValueError, match="unsupported SEC exchange"):
+        FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["exchnameen"](source)
+
+
+@pytest.mark.parametrize("source", ("Idaho", "idaho", " \t\nIdaho\r "))
+def test_sec_state_name_accepts_official_idaho(source: str) -> None:
+    from arelle import FunctionIxt
+
+    register_sec_inline_transforms()
+
+    assert FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["stateprovnameen"](source) == "ID"
+
+
+def test_sec_state_name_still_rejects_unknown_values() -> None:
+    from arelle import FunctionIxt
+
+    register_sec_inline_transforms()
+
+    with pytest.raises(ValueError, match="unsupported SEC state/province"):
+        FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["stateprovnameen"]("Atlantis")
+
+
+@pytest.mark.parametrize("source", ("nil", "Nil", "NIL", " \t\nNil\r "))
+def test_sec_english_number_accepts_official_nil(source: str) -> None:
+    from arelle import FunctionIxt
+
+    register_sec_inline_transforms()
+
+    assert FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["numwordsen"](source) == "0"
+
+
+def test_sec_english_number_still_rejects_unknown_words() -> None:
+    from arelle import FunctionIxt
+
+    register_sec_inline_transforms()
+
+    transform = FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["numwordsen"]
+    with pytest.raises(ValueError, match="unsupported English number token"):
+        transform("nilly")
+    with pytest.raises(ValueError, match="unsupported English number token"):
+        transform("nil!")
+
+
+def test_sec_nil_preserves_negative_zero_when_inline_sign_and_scale_are_applied() -> None:
+    from arelle import FunctionIxt
+
+    register_sec_inline_transforms()
+    transformed = FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["numwordsen"]("nil")
+
+    # Mirrors an observed Inline Fact with sign="-" and scale="6". Scaling
+    # zero keeps zero; the source sign remains visible in Arelle's lexical value.
+    scaled = Decimal(transformed)
+    scaled *= 10 ** Decimal(6)
+    scaled *= -1
+    assert format(scaled, "f") == "-0"
+
+
+@pytest.mark.parametrize(
+    "separator",
+    (
+        "-",
+        "\u058a",
+        "\u05be",
+        "\u2010",
+        "\u2011",
+        "\u2012",
+        "\u2013",
+        "\u2014",
+        "\u2015",
+        "\ufe58",
+        "\ufe63",
+        "\uff0d",
+    ),
+)
+def test_sec_english_duration_accepts_official_hyphen_characters(separator: str) -> None:
+    from arelle import FunctionIxt
+
+    register_sec_inline_transforms()
+
+    source = f"three{separator}year"
+    assert FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["durwordsen"](source) == "P3Y"
+
+
+def test_sec_english_duration_still_rejects_unknown_separator() -> None:
+    from arelle import FunctionIxt
+
+    register_sec_inline_transforms()
+
+    with pytest.raises(ValueError, match="unsupported English duration"):
+        FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["durwordsen"]("three_year")
+
+
 def test_duration_conformance_has_distinct_immutable_layer1_parser_version() -> None:
-    assert Layer1Extractor.parser_version == "m2-layer1-v4"
+    assert Layer1Extractor.parser_version == "m2-layer1-v5"
 
 
 @pytest.mark.parametrize(
