@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "universe_id": "pilot-21-20261008",
+  "purpose": "Initial cross-sector company-universe delivery and regression cohort",
+  "as_of_date": "2026-10-08",
+  "source_observed_at": null,
+  "collection": {
+    "completed_fiscal_years": 4,
+    "analytical_fiscal_years": 3,
+    "include_subsequent_quarters": true
+  },
+  "companies": [
+    {"ticker": "AMD", "groups": ["existing_fixture", "semiconductors"]},
+    {"ticker": "AAPL", "groups": ["existing_fixture", "technology_hardware"]},
+    {"ticker": "MSFT", "groups": ["existing_fixture", "software_cloud"]},
+    {"ticker": "AMZN", "groups": ["existing_fixture", "commerce_cloud"]},
+    {"ticker": "NVDA", "groups": ["existing_fixture", "semiconductors"]},
+    {"ticker": "NFLX", "groups": ["existing_fixture", "media"]},
+    {"ticker": "TSLA", "groups": ["existing_fixture", "automotive"]},
+    {"ticker": "META", "groups": ["existing_fixture", "digital_platforms"]},
+    {"ticker": "GOOGL", "groups": ["existing_fixture", "digital_platforms"]},
+    {"ticker": "AVGO", "groups": ["pilot_expansion", "semiconductors"]},
+    {"ticker": "INTC", "groups": ["pilot_expansion", "semiconductors"]},
+    {"ticker": "MU", "groups": ["pilot_expansion", "semiconductors"]},
+    {"ticker": "QCOM", "groups": ["pilot_expansion", "semiconductors"]},
+    {"ticker": "WMT", "groups": ["pilot_expansion", "retail"]},
+    {"ticker": "COST", "groups": ["pilot_expansion", "retail"]},
+    {"ticker": "TGT", "groups": ["pilot_expansion", "retail"]},
+    {"ticker": "CAT", "groups": ["pilot_expansion", "industrial_machinery"]},
+    {"ticker": "DE", "groups": ["pilot_expansion", "industrial_machinery"]},
+    {"ticker": "PCAR", "groups": ["pilot_expansion", "industrial_transport"]},
+    {"ticker": "PG", "groups": ["pilot_expansion", "consumer_staples"]},
+    {"ticker": "KO", "groups": ["pilot_expansion", "consumer_staples"]}
+  ]
+}
