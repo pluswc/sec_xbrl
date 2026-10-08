@@ -88,6 +88,8 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
                 self._text(CSS, "text/css; charset=utf-8")
             elif parsed.path == "/app.js":
                 self._text(JS, "text/javascript; charset=utf-8")
+            elif parsed.path == "/favicon.ico":
+                self._bytes(b"", "image/x-icon", HTTPStatus.NO_CONTENT)
             elif parsed.path == "/api/status":
                 self._json(service.status())
             elif parsed.path == "/api/screens":

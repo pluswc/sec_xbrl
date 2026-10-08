@@ -83,6 +83,37 @@ PYTHONPATH="$PWD/src" .venv/bin/python -m sec_xbrl.screening serve \
 검사한다. 인터넷 연결, 로그인, cloud sync는 없다. journal과 export 경로는
 symlink를 통과하지 않는 로컬 경로를 사용한다.
 
+### Windows 브라우저에서 WSL service 열기
+
+일반 경로는 위의 Linux/WSL `127.0.0.1` 주소를 직접 여는 것이다. Windows
+브라우저가 그 주소에 연결되지 않는 환경에서는 제공된 선택형 loopback
+adapter를 쓸 수 있다. 먼저 WSL에서 service를 위와 같이 `127.0.0.1`의 backend
+port로 실행한다. 그 다음 **Windows PowerShell**에서 Windows Node.js로 다음을
+실행한다.
+
+```powershell
+node "\\wsl.localhost\<DISTRO>\path\to\checkout\examples\screening\windows-loopback-bridge.cjs" `
+  --distribution "<DISTRO>" `
+  --linux-python "/absolute/linux/project/.venv/bin/python" `
+  --source-root "/absolute/linux/checkout/src" `
+  --backend-port 8765 `
+  --frontend-port 8884
+```
+
+`<DISTRO>`와 두 Linux 경로는 설치 환경의 실제 값으로 바꾼다. 이후 Windows
+브라우저에서 `http://127.0.0.1:8884/`를 연다. frontend와 backend port는 서로
+달라야 한다. adapter는 Windows `127.0.0.1`에만 bind하고 `wsl.exe`가 실행한
+Python relay도 기존 WSL `127.0.0.1` backend에만 연결한다. `0.0.0.0`, 외부 URL,
+proxy 설정, `netsh` 또는 네트워크 설정 변경은 사용하지 않는다.
+
+adapter는 `GET`/`POST`와 대시보드·API·등록 export 경로만 허용하고 request body
+1 MiB, response body 32 MiB 한도를 둔다. Windows frontend의 `Host`를 정확히
+검사하며 `POST`는 같은 frontend origin을 반드시 요구한다. 검사를 통과한 뒤에만
+relay가 `Host`/`Origin`을 WSL backend의 loopback origin으로 바꾸므로 기존
+service의 CSRF 검사가 그대로 적용된다. XLSX/CSV bytes, status,
+`Content-Type`/`Content-Disposition`은 요청 ID와 함께 전달된다. 종료할 때는
+PowerShell에서 `Ctrl+C`를 눌러 Windows listener와 relay를 함께 닫는다.
+
 주요 HTTP 경계는 다음과 같다.
 
 | 동작 | endpoint |

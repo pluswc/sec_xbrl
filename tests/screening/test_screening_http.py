@@ -45,6 +45,8 @@ def test_loopback_http_native_ui_origin_and_restart(
         text = html.decode()
         assert "기업 스크리닝 작업대" in text and "전 회사 결과" in text
         assert "localStorage" not in text
+        status, icon = _request(base + "/favicon.ico")
+        assert status == 204 and icon == b""
         status, body = _request(
             base + "/api/screens",
             body={"name": "브라우저 조건", "content": revision_content},

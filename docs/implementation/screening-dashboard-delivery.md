@@ -28,6 +28,8 @@ GPT-5.6 Sol 구현 writer는 checkpoint
 - 이름 있는 조건, revision, universe snapshot, 실행, 전 회사 판정, source trace,
   SIC peer 비교, 판단 event, old/new run 비교, CSV/XLSX export
 - `127.0.0.1` 전용 표준 라이브러리 HTTP service와 native HTML/CSS/JavaScript UI
+- Windows 브라우저가 WSL loopback에 직접 연결하지 못할 때만 쓰는 양쪽
+  `127.0.0.1` 전용 JSON-line transport adapter
 - SQLite의 append-only 실행·판단 이력과 빈 목적지 backup/restore
 - S01–S08의 실제 cohort 및 별도 synthetic/cache fixture 검증
 
@@ -172,6 +174,20 @@ screen create/revise/list, execute/reopen/compare, trace/peer comparison,
 decision create/history와 export를 제공한다. 알 수 없는 metric·dataset·run은
 fail closed 한다. test fault는 dependency injection/monkeypatch로만 만들고
 production debug endpoint는 두지 않는다.
+
+선택형 Windows/WSL adapter는 `examples/screening/windows-loopback-bridge.cjs`의
+Windows Node listener와 `python -m sec_xbrl.screening.bridge` relay로 구성한다.
+caller가 distribution, Linux Python/source root, backend/frontend port를
+명시하며 제품 코드에 실행 환경 절대 경로를 넣지 않는다. Windows listener와
+Python relay는 각각 고정된 `127.0.0.1`에만 연결한다. relay는 screening dataset,
+SQLite 또는 재무값을 열지 않고 제한된 HTTP bytes만 전달한다.
+
+Windows listener는 원래 frontend `Host`와 state-changing `Origin`을 먼저
+검증한 뒤 backend loopback의 `Host`/`Origin`으로 바꾼다. method/path/body size,
+request ID와 response size/header를 제한하고 외부 URL, 임의 proxy, secret,
+네트워크 설정 변경을 허용하지 않는다. binary export의 status, bytes,
+content type/disposition은 보존한다. 이 adapter는 브라우저 도달성만 해결하며
+dataset/API/SQLite와 회계 의미를 바꾸지 않는다.
 
 ScreenRun export는 U5가 아닌 별도 `screen-run-export-v1` 계약이다. canonical
 JSON을 기준으로 full/selected CSV와 XLSX를 만들고, row/column order, blank,
