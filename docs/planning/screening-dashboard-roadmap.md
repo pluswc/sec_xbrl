@@ -84,8 +84,8 @@ observed time, 불가/차단 reason을 보존한다. 이 publication이 없으�
 | P3 실행기 | 저장 조건을 deterministic하게 평가하고 독립 oracle의 예상 결과와 대조한다. | 실제 fixture의 전 CIK 결과, predicate별 상태·reason, 정렬·집계 증거 |
 | P4 방향·wireframe | 아래 reference와 provenance signature를 반영한 주석 wireframe을 만든다. P1/P2의 의미·영속 계약 조사와 독립적인 visual exploration은 병렬로 할 수 있다. | 1,440px·1,024px 화면 상태, focus 순서, 데이터/상태 label; 모두 `PROPOSED`/`MOCK` 표시 |
 | P5 실제 한 줄기 | 한 annual metric 조건 저장 → 실행 → 회사 trace → 판단 event → 재열기 → export를 실제 prepared publication으로 연결한다. | S01·S02·S03·S05·S07의 실제 end-to-end 증거 |
-| P6 전체 인수 | S01–S08을 실제 21사 fixture와 별도 synthetic 오류 fixture로 독립 실행하고 실제 브라우저를 검사한다. | requirement→scenario→browser check→artifact map, 독립 `PASS`/`FAIL` |
-| P7 refresh·cohort 확장 | frozen old run과 새 publication rerun 차이를 분리하고, 추가 cohort를 같은 계약으로 검증한다. | data/rule/universe/manual-decision diff와 cache/synthetic/live label; 새 승인 없이는 범위 확대 금지 |
+| P6 전체 인수 | S01–S08을 실제 21사 fixture와 별도 synthetic 오류 fixture로 독립 실행한다. S06은 실제 frozen old run과 별도 `CACHE_FUTURE_UPDATE_FIXTURE` publication의 new run을 같은 executor로 만들고 실제 브라우저에서 비교한다. | requirement→scenario→browser check→artifact map, 두 run의 불변 hash와 cache/synthetic label, 독립 `PASS`/`FAIL` |
+| P7 운영 refresh·cohort 확장 | 별도 승인 뒤 실제 live/운영 refresh와 추가 cohort를 같은 계약으로 검증한다. | data/rule/universe/manual-decision diff와 live/cache label; 새 승인 없이는 live·cohort 범위 확대 금지 |
 
 각 단계는 제안·승인·구현·독립 검증·로컬 인수·main merge를 따로 기록한다.
 P4의 mock이나 screenshot은 P5의 실제 데이터 연결을 대신하지 않는다. 실제
@@ -175,9 +175,10 @@ quality block, narrow desktop 상태가 기본 화면과 함께 설계되어야 
    동결한다.
 4. executor와 독립 expected-result oracle을 만든 뒤 reference가 반영된 주석
    wireframe을 검토한다.
-5. 한 실제 annual end-to-end slice를 통과시킨 뒤 전체 브라우저 범위로 넓힌다.
+5. 한 실제 annual end-to-end slice를 통과시킨 뒤 P6의 전체 브라우저 범위와
+   frozen old run/new cached-future run 비교로 넓힌다.
 6. synthetic 오류와 cached future-update fixture를 실제 21사 결과와 분리해
-   보고한다.
+   보고하고, 실제 live refresh와 cohort 확대는 P7의 새 승인 대상으로 남긴다.
 
 승인이 필요한 충돌은 새로운 metric 정의·formula·mapping, 비교 view 의미,
 quality block 처리의 회계적 확대, 매수 기준, 역사적 cohort membership 주장이다.

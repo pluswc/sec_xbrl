@@ -190,14 +190,16 @@ version이 둘 이상 바뀐 refresh는 원인을 자동으로 단정하지 않�
 - **단계·경계:** P5 실제 run에 사용자 판단 event를 기록한다. 이 판단은
   governed 재무 truth 또는 매수 정책이 아니다.
 
-### S06 — frozen old run과 최신 재실행
+### S06 — frozen old run과 별도 new run 비교
 
-- **사용자 목표:** 과거 실행을 그대로 열고 같은 저장 조건을 최신 publication에
-  다시 실행해 무엇이 달라졌는지 본다.
+- **사용자 목표:** 과거 실행을 그대로 열고 같은 저장 조건을 별도 new input
+  publication에 다시 실행해 무엇이 달라졌는지 본다.
 - **전제:** frozen S02 run, 같은 `ScreenRevision`, 별도 새 input publication 또는
-  `CACHE_FUTURE_UPDATE_FIXTURE`가 있다.
-- **행동:** old run 열기 → `같은 조건으로 다시 실행` → 새 run 열기 → diff panel에서
-  data/rule/universe/manual-decision version을 비교 → old run으로 돌아가기.
+  `CACHE_FUTURE_UPDATE_FIXTURE`가 있다. P6 control은 실제 old run과 명시적으로
+  labelled된 cached-future publication을 사용한다.
+- **행동:** old run 열기 → `같은 조건으로 새 입력 실행` → 별도 new run 열기 →
+  diff panel에서 data/rule/universe/manual-decision version을 비교 → old run으로
+  돌아가기.
 - **정확한 기대:** run ID와 full rows는 별도이며 old run은 변하지 않는다.
   diff는 data, metric/rule/mapping, universe snapshot, manual decision 변화를
   분리한다. 같은 saved revision은 원하는 query/metric policy를 유지하지만 각
@@ -207,8 +209,9 @@ version이 둘 이상 바뀐 refresh는 원인을 자동으로 단정하지 않�
   refresh라고 표시하지 않는다.
 - **영속 증거/검사:** 두 `ScreenRun`과 input/output hash, version tuple,
   row/predicate diff, decision-event references, old-run immutability hash.
-- **단계·경계:** P7 cached/synthetic update와 기존 실제 run. 실제 live refresh는
-  별도 승인·실행 증거가 있을 때만 인수한다.
+- **단계·경계:** P6에서 실제 old run과 cached/synthetic new-input control을
+  검증한다. 실제 live/운영 refresh와 cohort 확대는 P7의 별도 제안이며 승인·실행
+  증거가 있을 때만 인수한다.
 
 ### S07 — governed 결과와 동일한 CSV/XLSX export
 
