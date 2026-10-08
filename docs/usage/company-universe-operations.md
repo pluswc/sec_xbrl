@@ -147,7 +147,7 @@ publication before constructing a `PASS` accuracy assessment:
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m sec_xbrl.source_bindings \
-  --collection-manifest /absolute/path/to/20261008_sec_transform_v5/ops_v5/collection_manifest.json \
+  --collection-manifest /absolute/path/to/20261008_sec_transform_v5/operations_v5/collection_manifest.json \
   --package-root /absolute/path/to/data/raw/universe_runs/20261008_duration_v4/packages \
   --duration-source-index /absolute/path/to/20261008_sec_transform_v5/duration_source_index.json \
   --correction-source-index /absolute/path/to/20261008_sec_transform_v5/supported_lexical_correction_source_index.json \
@@ -179,7 +179,7 @@ opening SEC data or rerunning analysis:
 ```bash
 PYTHONPATH=src .venv/bin/python -m sec_xbrl.universe_delivery \
   --config /absolute/path/to/final-pilot-config.json \
-  --collection-manifest /absolute/path/to/20261008_sec_transform_v5/ops_v5/collection_manifest.json \
+  --collection-manifest /absolute/path/to/20261008_sec_transform_v5/operations_v5/collection_manifest.json \
   --metadata-publication /absolute/path/to/company_metadata_v2 \
   --reviewed-q4-publication /absolute/path/to/20261008_sec_transform_v5/q4_delivery_v5/companion \
   --quarterly-analysis /absolute/path/to/20261008_sec_transform_v5/q4_delivery_v5/quarterly \
@@ -428,3 +428,35 @@ has a verified governed-history `READY` publication; `RAW_COMPLETE` is reported
 separately and does not imply analysis readiness.
 Use a new destination for each prototype or final publication.  Runtime SEC
 payloads, Parquet outputs, and generated completion views remain outside Git.
+
+## Accepted 2026-10-08 local publication
+
+The accepted run is under
+`data/processed/universe_runs/20261008_sec_transform_v5/`.  Its collection,
+source-binding, history, Q4, and completion directories are respectively
+`operations_v5`, `source_bindings_v1`, `analysis_history_v5`,
+`q4_delivery_v5`, and `completion`.  The completion publication ID is
+`universe-delivery-1c4337ffe69e81ae8b4ecc61`; the completion manifest SHA-256
+is `d20188610b699b960fcac4b34fc1c08d0073b6d346bc7d2026df3966fc6ccb29`.
+
+Use `completion/index.html` for the joined 21-company readiness view.  Use
+`q4_delivery_v5/quarterly_report.html` and
+`q4_delivery_v5/annual_report.html` for the verified browser reports.  The
+extensionless report files are preserved historical outputs; actual browser
+verification found that local navigation served them as `text/plain`.
+Byte-identical `.html` copies were therefore created and independently
+verified as `text/html`.
+
+All 21 companies are `READY`; the run holds all 381 selected filings with zero
+failed or pending.  The completion manifest also binds the metadata, accuracy,
+reviewed-Q4, quarterly, and annual publication identities.  The authoritative
+counts, source dates, independent evidence paths, and remaining scope limits
+are in
+[`universe-data-delivery-completion.md`](../implementation/universe-data-delivery-completion.md).
+
+For high-memory history builds, invoke `build` with one repeatable `--ticker`
+selection per process.  The immutable request and aggregate status still cover
+the full cohort, while process exit releases parser and publication memory.
+The accepted run exercised this recovery for CAT after its publication had
+completed; a fresh one-company process verified and adopted that artifact
+without changing it.

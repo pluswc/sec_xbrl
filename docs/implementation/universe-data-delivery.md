@@ -8,18 +8,21 @@ runtime artifacts.  The implementation baseline is
 `201acf9aec2f8183acb7dd843579938db14236cd` on
 `codex/company-universe-delivery`.
 
-The current delivery state is **APPROVED with feature-branch implementation in
-progress**.  A candidate `24df803`, B candidate `1e5a398`, parser compatibility
-candidate `192ee424`, C repair candidate `9646771`, and numeric-duration
-conformance/fail-closed candidate `9b2c402` passed their separate independent
-verification.  The broader SEC supported-lexical and exact word-duration
-grammar repair `c1fdc21` also passed independent verification.  The combined
-integration and fresh runtime still require their own verification and
-acceptance.
+The current delivery state is **LOCALLY_ACCEPTED** as of 2026-10-08.  A
+candidate `24df803`, B candidate `1e5a398`, parser compatibility candidate
+`192ee424`, C repair candidate `9646771`, numeric-duration conformance and
+fail-closed candidate `9b2c402`, and the broader SEC supported-lexical and
+exact word-duration grammar repair `c1fdc21` passed their separate independent
+verification.  The governed source-binding producer at `eff3bff3` and final
+consumer at `8320ef06292c3855f57f2b01f4ce6b6c85ea03b7` also passed independent
+verification.  The accepted local publication is
+`universe-delivery-1c4337ffe69e81ae8b4ecc61`, bound by manifest SHA-256
+`d20188610b699b960fcac4b34fc1c08d0073b6d346bc7d2026df3966fc6ccb29`.
 The first combined candidate `f897045` remains
 historical evidence and is not accepted because the subsequent raw-accuracy
-audit found nonconforming numeric-duration values.  The whole delivery is not yet
-`LOCALLY_ACCEPTED` or `MERGED`.  Current evidence and remaining gates are in
+audit found nonconforming numeric-duration values.  It was superseded and is
+not the accepted source or runtime.  Current evidence and remaining remote
+workflow states are in
 [`universe-data-delivery-completion.md`](universe-data-delivery-completion.md)
 under the state rules of [`delivery-workflow.md`](delivery-workflow.md).  This
 contract does not create a new architectural Layer and does not replace the M
@@ -40,8 +43,11 @@ than an accepted candidate.  Independent verification proved that its two
 assessment JSON inputs could be changed together and re-hashed without an
 independent binding to the cached primary-document fields.  The authorized
 repair adds a separate governed Raw/Quality source-binding publication before
-the completion consumer.  Its replacement source and runtime publication are
-still awaiting their own independent verification and acceptance.
+the completion consumer.  The replacement producer and reader passed
+independent verification, the actual v5 runtime and browser delivery passed,
+and the lead locally accepted the joined publication.  Push, PR, remote CI,
+merge, and deployment remain pending and were not authorized by this local
+delivery.
 
 ## 2. Authorized A/B/C delivery
 
@@ -160,9 +166,9 @@ path such as `data/processed/universe_runs/<run-id>/` and contains:
 The supported-transform migration uses a new ignored root
 `data/processed/universe_runs/20261008_sec_transform_v5/` for its operations,
 fresh Layer 1 snapshots, governed histories, Q4 publications, evidence, and
-completion view.  The current runtime subroots are `ops_v5`,
+completion view.  The accepted runtime subroots are `operations_v5`,
 `source_bindings_v1`, `analysis_history_v5`, `q4_delivery_v5`, and
-`completion_v5`.  It reuses the immutable cached source packages under
+`completion`.  It reuses the immutable cached source packages under
 `data/raw/universe_runs/20261008_duration_v4/` without rewriting them.  It does
 not rewrite or delete the earlier
 operations, raw, retry, analysis, Q4, or completion artifacts.
@@ -377,8 +383,8 @@ PR, CI, merge, and main status remain outside this currently authorized local
 delivery unless separately approved.
 
 The initial collection threshold is 21/21 immutable company plans covering 381
-selected filings: 128 existing source snapshots are expected to be reusable
-and 253 filings require new intake.  Every selected accession must become
+selected filings: acquisition history records 128 existing source snapshots
+and 253 new intake filings.  Every selected accession must become
 `RAW_COMPLETE`; a failure blocks only that company's readiness while remaining
 visible in aggregate counts.  The metadata threshold
 is 21/21 identity coverage with a SIC classification or an explicit unresolved
@@ -392,6 +398,16 @@ traceable.
 The duration-conformance threshold is a `PASS` assessment for the exact fresh
 381-filing v5 cohort.  Structural completion, unchanged counts, or a zero-error
 parse run without normalized-value comparisons does not satisfy this gate.
+
+The accepted runtime met these gates with 21/21 raw and governed histories
+ready, 381 held filings, zero failed or pending filings, 741 verified history
+Parquet files, 21 pilot SIC classifications, 3,842 verified duration facts,
+104 approved transform corrections, zero unapproved foreign changes, and the
+approved C threshold of 16 economic values represented by 32 view records.
+The B master retains 8,016 candidates, including 7,995 explicit unclassified
+issuers.  Exact source identities, runtime counts, browser evidence, remaining
+accounting limits, and the accepted completion manifest are recorded in
+[`universe-data-delivery-completion.md`](universe-data-delivery-completion.md).
 
 ## 7. Assumptions and unresolved cases
 

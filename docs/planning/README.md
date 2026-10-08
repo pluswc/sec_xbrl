@@ -1,6 +1,6 @@
 # 계획 등록부 — 단일 진입점
 
-기준일: **2026-09-10**. 이 등록부는 목적·계약·현 상태·증거의 위치를 연결한다.
+기준일: **2026-10-08**. 이 등록부는 목적·계약·현 상태·증거의 위치를 연결한다.
 규범적 계획은 Git 추적 문서이며, 임시 계획 파일이나 특정 도구를 읽거나 설치할
 필요가 없다. 이 등록부를 만든 과거 변경은 문서 설계만 승인했다. 2026-09-09
 후속 승인은 [U4 전달 계약](../implementation/u4-continuous-refresh-delivery.md)의
@@ -24,7 +24,7 @@
 | [U4 계속 갱신 제안](../implementation/u4-continuous-refresh-plan.md) | 기존 기능/격차 대조와 후속 실행 수락안. 구현 승인 아님 |
 | [U4 완료·인수](../implementation/u4-completion-and-acceptance.md) | 후속 사용자 승인, 동결 소스, live/cache 구분, 독립 검증과 잔여 한계 |
 | [회사 universe 데이터 전달](../implementation/universe-data-delivery.md) | 21사 A/B/C 전달의 승인 범위, 입력·runtime 경계, 산출물과 인수 gate |
-| [회사 universe 완료 기록](../implementation/universe-data-delivery-completion.md) | A/B/C feature 후보, 준비된 출력 통합 계약, 현재 검증 상태와 최종 runtime gate |
+| [회사 universe 완료 기록](../implementation/universe-data-delivery-completion.md) | A/B/C 후보 이력, 최종 동결 소스, 실제 runtime·browser 독립 검증, 로컬 인수와 잔여 원격 상태 |
 | [기간 규칙](../implementation/period-rules.md), [Layer 2 연결](../implementation/layer2-longitudinal.md), [공시 발견 계약](../implementation/accession-contract.md) | 표시 계획으로 바꿀 수 없는 의미·입력 경계 |
 
 충돌 시 적용되는 사용자 결정과 승인 범위를 먼저 확인하고, 해당 평면의 계약을
@@ -41,7 +41,7 @@
 | U3 중요도·구조·Axis 시계열 | 승인 범위까지 확장·납품 | 명시적 U3 범위 | `3098be6` | 664 passed / 16 skipped, Ruff, 실제 6사 PASS | 2026-09-09 COMPLETE | PR #63, `9708508` |
 | U4 계속 갱신 | 복구된 제안과 후속 전달 계약 | bounded orchestration·복구·재개·live 입력·quality materialization; 원격 제외 | `3236778` | 675 passed / 37 skipped, Ruff, 6사 21, 실제 NFLX 14공시·동일 API/화면 PASS | **2026-09-10 LOCAL_ACCEPTED** | PR #63, `9708508` |
 | U5 보관·공유 | 복구된 기존 제안 | `51c196f` 기준 로컬 구현 승인 | product `8867229`; canonical snapshot + CSV/HTML/JSON/XLSX + offline 저장 controls | 679 passed / 37 skipped, cached 21, Ruff, 80 snapshots·320 formats·4,844 cells·24 downloads PASS | **2026-09-10 LOCAL_ACCEPTED** | PR #63, `9708508` |
-| 21사 universe A/B/C 전달 | [전달 계약](../implementation/universe-data-delivery.md) | **2026-10-08 APPROVED**; A/B/C, SEC duration 표준 교정, 4종 supported-lexical 보완, 381건 fresh v5 재생성 및 governed source-binding 보완 | A `24df803`, B `1e5a398`, durweek `192ee424`, C `9646771`, duration/fail-closed `9b2c402`, exact v5 grammar `c1fdc21`; source-binding 교정 구현·동결/검증 및 fresh runtime 대기 | A/B/durweek/C/duration/v5 grammar PASS; `7c7122a` source self-rehash finding으로 미인수, replacement source-binding·fresh runtime·재통합 검증 대기 | 미인수 | 미병합 |
+| 21사 universe A/B/C 전달 | [전달 계약](../implementation/universe-data-delivery.md) | **2026-10-08 APPROVED**; A/B/C, SEC duration 표준 교정, 4종 supported-lexical 보완, 381건 fresh v5 재생성 및 governed source-binding 보완 | final product `8320ef06292c3855f57f2b01f4ce6b6c85ea03b7`; source-binding producer `eff3bff3`; parser `c1fdc21`; A/B/C 검증 후보 이력은 [완료 기록](../implementation/universe-data-delivery-completion.md)에 보존 | final consumer 1,288 passed / 31 skipped, focused 41, Ruff PASS; 실제 21사·381공시·741 history Parquet 및 browser PASS | **2026-10-08 LOCALLY_ACCEPTED** | 미병합; push·PR·remote CI 미수행 |
 
 현재 전달 상태(2026-09-10): U3–U5 누적 이력은
 [PR #63](https://github.com/pluswc/sec_xbrl/pull/63)으로 `main`에 병합됐다. merge
@@ -49,6 +49,14 @@ SHA는 `9708508ec953ee4323ae29318c639abc9e0650b6`이고, 병합 시각은
 03:12:14 UTC(12:12:14 KST)다. PR CI와 병합 후 main CI는 모두 성공했으며 상세
 링크와 fresh checkout 확인법은 [main 전달 기록](../implementation/u3-u5-main-delivery.md)에
 있다. 위 로컬 인수 열은 각 단계의 당시 상태를 보존한다.
+
+회사 universe 전달 상태(2026-10-08): 실제 completion publication
+`universe-delivery-1c4337ffe69e81ae8b4ecc61`은 `READY`이며 manifest SHA-256은
+`d20188610b699b960fcac4b34fc1c08d0073b6d346bc7d2026df3966fc6ccb29`다.
+21/21 회사의 Raw와 governed history, 381/381 공시, duration 3,842건,
+승인 transform 보완 104건, 21개 pilot SIC, NVDA Q4 경제값 16개/보기 record
+32개를 함께 검증했다. 원격 작업은 승인 범위 밖이므로 `main`은 baseline
+`201acf9aec2f8183acb7dd843579938db14236cd`에 남아 있다.
 
 정확한 식별:
 
@@ -59,6 +67,11 @@ SHA는 `9708508ec953ee4323ae29318c639abc9e0650b6`이고, 병합 시각은
   문서 커밋은 제품 테스트 결과의 대상 SHA를 바꾸지 않는다.
 - U5 product: `8867229455f9441807117a4a4a3e1ebaa8ae7eee`.
   완료·인수 근거: [U5 완료·인수](../implementation/u5-completion-and-acceptance.md).
+- 회사 universe final product:
+  `8320ef06292c3855f57f2b01f4ce6b6c85ea03b7`; completion publication
+  `universe-delivery-1c4337ffe69e81ae8b4ecc61`; manifest SHA-256
+  `d20188610b699b960fcac4b34fc1c08d0073b6d346bc7d2026df3966fc6ccb29`.
+  실제 runtime/browser 독립 검증과 제한은 [회사 universe 완료 기록](../implementation/universe-data-delivery-completion.md)에 있다.
 - 이번 계획 설계의 기준 부모는 위 `32212ca`다. 단일 작성자 로컬 문서 커밋 후
   별도 읽기 전용 검증을 받는다. 독립 검증·인수·병합을 미리 완료로 표시하지 않는다.
 

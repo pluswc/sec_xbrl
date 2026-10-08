@@ -2,10 +2,19 @@
 
 ## Status
 
-This record covers the approved 2026-10-08 A/B/C delivery.  It records the
-feature-branch implementation and the checks still required before local
-acceptance or merge.  It does not mark the delivery locally accepted, merged,
-or deployed.
+This record covers the approved 2026-10-08 A/B/C delivery.  The lead marked
+the final local product **LOCALLY_ACCEPTED** on 2026-10-08 at frozen source
+`8320ef06292c3855f57f2b01f4ce6b6c85ea03b7`.  The accepted completion
+publication is `universe-delivery-1c4337ffe69e81ae8b4ecc61`; its
+`universe_delivery_manifest.json` SHA-256 is
+`d20188610b699b960fcac4b34fc1c08d0073b6d346bc7d2026df3966fc6ccb29`.
+The publication reports `READY`.
+
+This is a local acceptance state.  Push, PR, remote CI, merge, and deployment
+were not authorized in this delivery and remain pending.  `main` remains at
+the implementation baseline
+`201acf9aec2f8183acb7dd843579938db14236cd`; runtime data remains ignored and
+was not added to Git.
 
 The independently verified component candidates are:
 
@@ -23,28 +32,115 @@ The independently verified component candidates are:
 
 The subsequent complete old-sentinel audit found 104 valid SEC supported
 lexicals across four bounded transform families.  Their `m2-layer1-v5` source
-candidate passed independent verification.  This replacement integration,
-fresh runtime, and final joined publication still require separate verification;
-the prior v4 candidate remains evidence rather than final acceptance.
+candidate passed independent verification.  The governed source-binding
+producer replacement at `eff3bff3e61f46ed040e12a102ebeed994bad7cc` and the
+final consumer correction at `8320ef06292c3855f57f2b01f4ce6b6c85ea03b7`
+also passed separate independent verification.
 
 Combined candidate `f897045f122463a3754cc5d3e765ceee77d956d7` remains
 historical implementation evidence.  A subsequent raw audit found the
 numeric-duration accuracy blocker, so it is not a final accepted source or
 runtime publication.  The user authorized the standards correction and fresh
 v5 data generation.  The duration arithmetic, fail-closed gate, four-family
-supported-lexical repair, and exact word-duration grammar passed independent
-verification; the 381-filing v5 migration, updated combined integration, and
-final runtime publication remain pending.
+supported-lexical repair, exact word-duration grammar, 381-filing migration,
+and final publication were subsequently verified and accepted.
 Combined candidate `7c7122a62ba33a933b8a3d7ff56b526fd00e509d` is also
 historical evidence.  Its independent review found that the source index and
 fact evidence could be changed together and re-hashed while retaining a real
 v5 Fact row.  The replacement adds a governed Raw/Quality source-binding
-producer and reader; its frozen source, independent verification, runtime
-publication, and joined acceptance remain pending.
-Runtime completion counts and the final report identity remain **PENDING**
-until the fresh operations, duration-conformance assessment, metadata,
-reviewed-Q4, quarterly, and annual publications have all been verified
-together.
+producer and reader.  Independent verification reproduced the producer files,
+rejected the prior self-rehash attack, and bound the final assessment to the
+accepted publication before local acceptance.
+
+## Accepted runtime evidence
+
+The immutable runtime root is
+`data/processed/universe_runs/20261008_sec_transform_v5/`.  The accepted
+completion manifest binds the following results:
+
+- A has 21/21 `RAW_COMPLETE` and 21/21 governed histories `READY`, covering
+  381 selected and held filings with zero failed or pending filings.  The
+  verifier checked 741 declared history Parquet files and their row counts.
+- The first intake history comprised 128 already available source snapshots
+  and 253 new acquisitions.  The fresh v5 replay parsed all 381 cached source
+  packages offline.  Its completion `reused_filings: 0` describes this final
+  run and does not replace that acquisition history.
+- Raw accuracy is `PASS` for 3,842 duration facts: 2,902 `duryear`, 391
+  `durmonth`, 481 `durday`, and 68 `durweek`.  The separately governed source
+  binding is `source-bindings-b08f848a24c831a5812f9e7a`, manifest SHA-256
+  `87873702ddf8b307bda08430e083acb33da36024d9ddaa669f35016d9377d1b4`.
+- The 104 approved supported-lexical repairs comprise 48 Nasdaq exchange
+  values, 19 Idaho state values, five Unicode-hyphen duration words, and 32
+  reported numeric zeros.  The zeros comprise 22 monetary and 10 share facts,
+  including three source-signed `-0` values.  Unapproved foreign changes are
+  zero.
+- B preserves all 8,016 candidate issuers: 21 pilot issuers have SEC SIC
+  classifications and 7,995 candidates remain explicitly unclassified.  This
+  is candidate coverage, not global SIC coverage or accounting equivalence.
+- C uses a fresh v5 NVDA 14-filing historical reference selected as of
+  2026-09-06.  Its review cutoff is
+  `2026-10-08T07:28:02.487928+00:00` (16:28:02 KST).  The accepted source pair
+  evidence exactly matches 32 prior monetary Facts and six revenue text
+  blocks, including Context, Unit, full dimensions, period, and basis.
+- C publishes 32 view records representing 16 distinct approved economic Q4
+  values.  Ten exclusions remain visible: six exact FY2025 mapping scopes and
+  four policy notes.  Unreviewed geography, segment, and operating-income
+  scopes remain outside the approved accounting scope.
+- Quarterly and annual outputs remain separate.  The verifier checked 16
+  exports: JSON, CSV, XLSX, and HTML for both `AS_FILED` and
+  `LATEST_REPORTED`, in quarterly and annual modes.
+
+The collection financial as-of date is 2026-10-08.  The C analytical reference
+date is 2026-09-06, and the Q4 review cutoff is the timestamp above.  The
+accepted report keeps these dates separate and does not present them as a
+same-date cross-company panel.  The collection source observation time is
+`2026-10-08T01:15:07.740987+00:00`; the B candidate inventory observation time
+is `2026-10-08T01:32:29.603469Z`, and B retains its individual submissions
+snapshot observation times rather than replacing them with the financial
+as-of date.
+
+The final Chromium audit passed DOM, selector, trace-dialog, context, API, and
+export equality checks with no page errors or external requests.  The accepted
+browser paths are `q4_delivery_v5/quarterly_report.html` and
+`q4_delivery_v5/annual_report.html`.  The original extensionless files had
+been served as `text/plain`; that browser failure is retained as evidence, and
+byte-identical `.html` copies passed as `text/html`.  Screenshot capture timed
+out, so no screenshot acceptance is claimed.
+
+The accepted `completion/index.html` SHA-256 is
+`87fd2d4d43c6ea4e0be4b8a67a69e0beac5369b5b80b5a5492a36fa0a6adf858`.
+The quarterly and annual browser report SHA-256 values are respectively
+`12484e92c4d5176159e5c90788a09080f8474ef7bc89a3da48b231fbe57f725b`
+and `455397b57048a20c3f8433a0086197deb193f21eca4805d76d4b069087cf955c`.
+The reviewed-Q4, quarterly-analysis, and annual-analysis manifest SHA-256
+values are respectively
+`fa42e268238d0d1ed5011c4b977f3ff1b40cae134a98eafc52314c78afba105c`,
+`7249e5dac2f4cc73a3b6e68301d94e624e163bd3f178d07f7fefdf790762d4ff`,
+and `e52bc361de0b8d06c3c3b499a8fe897ae2aa4559a909b2e20e05409ad9c25c73`.
+
+Independent evidence is preserved under the runtime root:
+
+- `verification/parser/verification-report.json` — parser source candidate
+  `c1fdc21a267545c3c67ad4bdce8c74137ee340e1`, PASS with 1,160 passed,
+  30 skipped, 482 focused tests, seven real replays, and Ruff PASS;
+- `verification/integration/verification-report.json` — source-binding
+  producer `eff3bff3e61f46ed040e12a102ebeed994bad7cc`, PASS with 1,276 passed,
+  31 skipped, 29 focused tests, and Ruff PASS;
+- `verification/final_consumer/verification-report.json` — final source
+  `8320ef06292c3855f57f2b01f4ce6b6c85ea03b7`, PASS with 1,288 passed,
+  31 skipped, 41 focused tests, and Ruff PASS; and
+- `verification/final_runtime/verification-report.json` — actual joined
+  runtime and browser PASS, SHA-256
+  `fe82f679bbea6c764a074802fa1c13e8e867d936722accb39ac1d70cdb488150`.
+
+The migration preservation audit found zero changes across 4,142 protected
+old/v4 snapshot and evidence files.  A/history source remained unchanged from
+its independently verified component.  During the serial company builds, the
+combined CAT process reached about 26 GB RSS after completing its publication;
+it was interrupted cleanly, then a new one-company process verified and
+adopted the already built artifact.  The cohort progressed from 17 to 21
+`READY` companies without changing that output.  This is the operational use
+case for the validated `--ticker` subset and process-level memory release.
 
 ## Completion publication
 
@@ -140,14 +236,15 @@ from replay/adoption status.
 
 ## Runtime completion gate
 
-The intended runtime roots are caller inputs, not constants in the renderer.
-For the current run they are expected under
+The runtime roots are caller inputs, not constants in the renderer.  The
+accepted run is under
 `data/processed/universe_runs/20261008_sec_transform_v5/`, including fresh
-`ops_v5`, `source_bindings_v1`, `analysis_history_v5`, `q4_delivery_v5`, and
-`completion_v5` roots
+`operations_v5`, `source_bindings_v1`, `analysis_history_v5`, `q4_delivery_v5`, and
+`completion` roots
 declared by the runtime manifests.  Cached source packages remain read-only under the separate ignored
 `data/raw/universe_runs/20261008_duration_v4/` boundary.  The unaffected B
-`company_metadata_v2` publication is reused read-only from the initial run.
+`company_metadata_v2` publication is preserved under the accepted v5 runtime
+root and consumed read-only by the completion publisher.
 Earlier `operations_final`, raw, analysis, Q4, and report artifacts remain
 preserved.  Their existence here is not asserted by this tracked document.
 
@@ -177,6 +274,6 @@ manifest and readiness data prove:
 - focused tests, the full network-free regression suite, Ruff, and an
   independent read-only verification at the frozen integration SHA.
 
-The final runtime counts, publication ID, frozen integration SHA, independent
-verification result, local acceptance, PR, CI, and merge fields will be added
-only after those events occur.
+All local completion gates above passed at the frozen source and publication
+identities in this record.  PR, remote CI, merge, and deployment remain
+unperformed workflow states; this acceptance does not change them.
