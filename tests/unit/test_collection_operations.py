@@ -537,6 +537,56 @@ def test_collect_rejects_symlinked_owned_directory_before_ingest_or_write(
     assert list(outside.iterdir()) == []
 
 
+@pytest.mark.parametrize(
+    ("relative_path", "external_file"),
+    (
+        ("history_intake.json.partial", True),
+        ("extracted", False),
+        ("snapshots/0000000001/0000000001-24-000001/package", False),
+    ),
+)
+def test_collect_rejects_nested_intake_symlink_before_ingest_or_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    relative_path: str,
+    external_file: bool,
+) -> None:
+    manifest = operations.prepare_universe(
+        config_path=_config(tmp_path / "config.json", "AAA"),
+        run_root=tmp_path / "run",
+        existing_plans={"AAA": _full_plan(tmp_path / "plan.json", "AAA", "0000000001")},
+    )
+    intake_root = tmp_path / "run/companies/AAA/intake"
+    symlink = intake_root / relative_path
+    symlink.parent.mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / f"outside-{relative_path.replace('/', '-')}"
+    if external_file:
+        outside.write_text("sentinel", encoding="utf-8")
+    else:
+        outside.mkdir()
+    symlink.symlink_to(outside, target_is_directory=not external_file)
+    attempts = tuple((tmp_path / "run/companies/AAA/operation_attempts").iterdir())
+    monkeypatch.setattr(
+        operations.history,
+        "ingest_history",
+        lambda **kwargs: pytest.fail("nested symlink reached ingestion"),
+    )
+
+    with pytest.raises(ValueError, match="symlinked mutable descendant"):
+        operations.collect_universe(
+            manifest_path=manifest,
+            package_cache=tmp_path / "packages",
+            index_cache=tmp_path / "indexes",
+            taxonomy_cache=tmp_path / "taxonomy",
+        )
+
+    assert tuple((tmp_path / "run/companies/AAA/operation_attempts").iterdir()) == attempts
+    if external_file:
+        assert outside.read_text(encoding="utf-8") == "sentinel"
+    else:
+        assert list(outside.iterdir()) == []
+
+
 def test_status_rejects_symlinked_output_before_write(tmp_path: Path) -> None:
     manifest = operations.prepare_universe(
         config_path=_config(tmp_path / "config.json", "AAA"),

@@ -11,6 +11,7 @@ import csv
 import hashlib
 import html
 import json
+import os
 import re
 import uuid
 from collections.abc import Mapping, Sequence
@@ -369,6 +370,32 @@ def _require_safe_mutation_path(path: Path, *, root: Path, label: str) -> None:
             raise ValueError(f"{label} has a symlinked mutation path")
 
 
+def _reject_unsafe_mutable_descendants(path: Path, *, root: Path, label: str) -> None:
+    if not path.exists():
+        return
+    root_resolved = root.resolve(strict=False)
+    pending = [path]
+    while pending:
+        current = pending.pop()
+        if current.is_symlink():
+            raise ValueError(f"{label} has a symlinked mutable descendant")
+        if not current.resolve(strict=False).is_relative_to(root_resolved):
+            raise ValueError(f"{label} has a mutable descendant outside its declared root")
+        if not current.is_dir():
+            continue
+        with os.scandir(current) as entries:
+            for entry in entries:
+                child = Path(entry.path)
+                if entry.is_symlink():
+                    raise ValueError(f"{label} has a symlinked mutable descendant")
+                if not child.resolve(strict=False).is_relative_to(root_resolved):
+                    raise ValueError(
+                        f"{label} has a mutable descendant outside its declared root"
+                    )
+                if entry.is_dir(follow_symlinks=False):
+                    pending.append(child)
+
+
 def _preflight_status_paths(output_root: Path) -> None:
     paths = [output_root]
     for name in ("collection_status.json", "company_readiness.csv", "index.html"):
@@ -376,6 +403,9 @@ def _preflight_status_paths(output_root: Path) -> None:
         paths.extend((path, path.with_suffix(path.suffix + ".partial")))
     for path in paths:
         _require_safe_mutation_path(path, root=output_root, label="status output")
+    _reject_unsafe_mutable_descendants(
+        output_root, root=output_root, label="status output"
+    )
 
 
 def _preflight_run_mutations(run_root: Path, tickers: Sequence[str]) -> None:
@@ -409,6 +439,21 @@ def _preflight_run_mutations(run_root: Path, tickers: Sequence[str]) -> None:
         )
     for path in paths:
         _require_safe_mutation_path(path, root=run_root, label="collection run")
+    mutable_subtrees = [run_root / "status"]
+    for ticker in tickers:
+        company_root = run_root / "companies" / ticker
+        mutable_subtrees.extend(
+            (
+                company_root / "submissions",
+                company_root / "discovery_state",
+                company_root / "intake",
+                company_root / "operation_attempts",
+            )
+        )
+    for subtree in mutable_subtrees:
+        _reject_unsafe_mutable_descendants(
+            subtree, root=run_root, label="collection run"
+        )
     _preflight_status_paths(run_root / "status")
 
 
@@ -417,10 +462,9 @@ def _preflight_publication_paths(output_root: Path, tickers: Sequence[str]) -> N
     for ticker in tickers:
         destination = output_root / ticker
         _require_safe_mutation_path(destination, root=output_root, label="company publication")
-        if destination.exists():
-            for child in destination.rglob("*"):
-                if child.is_symlink():
-                    raise ValueError(f"company publication has a symlinked child: {ticker}")
+        _reject_unsafe_mutable_descendants(
+            destination, root=output_root, label=f"company publication {ticker}"
+        )
 
 
 def _attest_run(manifest_path: Path) -> _RunAttestation:
