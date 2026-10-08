@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -396,6 +397,27 @@ def test_cached_nvda_source_to_api_snapshot_xlsx(tmp_path: Path) -> None:
     fy2025 = [row for row in reader.records("candidate") if row["fiscal_year"] == 2025]
     assert all(row["source_table_evidence"][0]["target_table"]["normalized_start"] > 0
                for row in fy2025)
+    tampered_cutoff = tmp_path / "reviewed-q4-tampered-cutoff"
+    shutil.copytree(q4, tampered_cutoff)
+    tampered_manifest_path = tampered_cutoff / "reviewed_q4_manifest.json"
+    tampered_manifest = json.loads(tampered_manifest_path.read_text())
+    tampered_manifest["review_cutoff"] = "2026-09-06T00:00:00+00:00"
+    tampered_manifest_path.write_text(json.dumps(tampered_manifest))
+    with pytest.raises(ValueError, match="cutoff differs from review ledger"):
+        ReviewedQ4Reader(tampered_cutoff).verify_all()
+    with pytest.raises(ValueError, match="cutoff differs from review ledger"):
+        prepare_analysis(
+            publication=history, destination=tmp_path / "tampered-analysis", tickers=("NVDA",),
+            fiscal_start=2024, fiscal_end=2026, reviewed_q4_publication=tampered_cutoff,
+        )
+    tampered_identity = tmp_path / "reviewed-q4-tampered-identity"
+    shutil.copytree(q4, tampered_identity)
+    identity_manifest_path = tampered_identity / "reviewed_q4_manifest.json"
+    identity_manifest = json.loads(identity_manifest_path.read_text())
+    identity_manifest["publication_id"] = "reviewed-q4:publication:tampered"
+    identity_manifest_path.write_text(json.dumps(identity_manifest))
+    with pytest.raises(ValueError, match="publication identity changed"):
+        ReviewedQ4Reader(tampered_identity).verify_all()
     for view in ("AS_FILED", "LATEST_REPORTED"):
         values = {(row["fiscal_year"], row["member_qname"]): Decimal(row["value_numeric"])
                   for row in reviewed if row["selection_view"] == view}

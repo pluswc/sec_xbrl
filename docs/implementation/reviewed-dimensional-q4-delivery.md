@@ -30,7 +30,11 @@ immutable companion publication containing:
 the parent history manifest, the selection view and as-of date, and each source
 snapshot manifest. It records the timezone-aware 2026-10-08 review cutoff,
 separately from the 2026-09-06 financial selection date. The reader verifies
-all hashes and rejects moved, changed, partial, or symlinked publications.
+all hashes and rejects moved, changed, partial, or symlinked publications. It
+also reconstructs the publication identity, cutoff, parent, evidence, views,
+selection dates, and source-snapshot header fields from the hashed source and
+ledger inputs. Editing only a public manifest header cannot claim that review
+was known earlier than its actual ledger timestamp.
 
 An approval binds company, fiscal year, view, as-of date, mapping epoch, full
 raw and canonical dimensions, concept, numerator-only monetary unit, actual
@@ -124,6 +128,10 @@ not include the period class. FY axis time-series queries are permitted only in
 an annual bundle and mixed period classes fail closed. Annual columns display as
 `FY2024`, never `FY2024 Q4`.
 
+The hierarchy page switches its active analytical selector and empty-period
+hint to annual wording for an annual context and restores the existing
+quarterly wording for a quarterly context.
+
 Existing quarterly reviews do not imply annual review. Existing ratio, QoQ, and
 YoY policies remain unchanged; where they do not support annual input, the
 result remains unavailable rather than introducing a new annual metric policy.
@@ -142,7 +150,9 @@ result remains unavailable rather than introducing a new annual metric policy.
 6. Synthetic tests cover approval, tampering, parent drift, full scope, units,
    dates, mapping, future-as-of, continuity/recast flags, malformed policy and
    timestamps, raw monetary semantics, direct-cell precedence, exact Q4
-   exclusion scope, quarterly compatibility, and both annual display routes.
+   exclusion scope, public-manifest cutoff and publication-ID tampering,
+   quarterly compatibility, both annual display routes, and active annual and
+   quarterly hierarchy controls.
 7. A cached integration run traces all 32 approved view-specific decisions to
    16 economic Q4 cells per view through source, review, producer, API, snapshot,
    and XLSX without network access.

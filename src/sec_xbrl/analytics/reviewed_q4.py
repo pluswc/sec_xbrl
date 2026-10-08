@@ -248,6 +248,9 @@ class ReviewedQ4Reader:
         for field in ("source_evidence", "review_ledger"):
             if _sha256(Path(self.manifest[f"{field}_path"])) != self.manifest[f"{field}_sha256"]:
                 raise ValueError(f"reviewed-Q4 {field.replace('_', ' ')} changed")
+        evidence = _read_json(Path(self.manifest["source_evidence_path"]))
+        ledger = _read_json(Path(self.manifest["review_ledger_path"]))
+        _verify_manifest_inputs(self.manifest, evidence=evidence, ledger=ledger)
         for source in self.manifest["source_snapshots"]:
             snapshot_path = Path(source["path"])
             snapshot_manifest = _read_json(snapshot_path / "layer1_manifest.json")
@@ -814,6 +817,65 @@ def _aware_datetime(value: Any, label: str) -> datetime:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError(f"{label} must be an ISO-8601 timestamp with timezone")
     return parsed.astimezone(UTC)
+
+
+def _verify_manifest_inputs(
+    manifest: dict[str, Any], *, evidence: dict[str, Any], ledger: dict[str, Any]
+) -> None:
+    if manifest.get("rule_version") != RULE_VERSION:
+        raise ValueError("reviewed-Q4 manifest rule version changed")
+    if evidence.get("schema_version") != SOURCE_EVIDENCE_SCHEMA:
+        raise ValueError("unsupported reviewed-Q4 source evidence schema")
+    if ledger.get("schema_version") != REVIEW_LEDGER_SCHEMA:
+        raise ValueError("unsupported reviewed-Q4 review ledger schema")
+    parent_path = Path(manifest["history_publication"]).resolve()
+    evidence_path = Path(manifest["source_evidence_path"]).resolve()
+    if (Path(evidence.get("history_publication", "")).resolve() != parent_path
+            or evidence.get("history_manifest_sha256") != manifest["history_manifest_sha256"]):
+        raise ValueError("reviewed-Q4 manifest differs from source evidence parent")
+    if (Path(ledger.get("history_publication", "")).resolve() != parent_path
+            or ledger.get("history_manifest_sha256") != manifest["history_manifest_sha256"]):
+        raise ValueError("reviewed-Q4 manifest differs from review ledger parent")
+    if (Path(ledger.get("source_evidence_path", "")).resolve() != evidence_path
+            or ledger.get("source_evidence_sha256") != manifest["source_evidence_sha256"]):
+        raise ValueError("reviewed-Q4 manifest differs from review ledger evidence")
+    expected_publication_id = _id(
+        "publication", manifest["source_evidence_sha256"], manifest["review_ledger_sha256"],
+        manifest["history_manifest_sha256"],
+    )
+    if manifest.get("publication_id") != expected_publication_id:
+        raise ValueError("reviewed-Q4 publication identity changed")
+    ledger_cutoff = _aware_datetime(ledger.get("review_cutoff"), "review cutoff")
+    manifest_cutoff = _aware_datetime(manifest.get("review_cutoff"), "manifest review cutoff")
+    if manifest_cutoff != ledger_cutoff:
+        raise ValueError("reviewed-Q4 manifest review cutoff differs from review ledger")
+    decisions = [*ledger.get("approvals", []), *ledger.get("excluded_scopes", [])]
+    for decision in decisions:
+        if _aware_datetime(decision.get("known_at"), "review decision known_at") > ledger_cutoff:
+            raise ValueError("review decision is later than the review cutoff")
+    pairs = evidence.get("pairs")
+    if not isinstance(pairs, list):
+        raise TypeError("reviewed-Q4 source evidence pairs must be a list")
+    if manifest.get("selection_as_of_dates") != sorted({row.get("selection_as_of_date") for row in pairs}):
+        raise ValueError("reviewed-Q4 manifest selection dates differ from source evidence")
+    if manifest.get("views") != sorted({row.get("selection_view") for row in pairs}):
+        raise ValueError("reviewed-Q4 manifest views differ from source evidence")
+    expected_snapshots: dict[str, dict[str, str]] = {}
+    for pair in pairs:
+        for field in ("fy", "ytd_9m"):
+            source = pair.get(field) or {}
+            lineage = source.get("value_lineage") or {}
+            row = {
+                "path": str(Path(source.get("snapshot_path", "")).resolve()),
+                "manifest_sha256": source.get("snapshot_manifest_sha256"),
+                "snapshot_id": lineage.get("source_snapshot_id"),
+            }
+            previous = expected_snapshots.setdefault(row["path"], row)
+            if previous != row:
+                raise ValueError("source evidence reuses a snapshot path with conflicting identity")
+    expected = sorted(expected_snapshots.values(), key=lambda row: row["path"])
+    if manifest.get("source_snapshots") != expected:
+        raise ValueError("reviewed-Q4 manifest snapshots differ from source evidence")
 
 
 def _read_json(path: Path) -> dict[str, Any]:

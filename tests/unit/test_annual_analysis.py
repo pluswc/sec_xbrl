@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import copy
 import inspect
+import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -152,3 +154,28 @@ def test_hierarchy_javascript_uses_period_mode_for_all_analytical_labels() -> No
     assert "periodNoun=ctx.period_mode==='ANNUAL'?'개 연도':'분기'" in source
     assert ".map(p=>analyticalPeriodLabel(ctx,p))" in source
     assert "text('th',analyticalPeriodLabel(ctx,period))" in source
+
+
+def test_hierarchy_active_controls_switch_annual_and_restore_quarterly() -> None:
+    source = (Path(__file__).parents[2] / "src/sec_xbrl/display/hierarchy.js").read_text(encoding="utf-8")
+    function_source = source[source.index("function configureAnalyticalPeriodLanguage"):]
+    function_source = function_source[:function_source.index("\nfunction ", 10)]
+    program = f"""
+const elements={{
+  'analytical-mode-option':{{textContent:''}},
+  'analytical-empty-hint':{{textContent:''}}
+}};
+const $=id=>elements[id];
+{function_source}
+configureAnalyticalPeriodLanguage({{period_mode:'ANNUAL'}});
+const annual=[elements['analytical-mode-option'].textContent,elements['analytical-empty-hint'].textContent];
+configureAnalyticalPeriodLanguage({{}});
+const quarterly=[elements['analytical-mode-option'].textContent,elements['analytical-empty-hint'].textContent];
+process.stdout.write(JSON.stringify({{annual,quarterly}}));
+"""
+    result = subprocess.run(
+        ["node", "-e", program], check=True, capture_output=True, text=True,
+    )
+    labels = json.loads(result.stdout)
+    assert labels["annual"] == ["연간 비교 · Analytical", "같은 준비 노드만 연결 · 빈 연도는 미준비"]
+    assert labels["quarterly"] == ["분기 비교 · Analytical", "같은 준비 노드만 연결 · 빈 분기는 미준비"]
