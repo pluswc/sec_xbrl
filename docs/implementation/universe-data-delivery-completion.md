@@ -35,6 +35,12 @@ v5 data generation.  The duration arithmetic, fail-closed gate, four-family
 supported-lexical repair, and exact word-duration grammar passed independent
 verification; the 381-filing v5 migration, updated combined integration, and
 final runtime publication remain pending.
+Combined candidate `7c7122a62ba33a933b8a3d7ff56b526fd00e509d` is also
+historical evidence.  Its independent review found that the source index and
+fact evidence could be changed together and re-hashed while retaining a real
+v5 Fact row.  The replacement adds a governed Raw/Quality source-binding
+producer and reader; its frozen source, independent verification, runtime
+publication, and joined acceptance remain pending.
 Runtime completion counts and the final report identity remain **PENDING**
 until the fresh operations, duration-conformance assessment, metadata,
 reviewed-Q4, quarterly, and annual publications have all been verified
@@ -63,6 +69,16 @@ selection, the history builder, or a financial calculation producer.  Q4 rows
 come from the immutable reviewed-Q4 publication; the HTML renderer never
 subtracts FY and YTD values.
 
+The separate `sec_xbrl.source_bindings` producer is the only new step that
+opens cached primary XHTML.  It publishes `source_documents.json`,
+`source_bindings.json`, and `source_binding_manifest.json` atomically after
+binding exact source fields to v5 Raw identities.  The completion process uses
+`SourceBindingsReader`, which verifies prepared digests, cached bytes, and Raw
+table identities without parsing XHTML, invoking Arelle, contacting SEC, or
+recomputing a transform.  A `PASS` assessment names the exact source-binding
+publication ID and manifest digest and includes independent-verification
+evidence for its frozen producer revision.
+
 Before writing, the publisher verifies:
 
 1. the external configuration has explicit, unique CIKs and matches the exact
@@ -82,7 +98,8 @@ Before writing, the publisher verifies:
    scope, governed-history manifests, and evidence hashes; `PASS` additionally
    proves fail-closed ingestion gates, normalized values, the known AMD
    regression, all source-bound supported-lexical corrections, zero unapproved
-   foreign changes, and independent verification;
+   foreign changes, a separately prepared and independently verified governed
+   source-binding publication, and independent verification;
    and
 7. no output company row is duplicated by a ticker alias.
 
@@ -126,7 +143,8 @@ from replay/adoption status.
 The intended runtime roots are caller inputs, not constants in the renderer.
 For the current run they are expected under
 `data/processed/universe_runs/20261008_sec_transform_v5/`, including fresh
-`ops_v5`, `analysis_history_v5`, `q4_delivery_v5`, and `completion_v5` roots
+`ops_v5`, `source_bindings_v1`, `analysis_history_v5`, `q4_delivery_v5`, and
+`completion_v5` roots
 declared by the runtime manifests.  Cached source packages remain read-only under the separate ignored
 `data/raw/universe_runs/20261008_duration_v4/` boundary.  The unaffected B
 `company_metadata_v2` publication is reused read-only from the initial run.
@@ -146,6 +164,12 @@ manifest and readiness data prove:
   duration evidence, verifies the 104 supported-lexical repairs against the
   source index and actual Fact/Concept tables, discloses 22 monetary and 10
   share zeros, and reports zero unapproved foreign changes;
+- a `sec-source-bindings-v1` Raw/Quality publication that scans the exact 381
+  cached primary documents outside the renderer, binds all 3,842 duration
+  sources and 104 approved correction sources to v5 Raw identities, records
+  the package, primary-member, snapshot-manifest, Fact, Concept, and Context
+  table digests, and passes independent verification at its frozen producer
+  revision;
 - B identity and SEC SIC present for every pilot company, with an explicit
   status for all broader candidate issuers;
 - the approved reviewed-Q4 economic/view thresholds plus explicit exclusions;

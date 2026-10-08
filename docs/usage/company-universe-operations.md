@@ -140,6 +140,37 @@ discovery or newly ingested snapshot, `CACHE` for cached offline discovery, and
 `REUSED` for caller-supplied plans or existing Layer 1 snapshots.  The as-of
 date and source observation timestamp remain separate fields.
 
+## Publish governed Raw/Quality source bindings
+
+After the fresh v5 raw intake is complete, prepare the source-binding
+publication before constructing a `PASS` accuracy assessment:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m sec_xbrl.source_bindings \
+  --collection-manifest /absolute/path/to/20261008_sec_transform_v5/ops_v5/collection_manifest.json \
+  --package-root /absolute/path/to/data/raw/universe_runs/20261008_duration_v4/packages \
+  --duration-source-index /absolute/path/to/20261008_sec_transform_v5/duration_source_index.json \
+  --correction-source-index /absolute/path/to/20261008_sec_transform_v5/supported_lexical_correction_source_index.json \
+  --destination /absolute/path/to/20261008_sec_transform_v5/source_bindings_v1 \
+  --producer-revision <frozen-integration-commit-sha>
+```
+
+The destination must be new.  The producer performs no network requests.  It
+opens all planned cached primary documents, rejects changed or incomplete
+candidate source claims, and atomically writes `source_documents.json`,
+`source_bindings.json`, and `source_binding_manifest.json`.  It binds exact
+source IDs, Context references, lexicals, transform namespaces, QNames,
+source lines, and source ordinals to v5 Fact, Context, and Concept identities.
+It also records the 381 package and primary-member hashes, all snapshot
+manifest hashes, and the Fact, Concept, and Context table hashes.
+
+`SourceBindingsReader(root).verify_all()` is the consumer-side check.  It
+re-hashes the prepared publication, cached package/member bytes, A request,
+snapshot manifests, and Raw tables and recomputes stable identities.  It does
+not parse Inline XBRL, load Arelle, normalize a value, or contact SEC.  Run the
+producer from the frozen integration revision and independently verify that
+revision and publication before referring to it from a `PASS` assessment.
+
 ## Publish the integrated completion view
 
 After A, B, and C have produced their immutable outputs, join them without
@@ -154,6 +185,7 @@ PYTHONPATH=src .venv/bin/python -m sec_xbrl.universe_delivery \
   --quarterly-analysis /absolute/path/to/20261008_sec_transform_v5/q4_delivery_v5/quarterly \
   --annual-analysis /absolute/path/to/20261008_sec_transform_v5/q4_delivery_v5/annual \
   --accuracy-assessment /absolute/path/to/sec_duration_conformance_assessment.json \
+  --source-binding-publication /absolute/path/to/20261008_sec_transform_v5/source_bindings_v1 \
   --destination /absolute/path/to/completion
 ```
 
@@ -171,7 +203,8 @@ history manifest and one check per planned accession, attest all 104 approved
 SEC transform repairs against their source index and fresh v5 Fact/Concept
 tables, require zero unapproved foreign changes, reconcile the exact 3,842
 duration Facts to external evidence, and
-include independent-verification evidence.  `BLOCKED` is shown as
+include a separately governed source-binding publication plus its independent
+verification evidence.  `BLOCKED` is shown as
 an overall block; `PENDING` keeps the publication partial.  Counts without
 normalized-value checks are rejected.
 
@@ -196,6 +229,21 @@ records or all 21 ticker/hash entries; they are not valid literal JSON:
     "selected_filings": 381
   },
   "source_packages": {"expected": 381, "verified": 381, "missing": 0},
+  "source_binding_publication": {
+    "root": "/absolute/path/to/20261008_sec_transform_v5/source_bindings_v1",
+    "publication_id": "source-bindings-<identity>",
+    "manifest_sha256": "<sha256>",
+    "producer_revision": "<frozen-integration-commit-sha>",
+    "filing_count": 381,
+    "duration_binding_count": 3842,
+    "approved_transform_correction_count": 104,
+    "independent_verification": {
+      "state": "PASS",
+      "producer_revision": "<frozen-integration-commit-sha>",
+      "evidence_path": "/absolute/path/to/source-binding-verification.json",
+      "evidence_sha256": "<sha256>"
+    }
+  },
   "history_manifest_sha256s": {"AMD": "<sha256>", "...": "..."},
   "ingestion_gates": {
     "TAXONOMY_AND_TRANSFORM_RESOLUTION": "PASS",
@@ -273,6 +321,8 @@ records or all 21 ticker/hash entries; they are not valid literal JSON:
     {"path": "/absolute/path/to/duration_fact_checks.json", "sha256": "<sha256>"},
     {"path": "/absolute/path/to/approved_inline_transform_corrections.json", "sha256": "<sha256>"},
     {"path": "/absolute/path/to/supported_lexical_correction_source_index.json", "sha256": "<sha256>"},
+    {"path": "/absolute/path/to/source_bindings_v1/source_binding_manifest.json", "sha256": "<sha256>"},
+    {"path": "/absolute/path/to/source-binding-verification.json", "sha256": "<sha256>"},
     {"path": "/absolute/path/to/verification-report.json", "sha256": "<sha256>"}
   ]
 }
@@ -282,6 +332,13 @@ records or all 21 ticker/hash entries; they are not valid literal JSON:
 from the immutable collection plans, including zero-duration filings.  Every
 path is absolute, every referenced file must exist without a symlink leaf, and
 every digest is re-read before the completion destination is created.
+The `source_binding_publication` identity and manifest digest must match the
+reader input exactly, its embedded A collection digest and filing count must
+match the assessment scope, and its independent-verification evidence must be
+listed in `evidence_files`.  The consumer compares every duration and approved
+correction source field to that governed publication.  Re-hashing the two
+candidate JSON inputs together cannot substitute an invented source ID,
+Context reference, lexical, primary-document hash, or Fact binding.
 `duration_fact_checks.json` is a
 `sec-duration-fact-checks-v1` object with `record_count` and a `records` list.
 Each record contains ticker, CIK, accession, unique Fact ID, transform,

@@ -24,6 +24,7 @@ from sec_xbrl import analysis
 from sec_xbrl.analytics.reviewed_q4 import ReviewedQ4Reader
 from sec_xbrl.collection_operations import load_universe_config, read_universe_status
 from sec_xbrl.company_metadata import CompanyMetadataReader
+from sec_xbrl.source_bindings import SourceBindingsReader
 
 VERSION = "company-universe-delivery-v1"
 MANIFEST_NAME = "universe_delivery_manifest.json"
@@ -154,6 +155,7 @@ def publish_universe_delivery(
     quarterly_analysis: Path | None = None,
     annual_analysis: Path | None = None,
     accuracy_assessment: Path | None = None,
+    source_binding_publication: Path | None = None,
     expected_q4_economic_cells: int = 16,
     expected_q4_view_records: int = 32,
 ) -> UniverseDeliveryPublication:
@@ -197,6 +199,19 @@ def publish_universe_delivery(
         if accuracy_assessment is not None
         else {}
     )
+    if source_binding_publication is None and accuracy_assessment is not None:
+        declared_binding = _read_json(Path(accuracy_assessment)).get(
+            "source_binding_publication"
+        )
+        if isinstance(declared_binding, dict) and type(declared_binding.get("root")) is str:
+            source_binding_publication = Path(declared_binding["root"])
+    source_bindings = (
+        SourceBindingsReader(Path(source_binding_publication))
+        if source_binding_publication is not None
+        else None
+    )
+    if source_bindings is not None:
+        source_bindings.verify_all()
     accuracy = (
         _attest_accuracy(
             Path(accuracy_assessment),
@@ -214,6 +229,7 @@ def publish_universe_delivery(
                 if isinstance(row.get("build"), dict)
                 and type(row["build"].get("history_manifest_sha256")) is str
             },
+            source_bindings=source_bindings,
         )
         if accuracy_assessment is not None
         else None
@@ -287,6 +303,7 @@ def publish_universe_delivery(
         quarterly=quarterly,
         annual=annual,
         accuracy=accuracy,
+        source_bindings=source_bindings,
         expected_q4_economic_cells=expected_q4_economic_cells,
         expected_q4_view_records=expected_q4_view_records,
     )
@@ -305,6 +322,7 @@ def _attest_accuracy(
     planned_filings: tuple[tuple[str, str, str], ...],
     snapshot_scope: dict[tuple[str, str, str], dict[str, str]],
     history_manifest_sha256s: dict[str, str],
+    source_bindings: SourceBindingsReader | None,
 ) -> _AccuracyAttestation:
     path = _regular_file(path, "duration-conformance assessment")
     payload = _read_json(path)
@@ -356,6 +374,7 @@ def _attest_accuracy(
             commit_sha=commit_sha,
             evidence_files=evidence_files,
             history_manifest_sha256s=history_manifest_sha256s,
+            source_bindings=source_bindings,
         )
     return _AccuracyAttestation(
         path=path,
@@ -477,7 +496,12 @@ def _validate_accuracy_pass(
     commit_sha: str,
     evidence_files: tuple[dict[str, Any], ...],
     history_manifest_sha256s: dict[str, str],
+    source_bindings: SourceBindingsReader | None,
 ) -> dict[str, dict[str, int]]:
+    if source_bindings is None:
+        raise ValueError(
+            "PASS duration conformance requires a governed source-binding publication"
+        )
     packages = payload.get("source_packages")
     if packages != {
         "expected": selected_filings,
@@ -553,6 +577,15 @@ def _validate_accuracy_pass(
     if duration_fact_count != examined_facts:
         raise ValueError("duration-conformance filing and transform counts differ")
     evidence_index = {row["path"]: row["sha256"] for row in evidence_files}
+    _validate_source_binding_reference(
+        payload,
+        source_bindings=source_bindings,
+        evidence_index=evidence_index,
+        selected_filings=selected_filings,
+        collection_manifest_sha256=str(
+            payload.get("scope", {}).get("collection_manifest_sha256")
+        ),
+    )
     source_index = payload.get("source_index")
     fact_level = payload.get("fact_level_evidence")
     for label, declaration, expected_count_key, expected_count in (
@@ -572,6 +605,11 @@ def _validate_accuracy_pass(
         raise ValueError("duration-conformance source index fact count differs")
     source_counts, source_primary_hashes, duration_sources = _validate_accuracy_source_index(
         Path(source_index["path"]), planned_filings=planned_filings
+    )
+    _validate_trusted_duration_bindings(
+        duration_sources=duration_sources,
+        source_primary_hashes=source_primary_hashes,
+        source_bindings=source_bindings,
     )
     if source_counts != {
         transform: check["examined"] for transform, check in checks.items()
@@ -620,6 +658,7 @@ def _validate_accuracy_pass(
         source_index_path=Path(approved_corrections["source_index_path"]),
         source_index_sha256=approved_corrections["source_index_sha256"],
         evidence_index=evidence_index,
+        trusted_bindings=source_bindings.approved_transform_corrections(),
     )
     normalized = payload.get("normalized_value_checks")
     if not isinstance(normalized, list) or not normalized:
@@ -766,6 +805,96 @@ def _validate_accuracy_source_index(
     return calculated_counts, hashes, indexed_facts
 
 
+def _validate_source_binding_reference(
+    payload: dict[str, Any],
+    *,
+    source_bindings: SourceBindingsReader,
+    evidence_index: dict[str, str],
+    selected_filings: int,
+    collection_manifest_sha256: str,
+) -> None:
+    declaration = payload.get("source_binding_publication")
+    manifest = source_bindings.manifest
+    if not isinstance(declaration, dict):
+        raise TypeError("governed source-binding publication is not declared")
+    counts = manifest.get("counts")
+    collection = manifest.get("collection")
+    expected = {
+        "root": str(source_bindings.root),
+        "publication_id": source_bindings.publication_id,
+        "manifest_sha256": _sha256(source_bindings.manifest_path),
+        "producer_revision": manifest.get("producer_revision"),
+        "filing_count": selected_filings,
+        "duration_binding_count": (
+            counts.get("duration_bindings") if isinstance(counts, dict) else None
+        ),
+        "approved_transform_correction_count": (
+            counts.get("approved_transform_corrections")
+            if isinstance(counts, dict)
+            else None
+        ),
+    }
+    if any(declaration.get(key) != value for key, value in expected.items()):
+        raise ValueError("governed source-binding publication identity differs")
+    manifest_path = str(source_bindings.manifest_path.resolve())
+    if evidence_index.get(manifest_path) != expected["manifest_sha256"]:
+        raise ValueError("source-binding manifest is not declared as evidence")
+    if (
+        not isinstance(collection, dict)
+        or collection.get("manifest_sha256") != collection_manifest_sha256
+        or not isinstance(counts, dict)
+        or counts.get("filings") != selected_filings
+    ):
+        raise ValueError("governed source-binding collection scope differs")
+    verification = declaration.get("independent_verification")
+    if (
+        not isinstance(verification, dict)
+        or verification.get("state") != "PASS"
+        or verification.get("producer_revision") != manifest.get("producer_revision")
+        or type(verification.get("evidence_path")) is not str
+        or type(verification.get("evidence_sha256")) is not str
+    ):
+        raise ValueError("source-binding independent verification is missing")
+    evidence_path = str(Path(verification["evidence_path"]).resolve())
+    if evidence_index.get(evidence_path) != verification["evidence_sha256"]:
+        raise ValueError("source-binding independent evidence is not declared")
+
+
+def _validate_trusted_duration_bindings(
+    *,
+    duration_sources: dict[tuple[str, str, str, str], dict[str, Any]],
+    source_primary_hashes: dict[tuple[str, str, str], str],
+    source_bindings: SourceBindingsReader,
+) -> None:
+    trusted: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for binding in source_bindings.duration_bindings():
+        key = (
+            str(binding.get("ticker")),
+            str(binding.get("cik")),
+            str(binding.get("accession")),
+            str(binding.get("source_id")),
+        )
+        if key in trusted:
+            raise ValueError("governed duration source identity is duplicated")
+        trusted[key] = binding
+    if set(trusted) != set(duration_sources):
+        raise ValueError("duration source index differs from governed source bindings")
+    for key, source in duration_sources.items():
+        binding = trusted[key]
+        filing_key = key[:3]
+        if (
+            source.get("fact_id") != binding.get("fact_id")
+            or source.get("primary_document") != binding.get("primary_document")
+            or source_primary_hashes.get(filing_key) != binding.get("primary_sha256")
+            or source.get("format_qname") != binding.get("format_qname")
+            or source.get("format_namespace") != binding.get("format_namespace")
+            or source.get("source_lexical") != binding.get("source_lexical")
+            or source.get("concept_qname") != binding.get("concept_qname")
+            or source.get("context_ref") != binding.get("source_context_ref")
+        ):
+            raise ValueError("duration source fields differ from governed source bindings")
+
+
 def _validate_fact_level_evidence(
     path: Path,
     *,
@@ -874,6 +1003,7 @@ def _validate_approved_transform_corrections(
     source_index_path: Path,
     source_index_sha256: str,
     evidence_index: dict[str, str],
+    trusted_bindings: tuple[dict[str, Any], ...],
 ) -> dict[str, dict[str, int]]:
     evidence = _read_json(_regular_file(path, "approved inline transform corrections"))
     records = evidence.get("records")
@@ -934,6 +1064,43 @@ def _validate_approved_transform_corrections(
         ):
             raise ValueError("supported lexical correction source record is invalid")
         indexed_sources[key] = source
+
+    trusted_sources: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+    for binding in trusted_bindings:
+        key = (
+            str(binding.get("ticker")),
+            str(binding.get("cik")),
+            str(binding.get("accession")),
+            str(binding.get("source_id")),
+            str(binding.get("fact_id")),
+        )
+        if key in trusted_sources:
+            raise ValueError("governed correction source identity is duplicated")
+        trusted_sources[key] = binding
+    if set(trusted_sources) != set(indexed_sources):
+        raise ValueError("correction source index differs from governed source bindings")
+    for key, source in indexed_sources.items():
+        binding = trusted_sources[key]
+        if (
+            source.get("context_id") != binding.get("context_id")
+            or source.get("raw_concept_id") != binding.get("raw_concept_id")
+            or source.get("concept_qname") != binding.get("concept_qname")
+            or source.get("concept_data_type_qname")
+            != binding.get("concept_data_type_qname")
+            or source.get("source_element_type")
+            != binding.get("source_element_type")
+            or source.get("source_lexical") != binding.get("source_lexical")
+            or source.get("source_locator") != binding.get("source_locator")
+            or source.get("format_qname") != binding.get("format_qname")
+            or source.get("format_namespace") != binding.get("format_namespace")
+            or source.get("source_scale") != binding.get("source_scale")
+            or source.get("source_sign") != binding.get("source_sign")
+            or source.get("primary_document") != binding.get("primary_document")
+            or source.get("primary_sha256") != binding.get("primary_sha256")
+        ):
+            raise ValueError(
+                "correction source fields differ from governed source bindings"
+            )
 
     identities: set[tuple[str, str, str, str, str]] = set()
     families: dict[str, int] = {}
@@ -1364,6 +1531,7 @@ def _readiness_model(
     quarterly: _AnalysisAttestation | None,
     annual: _AnalysisAttestation | None,
     accuracy: _AccuracyAttestation | None,
+    source_bindings: SourceBindingsReader | None,
     expected_q4_economic_cells: int,
     expected_q4_view_records: int,
 ) -> dict[str, Any]:
@@ -1629,6 +1797,11 @@ def _readiness_model(
                 "source_index": (
                     accuracy.payload.get("source_index") if accuracy else None
                 ),
+                "source_binding_publication": (
+                    accuracy.payload.get("source_binding_publication")
+                    if accuracy
+                    else None
+                ),
                 "fact_level_evidence": (
                     accuracy.payload.get("fact_level_evidence") if accuracy else None
                 ),
@@ -1675,6 +1848,7 @@ def _readiness_model(
             "quarterly_analysis": _analysis_source(quarterly),
             "annual_analysis": _analysis_source(annual),
             "accuracy_assessment": _accuracy_source(accuracy),
+            "source_binding_publication": _source_binding_source(source_bindings),
         },
         "companies": companies,
         "reviewed_q4": {
@@ -1753,6 +1927,19 @@ def _accuracy_source(value: _AccuracyAttestation | None) -> dict[str, Any] | Non
         "parser_rule_version": value.parser_rule_version,
         "frozen_commit_sha": value.frozen_commit_sha,
         "evidence_files": list(value.evidence_files),
+    }
+
+
+def _source_binding_source(value: SourceBindingsReader | None) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    return {
+        "root": str(value.root),
+        "manifest_path": str(value.manifest_path),
+        "manifest_sha256": _sha256(value.manifest_path),
+        "publication_id": value.publication_id,
+        "producer_revision": value.manifest.get("producer_revision"),
+        "counts": value.manifest.get("counts"),
     }
 
 
@@ -2056,6 +2243,7 @@ def main() -> None:
     parser.add_argument("--quarterly-analysis", type=Path)
     parser.add_argument("--annual-analysis", type=Path)
     parser.add_argument("--accuracy-assessment", type=Path)
+    parser.add_argument("--source-binding-publication", type=Path)
     parser.add_argument("--destination", type=Path, required=True)
     parser.add_argument("--expected-q4-economic-cells", type=int, default=16)
     parser.add_argument("--expected-q4-view-records", type=int, default=32)
@@ -2068,6 +2256,7 @@ def main() -> None:
         quarterly_analysis=args.quarterly_analysis,
         annual_analysis=args.annual_analysis,
         accuracy_assessment=args.accuracy_assessment,
+        source_binding_publication=args.source_binding_publication,
         destination=args.destination,
         expected_q4_economic_cells=args.expected_q4_economic_cells,
         expected_q4_view_records=args.expected_q4_view_records,

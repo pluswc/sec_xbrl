@@ -27,6 +27,25 @@ def _write(path: Path, payload: object) -> Path:
     return path
 
 
+class _FixtureSourceBindingsReader:
+    """Small governed-publication stand-in for consumer-policy unit tests."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = Path(root)
+        self.manifest_path = self.root / "source_binding_manifest.json"
+        self.manifest = json.loads(self.manifest_path.read_text())
+        self.publication_id = self.manifest["publication_id"]
+
+    def verify_all(self) -> None:
+        return None
+
+    def duration_bindings(self) -> tuple[dict[str, object], ...]:
+        return tuple(self.manifest["duration_bindings"])
+
+    def approved_transform_corrections(self) -> tuple[dict[str, object], ...]:
+        return tuple(self.manifest["correction_bindings"])
+
+
 def _collection(tmp_path: Path) -> tuple[Path, Path]:
     config = _write(
         tmp_path / "config.json",
@@ -273,6 +292,39 @@ def _accuracy_assessment(
     correction_source_index_sha = hashlib.sha256(
         correction_source_index.read_bytes()
     ).hexdigest()
+    source_binding_root = tmp_path / f"source-bindings-{state.lower()}"
+    source_binding_manifest = _write(
+        source_binding_root / "source_binding_manifest.json",
+        {
+            "version": "sec-source-bindings-v1",
+            "publication_id": f"source-bindings-{state.lower()}-fixture",
+            "producer_revision": "b" * 40,
+            "collection": {
+                "manifest_sha256": hashlib.sha256(
+                    collection_manifest.read_bytes()
+                ).hexdigest()
+            },
+            "counts": {
+                "companies": 1,
+                "filings": 1,
+                "duration_bindings": 1,
+                "approved_transform_corrections": 0,
+            },
+            "duration_source_index": str(source_index),
+            "correction_source_index": str(correction_source_index),
+            "duration_bindings": [
+                {
+                    **json.loads(source_index.read_text())["duration_facts"][0],
+                    "source_context_ref": "source-context-duration-fixture",
+                    "primary_sha256": "e" * 64,
+                }
+            ],
+            "correction_bindings": [],
+        },
+    )
+    source_binding_manifest_sha = hashlib.sha256(
+        source_binding_manifest.read_bytes()
+    ).hexdigest()
     assessment: dict[str, object] = {
         "schema_version": universe_delivery.ACCURACY_SCHEMA,
         "state": state,
@@ -299,6 +351,10 @@ def _accuracy_assessment(
                 "path": str(correction_source_index.absolute()),
                 "sha256": correction_source_index_sha,
             },
+            {
+                "path": str(source_binding_manifest.absolute()),
+                "sha256": source_binding_manifest_sha,
+            },
         ],
     }
     if state == "PASS":
@@ -310,6 +366,21 @@ def _accuracy_assessment(
                     universe_delivery.SUPPORTED_LEXICAL_REPAIR_POLICY
                 ),
                 "frozen_commit_sha": "a" * 40,
+                "source_binding_publication": {
+                    "root": str(source_binding_root.absolute()),
+                    "publication_id": f"source-bindings-{state.lower()}-fixture",
+                    "manifest_sha256": source_binding_manifest_sha,
+                    "producer_revision": "b" * 40,
+                    "filing_count": 1,
+                    "duration_binding_count": 1,
+                    "approved_transform_correction_count": 0,
+                    "independent_verification": {
+                        "state": "PASS",
+                        "producer_revision": "b" * 40,
+                        "evidence_path": str(verification.absolute()),
+                        "evidence_sha256": verification_sha,
+                    },
+                },
                 "source_packages": {"expected": 1, "verified": 1, "missing": 0},
                 "filing_checks": [
                     {
@@ -543,6 +614,9 @@ def _inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
         tmp_path, name="annual", history=history, q4=None, annual=True
     )
     monkeypatch.setattr(universe_delivery.ReviewedQ4Reader, "verify_all", lambda self: None)
+    monkeypatch.setattr(
+        universe_delivery, "SourceBindingsReader", _FixtureSourceBindingsReader
+    )
     return {
         "config": config,
         "collection": collection,
@@ -885,6 +959,134 @@ def test_duration_conformance_binds_fact_evidence_to_actual_v5_rows(
     assert not (tmp_path / "completion").exists()
 
 
+def test_rehashed_duration_json_cannot_replace_governed_source_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _inputs(tmp_path, monkeypatch)
+    payload = json.loads(paths["accuracy"].read_text())
+    source_declaration = payload["source_index"]
+    fact_declaration = payload["fact_level_evidence"]
+    source_path = Path(source_declaration["path"])
+    fact_path = Path(fact_declaration["path"])
+    source = json.loads(source_path.read_text())
+    facts = json.loads(fact_path.read_text())
+    source["duration_facts"][0]["source_id"] = "invented-source"
+    source["duration_facts"][0]["source_lexical"] = "9.55"
+    facts["records"][0]["source_id"] = "invented-source"
+    facts["records"][0]["lexical_input"] = "9.55"
+    _write(source_path, source)
+    _write(fact_path, facts)
+    for declaration, path in (
+        (source_declaration, source_path),
+        (fact_declaration, fact_path),
+    ):
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        declaration["sha256"] = digest
+        next(
+            row for row in payload["evidence_files"] if row["path"] == str(path)
+        )["sha256"] = digest
+    inaccurate = _write(tmp_path / "rehashed-duration-pair.json", payload)
+
+    with pytest.raises(ValueError, match="governed source bindings"):
+        universe_delivery.publish_universe_delivery(
+            config_path=paths["config"],
+            collection_manifest=paths["collection"],
+            metadata_publication=paths["metadata"],
+            accuracy_assessment=inaccurate,
+            destination=tmp_path / "completion",
+        )
+    assert not (tmp_path / "completion").exists()
+
+
+def test_rehashed_correction_json_cannot_replace_governed_source_or_primary_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _inputs(tmp_path, monkeypatch)
+    payload = json.loads(paths["accuracy"].read_text())
+    declaration = payload["approved_transform_corrections"]
+    source_path = Path(declaration["source_index_path"])
+    correction_path = Path(declaration["path"])
+    source_record = {
+        "ticker": "TEST",
+        "cik": "0000000123",
+        "accession": "0000000123-26-000001",
+        "source_id": "invented-source",
+        "fact_id": "fact-invented",
+        "context_id": "context-invented",
+        "raw_concept_id": "concept-invented",
+        "concept_qname": "dei:SecurityExchangeName",
+        "concept_data_type_qname": "dei:edgarExchangeCodeItemType",
+        "source_element_type": "nonNumeric",
+        "source_lexical": "Nasdaq",
+        "source_locator": "line:999",
+        "format_qname": "ixt-sec:exchnameen",
+        "format_namespace": universe_delivery.SEC_TRANSFORM_NAMESPACE,
+        "source_scale": None,
+        "source_sign": None,
+        "primary_document": "test.htm",
+        "primary_sha256": "f" * 64,
+    }
+    _write(
+        source_path,
+        {"fact_count": 1, "facts": [source_record], "unmatched": []},
+    )
+    correction_record = {
+        "ticker": "TEST",
+        "cik": "0000000123",
+        "accession": "0000000123-26-000001",
+        "source_id": "invented-source",
+        "fact_id": "fact-invented",
+        "context_id": "context-invented",
+        "concept_qname": "dei:SecurityExchangeName",
+        "concept_data_type_qname": "dei:edgarExchangeCodeItemType",
+        "source_element_type": "nonNumeric",
+        "transform_namespace": universe_delivery.SEC_TRANSFORM_NAMESPACE,
+        "transform": "exchnameen",
+        "lexical_input": "Nasdaq",
+        "source_scale": None,
+        "source_sign": None,
+        "source_primary_sha256": "f" * 64,
+        "previous_raw_value": "(ixTransformValueError)",
+        "expected_raw_value": "NASDAQ",
+        "actual_raw_value": "NASDAQ",
+        "actual_is_nil": False,
+        "repair_family": "SEC_EXCHNAMEEN_NASDAQ",
+        "repair_rule": "sec-inline-2015-exchnameen-nasdaq",
+        "value_class": "metadata_text",
+        "status": "APPROVED",
+        "rule_reference": "SEC staff inline transformation reference",
+    }
+    _write(
+        correction_path,
+        {
+            "schema_version": "sec-approved-inline-transform-corrections-v1",
+            "record_count": 1,
+            "records": [correction_record],
+        },
+    )
+    declaration["record_count"] = 1
+    for key, path in (
+        ("source_index_sha256", source_path),
+        ("sha256", correction_path),
+    ):
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        declaration[key] = digest
+        next(
+            row for row in payload["evidence_files"] if row["path"] == str(path)
+        )["sha256"] = digest
+    inaccurate = _write(tmp_path / "rehashed-correction-pair.json", payload)
+
+    with pytest.raises(ValueError, match="governed source bindings"):
+        universe_delivery.publish_universe_delivery(
+            config_path=paths["config"],
+            collection_manifest=paths["collection"],
+            metadata_publication=paths["metadata"],
+            accuracy_assessment=inaccurate,
+            destination=tmp_path / "completion",
+        )
+    assert not (tmp_path / "completion").exists()
+
+
 @pytest.mark.parametrize(
     (
         "family",
@@ -1011,6 +1213,8 @@ def test_approved_transform_corrections_are_source_and_snapshot_bound(
         "format_namespace": universe_delivery.SEC_TRANSFORM_NAMESPACE,
         "source_scale": source_scale,
         "source_sign": source_sign,
+        "source_locator": "line:99",
+        "primary_document": "test.htm",
         "primary_sha256": "e" * 64,
     }
     _write(
@@ -1093,11 +1297,24 @@ def test_approved_transform_corrections_are_source_and_snapshot_bound(
         record_count=1,
         source_index_sha256=source_index_sha,
     )
+    binding_declaration = payload["source_binding_publication"]
+    binding_manifest_path = (
+        Path(binding_declaration["root"]) / "source_binding_manifest.json"
+    )
+    binding_manifest = json.loads(binding_manifest_path.read_text())
+    binding_manifest["counts"]["approved_transform_corrections"] = 1
+    binding_manifest["correction_bindings"] = [source_record]
+    _write(binding_manifest_path, binding_manifest)
+    binding_manifest_sha = hashlib.sha256(binding_manifest_path.read_bytes()).hexdigest()
+    binding_declaration["manifest_sha256"] = binding_manifest_sha
+    binding_declaration["approved_transform_correction_count"] = 1
     for evidence in payload["evidence_files"]:
         if evidence["path"] == str(correction_path):
             evidence["sha256"] = changed_sha
         elif evidence["path"] == str(source_index_path):
             evidence["sha256"] = source_index_sha
+        elif evidence["path"] == str(binding_manifest_path):
+            evidence["sha256"] = binding_manifest_sha
     valid = _write(tmp_path / f"valid-{family}-{value_class}.json", payload)
 
     publication = universe_delivery.publish_universe_delivery(

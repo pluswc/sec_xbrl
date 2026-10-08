@@ -35,6 +35,14 @@ filing counts alone cannot clear this gate.
 The parser and fail-closed ingestion contract is
 [`sec-duration-conformance-delivery.md`](sec-duration-conformance-delivery.md).
 
+Combined integration candidate `7c7122a` is also historical evidence rather
+than an accepted candidate.  Independent verification proved that its two
+assessment JSON inputs could be changed together and re-hashed without an
+independent binding to the cached primary-document fields.  The authorized
+repair adds a separate governed Raw/Quality source-binding publication before
+the completion consumer.  Its replacement source and runtime publication are
+still awaiting their own independent verification and acceptance.
+
 ## 2. Authorized A/B/C delivery
 
 ### A — Collection operations and the common delivery contract
@@ -153,7 +161,8 @@ The supported-transform migration uses a new ignored root
 `data/processed/universe_runs/20261008_sec_transform_v5/` for its operations,
 fresh Layer 1 snapshots, governed histories, Q4 publications, evidence, and
 completion view.  The current runtime subroots are `ops_v5`,
-`analysis_history_v5`, `q4_delivery_v5`, and `completion_v5`.  It reuses the immutable cached source packages under
+`source_bindings_v1`, `analysis_history_v5`, `q4_delivery_v5`, and
+`completion_v5`.  It reuses the immutable cached source packages under
 `data/raw/universe_runs/20261008_duration_v4/` without rewriting them.  It does
 not rewrite or delete the earlier
 operations, raw, retry, analysis, Q4, or completion artifacts.
@@ -229,6 +238,32 @@ scope must equal the immutable A universe ID, financial as-of date, collection
 request and collection-manifest SHA-256 values, requested-company count,
 selected-filing count, and every governed-history manifest digest.
 
+Before a `PASS` assessment can be consumed, the offline Raw/Quality producer
+`sec_xbrl.source_bindings.publish_source_bindings` must publish an immutable
+`sec-source-bindings-v1` directory.  It scans every planned cached primary
+document outside the renderer, verifies the exact package and primary-member
+bytes, and binds the source ID, Context reference, source lexical, transform
+namespace/name, source QName, line and model row ordinal to the deterministic
+Filing, Fact, Context, and Concept identities in the corresponding v5 Raw
+tables.  It fails closed on an omitted, extra, duplicated, changed, unresolved,
+or foreign source claim.  Its manifest covers the exact A request and
+collection digests, all 381 packages, all 381 snapshot manifests, and the
+Fact, Concept, and Context table hashes.
+
+`SourceBindingsReader.verify_all()` is the completion-side trust boundary.  It
+does not parse Inline XBRL, invoke Arelle, contact SEC, or normalize a value.
+It verifies the separately prepared publication, cached package and primary
+member digests, immutable collection membership, v5 table digests, and stable
+Raw identities.  The assessment must name that publication ID and manifest
+SHA-256 and include a `PASS` independent-verification record for its frozen
+producer revision.  The candidate duration and correction JSON records must
+then equal the governed bindings.  Re-hashing those two candidate JSON files
+together cannot change a source ID, Context reference, lexical, primary hash,
+or Fact binding accepted by the consumer.  Cryptographic signing and secret
+key infrastructure are outside this local contract; a forged replacement of
+the independently accepted publication and all of its declared parent inputs
+is outside the stated trust boundary.
+
 A `PASS` assessment binds `m2-layer1-v5`, duration rule
 `sec-duration-conformance-v1`, supported-lexical policy
 `sec-supported-lexical-repairs-v1`, the frozen 40-character source commit, all 381
@@ -276,7 +311,9 @@ match CIK/accession/source ID/stable Fact ID/format/lexical and every evidence F
 exist exactly once in the corresponding v5 snapshot with the declared
 normalized raw/text value, Context, reported/non-nil state, and Concept QName.
 This prevents a partial scan, invented Fact ID, or self-consistent but false
-value declaration from being reported as conformance.
+value declaration from being reported as conformance.  The separate governed
+source-binding publication also prevents a self-consistent re-hash of both
+candidate evidence files from replacing the actual cached source fields.
 
 `BLOCKED` is an overall delivery block and `PENDING` keeps the overall delivery
 partial.  Both require an explicit reason.  Omitting the assessment preserves

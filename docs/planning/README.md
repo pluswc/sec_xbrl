@@ -41,7 +41,7 @@
 | U3 중요도·구조·Axis 시계열 | 승인 범위까지 확장·납품 | 명시적 U3 범위 | `3098be6` | 664 passed / 16 skipped, Ruff, 실제 6사 PASS | 2026-09-09 COMPLETE | PR #63, `9708508` |
 | U4 계속 갱신 | 복구된 제안과 후속 전달 계약 | bounded orchestration·복구·재개·live 입력·quality materialization; 원격 제외 | `3236778` | 675 passed / 37 skipped, Ruff, 6사 21, 실제 NFLX 14공시·동일 API/화면 PASS | **2026-09-10 LOCAL_ACCEPTED** | PR #63, `9708508` |
 | U5 보관·공유 | 복구된 기존 제안 | `51c196f` 기준 로컬 구현 승인 | product `8867229`; canonical snapshot + CSV/HTML/JSON/XLSX + offline 저장 controls | 679 passed / 37 skipped, cached 21, Ruff, 80 snapshots·320 formats·4,844 cells·24 downloads PASS | **2026-09-10 LOCAL_ACCEPTED** | PR #63, `9708508` |
-| 21사 universe A/B/C 전달 | [전달 계약](../implementation/universe-data-delivery.md) | **2026-10-08 APPROVED**; A/B/C, SEC duration 표준 교정, 4종 supported-lexical 보완 및 381건 fresh v5 재생성 | A `24df803`, B `1e5a398`, durweek `192ee424`, C `9646771`, duration/fail-closed `9b2c402`, exact v5 grammar `c1fdc21`; 통합 후보·fresh runtime 대기 | A/B/durweek/C/duration/v5 grammar PASS; fresh runtime·재통합 검증 대기 | 미인수 | 미병합 |
+| 21사 universe A/B/C 전달 | [전달 계약](../implementation/universe-data-delivery.md) | **2026-10-08 APPROVED**; A/B/C, SEC duration 표준 교정, 4종 supported-lexical 보완, 381건 fresh v5 재생성 및 governed source-binding 보완 | A `24df803`, B `1e5a398`, durweek `192ee424`, C `9646771`, duration/fail-closed `9b2c402`, exact v5 grammar `c1fdc21`; source-binding 교정 구현·동결/검증 및 fresh runtime 대기 | A/B/durweek/C/duration/v5 grammar PASS; `7c7122a` source self-rehash finding으로 미인수, replacement source-binding·fresh runtime·재통합 검증 대기 | 미인수 | 미병합 |
 
 현재 전달 상태(2026-09-10): U3–U5 누적 이력은
 [PR #63](https://github.com/pluswc/sec_xbrl/pull/63)으로 `main`에 병합됐다. merge
