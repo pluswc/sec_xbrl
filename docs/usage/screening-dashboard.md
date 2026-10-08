@@ -171,7 +171,11 @@ PYTHONPATH="$PWD/src" .venv/bin/python -m sec_xbrl.screening restore \
 
 backup은 SQLite online backup, integrity check와 file hash가 있는 manifest를
 만든다. restore는 새 빈 목적지에서만 성공한다. 기존 journal을 reset·삭제하거나
-덮어쓰는 명령은 제공하지 않는다.
+덮어쓰는 명령은 제공하지 않는다. integrity check는 revision의 연속 번호와
+같은 screen 내 직전 parent, first-revision shape, 파생 ID, foreign-key orphan,
+run/universe, decision/run/이전 event, export/run 관계를 함께 검사한다. 따라서
+손상된 append-only chain은 backup되지 않으며, backup DB와 manifest를 함께 다시
+hash했더라도 restore의 관계 검사에서 거부된다.
 
 ## S01–S08 실제 인수 실행
 

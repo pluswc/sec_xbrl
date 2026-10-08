@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import sqlite3
 import uuid
@@ -24,6 +25,10 @@ from sec_xbrl.screening.common import (
 STORE_VERSION = "screening-store-v1"
 BACKUP_VERSION = "screening-store-backup-v1"
 DECISION_STATES = {"INTEREST", "HOLD", "EXCLUDE"}
+RECORD_ID = re.compile(
+    r"^(?:screen-[0-9a-f]{32}|(?:revision|universe|run|decision|export)-[0-9a-f]{24})$"
+)
+HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -170,9 +175,8 @@ class ScreeningStore:
             ).fetchone()
         if row is None:
             raise ValueError("screen revision does not exist")
+        _validate_revision_record(row)
         result = _screen_row(row)
-        if digest_value(result["content"]) != result["content_hash"]:
-            raise ValueError("screen revision integrity mismatch")
         return result
 
     def save_universe(self, content: dict[str, Any]) -> dict[str, Any]:
@@ -203,9 +207,13 @@ class ScreeningStore:
             raise ValueError("universe snapshot does not exist")
         content = json.loads(row["content_json"])
         if (
-            digest_value(content) != row["content_hash"]
+            not _record_id(row["universe_snapshot_id"], "universe-")
+            or canonical_json(content) != row["content_json"]
+            or digest_value(content) != row["content_hash"]
             or row["universe_snapshot_id"] != "universe-" + row["content_hash"][:24]
             or content.get("dataset_publication_id") != row["dataset_publication_id"]
+            or not isinstance(row["created_at"], str)
+            or not row["created_at"]
         ):
             raise ValueError("universe snapshot integrity mismatch")
         return {
@@ -265,7 +273,7 @@ class ScreeningStore:
                 (require_string(run_id, "run_id"),),
             ).fetchone()
             revision = connection.execute(
-                "SELECT content_hash FROM screen_revisions WHERE revision_id=?",
+                "SELECT * FROM screen_revisions WHERE revision_id=?",
                 (row["revision_id"],),
             ).fetchone() if row is not None else None
         if row is None:
@@ -274,6 +282,11 @@ class ScreeningStore:
         universe = self.universe(row["universe_snapshot_id"])
         if (
             revision is None
+            or not _record_id(row["run_id"], "run-")
+            or not isinstance(row["created_at"], str)
+            or not row["created_at"]
+            or not _digest(row["input_hash"])
+            or not _digest(row["output_hash"])
             or payload.get("revision_id") != row["revision_id"]
             or payload.get("universe_snapshot_id") != row["universe_snapshot_id"]
             or payload.get("dataset_publication_id") != row["dataset_publication_id"]
@@ -293,7 +306,10 @@ class ScreeningStore:
             != row["input_hash"]
         ):
             raise ValueError("screen run output integrity mismatch")
+        _validate_revision_record(revision)
         _validate_run_rows(payload, universe["content"])
+        if canonical_json(payload) != row["payload_json"]:
+            raise ValueError("screen run canonical payload integrity mismatch")
         return {"run_id": row["run_id"], "created_at": row["created_at"], **payload}
 
     def list_runs(self, revision_id: str | None = None) -> list[dict[str, Any]]:
@@ -380,18 +396,40 @@ class ScreeningStore:
             rows = connection.execute(sql, params).fetchall()
         results = []
         for row in rows:
+            evidence = json.loads(row["evidence_json"])
+            if (
+                not _record_id(row["event_id"], "decision-")
+                or not _record_id(row["run_id"], "run-")
+                or row["previous_event_id"] is not None
+                and not _record_id(row["previous_event_id"], "decision-")
+                or row["state"] not in DECISION_STATES
+                or row["before_state"] not in DECISION_STATES | {None}
+                or not isinstance(evidence, list)
+                or any(not isinstance(value, str) or not value for value in evidence)
+                or len(evidence) != len(set(evidence))
+                or canonical_json(evidence) != row["evidence_json"]
+                or not isinstance(row["created_at"], str)
+                or not row["created_at"]
+            ):
+                raise ValueError("decision event envelope integrity mismatch")
+            require_cik(row["cik"])
+            require_string(row["rationale"], "decision rationale")
+            require_string(row["actor"], "decision actor")
             material = {
                 "cik": row["cik"],
                 "state": row["state"],
                 "before_state": row["before_state"],
                 "rationale": row["rationale"],
-                "evidence_ids": json.loads(row["evidence_json"]),
+                "evidence_ids": evidence,
                 "run_id": row["run_id"],
                 "previous_event_id": row["previous_event_id"],
                 "actor": row["actor"],
                 "created_at": row["created_at"],
             }
-            if digest_value(material) != row["event_hash"]:
+            if (
+                digest_value(material) != row["event_hash"]
+                or row["event_id"] != "decision-" + row["event_hash"][:24]
+            ):
                 raise ValueError("decision event integrity mismatch")
             results.append({"event_id": row["event_id"], "event_hash": row["event_hash"], **material})
         latest: dict[str, dict[str, Any]] = {}
@@ -453,31 +491,32 @@ class ScreeningStore:
             result = connection.execute("PRAGMA integrity_check").fetchone()[0]
             if result != "ok":
                 raise ValueError(f"SQLite integrity check failed: {result}")
-            revision_ids = [
-                row["revision_id"]
-                for row in connection.execute("SELECT revision_id FROM screen_revisions")
-            ]
+            foreign_key_errors = list(connection.execute("PRAGMA foreign_key_check"))
+            definitions = list(connection.execute("SELECT * FROM screen_definitions"))
+            revisions = list(connection.execute("SELECT * FROM screen_revisions"))
             universes = list(connection.execute("SELECT * FROM universe_snapshots"))
+            run_ids = [row["run_id"] for row in connection.execute("SELECT run_id FROM screen_runs")]
             exports = list(connection.execute("SELECT * FROM export_manifests"))
-        for revision_id in revision_ids:
-            self.revision(revision_id)
+        if foreign_key_errors:
+            raise ValueError("screening store contains orphaned relational records")
+        _validate_revision_graph(definitions, revisions)
         for row in universes:
-            content = json.loads(row["content_json"])
-            if (
-                digest_value(content) != row["content_hash"]
-                or row["universe_snapshot_id"] != "universe-" + row["content_hash"][:24]
-            ):
-                raise ValueError("universe snapshot integrity mismatch")
-        for run in self.list_runs():
-            self.run(run["run_id"])
+            self.universe(row["universe_snapshot_id"])
+        for run_id in run_ids:
+            self.run(run_id)
         self.decisions()
         for row in exports:
             manifest = json.loads(row["manifest_json"])
             if (
-                row["export_id"] != "export-" + digest_value(manifest)[:24]
+                not _record_id(row["export_id"], "export-")
+                or not _record_id(row["run_id"], "run-")
+                or canonical_json(manifest) != row["manifest_json"]
+                or row["export_id"] != "export-" + digest_value(manifest)[:24]
                 or manifest.get("run_id") != row["run_id"]
                 or manifest.get("scope") != row["scope"]
                 or manifest.get("format") != row["format"]
+                or not isinstance(row["created_at"], str)
+                or not row["created_at"]
             ):
                 raise ValueError("export manifest integrity mismatch")
             self.run(row["run_id"])
@@ -611,6 +650,81 @@ def _new_revision(
         "content_hash": content_hash,
         "created_at": created_at,
     }
+
+
+def _validate_revision_record(row: sqlite3.Row) -> dict[str, Any]:
+    values = dict(row)
+    screen_id = values.get("screen_id")
+    revision_id = values.get("revision_id")
+    parent = values.get("parent_revision_id")
+    number = values.get("revision_number")
+    created_at = values.get("created_at")
+    if (
+        not _record_id(screen_id, "screen-")
+        or not _record_id(revision_id, "revision-")
+        or parent is not None
+        and not _record_id(parent, "revision-")
+        or type(number) is not int
+        or number < 1
+        or not isinstance(created_at, str)
+        or not created_at
+    ):
+        raise ValueError("screen revision envelope integrity mismatch")
+    content = json.loads(values["content_json"])
+    normalized = _revision_content(content)
+    expected = _new_revision(screen_id, parent, number, normalized, created_at)
+    if (
+        canonical_json(normalized) != values["content_json"]
+        or values.get("content_hash") != expected["content_hash"]
+        or revision_id != expected["revision_id"]
+    ):
+        raise ValueError("screen revision identity integrity mismatch")
+    return {**values, "content": normalized}
+
+
+def _validate_revision_graph(
+    definition_rows: list[sqlite3.Row], revision_rows: list[sqlite3.Row]
+) -> None:
+    definitions: dict[str, dict[str, Any]] = {}
+    for row in definition_rows:
+        values = dict(row)
+        screen_id = values.get("screen_id")
+        if (
+            not _record_id(screen_id, "screen-")
+            or not isinstance(values.get("created_at"), str)
+            or not values["created_at"]
+        ):
+            raise ValueError("screen definition envelope integrity mismatch")
+        require_string(values.get("name"), "screen name")
+        definitions[screen_id] = values
+    by_screen: dict[str, list[dict[str, Any]]] = {screen_id: [] for screen_id in definitions}
+    for row in revision_rows:
+        revision = _validate_revision_record(row)
+        if revision["screen_id"] not in by_screen:
+            raise ValueError("screen revision references an unknown definition")
+        by_screen[revision["screen_id"]].append(revision)
+    for screen_id, definition in definitions.items():
+        revisions = sorted(by_screen[screen_id], key=lambda row: row["revision_number"])
+        if not revisions:
+            raise ValueError("screen definition has no revision")
+        if [row["revision_number"] for row in revisions] != list(
+            range(1, len(revisions) + 1)
+        ):
+            raise ValueError("screen revision numbers are not contiguous")
+        for index, revision in enumerate(revisions):
+            expected_parent = revisions[index - 1]["revision_id"] if index else None
+            if revision["parent_revision_id"] != expected_parent:
+                raise ValueError("screen revision parent chain integrity mismatch")
+        if revisions[0]["created_at"] != definition["created_at"]:
+            raise ValueError("screen definition creation identity mismatch")
+
+
+def _record_id(value: Any, prefix: str) -> bool:
+    return isinstance(value, str) and value.startswith(prefix) and RECORD_ID.fullmatch(value) is not None
+
+
+def _digest(value: Any) -> bool:
+    return isinstance(value, str) and HEX_DIGEST.fullmatch(value) is not None
 
 
 def _screen_row(row: sqlite3.Row) -> dict[str, Any]:

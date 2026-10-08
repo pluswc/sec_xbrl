@@ -127,6 +127,16 @@ definition/version policy, universe selector, period policy, columns/sort를
 새 revision과 decision event만 추가할 수 있고 기존 record update/delete API는
 제공하지 않는다.
 
+`ScreeningStore.integrity_check()`는 SQLite page 검사와 foreign-key audit에 더해
+append-only 관계 envelope를 다시 계산한다. 각 screen은 revision 1부터 빈틈없는
+번호를 가지며 첫 revision은 parent가 없고 definition 생성시각과 일치해야 한다.
+그 뒤 revision은 같은 screen의 바로 앞 revision만 parent로 가리킨다. revision
+ID는 screen ID, parent ID, 번호, content hash, 생성시각에서 다시 계산하므로
+self-cycle, cross-screen parent, orphan, 번호 gap과 ID 치환을 거부한다. universe,
+run, decision, export도 canonical payload/hash와 row envelope를 대조하고 모든
+run·parent link의 실제 존재를 확인한다. decision ID는
+`decision-<event_hash 앞 24자>`와 정확히 일치해야 한다.
+
 predicate 비교는 유한 `Decimal`에 대해서만 수행한다. 누락·불가·검토 필요·
 quality block은 0이나 `FAIL`로 바꾸지 않고 `UNDETERMINED`다. 하나 이상의 유효
 `FAIL`이 있으면 회사 aggregate는 `FAIL`, 모든 predicate가 유효 `PASS`이고
@@ -143,7 +153,9 @@ cache fixture는 `CACHE_FUTURE_UPDATE_FIXTURE`로 표시하고 live라고 부르
 DecisionEvent는 `INTEREST`/`HOLD`/`EXCLUDE`, before/after, rationale, actor, run과
 evidence ID, 이전 event를 가진다. 메모는 재무값을 바꾸지 않는다. backup은
 SQLite online backup과 manifest/hash를 만들고, restore는 새 빈 목적지에서만
-성공하며 기존 DB를 덮어쓰지 않는다.
+성공하며 기존 DB를 덮어쓰지 않는다. backup 전 원본과 backup 직후 복제본,
+restore의 임시 복제본에 같은 관계 무결성 검사를 적용하므로 revision/decision
+chain이 손상된 journal은 외부 manifest를 다시 hash해도 전달되지 않는다.
 
 ## 5. 공개 Python·CLI·HTTP 경계
 
