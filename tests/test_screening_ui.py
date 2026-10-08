@@ -13,6 +13,9 @@ def test_screening_ui_exposes_governed_workflows_without_client_storage() -> Non
     assert "조건 펼치기" in JS
     assert "실제 준비 자료" in JS and "검증용 자료" in JS
     assert "canonical 원문" in JS
+    assert "function isRevisionEdit(target)" in JS
+    assert 'target.closest("#saved-screen,#dataset")' in JS
+    assert 'addEventListener("change",trackRevisionEdit)' in JS
 
 
 def test_screening_ui_keeps_accessibility_and_compact_desktop_contract() -> None:
@@ -24,3 +27,4 @@ def test_screening_ui_keeps_accessibility_and_compact_desktop_contract() -> None
     assert ":focus-visible" in CSS
     assert "aria-controls=\"criteria-form\"" in HTML
     assert ".criteria.compact" in CSS
+    assert "다음 실행 데이터셋" in HTML
