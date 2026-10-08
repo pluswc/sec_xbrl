@@ -80,12 +80,30 @@ def _collection(tmp_path: Path) -> tuple[Path, Path]:
         existing_plans={"TEST": plan},
     )
     local_plan = json.loads((tmp_path / "operations/companies/TEST/plan.json").read_text())
+    intake_root = tmp_path / "operations/companies/TEST/intake"
     _write(
-        tmp_path / "operations/companies/TEST/intake/history_intake.json",
+        intake_root
+        / "snapshots/0000000123/000000012326000001/layer1_manifest.json",
+        {
+            "cik": "0000000123",
+            "accession": "0000000123-26-000001",
+            "layer1_parser_version": universe_delivery.ACCURACY_PARSER_VERSION,
+            "package_sha256": "c" * 64,
+        },
+    )
+    _write(
+        intake_root / "history_intake.json",
         {
             "plan": local_plan,
             "complete": True,
-            "filings": [{"filing": filing, "status": "REUSED"}],
+            "filings": [
+                {
+                    "filing": filing,
+                    "status": "REUSED",
+                    "source_run": str(intake_root.absolute()),
+                    "ticker": "TEST",
+                }
+            ],
         },
     )
     return config, manifest
@@ -141,6 +159,162 @@ def _mark_collection_ready(collection_manifest: Path) -> None:
             "completed_at": "2026-10-08T02:00:00+00:00",
         },
     )
+
+
+def _accuracy_assessment(
+    tmp_path: Path,
+    collection_manifest: Path,
+    *,
+    state: str = "PASS",
+    actual_value: str = "P4Y6M18D",
+) -> Path:
+    collection = json.loads(collection_manifest.read_text())
+    build = json.loads(
+        (collection_manifest.parent / "companies/TEST/build_manifest.json").read_text()
+    )
+    verification = tmp_path / f"accuracy-{state.lower()}-verification.json"
+    _write(verification, {"state": state, "fixture": True})
+    verification_sha = hashlib.sha256(verification.read_bytes()).hexdigest()
+    source_index = _write(
+        tmp_path / f"accuracy-{state.lower()}-source-index.json",
+        {
+            "primary_document_count": 1,
+            "missing_primary_documents": 0,
+            "format_counts": {"durday": 0, "durmonth": 0, "duryear": 1, "durweek": 0},
+            "primary_documents": [
+                {
+                    "ticker": "TEST",
+                    "cik": "0000000123",
+                    "accession": "0000000123-26-000001",
+                    "primary_sha256": "e" * 64,
+                }
+            ],
+        },
+    )
+    source_index_sha = hashlib.sha256(source_index.read_bytes()).hexdigest()
+    fact_evidence = _write(
+        tmp_path / f"accuracy-{state.lower()}-fact-checks.json",
+        {
+            "schema_version": "sec-duration-fact-checks-v1",
+            "record_count": 1,
+            "records": [
+                {
+                    "ticker": "TEST",
+                    "cik": "0000000123",
+                    "accession": "0000000123-26-000001",
+                    "fact_id": "fact-fixture",
+                    "transform": "duryear",
+                    "lexical_input": "1.5",
+                    "expected_value": "P1Y6M",
+                    "actual_value": "P1Y6M",
+                    "status": "PASS",
+                }
+            ],
+        },
+    )
+    fact_evidence_sha = hashlib.sha256(fact_evidence.read_bytes()).hexdigest()
+    assessment: dict[str, object] = {
+        "schema_version": universe_delivery.ACCURACY_SCHEMA,
+        "state": state,
+        "reason": None if state == "PASS" else "fresh v4 cohort is not accepted",
+        "scope": {
+            "universe_id": "one-company-delivery",
+            "financial_as_of": "2026-10-08",
+            "collection_request_sha256": collection["request_sha256"],
+            "collection_manifest_sha256": hashlib.sha256(
+                collection_manifest.read_bytes()
+            ).hexdigest(),
+            "requested_companies": 1,
+            "selected_filings": 1,
+        },
+        "evidence_files": [
+            {"path": str(verification.absolute()), "sha256": verification_sha},
+            {"path": str(source_index.absolute()), "sha256": source_index_sha},
+            {"path": str(fact_evidence.absolute()), "sha256": fact_evidence_sha},
+        ],
+    }
+    if state == "PASS":
+        assessment.update(
+            {
+                "parser_version": universe_delivery.ACCURACY_PARSER_VERSION,
+                "parser_rule_version": universe_delivery.ACCURACY_RULE_VERSION,
+                "frozen_commit_sha": "a" * 40,
+                "source_packages": {"expected": 1, "verified": 1, "missing": 0},
+                "filing_checks": [
+                    {
+                        "ticker": "TEST",
+                        "cik": "0000000123",
+                        "accession": "0000000123-26-000001",
+                        "source_package_sha256": "c" * 64,
+                        "source_primary_sha256": "e" * 64,
+                        "snapshot_manifest_sha256": hashlib.sha256(
+                            (
+                                collection_manifest.parent
+                                / "companies/TEST/intake/snapshots/0000000123/000000012326000001/layer1_manifest.json"
+                            ).read_bytes()
+                        ).hexdigest(),
+                        "duration_fact_count": 1,
+                        "normalized_value_mismatches": 0,
+                        "status": "PASS",
+                    }
+                ],
+                "history_manifest_sha256s": {
+                    "TEST": build["history_manifest_sha256"]
+                },
+                "ingestion_gates": {
+                    "TAXONOMY_AND_TRANSFORM_RESOLUTION": "PASS",
+                    "RAW_CORPUS_COMPLETENESS": "PASS",
+                    "ATOMIC_FILING_SNAPSHOT": "PASS",
+                },
+                "invalid_duration_lexical_fails_closed": True,
+                "transform_checks": {
+                    "durday": {"examined": 0, "normalized_value_mismatches": 0},
+                    "durmonth": {"examined": 0, "normalized_value_mismatches": 0},
+                    "duryear": {"examined": 1, "normalized_value_mismatches": 0},
+                    "durweek": {"examined": 0, "normalized_value_mismatches": 0},
+                },
+                "source_index": {
+                    "path": str(source_index.absolute()),
+                    "sha256": source_index_sha,
+                    "filing_count": 1,
+                    "duration_fact_count": 1,
+                },
+                "fact_level_evidence": {
+                    "path": str(fact_evidence.absolute()),
+                    "sha256": fact_evidence_sha,
+                    "record_count": 1,
+                },
+                "normalized_value_checks": [
+                    {
+                        "ticker": "AMD",
+                        "accession": "0000002488-23-000047",
+                        "fact_id": "fact_a6259d1f828fa6d425c0fd2c",
+                        "transform": "duryear",
+                        "lexical_input": "4.55",
+                        "previous_value": "P4Y7M",
+                        "expected_value": "P4Y6M18D",
+                        "actual_value": actual_value,
+                        "status": "PASS",
+                    }
+                ],
+                "foreign_change_counts": {
+                    "non_duration_facts": 0,
+                    "duration_source_lexicals": 0,
+                    "monetary_values": 0,
+                    "contexts": 0,
+                    "units": 0,
+                    "dimensions": 0,
+                    "relationship_keys": 0,
+                },
+                "independent_verification": {
+                    "state": "PASS",
+                    "frozen_commit_sha": "a" * 40,
+                    "evidence_path": str(verification.absolute()),
+                    "evidence_sha256": verification_sha,
+                },
+            }
+        )
+    return _write(tmp_path / f"accuracy-{state.lower()}.json", assessment)
 
 
 def _metadata(tmp_path: Path) -> Path:
@@ -281,6 +455,7 @@ def _analysis_bundle(
 def _inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     config, collection = _collection(tmp_path)
     _mark_collection_ready(collection)
+    accuracy = _accuracy_assessment(tmp_path, collection)
     metadata = _metadata(tmp_path)
     q4, history = _reviewed_q4(tmp_path)
     quarterly = _analysis_bundle(
@@ -297,6 +472,7 @@ def _inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
         "q4": q4,
         "quarterly": quarterly,
         "annual": annual,
+        "accuracy": accuracy,
     }
 
 
@@ -311,6 +487,7 @@ def test_one_company_completion_joins_statuses_and_c_scope_labels(
         reviewed_q4_publication=paths["q4"],
         quarterly_analysis=paths["quarterly"],
         annual_analysis=paths["annual"],
+        accuracy_assessment=paths["accuracy"],
         destination=tmp_path / "completion",
         expected_q4_economic_cells=1,
         expected_q4_view_records=2,
@@ -336,12 +513,18 @@ def test_one_company_completion_joins_statuses_and_c_scope_labels(
     assert company["q4_scope"] == "REVIEWED_SCOPE"
     assert report["assessments"]["reviewed_q4"]["economic_cells"] == 1
     assert report["assessments"]["reviewed_q4"]["view_records"] == 2
+    assert (
+        report["assessments"]["reviewed_q4"]["parent_history_relation"]
+        == "SEPARATE_APPROVED_REFERENCE"
+    )
+    assert report["assessments"]["duration_conformance"]["state"] == "PASS"
     assert len(report["reviewed_q4"]["rows"]) == 2
     assert report["reviewed_q4"]["rows"][0]["source_accessions"]
     rendered = published.report_html.read_text(encoding="utf-8")
     assert "기업·산업·원자료·분석준비·Q4범위" in rendered
     assert "기준일을 분리해서 읽기" in rendered
     assert "MAPPING_REVIEW_REQUIRED_DIFFERENT_EPOCHS" in rendered
+    assert "Raw duration 정확성" in rendered
     assert "FY2025 Q4" in rendered
     assert published.readiness_csv.read_text().count("\n") == 2
     assert "does not" in published.readme.read_text(encoding="utf-8")
@@ -371,6 +554,7 @@ def test_completion_can_publish_explicit_partial_state_before_c_is_ready(
     assert report["assessments"]["reviewed_q4"]["state"] == "PENDING"
     assert report["assessments"]["quarterly_analysis"]["state"] == "PENDING"
     assert report["assessments"]["annual_analysis"]["state"] == "PENDING"
+    assert report["assessments"]["duration_conformance"]["state"] == "NOT_PROVIDED"
     assert report["companies"][0]["assessment_state"] == "RAW_METADATA_READY"
     assert "준비된 검토 Q4 publication이 없습니다" in published.report_html.read_text()
 
@@ -463,3 +647,147 @@ def test_completion_rejects_symlinked_destination_without_external_write(
             destination=destination,
         )
     assert list(outside.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    ("accuracy_state", "expected_delivery_state"),
+    (("PENDING", "PARTIAL"), ("BLOCKED", "BLOCKED")),
+)
+def test_duration_conformance_state_prevents_delivery_ready(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    accuracy_state: str,
+    expected_delivery_state: str,
+) -> None:
+    paths = _inputs(tmp_path, monkeypatch)
+    accuracy = _accuracy_assessment(
+        tmp_path / accuracy_state.lower(),
+        paths["collection"],
+        state=accuracy_state,
+    )
+    publication = universe_delivery.publish_universe_delivery(
+        config_path=paths["config"],
+        collection_manifest=paths["collection"],
+        metadata_publication=paths["metadata"],
+        reviewed_q4_publication=paths["q4"],
+        quarterly_analysis=paths["quarterly"],
+        annual_analysis=paths["annual"],
+        accuracy_assessment=accuracy,
+        destination=tmp_path / "completion",
+        expected_q4_economic_cells=1,
+        expected_q4_view_records=2,
+    )
+
+    report = json.loads(publication.readiness_json.read_text())
+    assert report["assessment_state"] == expected_delivery_state
+    assert (
+        report["assessments"]["duration_conformance"]["state"]
+        == accuracy_state
+    )
+    assert accuracy_state in publication.report_html.read_text(encoding="utf-8")
+
+
+def test_duration_conformance_pass_checks_normalized_values_not_only_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _inputs(tmp_path, monkeypatch)
+    inaccurate = _accuracy_assessment(
+        tmp_path / "inaccurate",
+        paths["collection"],
+        actual_value="P4Y7M",
+    )
+
+    with pytest.raises(ValueError, match="normalized-value check failed"):
+        universe_delivery.publish_universe_delivery(
+            config_path=paths["config"],
+            collection_manifest=paths["collection"],
+            metadata_publication=paths["metadata"],
+            accuracy_assessment=inaccurate,
+            destination=tmp_path / "completion",
+        )
+    assert not (tmp_path / "completion").exists()
+
+
+def test_duration_conformance_scope_must_match_immutable_collection_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _inputs(tmp_path, monkeypatch)
+    payload = json.loads(paths["accuracy"].read_text())
+    payload["scope"]["selected_filings"] = 381
+    foreign = _write(tmp_path / "foreign-accuracy.json", payload)
+
+    with pytest.raises(ValueError, match="scope differs"):
+        universe_delivery.publish_universe_delivery(
+            config_path=paths["config"],
+            collection_manifest=paths["collection"],
+            metadata_publication=paths["metadata"],
+            accuracy_assessment=foreign,
+            destination=tmp_path / "completion",
+        )
+    assert not (tmp_path / "completion").exists()
+
+
+def test_duration_conformance_pass_binds_current_governed_histories(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _inputs(tmp_path, monkeypatch)
+    payload = json.loads(paths["accuracy"].read_text())
+    payload["history_manifest_sha256s"]["TEST"] = "b" * 64
+    foreign = _write(tmp_path / "foreign-history-accuracy.json", payload)
+
+    with pytest.raises(ValueError, match="governed-history scope differs"):
+        universe_delivery.publish_universe_delivery(
+            config_path=paths["config"],
+            collection_manifest=paths["collection"],
+            metadata_publication=paths["metadata"],
+            accuracy_assessment=foreign,
+            destination=tmp_path / "completion",
+        )
+    assert not (tmp_path / "completion").exists()
+
+
+def test_duration_conformance_pass_binds_actual_v4_snapshot_hashes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _inputs(tmp_path, monkeypatch)
+    payload = json.loads(paths["accuracy"].read_text())
+    payload["filing_checks"][0]["source_package_sha256"] = "f" * 64
+    foreign = _write(tmp_path / "foreign-snapshot-accuracy.json", payload)
+
+    with pytest.raises(ValueError, match="differs from v4 snapshot"):
+        universe_delivery.publish_universe_delivery(
+            config_path=paths["config"],
+            collection_manifest=paths["collection"],
+            metadata_publication=paths["metadata"],
+            accuracy_assessment=foreign,
+            destination=tmp_path / "completion",
+        )
+    assert not (tmp_path / "completion").exists()
+
+
+def test_duration_conformance_loads_fact_level_values_before_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _inputs(tmp_path, monkeypatch)
+    payload = json.loads(paths["accuracy"].read_text())
+    fact_declaration = payload["fact_level_evidence"]
+    fact_path = Path(fact_declaration["path"])
+    facts = json.loads(fact_path.read_text())
+    facts["records"][0]["actual_value"] = "P1Y7M"
+    _write(fact_path, facts)
+    changed_sha = hashlib.sha256(fact_path.read_bytes()).hexdigest()
+    fact_declaration["sha256"] = changed_sha
+    for evidence in payload["evidence_files"]:
+        if evidence["path"] == str(fact_path):
+            evidence["sha256"] = changed_sha
+    inaccurate = _write(tmp_path / "inaccurate-fact-evidence.json", payload)
+
+    with pytest.raises(ValueError, match="fact-level normalized value is invalid"):
+        universe_delivery.publish_universe_delivery(
+            config_path=paths["config"],
+            collection_manifest=paths["collection"],
+            metadata_publication=paths["metadata"],
+            accuracy_assessment=inaccurate,
+            destination=tmp_path / "completion",
+        )
+    assert not (tmp_path / "completion").exists()

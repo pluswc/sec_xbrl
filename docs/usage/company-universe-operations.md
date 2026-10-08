@@ -153,6 +153,7 @@ PYTHONPATH=src .venv/bin/python -m sec_xbrl.universe_delivery \
   --reviewed-q4-publication /absolute/path/to/q4_delivery/companion \
   --quarterly-analysis /absolute/path/to/q4_delivery/quarterly \
   --annual-analysis /absolute/path/to/q4_delivery/annual \
+  --accuracy-assessment /absolute/path/to/sec_duration_conformance_assessment.json \
   --destination /absolute/path/to/completion
 ```
 
@@ -162,12 +163,130 @@ foreign or stale company/CIK scope, collection as-of, metadata identity,
 reviewed-Q4 parent, analytical selection date, period mode, or declared file
 digest before creating the destination.
 
+The accuracy input is optional for backward-compatible use on unrelated
+cohorts.  It is required for the 2026-10-08 delivery.  `PASS` must bind the
+exact A request and fresh v4 381-filing scope, verify actual normalized
+duration values including the known AMD `4.55` result, bind every governed
+history manifest and one check per planned accession, attest zero foreign
+changes, reconcile the exact 3,842 duration Facts to external evidence, and
+include independent-verification evidence.  `BLOCKED` is shown as
+an overall block; `PENDING` keeps the publication partial.  Counts without
+normalized-value checks are rejected.
+
+The final assessment has this exact shape.  Ellipses below mean repeated
+records or all 21 ticker/hash entries; they are not valid literal JSON:
+
+```json
+{
+  "schema_version": "sec-duration-conformance-assessment-v1",
+  "state": "PASS",
+  "reason": null,
+  "parser_version": "m2-layer1-v4",
+  "parser_rule_version": "sec-duration-conformance-v1",
+  "frozen_commit_sha": "9b2c4022c64dee2327da082a38777684c96271be",
+  "scope": {
+    "universe_id": "pilot-21-20261008",
+    "financial_as_of": "2026-10-08",
+    "collection_request_sha256": "<sha256>",
+    "collection_manifest_sha256": "<sha256>",
+    "requested_companies": 21,
+    "selected_filings": 381
+  },
+  "source_packages": {"expected": 381, "verified": 381, "missing": 0},
+  "history_manifest_sha256s": {"AMD": "<sha256>", "...": "..."},
+  "ingestion_gates": {
+    "TAXONOMY_AND_TRANSFORM_RESOLUTION": "PASS",
+    "RAW_CORPUS_COMPLETENESS": "PASS",
+    "ATOMIC_FILING_SNAPSHOT": "PASS"
+  },
+  "invalid_duration_lexical_fails_closed": true,
+  "filing_checks": [
+    {
+      "ticker": "AMD",
+      "cik": "0000002488",
+      "accession": "0000002488-23-000047",
+      "source_package_sha256": "<sha256>",
+      "source_primary_sha256": "<sha256>",
+      "snapshot_manifest_sha256": "<sha256>",
+      "duration_fact_count": 11,
+      "normalized_value_mismatches": 0,
+      "status": "PASS"
+    }
+  ],
+  "transform_checks": {
+    "durday": {"examined": 481, "normalized_value_mismatches": 0},
+    "durmonth": {"examined": 391, "normalized_value_mismatches": 0},
+    "duryear": {"examined": 2902, "normalized_value_mismatches": 0},
+    "durweek": {"examined": 68, "normalized_value_mismatches": 0}
+  },
+  "source_index": {
+    "path": "/absolute/path/to/duration_source_index.json",
+    "sha256": "<sha256>",
+    "filing_count": 381,
+    "duration_fact_count": 3842
+  },
+  "fact_level_evidence": {
+    "path": "/absolute/path/to/duration_fact_checks.json",
+    "sha256": "<sha256>",
+    "record_count": 3842
+  },
+  "normalized_value_checks": [
+    {
+      "ticker": "AMD",
+      "accession": "0000002488-23-000047",
+      "fact_id": "fact_a6259d1f828fa6d425c0fd2c",
+      "transform": "duryear",
+      "lexical_input": "4.55",
+      "previous_value": "P4Y7M",
+      "expected_value": "P4Y6M18D",
+      "actual_value": "P4Y6M18D",
+      "status": "PASS"
+    }
+  ],
+  "foreign_change_counts": {
+    "non_duration_facts": 0,
+    "duration_source_lexicals": 0,
+    "monetary_values": 0,
+    "contexts": 0,
+    "units": 0,
+    "dimensions": 0,
+    "relationship_keys": 0
+  },
+  "independent_verification": {
+    "state": "PASS",
+    "frozen_commit_sha": "9b2c4022c64dee2327da082a38777684c96271be",
+    "evidence_path": "/absolute/path/to/verification-report.json",
+    "evidence_sha256": "<sha256>"
+  },
+  "evidence_files": [
+    {"path": "/absolute/path/to/duration_source_index.json", "sha256": "<sha256>"},
+    {"path": "/absolute/path/to/duration_fact_checks.json", "sha256": "<sha256>"},
+    {"path": "/absolute/path/to/verification-report.json", "sha256": "<sha256>"}
+  ]
+}
+```
+
+`filing_checks` must contain exactly the 381 unique ticker/CIK/accession tuples
+from the immutable collection plans, including zero-duration filings.  Every
+path is absolute, every referenced file must exist without a symlink leaf, and
+every digest is re-read before the completion destination is created.
+`duration_fact_checks.json` is a
+`sec-duration-fact-checks-v1` object with `record_count` and a `records` list.
+Each record contains ticker, CIK, accession, unique Fact ID, transform,
+source lexical, expected normalized value, actual normalized value, and
+`status: PASS`.  The publisher loads all records, requires expected and actual
+values to match, and reconciles the per-filing and per-transform totals to the
+loaded source index.
+
 The destination contains `index.html`, `company_readiness.json`,
 `company_readiness.csv`, `README.md`, and `universe_delivery_manifest.json`.  The JSON keeps
 the collection financial as-of, metadata observation/cutoff, historical
 analytical selection as-of, and Q4 review cutoff as separate fields.  The Q4
 table comes from `ReviewedQ4Reader` records and includes exact source accession,
 snapshot, and fact identities; the HTML does not calculate a residual.
+It labels the Q4 parent as `CURRENT_A_HISTORY` or
+`SEPARATE_APPROVED_REFERENCE`, so preserved monetary Q4 evidence is not
+mistaken for fresh v4 raw lineage.
 
 The C paths may be omitted while creating a clearly `PARTIAL` prototype.  A
 quarterly bundle cannot be supplied without its exact reviewed-Q4 companion.

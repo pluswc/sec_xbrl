@@ -11,6 +11,7 @@ import hashlib
 import html
 import json
 import os
+import re
 import shutil
 import uuid
 from dataclasses import dataclass
@@ -30,6 +31,10 @@ READINESS_JSON = "company_readiness.json"
 READINESS_CSV = "company_readiness.csv"
 REPORT_HTML = "index.html"
 REPRO_README = "README.md"
+ACCURACY_SCHEMA = "sec-duration-conformance-assessment-v1"
+ACCURACY_PARSER_VERSION = "m2-layer1-v4"
+ACCURACY_RULE_VERSION = "sec-duration-conformance-v1"
+_COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +128,19 @@ class _AnalysisAttestation:
     manifest: dict[str, Any]
 
 
+@dataclass(frozen=True, slots=True)
+class _AccuracyAttestation:
+    path: Path
+    sha256: str
+    state: str
+    reason: str | None
+    parser_version: str | None
+    parser_rule_version: str | None
+    frozen_commit_sha: str | None
+    evidence_files: tuple[dict[str, Any], ...]
+    payload: dict[str, Any]
+
+
 def publish_universe_delivery(
     *,
     config_path: Path,
@@ -132,6 +150,7 @@ def publish_universe_delivery(
     reviewed_q4_publication: Path | None = None,
     quarterly_analysis: Path | None = None,
     annual_analysis: Path | None = None,
+    accuracy_assessment: Path | None = None,
     expected_q4_economic_cells: int = 16,
     expected_q4_view_records: int = 32,
 ) -> UniverseDeliveryPublication:
@@ -164,6 +183,37 @@ def publish_universe_delivery(
         raise ValueError("collection request digest changed")
     collection_company_sources = _collection_company_sources(
         collection_manifest, collection_payload
+    )
+    planned_filings = (
+        _planned_filing_scope(collection_company_sources)
+        if accuracy_assessment is not None
+        else ()
+    )
+    snapshot_scope = (
+        _collection_snapshot_scope(collection_company_sources)
+        if accuracy_assessment is not None
+        else {}
+    )
+    accuracy = (
+        _attest_accuracy(
+            Path(accuracy_assessment),
+            universe_id=config.universe_id,
+            financial_as_of=config.as_of_date.isoformat(),
+            collection_request_sha256=collection_payload["request_sha256"],
+            collection_manifest_sha256=_sha256(collection_manifest),
+            requested_companies=collection_status.requested_companies,
+            selected_filings=collection_status.selected_filings,
+            planned_filings=planned_filings,
+            snapshot_scope=snapshot_scope,
+            history_manifest_sha256s={
+                row["ticker"]: row["build"]["history_manifest_sha256"]
+                for row in collection_company_sources
+                if isinstance(row.get("build"), dict)
+                and type(row["build"].get("history_manifest_sha256")) is str
+            },
+        )
+        if accuracy_assessment is not None
+        else None
     )
 
     metadata = CompanyMetadataReader(metadata_publication)
@@ -233,10 +283,448 @@ def publish_universe_delivery(
         q4_exclusions=q4_exclusions,
         quarterly=quarterly,
         annual=annual,
+        accuracy=accuracy,
         expected_q4_economic_cells=expected_q4_economic_cells,
         expected_q4_view_records=expected_q4_view_records,
     )
     return _publish(report, Path(destination))
+
+
+def _attest_accuracy(
+    path: Path,
+    *,
+    universe_id: str,
+    financial_as_of: str,
+    collection_request_sha256: str,
+    collection_manifest_sha256: str,
+    requested_companies: int,
+    selected_filings: int,
+    planned_filings: tuple[tuple[str, str, str], ...],
+    snapshot_scope: dict[tuple[str, str, str], dict[str, str]],
+    history_manifest_sha256s: dict[str, str],
+) -> _AccuracyAttestation:
+    path = _regular_file(path, "duration-conformance assessment")
+    payload = _read_json(path)
+    if payload.get("schema_version") != ACCURACY_SCHEMA:
+        raise ValueError("unsupported duration-conformance assessment")
+    state = payload.get("state")
+    if state not in {"PASS", "PENDING", "BLOCKED"}:
+        raise ValueError("duration-conformance state must be PASS, PENDING, or BLOCKED")
+    scope = payload.get("scope")
+    expected_scope = {
+        "universe_id": universe_id,
+        "financial_as_of": financial_as_of,
+        "collection_request_sha256": collection_request_sha256,
+        "collection_manifest_sha256": collection_manifest_sha256,
+        "requested_companies": requested_companies,
+        "selected_filings": selected_filings,
+    }
+    if scope != expected_scope:
+        raise ValueError("duration-conformance scope differs from collection request")
+    reason = payload.get("reason")
+    if reason is not None and (type(reason) is not str or not reason.strip()):
+        raise ValueError("duration-conformance reason must be non-empty text")
+    if state != "PASS" and reason is None:
+        raise ValueError("non-PASS duration-conformance assessment requires a reason")
+
+    parser_version = payload.get("parser_version")
+    rule_version = payload.get("parser_rule_version")
+    commit_sha = payload.get("frozen_commit_sha")
+    evidence_files = _attest_accuracy_evidence(payload.get("evidence_files", []))
+    if state == "PASS":
+        if parser_version != ACCURACY_PARSER_VERSION:
+            raise ValueError("duration-conformance parser version is not v4")
+        if rule_version != ACCURACY_RULE_VERSION:
+            raise ValueError("duration-conformance rule version differs")
+        if type(commit_sha) is not str or _COMMIT_SHA.fullmatch(commit_sha) is None:
+            raise ValueError("duration-conformance frozen commit SHA is invalid")
+        _validate_accuracy_pass(
+            payload,
+            requested_companies=requested_companies,
+            selected_filings=selected_filings,
+            planned_filings=planned_filings,
+            snapshot_scope=snapshot_scope,
+            commit_sha=commit_sha,
+            evidence_files=evidence_files,
+            history_manifest_sha256s=history_manifest_sha256s,
+        )
+    return _AccuracyAttestation(
+        path=path,
+        sha256=_sha256(path),
+        state=state,
+        reason=reason,
+        parser_version=parser_version if isinstance(parser_version, str) else None,
+        parser_rule_version=rule_version if isinstance(rule_version, str) else None,
+        frozen_commit_sha=commit_sha if isinstance(commit_sha, str) else None,
+        evidence_files=evidence_files,
+        payload=payload,
+    )
+
+
+def _planned_filing_scope(
+    company_sources: list[dict[str, Any]],
+) -> tuple[tuple[str, str, str], ...]:
+    scope: list[tuple[str, str, str]] = []
+    for source in company_sources:
+        plan_source = source.get("plan")
+        if not isinstance(plan_source, dict) or type(plan_source.get("path")) is not str:
+            continue
+        plan = _read_json(_regular_file(Path(plan_source["path"]), "collection plan"))
+        companies = plan.get("companies")
+        if not isinstance(companies, list) or len(companies) != 1:
+            raise ValueError("collection plan company scope is malformed")
+        company = companies[0]
+        filings = company.get("filings") if isinstance(company, dict) else None
+        if not isinstance(filings, list):
+            raise TypeError("collection plan filing scope is malformed")
+        for filing in filings:
+            if not isinstance(filing, dict):
+                raise TypeError("collection plan filing identity is malformed")
+            scope.append(
+                (
+                    str(source["ticker"]),
+                    str(source["cik"]),
+                    str(filing.get("accession")),
+                )
+            )
+    if len(scope) != len(set(scope)):
+        raise ValueError("collection plans contain duplicate filing scope")
+    return tuple(sorted(scope))
+
+
+def _collection_snapshot_scope(
+    company_sources: list[dict[str, Any]],
+) -> dict[tuple[str, str, str], dict[str, str]]:
+    snapshots: dict[tuple[str, str, str], dict[str, str]] = {}
+    for source in company_sources:
+        intake_source = source.get("intake")
+        if not isinstance(intake_source, dict) or type(intake_source.get("path")) is not str:
+            continue
+        intake = _read_json(_regular_file(Path(intake_source["path"]), "collection intake"))
+        filings = intake.get("filings")
+        if not isinstance(filings, list):
+            raise TypeError("collection intake filing scope is malformed")
+        for outcome in filings:
+            filing = outcome.get("filing") if isinstance(outcome, dict) else None
+            if not isinstance(filing, dict) or type(outcome.get("source_run")) is not str:
+                raise TypeError("collection intake outcome is malformed")
+            ticker = str(outcome.get("ticker"))
+            cik = str(filing.get("cik"))
+            accession = str(filing.get("accession"))
+            source_run = Path(outcome["source_run"])
+            if not source_run.is_absolute():
+                raise ValueError("collection intake source run must be absolute")
+            manifest_path = _regular_file(
+                source_run
+                / "snapshots"
+                / cik
+                / accession.replace("-", "")
+                / "layer1_manifest.json",
+                "Layer 1 snapshot manifest",
+            )
+            manifest = _read_json(manifest_path)
+            if manifest.get("cik") != cik or manifest.get("accession") != accession:
+                raise ValueError("Layer 1 snapshot identity differs from intake")
+            key = (ticker, cik, accession)
+            if key in snapshots:
+                raise ValueError("collection intake repeats a snapshot identity")
+            snapshots[key] = {
+                "snapshot_manifest_sha256": _sha256(manifest_path),
+                "source_package_sha256": str(manifest.get("package_sha256")),
+                "parser_version": str(manifest.get("layer1_parser_version")),
+            }
+    return snapshots
+
+
+def _attest_accuracy_evidence(value: Any) -> tuple[dict[str, Any], ...]:
+    if not isinstance(value, list):
+        raise TypeError("duration-conformance evidence_files must be a list")
+    result: list[dict[str, Any]] = []
+    for entry in value:
+        if not isinstance(entry, dict) or type(entry.get("path")) is not str:
+            raise ValueError("duration-conformance evidence declaration is malformed")
+        evidence_path = Path(entry["path"])
+        if not evidence_path.is_absolute():
+            raise ValueError("duration-conformance evidence path must be absolute")
+        evidence_path = _regular_file(evidence_path, "duration-conformance evidence")
+        digest = _sha256(evidence_path)
+        if entry.get("sha256") != digest:
+            raise ValueError("duration-conformance evidence digest changed")
+        result.append({"path": str(evidence_path), "sha256": digest})
+    if len(result) != len({row["path"] for row in result}):
+        raise ValueError("duration-conformance evidence paths must be unique")
+    return tuple(result)
+
+
+def _validate_accuracy_pass(
+    payload: dict[str, Any],
+    *,
+    requested_companies: int,
+    selected_filings: int,
+    planned_filings: tuple[tuple[str, str, str], ...],
+    snapshot_scope: dict[tuple[str, str, str], dict[str, str]],
+    commit_sha: str,
+    evidence_files: tuple[dict[str, Any], ...],
+    history_manifest_sha256s: dict[str, str],
+) -> None:
+    packages = payload.get("source_packages")
+    if packages != {
+        "expected": selected_filings,
+        "verified": selected_filings,
+        "missing": 0,
+    }:
+        raise ValueError("duration-conformance source-package coverage is incomplete")
+    filing_checks = payload.get("filing_checks")
+    if not isinstance(filing_checks, list) or len(filing_checks) != selected_filings:
+        raise ValueError("duration-conformance requires one check per selected filing")
+    checked_scope: list[tuple[str, str, str]] = []
+    filing_check_index: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for check in filing_checks:
+        if (
+            not isinstance(check, dict)
+            or check.get("status") != "PASS"
+            or type(check.get("duration_fact_count")) is not int
+            or check["duration_fact_count"] < 0
+            or check.get("normalized_value_mismatches") != 0
+            or type(check.get("source_package_sha256")) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", check["source_package_sha256"]) is None
+            or type(check.get("source_primary_sha256")) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", check["source_primary_sha256"]) is None
+            or type(check.get("snapshot_manifest_sha256")) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", check["snapshot_manifest_sha256"]) is None
+        ):
+            raise ValueError("duration-conformance filing check is invalid")
+        key = (str(check.get("ticker")), str(check.get("cik")), str(check.get("accession")))
+        checked_scope.append(key)
+        filing_check_index[key] = check
+    if len(checked_scope) != len(set(checked_scope)) or tuple(sorted(checked_scope)) != planned_filings:
+        raise ValueError("duration-conformance filing checks differ from immutable plans")
+    if set(snapshot_scope) != set(planned_filings):
+        raise ValueError("duration-conformance snapshot scope differs from immutable plans")
+    for key, snapshot in snapshot_scope.items():
+        check = filing_check_index[key]
+        if (
+            snapshot.get("parser_version") != ACCURACY_PARSER_VERSION
+            or check["source_package_sha256"] != snapshot.get("source_package_sha256")
+            or check["snapshot_manifest_sha256"]
+            != snapshot.get("snapshot_manifest_sha256")
+        ):
+            raise ValueError("duration-conformance filing check differs from v4 snapshot")
+    if (
+        len(history_manifest_sha256s) != requested_companies
+        or payload.get("history_manifest_sha256s") != history_manifest_sha256s
+    ):
+        raise ValueError("duration-conformance governed-history scope differs")
+    if payload.get("ingestion_gates") != {
+        "TAXONOMY_AND_TRANSFORM_RESOLUTION": "PASS",
+        "RAW_CORPUS_COMPLETENESS": "PASS",
+        "ATOMIC_FILING_SNAPSHOT": "PASS",
+    } or payload.get("invalid_duration_lexical_fails_closed") is not True:
+        raise ValueError("duration-conformance ingestion gates are incomplete")
+    checks = payload.get("transform_checks")
+    if not isinstance(checks, dict) or set(checks) != {
+        "durday",
+        "durmonth",
+        "duryear",
+        "durweek",
+    }:
+        raise ValueError("duration-conformance transform checks are incomplete")
+    for transform, check in checks.items():
+        if (
+            not isinstance(check, dict)
+            or type(check.get("examined")) is not int
+            or check["examined"] < 0
+            or check.get("normalized_value_mismatches") != 0
+        ):
+            raise ValueError(f"duration-conformance {transform} result is invalid")
+    duration_fact_count = sum(check["duration_fact_count"] for check in filing_checks)
+    examined_facts = sum(check["examined"] for check in checks.values())
+    if duration_fact_count != examined_facts:
+        raise ValueError("duration-conformance filing and transform counts differ")
+    evidence_index = {row["path"]: row["sha256"] for row in evidence_files}
+    source_index = payload.get("source_index")
+    fact_level = payload.get("fact_level_evidence")
+    for label, declaration, expected_count_key, expected_count in (
+        ("source index", source_index, "filing_count", selected_filings),
+        ("fact-level evidence", fact_level, "record_count", examined_facts),
+    ):
+        if (
+            not isinstance(declaration, dict)
+            or type(declaration.get("path")) is not str
+            or type(declaration.get("sha256")) is not str
+            or declaration.get(expected_count_key) != expected_count
+            or evidence_index.get(str(Path(declaration["path"]).resolve()))
+            != declaration["sha256"]
+        ):
+            raise ValueError(f"duration-conformance {label} is not declared")
+    if source_index.get("duration_fact_count") != examined_facts:
+        raise ValueError("duration-conformance source index fact count differs")
+    source_counts, source_primary_hashes = _validate_accuracy_source_index(
+        Path(source_index["path"]), planned_filings=planned_filings
+    )
+    if source_counts != {
+        transform: check["examined"] for transform, check in checks.items()
+    }:
+        raise ValueError("duration-conformance transform counts differ from source index")
+    if any(
+        filing_check_index[key]["source_primary_sha256"] != source_primary_hashes[key]
+        for key in planned_filings
+    ):
+        raise ValueError("duration-conformance primary document hash differs")
+    fact_counts, fact_scope_counts = _validate_fact_level_evidence(
+        Path(fact_level["path"]), expected_records=examined_facts
+    )
+    if fact_counts != source_counts:
+        raise ValueError("duration-conformance fact evidence differs from source index")
+    if any(
+        fact_scope_counts.get(key, 0) != filing_check_index[key]["duration_fact_count"]
+        for key in planned_filings
+    ):
+        raise ValueError("duration-conformance fact evidence differs from filing checks")
+    normalized = payload.get("normalized_value_checks")
+    if not isinstance(normalized, list) or not normalized:
+        raise ValueError("duration-conformance requires normalized-value checks")
+    for check in normalized:
+        if (
+            not isinstance(check, dict)
+            or check.get("status") != "PASS"
+            or type(check.get("expected_value")) is not str
+            or check.get("actual_value") != check.get("expected_value")
+        ):
+            raise ValueError("duration-conformance normalized-value check failed")
+    known = {
+        (
+            check.get("ticker"),
+            check.get("accession"),
+            check.get("fact_id"),
+            check.get("transform"),
+            check.get("lexical_input"),
+            check.get("previous_value"),
+            check.get("expected_value"),
+            check.get("actual_value"),
+        )
+        for check in normalized
+    }
+    if (
+        "AMD",
+        "0000002488-23-000047",
+        "fact_a6259d1f828fa6d425c0fd2c",
+        "duryear",
+        "4.55",
+        "P4Y7M",
+        "P4Y6M18D",
+        "P4Y6M18D",
+    ) not in known:
+        raise ValueError("duration-conformance known AMD regression is not attested")
+    foreign = payload.get("foreign_change_counts")
+    expected_foreign = {
+        "non_duration_facts",
+        "duration_source_lexicals",
+        "monetary_values",
+        "contexts",
+        "units",
+        "dimensions",
+        "relationship_keys",
+    }
+    if (
+        not isinstance(foreign, dict)
+        or set(foreign) != expected_foreign
+        or any(type(value) is not int or value != 0 for value in foreign.values())
+    ):
+        raise ValueError("duration-conformance replay has foreign changes")
+    independent = payload.get("independent_verification")
+    if (
+        not isinstance(independent, dict)
+        or independent.get("state") != "PASS"
+        or independent.get("frozen_commit_sha") != commit_sha
+        or type(independent.get("evidence_path")) is not str
+        or type(independent.get("evidence_sha256")) is not str
+    ):
+        raise ValueError("duration-conformance independent verification is missing")
+    independent_path = str(Path(independent["evidence_path"]).resolve())
+    if evidence_index.get(independent_path) != independent["evidence_sha256"]:
+        raise ValueError("duration-conformance independent evidence is not declared")
+
+
+def _validate_accuracy_source_index(
+    path: Path,
+    *,
+    planned_filings: tuple[tuple[str, str, str], ...],
+) -> tuple[dict[str, int], dict[tuple[str, str, str], str]]:
+    source = _read_json(_regular_file(path, "duration source index"))
+    documents = source.get("primary_documents")
+    format_counts = source.get("format_counts")
+    if (
+        source.get("primary_document_count") != len(planned_filings)
+        or source.get("missing_primary_documents") != 0
+        or not isinstance(documents, list)
+        or len(documents) != len(planned_filings)
+        or not isinstance(format_counts, dict)
+        or set(format_counts) != {"durday", "durmonth", "duryear", "durweek"}
+        or any(type(value) is not int or value < 0 for value in format_counts.values())
+    ):
+        raise ValueError("duration source index scope is invalid")
+    hashes: dict[tuple[str, str, str], str] = {}
+    for document in documents:
+        if (
+            not isinstance(document, dict)
+            or type(document.get("primary_sha256")) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", document["primary_sha256"]) is None
+        ):
+            raise ValueError("duration source index document is invalid")
+        key = (
+            str(document.get("ticker")),
+            str(document.get("cik")),
+            str(document.get("accession")),
+        )
+        if key in hashes:
+            raise ValueError("duration source index repeats a filing")
+        hashes[key] = document["primary_sha256"]
+    if tuple(sorted(hashes)) != planned_filings:
+        raise ValueError("duration source index differs from immutable plans")
+    return {key: int(value) for key, value in format_counts.items()}, hashes
+
+
+def _validate_fact_level_evidence(
+    path: Path,
+    *,
+    expected_records: int,
+) -> tuple[dict[str, int], dict[tuple[str, str, str], int]]:
+    evidence = _read_json(_regular_file(path, "duration fact-level evidence"))
+    records = evidence.get("records")
+    if (
+        evidence.get("schema_version") != "sec-duration-fact-checks-v1"
+        or evidence.get("record_count") != expected_records
+        or not isinstance(records, list)
+        or len(records) != expected_records
+    ):
+        raise ValueError("duration fact-level evidence scope is invalid")
+    transform_counts = {name: 0 for name in ("durday", "durmonth", "duryear", "durweek")}
+    filing_counts: dict[tuple[str, str, str], int] = {}
+    identities: set[tuple[str, str, str, str]] = set()
+    for record in records:
+        if (
+            not isinstance(record, dict)
+            or record.get("transform") not in transform_counts
+            or record.get("status") != "PASS"
+            or type(record.get("fact_id")) is not str
+            or type(record.get("lexical_input")) is not str
+            or type(record.get("expected_value")) is not str
+            or record.get("actual_value") != record.get("expected_value")
+        ):
+            raise ValueError("duration fact-level normalized value is invalid")
+        filing_key = (
+            str(record.get("ticker")),
+            str(record.get("cik")),
+            str(record.get("accession")),
+        )
+        identity = (*filing_key, record["fact_id"])
+        if identity in identities:
+            raise ValueError("duration fact-level evidence repeats a Fact")
+        identities.add(identity)
+        transform_counts[record["transform"]] += 1
+        filing_counts[filing_key] = filing_counts.get(filing_key, 0) + 1
+    return transform_counts, filing_counts
 
 
 def _validate_collection_scope(config: Any, status: Any) -> None:
@@ -490,6 +978,7 @@ def _readiness_model(
     q4_exclusions: tuple[dict[str, Any], ...],
     quarterly: _AnalysisAttestation | None,
     annual: _AnalysisAttestation | None,
+    accuracy: _AccuracyAttestation | None,
     expected_q4_economic_cells: int,
     expected_q4_view_records: int,
 ) -> dict[str, Any]:
@@ -582,12 +1071,40 @@ def _readiness_model(
     )
     quarterly_ready = quarterly is not None
     annual_ready = annual is not None
+    current_history_publications = {
+        str(Path(row["build"]["publication"]).resolve())
+        for row in collection_company_sources
+        if isinstance(row.get("build"), dict)
+        and type(row["build"].get("publication")) is str
+    }
+    q4_parent = (
+        str(Path(q4_manifest["history_publication"]).resolve())
+        if q4_manifest is not None
+        else None
+    )
+    q4_parent_relation = (
+        "CURRENT_A_HISTORY"
+        if q4_parent in current_history_publications
+        else "SEPARATE_APPROVED_REFERENCE"
+        if q4_parent is not None
+        else None
+    )
     failed = any(row["assessment_state"] == "RAW_FAILED" for row in companies)
+    accuracy_state = accuracy.state if accuracy is not None else "NOT_PROVIDED"
     overall = (
         "FAILED"
         if failed
+        else "BLOCKED"
+        if accuracy_state == "BLOCKED"
         else "READY"
-        if collection_ready and metadata_ready and q4_ready and quarterly_ready and annual_ready
+        if (
+            collection_ready
+            and metadata_ready
+            and q4_ready
+            and quarterly_ready
+            and annual_ready
+            and accuracy_state in {"PASS", "NOT_PROVIDED"}
+        )
         else "PARTIAL"
     )
     classified = sum(row.sic_code is not None for row in metadata_rows)
@@ -692,6 +1209,7 @@ def _readiness_model(
                 "expected_view_records": expected_q4_view_records,
                 "view_records": len(q4_derived),
                 "exclusions": len(q4_exclusions),
+                "parent_history_relation": q4_parent_relation,
             },
             "quarterly_analysis": {
                 "state": "READY" if quarterly_ready else "PENDING",
@@ -702,6 +1220,47 @@ def _readiness_model(
                 "state": "READY" if annual_ready else "PENDING",
                 "companies": list(annual.companies) if annual else [],
                 "period_mode": annual.period_mode if annual else None,
+            },
+            "duration_conformance": {
+                "state": accuracy_state,
+                "required_for_this_delivery": accuracy is not None,
+                "reason": accuracy.reason if accuracy else None,
+                "parser_version": accuracy.parser_version if accuracy else None,
+                "parser_rule_version": (
+                    accuracy.parser_rule_version if accuracy else None
+                ),
+                "frozen_commit_sha": accuracy.frozen_commit_sha if accuracy else None,
+                "source_packages": (
+                    accuracy.payload.get("source_packages") if accuracy else None
+                ),
+                "filing_checks": (
+                    len(accuracy.payload.get("filing_checks", [])) if accuracy else 0
+                ),
+                "source_index": (
+                    accuracy.payload.get("source_index") if accuracy else None
+                ),
+                "fact_level_evidence": (
+                    accuracy.payload.get("fact_level_evidence") if accuracy else None
+                ),
+                "transform_checks": (
+                    accuracy.payload.get("transform_checks") if accuracy else None
+                ),
+                "normalized_value_checks": (
+                    accuracy.payload.get("normalized_value_checks", [])
+                    if accuracy
+                    else []
+                ),
+                "foreign_change_counts": (
+                    accuracy.payload.get("foreign_change_counts") if accuracy else None
+                ),
+                "ingestion_gates": (
+                    accuracy.payload.get("ingestion_gates") if accuracy else None
+                ),
+                "invalid_duration_lexical_fails_closed": (
+                    accuracy.payload.get("invalid_duration_lexical_fails_closed")
+                    if accuracy
+                    else None
+                ),
             },
         },
         "sources": {
@@ -717,6 +1276,7 @@ def _readiness_model(
             "reviewed_q4": _optional_publication_source(q4_root, q4_manifest),
             "quarterly_analysis": _analysis_source(quarterly),
             "annual_analysis": _analysis_source(annual),
+            "accuracy_assessment": _accuracy_source(accuracy),
         },
         "companies": companies,
         "reviewed_q4": {
@@ -725,6 +1285,14 @@ def _readiness_model(
             "scope_note": "승인된 정확한 FY/YTD-9M 원천쌍만 표시하며 HTML에서 Q4를 계산하지 않습니다.",
         },
         "warnings": [
+            f"Raw numeric-duration conformance 판정은 {accuracy_state}입니다.",
+            (
+                "Q4 원천 parent는 현재 A history입니다."
+                if q4_parent_relation == "CURRENT_A_HISTORY"
+                else "Q4 원천 parent는 현재 A history와 분리된 승인 reference입니다."
+                if q4_parent_relation == "SEPARATE_APPROVED_REFERENCE"
+                else "Q4 원천 parent가 아직 제공되지 않았습니다."
+            ),
             "재무 수집 기준일, SEC 메타데이터 관측시각, 분석 선택 기준일, Q4 검토시각은 서로 다른 provenance입니다.",
             "서로 다른 기준일의 값을 동일 기준 횡단면처럼 비교하지 않습니다.",
             "SEC SIC는 동종 후보 신호이며 회계적 동등성을 뜻하지 않습니다.",
@@ -765,6 +1333,21 @@ def _analysis_source(value: _AnalysisAttestation | None) -> dict[str, Any] | Non
         "period_mode": value.period_mode,
         "selection_as_of_dates": list(value.selection_as_of_dates),
         "source_publications": list(value.source_publications),
+    }
+
+
+def _accuracy_source(value: _AccuracyAttestation | None) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    return {
+        "path": str(value.path),
+        "sha256": value.sha256,
+        "schema_version": ACCURACY_SCHEMA,
+        "state": value.state,
+        "parser_version": value.parser_version,
+        "parser_rule_version": value.parser_rule_version,
+        "frozen_commit_sha": value.frozen_commit_sha,
+        "evidence_files": list(value.evidence_files),
     }
 
 
@@ -902,7 +1485,7 @@ def _render_html(report: dict[str, Any]) -> str:
             (
                 "검토 Q4",
                 assessments["reviewed_q4"],
-                f"경제값 {assessments['reviewed_q4']['economic_cells']}/{assessments['reviewed_q4']['expected_economic_cells']} · view 기록 {assessments['reviewed_q4']['view_records']}/{assessments['reviewed_q4']['expected_view_records']}",
+                f"경제값 {assessments['reviewed_q4']['economic_cells']}/{assessments['reviewed_q4']['expected_economic_cells']} · view 기록 {assessments['reviewed_q4']['view_records']}/{assessments['reviewed_q4']['expected_view_records']} · parent {assessments['reviewed_q4']['parent_history_relation'] or '미제공'}",
             ),
             (
                 "분기 분석",
@@ -913,6 +1496,14 @@ def _render_html(report: dict[str, Any]) -> str:
                 "연간 분석",
                 assessments["annual_analysis"],
                 f"준비 회사 {len(assessments['annual_analysis']['companies'])}",
+            ),
+            (
+                "Raw duration 정확성",
+                assessments["duration_conformance"],
+                (
+                    f"parser {assessments['duration_conformance']['parser_version'] or '미제공'} · "
+                    f"검증 commit {assessments['duration_conformance']['frozen_commit_sha'] or '미제공'}"
+                ),
             ),
         )
     )
@@ -1058,6 +1649,7 @@ def main() -> None:
     parser.add_argument("--reviewed-q4-publication", type=Path)
     parser.add_argument("--quarterly-analysis", type=Path)
     parser.add_argument("--annual-analysis", type=Path)
+    parser.add_argument("--accuracy-assessment", type=Path)
     parser.add_argument("--destination", type=Path, required=True)
     parser.add_argument("--expected-q4-economic-cells", type=int, default=16)
     parser.add_argument("--expected-q4-view-records", type=int, default=32)
@@ -1069,6 +1661,7 @@ def main() -> None:
         reviewed_q4_publication=args.reviewed_q4_publication,
         quarterly_analysis=args.quarterly_analysis,
         annual_analysis=args.annual_analysis,
+        accuracy_assessment=args.accuracy_assessment,
         destination=args.destination,
         expected_q4_economic_cells=args.expected_q4_economic_cells,
         expected_q4_view_records=args.expected_q4_view_records,

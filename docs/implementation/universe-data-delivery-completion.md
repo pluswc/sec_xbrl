@@ -13,14 +13,23 @@ The independently verified component candidates are:
 - B company master and SEC SIC publication: source candidate
   `1e5a398712d8423f1f6a45d08e233d52854021b6`; and
 - SEC `durweek` parser compatibility: source candidate
-  `192ee4243e469ff120f33debae7e965d0dd1ce9f`.
+  `192ee4243e469ff120f33debae7e965d0dd1ce9f`;
+- C reviewed Q4: source candidate
+  `964677136ef15c0bea833b2cfb3cd89dcd749380`; and
+- SEC numeric-duration conformance and fail-closed ingestion: source candidate
+  `9b2c4022c64dee2327da082a38777684c96271be`.
 
-C reviewed Q4 source candidate
-`964677136ef15c0bea833b2cfb3cd89dcd749380` and the combined integration
-remain subject to their own independent verification and lead acceptance.
+Combined candidate `f897045f122463a3754cc5d3e765ceee77d956d7` remains
+historical implementation evidence.  A subsequent raw audit found the
+numeric-duration accuracy blocker, so it is not a final accepted source or
+runtime publication.  The user authorized the standards correction and fresh
+v4 data generation.  The replacement parser passed independent verification;
+the 381-filing v4 migration, updated combined integration, and final runtime
+publication remain pending.
 Runtime completion counts and the final report identity remain **PENDING**
-until the final operations, metadata, reviewed-Q4, quarterly, and annual
-publications have all been verified together.
+until the fresh operations, duration-conformance assessment, metadata,
+reviewed-Q4, quarterly, and annual publications have all been verified
+together.
 
 ## Completion publication
 
@@ -60,7 +69,12 @@ Before writing, the publisher verifies:
 5. quarterly and annual bundles have the required separate period modes, all
    declared Parquet hashes and row counts, the same historical analytical
    selection scope, and the exact C parent publication identity; and
-6. no output company row is duplicated by a ticker alias.
+6. when supplied, the duration-conformance assessment matches the exact A
+   scope, governed-history manifests, and evidence hashes; `PASS` additionally
+   proves fail-closed ingestion gates, normalized values, the known AMD
+   regression, zero foreign changes, and independent verification;
+   and
+7. no output company row is duplicated by a ticker alias.
 
 Unknown SIC candidates remain in the B master and count as unclassified.  The
 completion report states candidate, classified, unclassified, and pilot
@@ -83,6 +97,11 @@ and 32 view-specific records.  Structured exclusions, including FY2025 mapping
 epoch cases, and unreviewed segment/geography scopes remain visible exclusions;
 they are not converted to zero or treated as a failed raw filing.
 
+The report also labels whether the reviewed-Q4 parent is a current A governed
+history or a separate approved historical reference.  A separate reference is
+never presented as fresh v4 lineage; for this migration it is acceptable only
+with the bound duration assessment's zero monetary-value foreign-change result.
+
 The final-run A `REUSED` count means the new run verified and adopted existing
 raw snapshots.  It does not restate how many filings originally came from an
 external baseline versus a new acquisition.  That acquisition history belongs
@@ -93,10 +112,13 @@ from replay/adoption status.
 
 The intended runtime roots are caller inputs, not constants in the renderer.
 For the current run they are expected under
-`data/processed/universe_runs/20261008_initial/`, including
-`operations_final`, `company_metadata_v2`, `q4_delivery`, and
-`analysis_history_final`.  Their existence here is not asserted by this
-tracked document.
+`data/processed/universe_runs/20261008_duration_v4/`, including fresh
+`operations_v4`, `analysis_history_v4`, and `q4_delivery_v4` roots.  Fresh raw
+snapshots and their source index live under the separate ignored
+`data/raw/universe_runs/20261008_duration_v4/` boundary.  The unaffected B
+`company_metadata_v2` publication is reused read-only from the initial run.
+Earlier `operations_final`, raw, analysis, Q4, and report artifacts remain
+preserved.  Their existence here is not asserted by this tracked document.
 
 Local completion requires a newly generated completion publication whose
 manifest and readiness data prove:
@@ -105,6 +127,10 @@ manifest and readiness data prove:
 - complete A raw intake plus a verified governed-history `READY` publication
   for every configured company (raw completion alone remains a green
   foundation with overall `PARTIAL` status);
+- a scope-bound `PASS` duration-conformance assessment that validates actual
+  normalized values across the fresh 381-filing v4 cohort, preserves source
+  lexicals, binds all v4 snapshot manifests plus the 3,842-Fact external
+  evidence, and reports zero foreign changes;
 - B identity and SEC SIC present for every pilot company, with an explicit
   status for all broader candidate issuers;
 - the approved reviewed-Q4 economic/view thresholds plus explicit exclusions;

@@ -9,15 +9,26 @@ runtime artifacts.  The implementation baseline is
 `codex/company-universe-delivery`.
 
 The current delivery state is **APPROVED with feature-branch implementation in
-progress**.  A candidate `24df803` and B candidate `1e5a398` passed their
-separate independent verification; parser compatibility candidate `192ee424`
-also passed.  C repair candidate `9646771` and the combined completion publication
-still require their own independent results.  The whole delivery is not yet
+progress**.  A candidate `24df803`, B candidate `1e5a398`, parser compatibility
+candidate `192ee424`, C repair candidate `9646771`, and numeric-duration
+conformance candidate `9b2c402` passed their separate independent verification.
+The first combined candidate `f897045` remains
+historical evidence and is not accepted because the subsequent raw-accuracy
+audit found nonconforming numeric-duration values.  The whole delivery is not yet
 `LOCALLY_ACCEPTED` or `MERGED`.  Current evidence and remaining gates are in
 [`universe-data-delivery-completion.md`](universe-data-delivery-completion.md)
 under the state rules of [`delivery-workflow.md`](delivery-workflow.md).  This
 contract does not create a new architectural Layer and does not replace the M
 architecture roadmap or U investor roadmap.
+
+On 2026-10-08 the user then authorized the SEC numeric-duration standards
+correction and fresh data generation.  The old v2/v3 raw snapshots, histories,
+and combined artifacts remain immutable.  This delivery now also requires a
+fresh `m2-layer1-v4` replay of all 381 selected source packages, fresh governed
+histories, and an assessment that verifies normalized duration values against
+the approved rule.  Matching filing counts alone cannot clear this gate.
+The parser and fail-closed ingestion contract is
+[`sec-duration-conformance-delivery.md`](sec-duration-conformance-delivery.md).
 
 ## 2. Authorized A/B/C delivery
 
@@ -133,6 +144,10 @@ path such as `data/processed/universe_runs/<run-id>/` and contains:
 - a reproducible runtime README with source revision, commands, input
   locations, as-of date, source observation times, and rule versions.
 
+The duration migration uses new sibling roots such as `operations_v4`,
+`freshraw_v4`, and `analyzed_v4`.  It does not rewrite or delete the earlier
+operations, raw, retry, analysis, Q4, or completion artifacts.
+
 No runtime report may embed `SEC_USER_AGENT`, secrets, or mutable cache
 contents.  Runtime evidence identifies source paths or content digests and
 stage labels `LIVE`, `CACHE`, or `REUSED`.  Reuse is verified against the
@@ -194,6 +209,52 @@ the publication through `HistoryPublicationReader.verify_all()` before writing
 that marker.  Ordinary status performs only offline manifest, path, existence,
 scope, and digest checks; it does not invoke SEC, Arelle, selection, or
 calculation.
+
+### Duration-conformance assessment
+
+The integrated publisher accepts an optional
+`sec-duration-conformance-assessment-v1` JSON input for backward compatibility
+with unrelated cohorts.  It is mandatory for this 2026-10-08 delivery.  Its
+scope must equal the immutable A universe ID, financial as-of date, collection
+request and collection-manifest SHA-256 values, requested-company count,
+selected-filing count, and every governed-history manifest digest.
+
+A `PASS` assessment binds `m2-layer1-v4`, rule
+`sec-duration-conformance-v1`, the frozen 40-character source commit, all 381
+verified source packages with none missing, and independent verification of
+that same commit.  It declares SHA-256 identities for its evidence files and
+must prove:
+
+- one unique `PASS` check for every accession in the immutable A plans,
+  including its source-package hash, v4 snapshot-manifest hash, duration-Fact
+  count, and zero normalized mismatches, including filings with zero duration
+  Facts;
+- `TAXONOMY_AND_TRANSFORM_RESOLUTION`, `RAW_CORPUS_COMPLETENESS`, and
+  `ATOMIC_FILING_SNAPSHOT` all pass, including fail-closed handling of an
+  invalid duration lexical value;
+- per-transform `durday`, `durmonth`, `duryear`, and `durweek`
+  normalized-value mismatch counts are zero;
+- actual normalized-value checks equal their expected values, including AMD
+  accession `0000002488-23-000047`, source `4.55`, old `P4Y7M`, and corrected
+  `P4Y6M18D`; and
+- foreign-change counts are zero for non-duration facts, duration source
+  lexicals, monetary values, Contexts, Units, dimensions, and relationship
+  keys.
+
+For the 381-filing cohort, the exact verified source index contains 3,842
+duration Facts: 481 `durday`, 391 `durmonth`, 2,902 `duryear`, and 68 `durweek`.
+The per-filing and per-transform totals must reconcile to those exact counts.
+The assessment binds the 381-row source index and external fact-level evidence
+by path and SHA-256 instead of duplicating thousands of Fact records.  This
+prevents a partial scan with zero mismatches from being reported as
+conformance.
+
+`BLOCKED` is an overall delivery block and `PENDING` keeps the overall delivery
+partial.  Both require an explicit reason.  Omitting the assessment preserves
+the API behavior for other callers, but cannot be used for this cohort's final
+publication.  The completion manifest records the assessment and every
+declared evidence digest; the HTML displays its state, parser version, and
+frozen commit.
 
 ## 6. Acceptance gates
 
@@ -261,6 +322,10 @@ exactly 16 lead-approved NVDA cells.  Governed data-quality exclusions,
 ambiguous scopes, and unavailable analytical values count as explicit reviewed
 outcomes rather than delivery failures; they must remain non-numeric and
 traceable.
+
+The duration-conformance threshold is a `PASS` assessment for the exact fresh
+381-filing v4 cohort.  Structural completion, unchanged counts, or a zero-error
+parse run without normalized-value comparisons does not satisfy this gate.
 
 ## 7. Assumptions and unresolved cases
 
