@@ -69,10 +69,12 @@ rewrite the observed description.
 ## 4. Observation selection and temporal meaning
 
 For each CIK, the builder selects the root observation with the greatest
-`observed_at` at or before the optional cutoff.  Multiple identical byte hashes
-at that instant are duplicate references to one observation.  Multiple distinct
-hashes at the selected instant are ambiguous and fail closed.  Earlier and later
-root snapshots are never field-by-field merged.
+timezone-aware `observed_at` instant at or before the optional cutoff.  Selection
+compares datetimes rather than variable-precision timestamp text.  Multiple
+identical byte hashes at that instant are duplicate references to one observation,
+but conflicting source/source-URL claims for the same cached path fail closed.
+Multiple distinct hashes at the selected instant are ambiguous and fail closed.
+Earlier and later root snapshots are never field-by-field merged.
 
 The publication describes metadata as observed by the collector.  SEC root SIC
 and names are current observations and are not claimed to have been known or
@@ -133,7 +135,9 @@ provenance, candidate/reference inputs, and the temporal limitation above.
 An existing destination is reusable only when a defensive reader validates it
 and its publication ID equals the requested build.  Any collision fails.  The
 reader rejects missing, extra, symlinked, hash-mismatched, or schema-mismatched
-files before exposing rows.
+files before exposing rows.  Schema validation includes every Polars column dtype,
+not only column names, so rewriting an integer or other field with a different
+physical type cannot retain the publication identity.
 
 ## 7. Query and universe semantics
 

@@ -1,3 +1,4 @@
+import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -118,6 +119,38 @@ def test_snapshot_cutoff_and_competing_latest_observations_are_explicit(tmp_path
         build_company_metadata([old], observed_at=datetime.fromisoformat("2026-01-01"))
 
 
+def test_snapshot_selection_compares_fractional_observation_times_as_datetimes(
+    tmp_path: Path,
+) -> None:
+    older = _write(tmp_path / "older.json", _root("123", name="Older"))
+    newer = _write(tmp_path / "newer.json", _root("123", name="Newer"))
+    fractional = OBSERVED + timedelta(microseconds=1)
+
+    selected = build_company_metadata(
+        [SnapshotInput(older, OBSERVED), SnapshotInput(newer, fractional)]
+    )
+    assert selected.companies[0]["name"] == "Newer"
+    assert selected.companies[0]["observed_at"] == "2026-10-08T01:02:03.000001Z"
+
+    cutoff_selected = build_company_metadata(
+        [SnapshotInput(older, OBSERVED), SnapshotInput(newer, fractional)],
+        cutoff=OBSERVED,
+    )
+    assert cutoff_selected.companies[0]["name"] == "Older"
+
+
+def test_identical_snapshot_with_conflicting_provenance_fails_in_any_input_order(
+    tmp_path: Path,
+) -> None:
+    snapshot = _write(tmp_path / "root.json", _root("123"))
+    one = SnapshotInput(snapshot, OBSERVED, source="source-a", source_url="https://a.example")
+    two = SnapshotInput(snapshot, OBSERVED, source="source-b", source_url="https://b.example")
+
+    for inputs in ([one, two], [two, one]):
+        with pytest.raises(CompanyMetadataError, match="conflicting provenance"):
+            build_company_metadata(inputs)
+
+
 def test_publication_is_immutable_reusable_and_defensively_read(tmp_path: Path) -> None:
     snapshot = _write(tmp_path / "root.json", _root("123"))
     built = build_company_metadata([snapshot], observed_at=OBSERVED)
@@ -140,6 +173,25 @@ def test_publication_is_immutable_reusable_and_defensively_read(tmp_path: Path) 
     manifest["publication_id"] = "company-metadata-000000000000000000000000"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(CompanyMetadataError, match="identity mismatch"):
+        CompanyMetadataReader(destination)
+
+
+def test_reader_rejects_parquet_dtype_change_even_with_updated_file_digest(tmp_path: Path) -> None:
+    snapshot = _write(tmp_path / "root.json", _root("123"))
+    built = build_company_metadata([snapshot], observed_at=OBSERVED)
+    destination = publish_company_metadata(built, tmp_path / "publication").root
+    identifiers_path = destination / "company_identifiers.parquet"
+    identifiers = pl.read_parquet(identifiers_path).with_columns(pl.col("ordinal").cast(pl.UInt32))
+    identifiers.write_parquet(identifiers_path)
+    manifest_path = destination / "company_metadata_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"][identifiers_path.name]["sha256"] = hashlib.sha256(
+        identifiers_path.read_bytes()
+    ).hexdigest()
+    manifest["files"][identifiers_path.name]["size"] = identifiers_path.stat().st_size
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(CompanyMetadataError, match="schema mismatch"):
         CompanyMetadataReader(destination)
 
 
@@ -181,6 +233,8 @@ def test_cached_candidate_inventory_broadens_candidates_without_claiming_sic_cov
             "data": [
                 [123, "Example Corp", "ONE", "Nasdaq"],
                 [777, "Candidate Ltd", "CAND", None],
+                [777, "Candidate Ltd", "CAND.OTC", "OTC"],
+                [778, "Unknown Exchange Ltd", "UNK", None],
             ],
         },
     )
@@ -195,19 +249,38 @@ def test_cached_candidate_inventory_broadens_candidates_without_claiming_sic_cov
     assert rows["0000000123"].metadata_status == "ROOT_OBSERVED"
     candidate = rows["0000000777"]
     assert candidate.metadata_status == "CANDIDATE_ONLY"
+    assert candidate.tickers == ("CAND", "CAND.OTC")
+    assert candidate.exchanges == ("OTC",)
     assert candidate.sic_code is None
     assert candidate.eligible is False
     assert candidate.exclusion_reasons == ("ROOT_METADATA_UNAVAILABLE",)
     filtered_candidate = {
         row.cik: row
         for row in reader.list_companies(UniverseFilter(exchanges=frozenset({"NYSE"})))
-    }["0000000777"]
+    }["0000000778"]
     assert "EXCHANGE_UNAVAILABLE" in filtered_candidate.exclusion_reasons
     industry = {
         row["cik"]: row
         for row in pl.read_parquet(tmp_path / "pub" / "industry_classifications.parquet").to_dicts()
     }
     assert industry["0000000777"]["classification_status"] == "NOT_CLASSIFIED"
+
+    duplicate_inventory = _write(
+        tmp_path / "duplicate-inventory.json",
+        {
+            "fields": ["cik", "name", "ticker", "exchange"],
+            "data": [
+                [888, "Duplicate Ltd", "DUP", None],
+                [888, "Duplicate Ltd", "dup", None],
+            ],
+        },
+    )
+    with pytest.raises(CompanyMetadataError, match="duplicate candidate"):
+        build_company_metadata(
+            [root],
+            observed_at=OBSERVED,
+            candidate_inventory=CandidateInventoryInput(duplicate_inventory, OBSERVED),
+        )
 
 
 def test_publication_rejects_same_ticker_exchange_owned_by_two_ciks(tmp_path: Path) -> None:

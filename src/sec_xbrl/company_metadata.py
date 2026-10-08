@@ -129,6 +129,7 @@ class _RootObservation:
     cik: str
     payload: Mapping[str, Any]
     trace: Mapping[str, Any]
+    observed_at: datetime
 
 
 def build_company_metadata(
@@ -160,7 +161,7 @@ def build_company_metadata(
         cik = _payload_cik(payload, item.path)
         if not _is_root_payload(payload):
             continue
-        observations[cik].append(_RootObservation(cik, payload, trace))
+        observations[cik].append(_RootObservation(cik, payload, trace, item.observed_at))
 
     selected = {cik: _select_observation(cik, rows) for cik, rows in observations.items()}
     inventory_rows: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
@@ -236,7 +237,7 @@ def build_company_metadata(
             raw_ticker = ticker_row["ticker"]
             ticker = raw_ticker.upper()
             exchange = ticker_row["exchange"]
-            key = (ticker, exchange.casefold() if exchange is not None else "")
+            key = (ticker, _exchange_key(exchange))
             if key in seen_for_company:
                 continue
             seen_for_company.add(key)
@@ -423,8 +424,9 @@ class CompanyMetadataReader:
                 frame = pl.read_parquet(path)
             except Exception as exc:
                 raise CompanyMetadataError(f"invalid Parquet dataset: {filename}") from exc
-            expected_columns = list(_dataset_schema(name))
-            if frame.columns != expected_columns or metadata.get("columns") != expected_columns:
+            expected_schema = pl.Schema(_dataset_schema(name))
+            expected_columns = expected_schema.names()
+            if frame.schema != expected_schema or metadata.get("columns") != expected_columns:
                 raise CompanyMetadataError(f"metadata dataset schema mismatch: {filename}")
             if metadata.get("rows") != frame.height:
                 raise CompanyMetadataError(f"metadata dataset row count mismatch: {filename}")
@@ -596,8 +598,7 @@ class CompanyMetadataReader:
             elif row["identifier_type"] == "TICKER":
                 if not row["identifier_value"]:
                     raise CompanyMetadataError("invalid ticker identifier in publication")
-                exchange_key = row["exchange"].casefold() if row["exchange"] is not None else ""
-                key = (row["identifier_value"].upper(), exchange_key)
+                key = (row["identifier_value"].upper(), _exchange_key(row["exchange"]))
                 owner = ticker_owners.setdefault(key, row["company_id"])
                 if owner != row["company_id"]:
                     raise CompanyMetadataError("ticker/exchange identity collision in publication")
@@ -686,14 +687,31 @@ def _is_root_payload(payload: Mapping[str, Any]) -> bool:
 
 
 def _select_observation(cik: str, rows: Sequence[_RootObservation]) -> _RootObservation:
-    latest_at = max(row.trace["observed_at"] for row in rows)
-    latest = [row for row in rows if row.trace["observed_at"] == latest_at]
+    latest_at = max(row.observed_at for row in rows)
+    latest = [row for row in rows if row.observed_at == latest_at]
     hashes = {row.trace["source_sha256"] for row in latest}
     if len(hashes) != 1:
         raise CompanyMetadataError(
-            f"ambiguous competing root snapshots for {cik} at {latest_at}"
+            f"ambiguous competing root snapshots for {cik} at {_timestamp(latest_at, field='observed_at')}"
         )
-    return min(latest, key=lambda row: row.trace["source_path"])
+    provenance_by_path: dict[str, set[tuple[str, str | None]]] = defaultdict(set)
+    for row in latest:
+        provenance_by_path[row.trace["source_path"]].add(
+            (row.trace["source"], row.trace["source_url"])
+        )
+    if any(len(provenance) > 1 for provenance in provenance_by_path.values()):
+        raise CompanyMetadataError(
+            f"conflicting provenance for identical root snapshot {cik} at "
+            f"{_timestamp(latest_at, field='observed_at')}"
+        )
+    return min(
+        latest,
+        key=lambda row: (
+            row.trace["source_path"],
+            row.trace["source"],
+            row.trace["source_url"] or "",
+        ),
+    )
 
 
 def _parse_candidate_inventory(payload: Mapping[str, Any]) -> dict[str, list[Mapping[str, Any]]]:
@@ -722,9 +740,9 @@ def _parse_candidate_inventory(payload: Mapping[str, Any]) -> dict[str, list[Map
         name = _optional_text(row.get("name"), field=f"candidate[{index}].name")
         ticker = _required_text(row.get("ticker"), field=f"candidate[{index}].ticker")
         exchange = _optional_text(row.get("exchange"), field=f"candidate[{index}].exchange")
-        identity = (ticker.upper(), exchange.casefold() if exchange is not None else "")
+        identity = (ticker.upper(), _exchange_key(exchange))
         if any(
-            (existing["ticker"].upper(), existing["exchange"].casefold()) == identity
+            (existing["ticker"].upper(), _exchange_key(existing["exchange"])) == identity
             for existing in result[cik]
         ):
             raise CompanyMetadataError(
@@ -770,10 +788,7 @@ def _root_tickers(
     for index, (ticker, exchange) in enumerate(zip(tickers, exchanges, strict=True)):
         parsed_ticker = _required_text(ticker, field=f"{cik}.tickers[{index}]")
         parsed_exchange = _optional_text(exchange, field=f"{cik}.exchanges[{index}]")
-        key = (
-            parsed_ticker.upper(),
-            parsed_exchange.casefold() if parsed_exchange is not None else "",
-        )
+        key = (parsed_ticker.upper(), _exchange_key(parsed_exchange))
         if key in seen:
             raise CompanyMetadataError(f"duplicate ticker/exchange identity for {cik}: {key[0]}")
         seen.add(key)
@@ -877,6 +892,12 @@ def _required_text(value: object, *, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise CompanyMetadataError(f"{field} must be non-empty text")
     return value.strip()
+
+
+def _exchange_key(value: str | None) -> str:
+    """Return one collision key for both known and unavailable exchanges."""
+
+    return value.casefold() if value is not None else ""
 
 
 def _trace_columns(trace: Mapping[str, Any]) -> dict[str, Any]:
