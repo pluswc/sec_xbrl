@@ -7,6 +7,14 @@
 상태는 **APPROVED / IMPLEMENTATION IN PROGRESS**다. 독립 검증, 로컬 인수,
 push, PR, remote CI, `main` 병합은 아직 완료되지 않았다.
 
+2026-10-09의 writer 역할은 겹치지 않게 분리한다. 이 구현 writer는 prepared
+source integrity, dataset/store/service/server/CLI, test와 문서를 소유한다. 별도
+GPT-5.6 Sol 구현 writer는 checkpoint
+`e1d19c63d3e7f87a595b6e7695ed1a8ae87bc276`에서 만든 격리 worktree에서
+`src/sec_xbrl/screening/ui.py`와 UI 전용 test만 소유한다. UI commit을 동결한 뒤
+이 브랜치에 cherry-pick하고 통합 검증한다. 이는 구현 병렬화 상태이며 독립 검증
+또는 로컬 인수 완료를 뜻하지 않는다.
+
 구현 브랜치의 부모는 문서 기준 `d53b9f8e5c9d38e18c93ed75b821b912c1820bfe`다.
 그 부모는 locally accepted 회사-universe 제품
 `8320ef06292c3855f57f2b01f4ce6b6c85ea03b7`과 추적 문서 기준
@@ -91,8 +99,19 @@ selection·metric version, source observed/review times를 묶는다. observatio
 blank를 구분하고 full unit/dimension, original status/quality reason,
 `quality_blocking`, actual period dates, fiscal year, mapping relation, source
 cell/Fact/accession와 canonical snapshot/trace를 보존한다. `U5 BLOCK`은 숫자가
-아니며 raw amount는 lineage-only로 남긴다. reader는 모든 declared file과 digest,
-count, identity, unique grain을 매번 검증한다.
+아니며 raw amount는 lineage-only로 남긴다. reader constructor는 모든 declared
+file과 digest, count, identity, unique grain을 검증하고 안전한 record/snapshot을
+메모리에 고정한다. 명시적 `verify_all()`은 현재 publication file hash/set을 다시
+확인하며 source anchor 평가는 reader를 열 때 수행한다.
+
+`ACTUAL_PREPARED`와 cache fixture의 reader는 자체 JSON hash만 확인하지 않는다.
+config/completion/metadata/analysis source anchor가 모두 있어야 하며, completion과
+metadata publication을 다시 검증하고 각 analysis manifest의 정확한 declared file
+set/hash 및 history-manifest checksum을 확인한다. 이어 read-only `AnalysisClient`가
+같은 prepared parent에서 내는 U5 snapshot을 packaged snapshot과 cell 단위로
+대조한다. 이 integrity 단계는 SEC/Raw XML을 읽지 않고 Arelle, filing selection,
+recast 또는 metric 계산을 실행하지 않는다. synthetic error fixture만 명시적인
+`SELF_CONTAINED_TEST_ONLY` policy로 이 외부 anchor를 사용하지 않는다.
 
 ## 4. 영속 계약과 실행 규칙
 
@@ -129,18 +148,19 @@ SQLite online backup과 manifest/hash를 만들고, restore는 새 빈 목적지
 ```python
 publish_screening_dataset(config_path, destination) -> ScreeningPublication
 ScreeningDatasetReader(root).verify_all()
-ScreeningStore(path).create_revision(...)
-ScreeningService(dataset_catalog, store).execute(...)
+ScreeningStore(path).create_screen(...)
+ScreeningStore(path).revise_screen(...)
+ScreeningService(datasets, store).execute(...)
 ScreeningService(...).export_run(...)
-serve(dataset_catalog, store, host="127.0.0.1", port=8765)
+serve(service, export_root=..., host="127.0.0.1", port=8765)
 ```
 
-CLI는 다음 형태를 목표로 한다. 정확한 옵션은 구현 후 이용 가이드에서 동결한다.
+CLI는 다음 형태로 동결한다. `serve`에는 export root도 필수로 전달한다.
 
 ```text
 python -m sec_xbrl.screening prepare --config CONFIG --destination DATASET
 python -m sec_xbrl.screening status --dataset DATASET
-python -m sec_xbrl.screening serve --catalog CATALOG --store JOURNAL.sqlite --port 8765
+python -m sec_xbrl.screening serve --catalog CATALOG --store JOURNAL.sqlite --exports EXPORTS --port 8765
 python -m sec_xbrl.screening backup --store JOURNAL.sqlite --destination BACKUP
 python -m sec_xbrl.screening restore --backup BACKUP --destination JOURNAL.sqlite
 ```

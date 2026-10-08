@@ -57,12 +57,25 @@ def real_directory(path: Path, label: str) -> Path:
 
 
 def safe_new_destination(path: Path, label: str) -> Path:
-    absolute = Path(path).absolute()
+    absolute = Path(os.path.abspath(path))
     for ancestor in (absolute, *absolute.parents):
         if ancestor.is_symlink():
             raise ValueError(f"{label} traverses a symlink")
     if absolute.exists():
         raise ValueError(f"{label} requires a new destination")
+    return absolute
+
+
+def safe_write_directory(path: Path, label: str) -> Path:
+    absolute = Path(os.path.abspath(path))
+    for ancestor in (absolute, *absolute.parents):
+        if ancestor.is_symlink():
+            raise ValueError(f"{label} traverses a symlink")
+    if absolute.exists() and not absolute.is_dir():
+        raise ValueError(f"{label} is not a directory")
+    absolute.mkdir(parents=True, exist_ok=True)
+    if absolute.is_symlink() or absolute.resolve() != absolute:
+        raise ValueError(f"{label} is not a real directory")
     return absolute
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import shutil
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,6 +17,7 @@ from sec_xbrl.screening.dataset import (
     MANIFEST,
     OBSERVATIONS,
     ScreeningDatasetReader,
+    _is_usd_unit,
     _observation,
     _verify_analysis_files,
 )
@@ -61,6 +63,11 @@ def test_unknown_and_unsupported_metrics_fail_closed(
     invalid_number["predicates"][0]["threshold"] = "NaN"
     with pytest.raises(ValueError, match="finite"):
         service.create_screen("bad", invalid_number)
+    wrong_version = json.loads(json.dumps(revision_content))
+    wrong_version["predicates"][0]["definition_version"] = "invented-definition-v99"
+    revision = service.create_screen("wrong-version", wrong_version)
+    with pytest.raises(ValueError, match="definition version"):
+        service.execute(revision["revision_id"], "fixture")
 
 
 def test_sic_universe_metadata_unknown_trace_and_peer_dates(
@@ -120,12 +127,32 @@ def test_run_comparison_separates_revision_from_universe_membership(
     assert comparison["changed_dimensions"]["condition_revision"] is True
     assert comparison["changed_dimensions"]["universe"] is False
     assert comparison["changed_dimensions"]["universe_selector"] is False
+    assert comparison["result_state"] == "UNCHANGED"
     assert comparison["universe_membership"]["old_ciks"] == comparison[
         "universe_membership"
     ]["new_ciks"]
     assert second["versions"]["predicate_definition_versions"] == [
         "annual-core-reported-v1"
     ]
+
+
+def test_run_read_reconciles_counts_and_universe_rows(
+    screening_dataset: Path, revision_content: dict, tmp_path: Path
+) -> None:
+    service = _service(screening_dataset, tmp_path)
+    revision = service.create_screen("무결성", revision_content)
+    run = service.execute(revision["revision_id"], "fixture")
+    altered = json.loads(json.dumps(run))
+    altered.pop("run_id")
+    altered.pop("created_at")
+    altered["counts"]["target"] = 999
+    with sqlite3.connect(service.store.path) as connection:
+        connection.execute(
+            "UPDATE screen_runs SET payload_json=? WHERE run_id=?",
+            (json.dumps(altered), run["run_id"]),
+        )
+    with pytest.raises(ValueError, match="counts do not reconcile"):
+        service.store.run(run["run_id"])
 
 
 def test_full_and_selected_csv_xlsx_equal_frozen_run(
@@ -145,12 +172,74 @@ def test_full_and_selected_csv_xlsx_equal_frozen_run(
     assert [json.loads(row["record_json"])["cik"] for row in full_rows if row["record_type"] == "ROW"] == [row["cik"] for row in run["rows"]]
     selected_rows = list(csv.DictReader((tmp_path / "selected.csv").open(encoding="utf-8-sig")))
     assert [row["cik"] for row in selected_rows if row["record_type"] == "ROW"] == ["0000000001"]
+    for scope, records in (("FULL", full_rows), ("SELECTED", selected_rows)):
+        header = json.loads(records[0]["record_json"])
+        rebuilt = {
+            **header["metadata"],
+            "rows": [
+                json.loads(row["record_json"])
+                for row in records
+                if row["record_type"] == "ROW"
+            ],
+        }
+        assert digest_value(rebuilt) == header["canonical_payload_hash"]
+        assert digest_value(rebuilt) == outputs[(scope, "csv")]["canonical_payload_hash"]
     for scope, expected in (("full", 3), ("selected", 1)):
         workbook = load_workbook(tmp_path / f"{scope}.xlsx", data_only=False)
         assert workbook.sheetnames == ["Rows", "Metadata"]
         assert workbook["Rows"].max_row == expected + 1
         assert all(cell.data_type != "f" for sheet in workbook for row in sheet.iter_rows() for cell in row)
+        metadata = {
+            row[0].value: row[1].value
+            for row in workbook["Metadata"].iter_rows(min_row=2)
+        }
+        headers = [cell.value for cell in workbook["Rows"][1]]
+        records = [
+            dict(zip(headers, (cell.value for cell in row), strict=True))
+            for row in workbook["Rows"].iter_rows(min_row=2)
+        ]
+        rebuilt = {
+            "export_version": metadata["export_version"],
+            "scope": metadata["scope"],
+            "selected_ciks": json.loads(metadata["selected_ciks_json"]),
+            "run": json.loads(metadata["run_json"]),
+            "rows": [json.loads(row["record_json"]) for row in records],
+        }
+        assert digest_value(rebuilt) == metadata["canonical_payload_hash"]
+        assert digest_value(rebuilt) == outputs[(scope.upper(), "xlsx")][
+            "canonical_payload_hash"
+        ]
     assert all(result["canonical_payload_hash"] for result in outputs.values())
+    full_path = tmp_path / "full.csv"
+    assert service.store.export_for_path(full_path)["row_count"] == 3
+    unregistered = tmp_path / "not-an-export.csv"
+    unregistered.write_text("private file", encoding="utf-8")
+    with pytest.raises(ValueError, match="not uniquely registered"):
+        service.store.export_for_path(unregistered)
+    full_path.write_text("changed", encoding="utf-8")
+    with pytest.raises(ValueError, match="integrity mismatch"):
+        service.store.export_for_path(full_path)
+
+
+def test_export_registration_failure_leaves_no_downloadable_file(
+    screening_dataset: Path,
+    revision_content: dict,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _service(screening_dataset, tmp_path)
+    revision = service.create_screen("내보내기 실패", revision_content)
+    run = service.execute(revision["revision_id"], "fixture")
+    destination = tmp_path / "failed.csv"
+
+    def fail_registration(manifest: dict) -> dict:
+        raise OSError("synthetic export manifest failure")
+
+    monkeypatch.setattr(service.store, "record_export", fail_registration)
+    with pytest.raises(OSError, match="synthetic"):
+        service.export_run(run["run_id"], destination)
+    assert not destination.exists()
+    assert not list(tmp_path.glob(".failed.csv.partial-*"))
 
 
 def test_dataset_reader_rejects_rehashed_record_count_or_payload_tamper(
@@ -162,6 +251,23 @@ def test_dataset_reader_rejects_rehashed_record_count_or_payload_tamper(
     path.write_text("[]\n", encoding="utf-8")
     with pytest.raises(ValueError, match="integrity"):
         ScreeningDatasetReader(screening_dataset)
+
+
+def test_open_reader_never_returns_later_corrupted_snapshot_bytes(
+    screening_dataset: Path,
+) -> None:
+    reader = ScreeningDatasetReader(screening_dataset)
+    cik = "0000000001"
+    verified = reader.source_snapshot(cik)
+    path = screening_dataset / "source_snapshots" / cik / (
+        verified["snapshot_id"] + ".json"
+    )
+    changed = json.loads(path.read_text())
+    changed["cells"][0]["display_value"] = "999999"
+    write_json(path, changed)
+    assert reader.source_snapshot(cik) == verified
+    with pytest.raises(ValueError, match="changed after reader verification"):
+        reader.verify_all()
 
 
 def test_actual_dataset_cannot_omit_governed_source_anchors(screening_dataset: Path) -> None:
@@ -198,6 +304,14 @@ def test_analysis_parent_bytes_must_match_declared_hash(tmp_path: Path) -> None:
     data.write_bytes(b"changed while manifest stayed unchanged")
     with pytest.raises(ValueError, match="analysis data integrity mismatch"):
         _verify_analysis_files(root, manifest)
+
+
+def test_usd_screening_unit_requires_exact_prepared_measure() -> None:
+    assert _is_usd_unit([["iso4217:USD"], []]) is True
+    assert _is_usd_unit(['["iso4217:USD"]', "[]"]) is True
+    assert _is_usd_unit([["iso4217:USDollar"], []]) is False
+    assert _is_usd_unit(['["iso4217:USDollar"]', "[]"]) is False
+    assert _is_usd_unit([["iso4217:USD"], ["xbrli:shares"]]) is False
 
 
 def test_coordinated_embedded_rehash_cannot_replace_prepared_source_value(
@@ -287,13 +401,34 @@ def test_coordinated_embedded_rehash_cannot_replace_prepared_source_value(
         for row in metadata_rows
     ]
     completion_rows = [
-        {"cik": company["cik"], "ticker": company["ticker"]} for company in companies
+        {
+            "cik": company["cik"],
+            "ticker": company["ticker"],
+            "collection_state": "READY",
+            "held_filings": 1,
+            "selected_filings": 1,
+            "pending_filings": 0,
+            "failed_filings": 0,
+            "industry_status": "CLASSIFIED",
+        }
+        for company in companies
     ]
     monkeypatch.setattr(
         dataset_module,
         "UniverseDeliveryReader",
         lambda root: SimpleNamespace(
             publication_id="completion-fixture",
+            manifest={
+                "sources": {
+                    "accuracy_assessment": {
+                        "state": "PASS",
+                        "parser_version": "fixture-parser-v1",
+                        "parser_rule_version": "fixture-parser-rule-v1",
+                        "frozen_commit_sha": "fixture-frozen-commit",
+                        "sha256": "fixture-assessment-hash",
+                    }
+                }
+            },
             readiness={
                 "assessment_state": "READY",
                 "dates": {"financial_as_of": "2026-10-08"},
@@ -332,6 +467,30 @@ def test_coordinated_embedded_rehash_cannot_replace_prepared_source_value(
         },
         "analysis": analysis_sources,
     }
+    version_sets = {
+        "analysis_versions": set(),
+        "source_publications": {row["source_publication"] for row in analysis_sources},
+        "review_cutoffs": set(),
+        "source_observed_times": {row["observed_at"] for row in metadata_rows},
+        "metric_definition_versions": {
+            row["definition_version"]
+            for row in json.loads((publication / "metric_support.json").read_text())
+        },
+        "concept_mapping_versions": {"fixture-mapping-v1"},
+        "selection_rule_versions": {"fixture-selection-v1"},
+        "classification_rule_versions": {"fixture-period-v1"},
+        "accession_version_ledger_ids": set(),
+        "raw_concept_taxonomy_versions": set(),
+    }
+    manifest["versions"] = dataset_module._version_manifest(
+        version_sets,
+        {
+            "parser_version": "fixture-parser-v1",
+            "parser_rule_version": "fixture-parser-rule-v1",
+            "frozen_commit_sha": "fixture-frozen-commit",
+            "sha256": "fixture-assessment-hash",
+        },
+    )
 
     target = companies[0]
     old_path = publication / "source_snapshots" / target["cik"] / (

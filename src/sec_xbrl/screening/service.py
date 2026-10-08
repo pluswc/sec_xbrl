@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import uuid
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,17 @@ ENGINE_VERSION = "screening-executor-v1"
 EXPORT_VERSION = "screen-run-export-v1"
 OPERATORS = {"GT", "GTE", "LT", "LTE", "EQ"}
 AGGREGATES = {"PASS", "FAIL", "UNDETERMINED"}
+VISIBLE_COLUMNS = {
+    "company",
+    "ticker",
+    "name",
+    "cik",
+    "sic",
+    "sic_code",
+    "aggregate",
+    "predicates",
+    "decision",
+}
 
 
 class ScreeningService:
@@ -214,14 +226,30 @@ class ScreeningService:
         metric_id: str,
         fiscal_year: int,
     ) -> dict[str, Any]:
-        if len(ciks) < 2 or len(ciks) != len(set(ciks)):
-            raise ValueError("peer comparison requires at least two unique CIKs")
+        if len(ciks) < 2 or len(ciks) > 100 or len(ciks) != len(set(ciks)):
+            raise ValueError("peer comparison requires two to 100 unique CIKs")
+        if type(fiscal_year) is not int or not 1900 <= fiscal_year <= 2200:
+            raise ValueError("peer comparison fiscal year is invalid")
         reader = self._dataset(dataset_id)
+        definition_versions = {
+            row.get("definition_version")
+            for row in reader.metric_support
+            if row.get("metric_id") == metric_id and row.get("execution_supported") is True
+        }
+        if len(definition_versions) != 1:
+            raise ValueError("peer comparison metric is unavailable or version-ambiguous")
+        definition_version = next(iter(definition_versions))
         rows = []
         for cik in ciks:
             cik = require_cik(cik)
             company = reader.company(cik)
-            observation = _find_observation(reader, cik, metric_id, {"mode": "FIXED_FISCAL_YEAR", "fiscal_year": fiscal_year})
+            observation = _find_observation(
+                reader,
+                cik,
+                metric_id,
+                {"mode": "FIXED_FISCAL_YEAR", "fiscal_year": fiscal_year},
+                definition_version=definition_version,
+            )
             rows.append({"company": company, "observation": observation})
         return {
             "metric_id": metric_id,
@@ -288,6 +316,8 @@ class ScreeningService:
             "changed_dimensions": changed,
             "attribution": attribution,
             "differences": differences,
+            "result_rows_changed": bool(differences),
+            "result_state": "CHANGED" if differences else "UNCHANGED",
             "fixture_kinds": [old["fixture_kind"], new["fixture_kind"]],
             "universe_membership": {
                 "old_ciks": old_universe.get("ciks", []),
@@ -330,12 +360,20 @@ class ScreeningService:
             "rows": rows,
         }
         destination_path.parent.mkdir(parents=True, exist_ok=True)
-        if selected_format == "json":
-            destination_path.write_text(canonical_json(payload) + "\n", encoding="utf-8")
-        elif selected_format == "csv":
-            _write_csv(destination_path, payload)
-        else:
-            _write_xlsx(destination_path, payload)
+        temporary = destination_path.parent / (
+            f".{destination_path.name}.partial-{uuid.uuid4().hex}"
+        )
+        try:
+            if selected_format == "json":
+                temporary.write_text(canonical_json(payload) + "\n", encoding="utf-8")
+            elif selected_format == "csv":
+                _write_csv(temporary, payload)
+            else:
+                _write_xlsx(temporary, payload)
+            temporary.rename(destination_path)
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
         manifest = {
             "export_version": EXPORT_VERSION,
             "run_id": run_id,
@@ -353,7 +391,11 @@ class ScreeningService:
             "size": destination_path.stat().st_size,
             "canonical_payload_hash": digest_value(payload),
         }
-        return self.store.record_export(manifest)
+        try:
+            return self.store.record_export(manifest)
+        except Exception:
+            destination_path.unlink(missing_ok=True)
+            raise
 
     def _dataset(self, dataset_id: str) -> ScreeningDatasetReader:
         try:
@@ -378,7 +420,9 @@ class ScreeningService:
             if predicate.get("operator") not in OPERATORS:
                 raise ValueError("unsupported predicate operator")
             _decimal(predicate.get("threshold"))
-            require_string(predicate.get("definition_version"), "metric definition version")
+            definition_version = require_string(
+                predicate.get("definition_version"), "metric definition version"
+            )
             if reader is not None:
                 supports = [row for row in reader.metric_support if row["metric_id"] == metric_id]
                 if not supports:
@@ -386,16 +430,28 @@ class ScreeningService:
                 if not any(row["execution_supported"] for row in supports):
                     reason = sorted({row.get("reason") for row in supports})
                     raise ValueError(f"metric is unavailable for execution: {reason}")
+                if definition_version not in {
+                    row.get("definition_version") for row in supports
+                }:
+                    raise ValueError("metric definition version is not prepared")
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate metric predicate")
         _validate_universe(content.get("universe"))
         _validate_period_policy(content.get("period_policy"))
         columns = content.get("columns")
-        if not isinstance(columns, list) or not columns or any(not isinstance(v, str) for v in columns):
+        if (
+            not isinstance(columns, list)
+            or not columns
+            or any(value not in VISIBLE_COLUMNS for value in columns)
+            or len(columns) != len(set(columns))
+        ):
             raise ValueError("screen columns must be a nonempty string list")
         sort = content.get("sort")
         if not isinstance(sort, dict) or sort.get("direction") not in {"ASC", "DESC"}:
             raise ValueError("invalid screen sort")
+        sort_column = require_string(sort.get("column"), "sort column")
+        if sort_column.startswith("metric:") and sort_column.split(":", 1)[1] not in ids:
+            raise ValueError("metric sort column requires a matching predicate")
 
     def _evaluate_company(
         self, reader: ScreeningDatasetReader, company: dict[str, Any], content: dict[str, Any]
@@ -403,7 +459,11 @@ class ScreeningService:
         evaluations = []
         for predicate in content["predicates"]:
             observation = _find_observation(
-                reader, company["cik"], predicate["metric_id"], content["period_policy"]
+                reader,
+                company["cik"],
+                predicate["metric_id"],
+                content["period_policy"],
+                definition_version=predicate["definition_version"],
             )
             evaluations.append(_evaluate_predicate(predicate, observation))
         valid_fail = any(row["result"] == "FAIL" for row in evaluations)
@@ -446,11 +506,19 @@ def _find_observation(
     cik: str,
     metric_id: str,
     policy: dict[str, Any],
+    *,
+    definition_version: str | None = None,
 ) -> dict[str, Any] | None:
     rows = [
         row for row in reader.observations
         if row["cik"] == cik and row["metric_id"] == metric_id and row["period_class"] == "FY"
     ]
+    if definition_version is not None:
+        rows = [
+            row
+            for row in rows
+            if row.get("metric_definition_version") == definition_version
+        ]
     if policy["mode"] == "FIXED_FISCAL_YEAR":
         rows = [row for row in rows if row["fiscal_year"] == policy["fiscal_year"]]
     else:
@@ -580,7 +648,19 @@ def _write_csv(path: Path, payload: dict[str, Any]) -> None:
     with path.open("w", newline="", encoding="utf-8-sig") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields)
         writer.writeheader()
-        writer.writerow({"record_type": "EXPORT", "record_json": _csv_safe({key: value for key, value in payload.items() if key != "rows"})})
+        writer.writerow(
+            {
+                "record_type": "EXPORT",
+                "record_json": _csv_safe(
+                    {
+                        "metadata": {
+                            key: value for key, value in payload.items() if key != "rows"
+                        },
+                        "canonical_payload_hash": digest_value(payload),
+                    }
+                ),
+            }
+        )
         for row in payload["rows"]:
             writer.writerow({
                 "record_type": "ROW",
@@ -606,7 +686,14 @@ def _write_xlsx(path: Path, payload: dict[str, Any]) -> None:
         rows_sheet.append([str(row.get(key, "")) if key != "record_json" else canonical_json(row) for key in headers])
     metadata = workbook.create_sheet("Metadata")
     metadata.append(["key", "value"])
-    metadata.append(["canonical_export", canonical_json(payload)])
+    for key, value in (
+        ("export_version", payload["export_version"]),
+        ("scope", payload["scope"]),
+        ("selected_ciks_json", canonical_json(payload["selected_ciks"])),
+        ("run_json", canonical_json(payload["run"])),
+        ("canonical_payload_hash", digest_value(payload)),
+    ):
+        metadata.append([key, value])
     for sheet in workbook.worksheets:
         sheet.freeze_panes = "A2"
         for row in sheet.iter_rows():

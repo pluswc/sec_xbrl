@@ -126,6 +126,7 @@ class ScreeningStore:
         normalized = _revision_content(content)
         created_at = _now()
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             current = connection.execute(
                 "SELECT revision_id,revision_number FROM screen_revisions "
                 "WHERE screen_id=? ORDER BY revision_number DESC LIMIT 1",
@@ -225,11 +226,14 @@ class ScreeningStore:
         if normalized.get("output_hash") not in {None, output_hash}:
             raise ValueError("run output hash does not match rows")
         normalized["output_hash"] = output_hash
+        universe = self.universe(universe_id)
+        _validate_run_rows(normalized, universe["content"])
         run_id = "run-" + digest_value(
             {"payload": normalized, "nonce": uuid.uuid4().hex}
         )[:24]
         created_at = _now()
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             if connection.execute(
                 "SELECT 1 FROM screen_revisions WHERE revision_id=?", (revision_id,)
             ).fetchone() is None:
@@ -267,6 +271,7 @@ class ScreeningStore:
         if row is None:
             raise ValueError("screen run does not exist")
         payload = json.loads(row["payload_json"])
+        universe = self.universe(row["universe_snapshot_id"])
         if (
             revision is None
             or payload.get("revision_id") != row["revision_id"]
@@ -288,6 +293,7 @@ class ScreeningStore:
             != row["input_hash"]
         ):
             raise ValueError("screen run output integrity mismatch")
+        _validate_run_rows(payload, universe["content"])
         return {"run_id": row["run_id"], "created_at": row["created_at"], **payload}
 
     def list_runs(self, revision_id: str | None = None) -> list[dict[str, Any]]:
@@ -322,6 +328,7 @@ class ScreeningStore:
             raise ValueError("duplicate decision evidence ID")
         created_at = _now()
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             if connection.execute(
                 "SELECT 1 FROM screen_runs WHERE run_id=?", (run_id,)
             ).fetchone() is None:
@@ -415,6 +422,32 @@ class ScreeningStore:
             )
         return {"export_id": export_id, "created_at": created_at, **normalized}
 
+    def export_for_path(self, path: Path | str) -> dict[str, Any]:
+        target = Path(path).absolute()
+        with self._connect() as connection:
+            rows = list(connection.execute("SELECT * FROM export_manifests"))
+        matches = []
+        for row in rows:
+            manifest = json.loads(row["manifest_json"])
+            if manifest.get("path") == str(target):
+                matches.append((row, manifest))
+        if len(matches) != 1:
+            raise ValueError("export is not uniquely registered")
+        row, manifest = matches[0]
+        if (
+            row["export_id"] != "export-" + digest_value(manifest)[:24]
+            or manifest.get("run_id") != row["run_id"]
+            or manifest.get("scope") != row["scope"]
+            or manifest.get("format") != row["format"]
+            or not target.is_file()
+            or target.is_symlink()
+            or manifest.get("sha256") != sha256_file(target)
+            or manifest.get("size") != target.stat().st_size
+        ):
+            raise ValueError("export artifact integrity mismatch")
+        self.run(row["run_id"])
+        return {"export_id": row["export_id"], "created_at": row["created_at"], **manifest}
+
     def integrity_check(self) -> None:
         with self._connect() as connection:
             result = connection.execute("PRAGMA integrity_check").fetchone()[0]
@@ -447,6 +480,7 @@ class ScreeningStore:
                 or manifest.get("format") != row["format"]
             ):
                 raise ValueError("export manifest integrity mismatch")
+            self.run(row["run_id"])
 
     def _initialize(self) -> None:
         with self._connect() as connection:
@@ -590,6 +624,41 @@ def _screen_row(row: sqlite3.Row) -> dict[str, Any]:
         "content_hash": values["content_hash"],
         "created_at": values.get("revised_at", values["created_at"]),
     }
+
+
+def _validate_run_rows(payload: dict[str, Any], universe: dict[str, Any]) -> None:
+    rows = payload.get("rows")
+    counts = payload.get("counts")
+    ciks = universe.get("ciks")
+    if (
+        not isinstance(rows, list)
+        or any(not isinstance(row, dict) for row in rows)
+        or not isinstance(counts, dict)
+        or not isinstance(ciks, list)
+        or len(ciks) != len(set(ciks))
+    ):
+        raise ValueError("screen run rows or universe are malformed")
+    row_ciks = [row.get("cik") for row in rows]
+    if len(row_ciks) != len(set(row_ciks)) or set(row_ciks) != set(ciks):
+        raise ValueError("screen run row identity differs from universe membership")
+    aggregates = {"PASS", "FAIL", "UNDETERMINED"}
+    if any(
+        row.get("aggregate") not in aggregates
+        or type(row.get("quality_blocking")) is not bool
+        for row in rows
+    ):
+        raise ValueError("screen run row status is invalid")
+    expected = {
+        "target": len(rows),
+        "pass": sum(row["aggregate"] == "PASS" for row in rows),
+        "fail": sum(row["aggregate"] == "FAIL" for row in rows),
+        "undetermined": sum(row["aggregate"] == "UNDETERMINED" for row in rows),
+        "quality_block": sum(row["quality_blocking"] for row in rows),
+    }
+    if counts != expected:
+        raise ValueError("screen run counts do not reconcile with rows")
+    if payload.get("dataset_publication_id") != universe.get("dataset_publication_id"):
+        raise ValueError("screen run dataset differs from universe snapshot")
 
 
 def _now() -> str:

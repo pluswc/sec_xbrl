@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from sec_xbrl.screening.common import require_string
+from sec_xbrl.screening.common import require_string, safe_write_directory
 from sec_xbrl.screening.service import ScreeningService
 from sec_xbrl.screening.ui import CSS, HTML, JS
 
@@ -33,8 +33,7 @@ def serve(
         raise ValueError("screening service may bind only to a loopback address")
     if type(port) is not int or not 0 <= port <= 65535:
         raise ValueError("invalid HTTP port")
-    root = Path(export_root).absolute()
-    root.mkdir(parents=True, exist_ok=True)
+    root = safe_write_directory(Path(export_root), "screening export root")
     handler = _handler(service, root)
     server = ThreadingHTTPServer((host, port), handler)
     try:
@@ -53,8 +52,7 @@ def create_server(
     """Create a loopback server for controlled callers and offline tests."""
     if not ipaddress.ip_address(host).is_loopback:
         raise ValueError("screening service may bind only to a loopback address")
-    root = Path(export_root).absolute()
-    root.mkdir(parents=True, exist_ok=True)
+    root = safe_write_directory(Path(export_root), "screening export root")
     return ThreadingHTTPServer((host, port), _handler(service, root))
 
 
@@ -130,6 +128,7 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
                 path = export_root / name
                 if not path.is_file() or path.is_symlink() or path.resolve().parent != export_root.resolve():
                     raise ValueError("export does not exist")
+                service.store.export_for_path(path)
                 self._bytes(path.read_bytes(), mimetypes.guess_type(path.name)[0] or "application/octet-stream")
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)

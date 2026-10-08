@@ -3,9 +3,12 @@
 ## 경계와 준비물
 
 이 대시보드는 준비된 annual `AnalysisClient` bundle을 screening 전용 immutable
-publication으로 한 번 발행한 뒤 읽는다. 웹 service는 SEC 문서, Raw Parquet,
-history publication 또는 Arelle을 열지 않는다. 재무값·period·mapping·quality와
-trace는 upstream publication의 값을 그대로 보존한다.
+publication으로 한 번 발행한 뒤 읽는다. 일반 화면 query와 실행은 screening
+publication만 읽는다. service 시작과 `status`의 integrity 단계는 선언된
+completion/metadata/analysis parent의 manifest, prepared file hash와 U5 snapshot을
+read-only로 다시 대조한다. 이 단계도 SEC 문서나 Raw XML을 읽지 않고 Arelle,
+filing selection, recast 또는 metric 계산을 실행하지 않는다. 재무값·period·
+mapping·quality와 trace는 upstream publication의 값을 그대로 보존한다.
 
 v1에서 실행 가능한 지표는 실제 prepared coverage가 있는 직접 보고 annual
 `revenue`, `cfo`, `operating_income`, `net_income`이다. `revenue_growth`와
@@ -43,8 +46,10 @@ PYTHONPATH="$PWD/src" .venv/bin/python -m sec_xbrl.screening status \
 목적지는 새 경로여야 한다. publisher는 completion/metadata/analysis manifest,
 모든 analysis data file, history binding과 21개의 U5 snapshot을 검증하고 새
 목적지에 원자적으로 발행한다. 기존 publication을 고치거나 덮어쓰지 않는다.
-`status`는 SEC/parser/metric 계산 없이 manifest와 모든 파일 hash, count,
-unique grain, source snapshot identity를 다시 확인한다.
+`status`는 SEC/parser/metric 계산 없이 자체 manifest/file hash/count/unique grain,
+prepared parent의 exact file set/hash, source snapshot의 cell/context/trace identity를
+다시 확인한다. source anchor가 없거나 바뀐 `ACTUAL_PREPARED` publication은
+자체 JSON을 일관되게 다시 hash했더라도 거부한다.
 
 출력은 다음과 같다.
 
@@ -104,7 +109,8 @@ SQLite commit 뒤에만 나온다. 서버와 브라우저를 닫은 뒤 같은 j
 blocking/unknown이 없으면 `PASS`, 나머지는 `UNDETERMINED`다.
 
 상단 context strip은 financial as-of, 기간, universe, saved revision, 짧은 run과
-review 상태를 보여준다. 긴 publication/hash는 `Publication provenance`에서
+review 상태를 보여준다. 긴 publication/hash와 parser·mapping·selection·period·
+metric version vector는 `자료 출처·버전`에서
 확인한다. 결과 행을 열면 값, unit, 실제 period start/context end, mapping,
 Fact/accession과 전체 prepared trace가 오른쪽 패널에 나온다. 같은 FY label의 두
 회사가 같은 날짜라는 뜻은 아니다.

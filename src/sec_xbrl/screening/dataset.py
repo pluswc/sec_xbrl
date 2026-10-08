@@ -6,9 +6,11 @@ choose filings, approve mappings, or calculate financial metrics.
 
 from __future__ import annotations
 
+import json
 import shutil
 import uuid
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +18,7 @@ from sec_xbrl.analysis import open_analysis
 from sec_xbrl.company_metadata import CompanyMetadataReader
 from sec_xbrl.screening.common import (
     atomic_replace,
+    canonical_json,
     contained_file,
     digest_value,
     read_json,
@@ -74,10 +77,13 @@ def publish_screening_dataset(
     if completion.readiness.get("dates", {}).get("financial_as_of") != config["financial_as_of"]:
         raise ValueError("completion financial-as-of differs from screening config")
 
+    completion_rows = completion.readiness["companies"]
     completion_companies = {
         require_cik(row.get("cik"), "completion company CIK"): row
-        for row in completion.readiness["companies"]
+        for row in completion_rows
     }
+    if len(completion_companies) != len(completion_rows):
+        raise ValueError("completion publication contains duplicate companies")
     collection_sources = {
         require_cik(row.get("cik"), "completion source CIK"): row
         for row in completion.readiness.get("sources", {}).get("collection_companies", [])
@@ -99,6 +105,7 @@ def publish_screening_dataset(
         "analysis_versions": set(),
         "source_publications": set(),
         "review_cutoffs": set(),
+        "source_observed_times": set(),
         "metric_definition_versions": set(),
         "concept_mapping_versions": set(),
         "selection_rule_versions": set(),
@@ -112,13 +119,7 @@ def publish_screening_dataset(
         completion_row = completion_companies[cik]
         if completion_row.get("ticker") != ticker:
             raise ValueError(f"{ticker}: completion ticker/CIK identity mismatch")
-        if (
-            completion_row.get("collection_state") != "READY"
-            or completion_row.get("held_filings") != completion_row.get("selected_filings")
-            or completion_row.get("pending_filings") != 0
-            or completion_row.get("failed_filings") != 0
-            or completion_row.get("industry_status") != "CLASSIFIED"
-        ):
+        if not _ready_completion_company(completion_row):
             raise ValueError(f"{ticker}: completion company collection/identity is not ready")
         candidate = metadata_by_cik.get(cik)
         if candidate is None or ticker not in candidate.tickers:
@@ -234,12 +235,25 @@ def publish_screening_dataset(
 
     _assert_unique(company_rows, ("cik",), "company")
     _assert_unique(support_rows, ("cik", "metric_id"), "metric support")
+    for metric_id in SUPPORTED_METRICS:
+        if not any(
+            row["metric_id"] == metric_id and row["execution_supported"]
+            for row in support_rows
+        ):
+            raise ValueError(f"screening metric has no available cohort coverage: {metric_id}")
+    for support in support_rows:
+        _add_version(
+            common_versions["metric_definition_versions"],
+            support.get("definition_version"),
+        )
     _assert_unique(
         observations,
         ("cik", "metric_id", "fiscal_year", "period_class", "view"),
         "metric observation",
     )
     metadata_rows = [_metadata_row(row, set(requested_ciks)) for row in metadata_candidates]
+    for row in metadata_rows:
+        _add_version(common_versions["source_observed_times"], row.get("observed_at"))
 
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     staging = destination_path.parent / f".{destination_path.name}.partial-{uuid.uuid4().hex}"
@@ -266,15 +280,7 @@ def publish_screening_dataset(
         accuracy = completion.manifest.get("sources", {}).get("accuracy_assessment")
         if not isinstance(accuracy, dict) or accuracy.get("state") != "PASS":
             raise ValueError("completion publication lacks a passing parser accuracy assessment")
-        versions = {key: sorted(values) for key, values in common_versions.items()}
-        versions.update(
-            {
-                "parser_version": accuracy.get("parser_version"),
-                "parser_rule_version": accuracy.get("parser_rule_version"),
-                "parser_frozen_commit_sha": accuracy.get("frozen_commit_sha"),
-                "accuracy_assessment_sha256": accuracy.get("sha256"),
-            }
-        )
+        versions = _version_manifest(common_versions, accuracy)
         identity = {
             "version": VERSION,
             "dataset_id": config["dataset_id"],
@@ -328,6 +334,7 @@ class ScreeningDatasetReader:
         if not allow_staging and self.root.name.startswith(".") and ".partial-" in self.root.name:
             raise ValueError("unpublished screening staging directory")
         self.manifest_path = contained_file(self.root, MANIFEST, "screening manifest")
+        self._manifest_sha256 = sha256_file(self.manifest_path)
         self.manifest = read_json(self.manifest_path, "screening manifest")
         if self.manifest.get("version") != VERSION:
             raise ValueError("unsupported screening dataset version")
@@ -358,10 +365,12 @@ class ScreeningDatasetReader:
         self.metadata = self._list(METADATA)
         self.metric_support = self._list(SUPPORT)
         self.observations = self._list(OBSERVATIONS)
+        self._snapshot_cache: dict[str, dict[str, Any]] = {}
         self._validate_records()
         self._validate_external_sources()
 
     def verify_all(self) -> dict[str, Any]:
+        self._verify_current_publication_files()
         return {
             "publication_id": self.publication_id,
             "dataset_id": self.manifest["dataset_id"],
@@ -370,13 +379,28 @@ class ScreeningDatasetReader:
             "financial_as_of": self.manifest["financial_as_of"],
             "counts": dict(self.manifest["counts"]),
             "state": "VERIFIED",
+            "verification_scope": "CURRENT_PUBLICATION_FILES; SOURCE_ANCHORS_AT_READER_OPEN",
         }
 
     def source_snapshot(self, cik: str) -> dict[str, Any]:
         cik = require_cik(cik)
+        if cik in self._snapshot_cache:
+            return json.loads(canonical_json(self._snapshot_cache[cik]))
         company = self.company(cik)
         relative = f"source_snapshots/{cik}/{company['source_snapshot_id']}.json"
-        return read_json(contained_file(self.root, relative, "source snapshot"), "source snapshot")
+        path = contained_file(self.root, relative, "source snapshot")
+        info = self.manifest["files"].get(relative)
+        if (
+            not isinstance(info, dict)
+            or info.get("sha256") != sha256_file(path)
+            or info.get("size") != path.stat().st_size
+        ):
+            raise ValueError("source snapshot changed after publication verification")
+        snapshot = read_json(path, "source snapshot")
+        if not isinstance(snapshot, dict):
+            raise TypeError("source snapshot must be an object")
+        self._snapshot_cache[cik] = snapshot
+        return json.loads(canonical_json(snapshot))
 
     def company(self, cik: str) -> dict[str, Any]:
         cik = require_cik(cik)
@@ -391,6 +415,22 @@ class ScreeningDatasetReader:
             raise ValueError(f"{relative} must contain a list of objects")
         return value
 
+    def _verify_current_publication_files(self) -> None:
+        if sha256_file(self.manifest_path) != self._manifest_sha256:
+            raise ValueError("screening manifest changed after reader verification")
+        files = self.manifest["files"]
+        actual = {
+            str(path.relative_to(self.root))
+            for path in self.root.rglob("*")
+            if path.is_file()
+        }
+        if actual != {MANIFEST, *files} or any(path.is_symlink() for path in self.root.rglob("*")):
+            raise ValueError("screening publication file set changed after reader verification")
+        for relative, info in files.items():
+            path = contained_file(self.root, relative, "screening data")
+            if info.get("sha256") != sha256_file(path) or info.get("size") != path.stat().st_size:
+                raise ValueError("screening data changed after reader verification")
+
     def _validate_records(self) -> None:
         counts = self.manifest.get("counts", {})
         expected = {
@@ -401,6 +441,8 @@ class ScreeningDatasetReader:
         }
         if any(counts.get(key) != value for key, value in expected.items()):
             raise ValueError("screening record count mismatch")
+        if counts.get("source_snapshots") != len(self.companies):
+            raise ValueError("screening source snapshot count mismatch")
         _assert_unique(self.companies, ("cik",), "company")
         _assert_unique(self.metadata, ("cik",), "metadata")
         _assert_unique(self.metric_support, ("cik", "metric_id"), "metric support")
@@ -414,6 +456,20 @@ class ScreeningDatasetReader:
             raise ValueError("screening company membership differs from manifest")
         if any(row.get("cik") not in ciks for row in self.metric_support + self.observations):
             raise ValueError("screening record references an unprepared company")
+        for company in self.companies:
+            require_cik(company.get("cik"), "screening company CIK")
+            require_ticker(company.get("ticker"), "screening company ticker")
+        for support in self.metric_support:
+            require_string(support.get("metric_id"), "support metric ID")
+            require_string(support.get("definition_version"), "support definition version")
+            if type(support.get("execution_supported")) is not bool:
+                raise TypeError("metric support execution flag must be boolean")
+        for observation in self.observations:
+            require_string(observation.get("metric_id"), "observation metric ID")
+            if type(observation.get("fiscal_year")) is not int:
+                raise TypeError("observation fiscal year must be an integer")
+            if observation.get("availability_status") not in {"AVAILABLE", "UNAVAILABLE"}:
+                raise ValueError("observation availability status is invalid")
         if any(
             row.get("financial_as_of") != self.manifest["financial_as_of"]
             for row in self.observations
@@ -495,6 +551,15 @@ class ScreeningDatasetReader:
             != self.manifest["configured_ciks"]
         ):
             raise ValueError("screening completion source scope changed")
+        completion_by_cik = {
+            require_cik(row.get("cik"), "completion company CIK"): row
+            for row in completion.readiness["companies"]
+        }
+        if len(completion_by_cik) != len(completion.readiness["companies"]):
+            raise ValueError("screening completion contains duplicate companies")
+        accuracy = completion.manifest.get("sources", {}).get("accuracy_assessment")
+        if not isinstance(accuracy, dict) or accuracy.get("state") != "PASS":
+            raise ValueError("screening completion lacks a passing parser assessment")
 
         metadata_root = real_directory(
             Path(metadata_source.get("root", "")), "screening metadata source"
@@ -519,11 +584,39 @@ class ScreeningDatasetReader:
         if set(source_by_cik) != set(self.manifest["configured_ciks"]):
             raise ValueError("screening analysis source membership changed")
         company_by_cik = {row["cik"]: row for row in self.companies}
+        observed_versions: dict[str, set[str]] = {
+            "analysis_versions": set(),
+            "source_publications": set(),
+            "review_cutoffs": set(),
+            "source_observed_times": set(),
+            "metric_definition_versions": set(),
+            "concept_mapping_versions": set(),
+            "selection_rule_versions": set(),
+            "classification_rule_versions": set(),
+            "accession_version_ledger_ids": set(),
+            "raw_concept_taxonomy_versions": set(),
+        }
+        for observation in self.observations:
+            _collect_observation_versions(observed_versions, observation)
+        for support in self.metric_support:
+            _add_version(
+                observed_versions["metric_definition_versions"],
+                support.get("definition_version"),
+            )
+        for row in self.metadata:
+            _add_version(observed_versions["source_observed_times"], row.get("observed_at"))
         for cik in self.manifest["configured_ciks"]:
             source = source_by_cik[cik]
             configured = config_by_cik[cik]
             if source.get("ticker") != configured["ticker"]:
                 raise ValueError("screening analysis source company identity changed")
+            if (
+                company_by_cik[cik]["ticker"] != configured["ticker"]
+                or completion_by_cik[cik].get("ticker") != configured["ticker"]
+            ):
+                raise ValueError("screening company ticker differs across governed sources")
+            if not _ready_completion_company(completion_by_cik[cik]):
+                raise ValueError("screening completion company is not fully prepared")
             root = real_directory(Path(source.get("root", "")), "screening analysis source")
             if root != Path(configured["analysis_root"]).resolve():
                 raise ValueError("screening analysis source path differs from config")
@@ -540,6 +633,9 @@ class ScreeningDatasetReader:
             ):
                 raise ValueError("screening analysis publication scope changed")
             company_info = client.manifest["companies"][ticker]
+            _add_version(observed_versions["analysis_versions"], client.manifest.get("version"))
+            _add_version(observed_versions["source_publications"], source.get("source_publication"))
+            _add_version(observed_versions["review_cutoffs"], company_info.get("review_cutoff"))
             if (
                 company_info.get("as_of") != self.manifest["financial_as_of"]
                 or company_info.get("source_publication") != source.get("source_publication")
@@ -573,6 +669,8 @@ class ScreeningDatasetReader:
                 or company.get("sic_description") != metadata_company.get("sic_description")
             ):
                 raise ValueError("screening company identity differs from metadata source")
+        if self.manifest.get("versions") != _version_manifest(observed_versions, accuracy):
+            raise ValueError("screening governed version vector differs from prepared sources")
 
 
 def _validate_config(value: Any) -> dict[str, Any]:
@@ -643,6 +741,13 @@ def _observation(
         and not dimensions
         and _is_usd_unit(unit)
     )
+    if available:
+        try:
+            numeric = Decimal(str(value))
+        except (InvalidOperation, ValueError) as exc:
+            raise ValueError("screenable prepared value is not a decimal") from exc
+        if not numeric.is_finite():
+            raise ValueError("screenable prepared value is not finite")
     if not available:
         reason = reason or _unavailable_reason(status, value, quality_status, dimensions, unit)
     source_inputs = lineage.get("source_inputs") or [lineage]
@@ -653,6 +758,20 @@ def _observation(
             if item.get("accession") or item.get("source_filing_id")
         }
     )
+    if available and (
+        type(cell.get("fiscal_year")) is not int
+        or not isinstance(cell.get("source_fact_id"), str)
+        or not cell["source_fact_id"]
+        or not source_filings
+        or not isinstance(cell.get("start"), str)
+        or not isinstance(cell.get("end"), str)
+        or not isinstance(provenance, dict)
+        or not provenance
+        or not isinstance(lineage.get("concept_mapping_version"), str)
+        or not isinstance(lineage.get("selection_rule_version"), str)
+        or not isinstance(lineage.get("classification_rule_version"), str)
+    ):
+        raise ValueError("available screening value lacks governed source trace")
     return {
         "cik": cik,
         "ticker": ticker,
@@ -716,11 +835,47 @@ def _add_version(target: set[str], value: Any) -> None:
         target.add(value)
 
 
+def _ready_completion_company(row: dict[str, Any]) -> bool:
+    return (
+        row.get("collection_state") == "READY"
+        and row.get("held_filings") == row.get("selected_filings")
+        and row.get("pending_filings") == 0
+        and row.get("failed_filings") == 0
+        and row.get("industry_status") == "CLASSIFIED"
+    )
+
+
+def _version_manifest(
+    versions: dict[str, set[str]], accuracy: dict[str, Any]
+) -> dict[str, Any]:
+    result: dict[str, Any] = {key: sorted(values) for key, values in versions.items()}
+    result.update(
+        {
+            "parser_version": require_string(
+                accuracy.get("parser_version"), "accuracy parser version"
+            ),
+            "parser_rule_version": require_string(
+                accuracy.get("parser_rule_version"), "accuracy parser rule version"
+            ),
+            "parser_frozen_commit_sha": require_string(
+                accuracy.get("frozen_commit_sha"), "accuracy parser frozen commit"
+            ),
+            "accuracy_assessment_sha256": require_string(
+                accuracy.get("sha256"), "accuracy assessment hash"
+            ),
+        }
+    )
+    return result
+
+
 def _is_usd_unit(unit: Any) -> bool:
     if not isinstance(unit, list) or len(unit) != 2:
         return False
     numerator, denominator = unit
-    return "iso4217:USD" in str(numerator) and str(denominator) in {"[]", "None", ""}
+    return numerator in (["iso4217:USD"], '["iso4217:USD"]') and denominator in (
+        [],
+        "[]",
+    )
 
 
 def _unavailable_reason(

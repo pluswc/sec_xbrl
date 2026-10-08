@@ -57,7 +57,21 @@ def test_loopback_http_native_ui_origin_and_restart(
             body={"revision_id": revision["revision_id"], "dataset_id": "fixture"},
             origin=base,
         )
-        assert status == 201 and json.loads(body)["counts"]["target"] == 3
+        run = json.loads(body)
+        assert status == 201 and run["counts"]["target"] == 3
+        status, body = _request(
+            base + f"/api/runs/{run['run_id']}/exports",
+            body={"scope": "FULL", "format": "csv", "selected_ciks": None},
+            origin=base,
+        )
+        export = json.loads(body)
+        assert status == 201
+        status, downloaded = _request(base + export["download_url"])
+        assert status == 200 and downloaded.startswith(b"\xef\xbb\xbf")
+        private = tmp_path / "exports" / "unregistered.txt"
+        private.write_text("not an export", encoding="utf-8")
+        status, _ = _request(base + "/exports/unregistered.txt")
+        assert status == 400
         status, body = _request(
             base + "/api/screens",
             body={"name": "외부 origin", "content": revision_content},
@@ -78,6 +92,12 @@ def test_server_rejects_non_loopback(screening_dataset: Path, tmp_path: Path) ->
     service = ScreeningService({"fixture": screening_dataset}, ScreeningStore(tmp_path / "db.sqlite"))
     with pytest.raises(ValueError, match="loopback"):
         create_server(service, export_root=tmp_path / "exports", host="0.0.0.0")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    linked = tmp_path / "linked-exports"
+    linked.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlink"):
+        create_server(service, export_root=linked)
 
 
 def test_save_failure_has_no_false_commit(
