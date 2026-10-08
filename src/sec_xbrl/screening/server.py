@@ -6,6 +6,7 @@ import ipaddress
 import json
 import mimetypes
 import re
+import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -153,7 +154,10 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
                 run_id = match.group(1)
                 selected_format = require_string(body.get("format"), "format").lower()
                 scope = require_string(body.get("scope"), "scope").upper()
-                name = f"{run_id}-{scope.lower()}-{selected_format}.{selected_format}"
+                name = (
+                    f"{run_id}-{scope.lower()}-{selected_format}-"
+                    f"{uuid.uuid4().hex}.{selected_format}"
+                )
                 result = service.export_run(
                     run_id, export_root / name, scope=scope,
                     selected_ciks=body.get("selected_ciks"), format=selected_format,

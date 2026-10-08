@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
+import re
+import sqlite3
 import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 import pytest
+from openpyxl import load_workbook
 
 from sec_xbrl.screening.server import create_server
 from sec_xbrl.screening.service import ScreeningService
@@ -102,6 +107,89 @@ def test_server_rejects_non_loopback(screening_dataset: Path, tmp_path: Path) ->
         create_server(service, export_root=linked)
 
 
+def test_http_repeated_and_selected_exports_remain_immutable(
+    screening_dataset: Path, revision_content: dict, tmp_path: Path
+) -> None:
+    store_path = tmp_path / "journal.sqlite"
+    export_root = tmp_path / "exports"
+    service = ScreeningService({"fixture": screening_dataset}, ScreeningStore(store_path))
+    revision = service.create_screen("반복 내보내기", revision_content)
+    run = service.execute(revision["revision_id"], "fixture")
+    expected_rows = {row["cik"]: row for row in run["rows"]}
+    server = create_server(service, export_root=export_root)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    exports: list[tuple[dict, bytes]] = []
+    try:
+        for selected_format in ("csv", "xlsx"):
+            for _repeat in range(2):
+                exports.append(
+                    _http_export(
+                        base,
+                        run["run_id"],
+                        scope="FULL",
+                        selected_format=selected_format,
+                        selected_ciks=None,
+                    )
+                )
+        for selected_format, selected_ciks in (
+            ("csv", ["0000000001"]),
+            ("xlsx", ["0000000002"]),
+        ):
+            exports.append(
+                _http_export(
+                    base,
+                    run["run_id"],
+                    scope="SELECTED",
+                    selected_format=selected_format,
+                    selected_ciks=selected_ciks,
+                )
+            )
+
+        urls = [manifest["download_url"] for manifest, _data in exports]
+        assert len(urls) == len(set(urls)) == 6
+        assert all(
+            re.fullmatch(
+                rf"/exports/{re.escape(run['run_id'])}-(?:full|selected)-"
+                r"(?:csv|xlsx)-[0-9a-f]{32}\.(?:csv|xlsx)",
+                url,
+            )
+            for url in urls
+        )
+        for manifest, data in exports:
+            scope, rows = _export_payload(manifest["format"], data)
+            expected_ciks = (
+                set(expected_rows)
+                if manifest["scope"] == "FULL"
+                else set(manifest["selected_ciks"])
+            )
+            assert scope == manifest["scope"]
+            assert {row["cik"] for row in rows} == expected_ciks
+            assert rows == [row for row in run["rows"] if row["cik"] in expected_ciks]
+
+        for manifest, original in exports:
+            status, downloaded = _request(base + manifest["download_url"])
+            assert status == 200 and downloaded == original
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    with sqlite3.connect(store_path) as connection:
+        stored = [
+            json.loads(row[0])
+            for row in connection.execute(
+                "SELECT manifest_json FROM export_manifests ORDER BY rowid"
+            )
+        ]
+    assert len(stored) == 6
+    assert len({manifest["path"] for manifest in stored}) == 6
+    assert all(Path(manifest["path"]).is_file() for manifest in stored)
+    assert [manifest["scope"] for manifest in stored].count("FULL") == 4
+    assert [manifest["scope"] for manifest in stored].count("SELECTED") == 2
+
+
 def test_save_failure_has_no_false_commit(
     screening_dataset: Path,
     revision_content: dict,
@@ -122,3 +210,51 @@ def test_save_failure_has_no_false_commit(
         service.create_screen("저장 실패", revision_content)
     recovered = ScreeningStore(tmp_path / "db.sqlite")
     assert recovered.list_screens() == []
+
+
+def _http_export(
+    base: str,
+    run_id: str,
+    *,
+    scope: str,
+    selected_format: str,
+    selected_ciks: list[str] | None,
+) -> tuple[dict, bytes]:
+    status, body = _request(
+        base + f"/api/runs/{run_id}/exports",
+        body={
+            "scope": scope,
+            "format": selected_format,
+            "selected_ciks": selected_ciks,
+        },
+        origin=base,
+    )
+    assert status == 201
+    manifest = json.loads(body)
+    status, downloaded = _request(base + manifest["download_url"])
+    assert status == 200
+    return manifest, downloaded
+
+
+def _export_payload(selected_format: str, data: bytes) -> tuple[str, list[dict]]:
+    if selected_format == "csv":
+        records = list(csv.DictReader(io.StringIO(data.decode("utf-8-sig"))))
+        header = json.loads(records[0]["record_json"])
+        rows = [
+            json.loads(record["record_json"])
+            for record in records
+            if record["record_type"] == "ROW"
+        ]
+        return header["metadata"]["scope"], rows
+    workbook = load_workbook(io.BytesIO(data), read_only=True, data_only=False)
+    metadata = {
+        row[0].value: row[1].value
+        for row in workbook["Metadata"].iter_rows(min_row=2)
+    }
+    headers = [cell.value for cell in workbook["Rows"][1]]
+    record_index = headers.index("record_json")
+    rows = [
+        json.loads(row[record_index].value)
+        for row in workbook["Rows"].iter_rows(min_row=2)
+    ]
+    return metadata["scope"], rows

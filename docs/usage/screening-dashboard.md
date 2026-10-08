@@ -161,7 +161,10 @@ old run을 열어도 full rows/hash는 그대로이고 같은 revision을 새 da
 full/selected CSV와 XLSX는 별도 `screen-run-export-v1`이다. export는 run/revision/
 universe/publication/date/version, 전 row의 status·unknown·reason과 순서를
 보존한다. CSV와 XLSX의 text는 formula로 실행되지 않는다. 같은 immutable
-목적지 이름을 다시 쓰려 하면 실패한다.
+목적지 이름을 다시 쓰려 하면 실패한다. 직접 Python API에서는 caller가 매번 새
+목적지를 제공해야 한다. 화면과 HTTP API는 요청마다 안전한 새 파일 이름을
+발급하므로 같은 full export를 다시 받거나 같은 run에서 다른 selected subset을
+받아도 이전 파일과 `ExportManifest`를 덮어쓰지 않는다.
 
 ## backup과 restore
 
