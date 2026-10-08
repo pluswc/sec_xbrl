@@ -132,6 +132,12 @@ PowerShell에서 `Ctrl+C`를 눌러 Windows listener와 relay를 함께 닫는�
 SQLite commit 뒤에만 나온다. 서버와 브라우저를 닫은 뒤 같은 journal로 다시
 실행하면 저장 조건, frozen run, 판단 event를 다시 연다.
 
+새 screen config의 `columns`에는 화면 group 이름 `company`, `sic`, `aggregate`,
+`predicates`, `decision`을 사용한다. 기존 API와 과거 journal의 `ticker`, `name`,
+`cik`은 `company` group으로, `sic_code`, `sic_description`은 `sic` group으로
+읽기 전용 표시 호환된다. 과거 revision JSON은 변환하거나 덮어쓰지 않으며,
+명시적으로 생략한 group은 계속 숨긴다.
+
 ## 판정과 화면 읽기
 
 각 predicate는 `PASS`, `FAIL`, `UNDETERMINED`와 reason을 가진다. 누락,

@@ -24,11 +24,11 @@
       "fiscal_year": 2025
     },
     "columns": [
-      "ticker",
-      "name",
-      "sic_code",
+      "company",
+      "sic",
       "aggregate",
-      "predicates"
+      "predicates",
+      "decision"
     ],
     "sort": {
       "column": "ticker",
