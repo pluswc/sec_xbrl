@@ -11,6 +11,7 @@ import csv
 import hashlib
 import html
 import json
+import re
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
@@ -32,6 +33,7 @@ COLLECTION_RULE_VERSIONS = {
     "history": history.HISTORY_VERSION,
     "period": "m6-fiscal-boundaries-v2",
 }
+SAFE_TICKER = re.compile(r"^[A-Z0-9](?:[A-Z0-9.^-]{0,18}[A-Z0-9])?$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,7 +142,7 @@ def _digest(path: Path) -> str:
 def load_universe_config(path: Path) -> UniverseConfig:
     """Load and validate a company-universe configuration file."""
     payload = _read_json(path)
-    if payload.get("schema_version") != 1:
+    if type(payload.get("schema_version")) is not int or payload["schema_version"] != 1:
         raise ValueError("universe config schema_version must be 1")
     universe_id = str(payload.get("universe_id", "")).strip()
     purpose = str(payload.get("purpose", "")).strip()
@@ -149,9 +151,11 @@ def load_universe_config(path: Path) -> UniverseConfig:
     collection = payload.get("collection")
     if not isinstance(collection, dict):
         raise TypeError("collection configuration is required")
-    completed = int(collection.get("completed_fiscal_years", 0))
-    analytical = int(collection.get("analytical_fiscal_years", 0))
+    completed = collection.get("completed_fiscal_years")
+    analytical = collection.get("analytical_fiscal_years")
     subsequent = collection.get("include_subsequent_quarters")
+    if type(completed) is not int or type(analytical) is not int:
+        raise TypeError("fiscal-year windows must be JSON integers")
     if completed < 1 or analytical < 1 or analytical > completed:
         raise ValueError("fiscal-year windows must satisfy 1 <= analytical <= completed")
     if subsequent is not True:
@@ -165,8 +169,10 @@ def load_universe_config(path: Path) -> UniverseConfig:
         if not isinstance(row, dict):
             raise TypeError("every company configuration must be an object")
         ticker = str(row.get("ticker", "")).strip().upper()
-        if not ticker or ticker in seen:
-            raise ValueError("company tickers must be nonempty and unique")
+        if not SAFE_TICKER.fullmatch(ticker):
+            raise ValueError(f"unsafe company ticker: {ticker!r}")
+        if ticker in seen:
+            raise ValueError("company tickers must be unique")
         seen.add(ticker)
         raw_cik = row.get("cik")
         cik = canonicalize_cik(raw_cik) if raw_cik not in (None, "") else None

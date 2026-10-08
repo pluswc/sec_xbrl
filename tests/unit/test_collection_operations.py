@@ -116,6 +116,42 @@ def test_pilot_configuration_is_external_and_has_approved_scope() -> None:
     assert {company.ticker for company in config.companies} >= {"AMD", "NVDA", "AVGO", "KO"}
 
 
+@pytest.mark.parametrize("ticker", ("../escape", "AAA/BBB", "AAA\\BBB", ".", "..", "A B"))
+def test_unsafe_ticker_is_rejected_before_filesystem_writes(tmp_path: Path, ticker: str) -> None:
+    config = _config(tmp_path / "config.json", ticker)
+    run_root = tmp_path / "run"
+    with pytest.raises(ValueError, match="unsafe company ticker"):
+        operations.prepare_universe(config_path=config, run_root=run_root)
+    assert not run_root.exists()
+    assert not (tmp_path / "escape").exists()
+
+
+@pytest.mark.parametrize("ticker", ("BRK.B", "BF-B"))
+def test_safe_punctuation_in_ticker_is_supported(tmp_path: Path, ticker: str) -> None:
+    config = operations.load_universe_config(_config(tmp_path / "config.json", ticker))
+    assert config.companies[0].ticker == ticker
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    (
+        ("completed_fiscal_years", "4", TypeError),
+        ("completed_fiscal_years", True, TypeError),
+        ("analytical_fiscal_years", 3.0, TypeError),
+        ("include_subsequent_quarters", 1, ValueError),
+    ),
+)
+def test_collection_window_types_are_strict(
+    tmp_path: Path, field: str, value: object, error: type[Exception]
+) -> None:
+    path = _config(tmp_path / "config.json", "AAA")
+    payload = json.loads(path.read_text())
+    payload["collection"][field] = value
+    _write(path, payload)
+    with pytest.raises(error):
+        operations.load_universe_config(path)
+
+
 def test_existing_plan_is_reused_without_discovery_and_plan_drift_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
