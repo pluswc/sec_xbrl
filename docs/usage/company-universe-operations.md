@@ -99,7 +99,9 @@ Status reads JSON manifests only.  It does not contact SEC, load Arelle, run
 discovery, select facts, or build panels.  It writes deterministic
 `collection_status.json`, `company_readiness.csv`, and `index.html` files under
 the collection run's `status/` directory.  Counts distinguish selected, held,
-succeeded, failed, and reused filings.  The company state and next action remain
+pending, succeeded, failed, and reused filings.  Held means validated successful
+raw outcomes already available; pending means selected minus validated success
+and validated failure.  The company state and next action remain
 separate from the capability flag so governed unavailable analytical scopes do
 not become collection failures.
 

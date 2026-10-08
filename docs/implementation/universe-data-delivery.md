@@ -158,9 +158,20 @@ converted to a missing disclosure, unavailable analytical value, or zero.
 Status reads only manifests and generated summaries.  It never calls SEC,
 Arelle, discovery, ingestion, selection, or publication code.  Counts are
 deterministic and include requested, planned/selected, held, succeeded,
-failed, and reused filings, along with CIK, ticker, requested dates, actual
+failed, pending, and reused filings, along with CIK, ticker, requested dates, actual
 available report-date range, current action, source stage, as-of date, source
 observation time when supplied, and applicable rule/version identifiers.
+`held_filings` is the number of validated successful `REUSED` or `INGESTED`
+outcomes already available.  `pending_filings` is selected minus validated
+successful and validated failed outcomes.  Invalid, duplicate, extra, or
+out-of-scope outcomes are quarantined and do not increase any success count.
+
+A `READY` build marker attests the exact plan and intake digests, history
+manifest digest, and every declared publication file and digest.  Build verifies
+the publication through `HistoryPublicationReader.verify_all()` before writing
+that marker.  Ordinary status performs only offline manifest, path, existence,
+scope, and digest checks; it does not invoke SEC, Arelle, selection, or
+calculation.
 
 ## 6. Acceptance gates
 

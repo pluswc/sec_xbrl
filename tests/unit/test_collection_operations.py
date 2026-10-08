@@ -152,6 +152,23 @@ def test_collection_window_types_are_strict(
         operations.load_universe_config(path)
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        lambda payload: payload["companies"][0].update(ticker=None),
+        lambda payload: payload["companies"][0].update(groups=["valid", True, None]),
+        lambda payload: payload.update(universe_id=True),
+    ),
+)
+def test_json_text_fields_reject_non_strings(tmp_path: Path, mutation: object) -> None:
+    path = _config(tmp_path / "config.json", "AAA")
+    payload = json.loads(path.read_text())
+    mutation(payload)
+    _write(path, payload)
+    with pytest.raises((TypeError, ValueError)):
+        operations.load_universe_config(path)
+
+
 def test_existing_plan_is_reused_without_discovery_and_plan_drift_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -170,16 +187,15 @@ def test_existing_plan_is_reused_without_discovery_and_plan_drift_fails_closed(
     status = operations.read_universe_status(manifest_path=manifest)
     assert status.prepared_companies == 1
     assert status.companies[0].source_stage == "REUSED"
-    assert status.companies[0].held_filings == 5
+    assert status.companies[0].held_filings == 0
+    assert status.companies[0].pending_filings == 5
 
     local_plan = tmp_path / "run/companies/AAA/plan.json"
     changed = json.loads(local_plan.read_text())
     changed["companies"][0]["filings"][0]["accession"] = "changed"
     _write(local_plan, changed)
-    operations.prepare_universe(config_path=config, run_root=tmp_path / "run")
-    failed = operations.read_universe_status(manifest_path=manifest).companies[0]
-    assert failed.state == "PREPARE_FAILED"
-    assert "immutable history plan changed" in str(failed.error)
+    with pytest.raises(ValueError, match="immutable plan identity differs"):
+        operations.prepare_universe(config_path=config, run_root=tmp_path / "run")
 
 
 def test_collection_request_refuses_changed_as_of_under_same_identity(tmp_path: Path) -> None:
@@ -355,6 +371,168 @@ def test_status_rejects_mismatched_preexisting_intake(tmp_path: Path) -> None:
     assert "differs from immutable company plan" in str(row.error)
 
 
+def test_incomplete_unique_intake_subset_is_partial_with_held_and_pending_counts(
+    tmp_path: Path,
+) -> None:
+    manifest = operations.prepare_universe(
+        config_path=_config(tmp_path / "config.json", "AAA"),
+        run_root=tmp_path / "run",
+        existing_plans={"AAA": _full_plan(tmp_path / "plan.json", "AAA", "0000000001")},
+    )
+    plan = json.loads((tmp_path / "run/companies/AAA/plan.json").read_text())
+    _write(
+        tmp_path / "run/companies/AAA/intake/history_intake.json",
+        {
+            "plan": plan,
+            "complete": False,
+            "filings": [{"filing": plan["companies"][0]["filings"][0], "status": "REUSED"}],
+        },
+    )
+    status = operations.read_universe_status(manifest_path=manifest)
+    row = status.companies[0]
+    assert row.state == "RAW_PARTIAL"
+    assert row.held_filings == row.succeeded_filings == row.reused_filings == 1
+    assert row.pending_filings == 4
+    assert row.failed_filings == 0
+    assert status.held_filings == 1
+    assert status.pending_filings == 4
+
+
+@pytest.mark.parametrize("case", ("full_identity", "duplicate"))
+def test_invalid_intake_outcomes_are_quarantined_without_inflating_counts(
+    tmp_path: Path, case: str
+) -> None:
+    manifest = operations.prepare_universe(
+        config_path=_config(tmp_path / "config.json", "AAA"),
+        run_root=tmp_path / "run",
+        existing_plans={"AAA": _full_plan(tmp_path / "plan.json", "AAA", "0000000001")},
+    )
+    plan = json.loads((tmp_path / "run/companies/AAA/plan.json").read_text())
+    outcomes = [
+        {"filing": row, "status": "REUSED"}
+        for row in plan["companies"][0]["filings"]
+    ]
+    if case == "full_identity":
+        outcomes[0]["filing"] = {**outcomes[0]["filing"], "form": "10-Q"}
+    else:
+        outcomes.append(json.loads(json.dumps(outcomes[0])))
+    _write(
+        tmp_path / "run/companies/AAA/intake/history_intake.json",
+        {"plan": plan, "complete": False, "filings": outcomes},
+    )
+    row = operations.read_universe_status(manifest_path=manifest).companies[0]
+    assert row.state == "RAW_FAILED"
+    assert row.succeeded_filings == row.held_filings == row.failed_filings == 0
+    assert row.pending_filings == row.selected_filings == 5
+
+
+@pytest.mark.parametrize("operation", ("collect", "build"))
+def test_mutable_manifest_traversal_fails_before_any_operation_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    manifest = operations.prepare_universe(
+        config_path=_config(tmp_path / "config.json", "AAA"),
+        run_root=tmp_path / "run",
+        existing_plans={"AAA": _full_plan(tmp_path / "plan.json", "AAA", "0000000001")},
+    )
+    payload = json.loads(manifest.read_text())
+    payload["companies"][0]["ticker"] = "../outside"
+    _write(manifest, payload)
+    attempts = tuple((tmp_path / "run/companies/AAA/operation_attempts").iterdir())
+    monkeypatch.setattr(
+        operations.history,
+        "ingest_history",
+        lambda **kwargs: pytest.fail("preflight must run before ingestion"),
+    )
+    monkeypatch.setattr(
+        operations.history,
+        "build_history",
+        lambda **kwargs: pytest.fail("preflight must run before build"),
+    )
+    with pytest.raises(ValueError, match="membership differs"):
+        if operation == "collect":
+            operations.collect_universe(
+                manifest_path=manifest,
+                package_cache=tmp_path / "packages",
+                index_cache=tmp_path / "indexes",
+                taxonomy_cache=tmp_path / "taxonomy",
+            )
+        else:
+            operations.build_universe(manifest_path=manifest, output_root=tmp_path / "publication")
+    assert tuple((tmp_path / "run/companies/AAA/operation_attempts").iterdir()) == attempts
+    assert not (tmp_path / "outside").exists()
+
+
+@pytest.mark.parametrize("mutation", ("plan_path", "plan_accession", "remove_company"))
+def test_scope_corruption_fails_preflight_before_ingest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    manifest = operations.prepare_universe(
+        config_path=_config(tmp_path / "config.json", "AAA"),
+        run_root=tmp_path / "run",
+        existing_plans={"AAA": _full_plan(tmp_path / "plan.json", "AAA", "0000000001")},
+    )
+    if mutation == "plan_accession":
+        path = tmp_path / "run/companies/AAA/plan.json"
+        payload = json.loads(path.read_text())
+        payload["companies"][0]["filings"][0]["accession"] = "changed"
+        _write(path, payload)
+    else:
+        payload = json.loads(manifest.read_text())
+        if mutation == "plan_path":
+            payload["companies"][0]["plan_path"] = str((tmp_path / "outside/plan.json").absolute())
+        else:
+            payload["companies"] = []
+        _write(manifest, payload)
+    attempts = tuple((tmp_path / "run/companies/AAA/operation_attempts").iterdir())
+    monkeypatch.setattr(
+        operations.history,
+        "ingest_history",
+        lambda **kwargs: pytest.fail("corrupt scope reached ingestion"),
+    )
+    with pytest.raises(ValueError):
+        operations.collect_universe(
+            manifest_path=manifest,
+            package_cache=tmp_path / "packages",
+            index_cache=tmp_path / "indexes",
+            taxonomy_cache=tmp_path / "taxonomy",
+        )
+    assert tuple((tmp_path / "run/companies/AAA/operation_attempts").iterdir()) == attempts
+
+
+@pytest.mark.parametrize("intake_case", ("missing_publication", "failed_complete"))
+def test_unattested_ready_marker_never_reports_ready(tmp_path: Path, intake_case: str) -> None:
+    manifest = operations.prepare_universe(
+        config_path=_config(tmp_path / "config.json", "AAA"),
+        run_root=tmp_path / "run",
+        existing_plans={"AAA": _full_plan(tmp_path / "plan.json", "AAA", "0000000001")},
+    )
+    company_root = tmp_path / "run/companies/AAA"
+    plan = json.loads((company_root / "plan.json").read_text())
+    status = "FAILED" if intake_case == "failed_complete" else "REUSED"
+    _write(
+        company_root / "intake/history_intake.json",
+        {
+            "plan": plan,
+            "complete": True,
+            "filings": [{"filing": row, "status": status} for row in plan["companies"][0]["filings"]],
+        },
+    )
+    _write(
+        company_root / "build_manifest.json",
+        {
+            "version": operations.COLLECTION_VERSION,
+            "status": "READY",
+            "ticker": "AAA",
+            "output_root": str((tmp_path / "missing").absolute()),
+            "publication": str((tmp_path / "missing/panels").absolute()),
+        },
+    )
+    status_result = operations.read_universe_status(manifest_path=manifest)
+    assert status_result.ready_companies == 0
+    assert status_result.companies[0].state in {"RAW_FAILED", "BUILD_FAILED"}
+
+
 def test_raw_complete_is_distinct_from_ready_and_build_failures_are_isolated(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -397,12 +575,30 @@ def test_raw_complete_is_distinct_from_ready_and_build_failures_are_isolated(
     assert raw.ready_companies == 0
     assert {row.action for row in raw.companies} == {"BUILD_OPTIONAL"}
 
+    published_info: dict[str, object] = {}
+
     def build(**kwargs: object) -> Path:
         ticker = Path(kwargs["output_root"]).name
         if ticker == "BBB":
             raise ValueError("publication rejected")
         publication = Path(kwargs["output_root"]) / "panels"
-        publication.mkdir(parents=True)
+        intake_path = Path(kwargs["intake_manifest"])
+        intake = json.loads(intake_path.read_text())
+        relative = Path("0000000001/LATEST_REPORTED/QTD_3M/rows.parquet")
+        info = operations.history._write_records(
+            publication / relative, ({"row_id": "verified"},)
+        )
+        published_info.update(info)
+        _write(
+            publication / "history_manifest.json",
+            {
+                "version": operations.history.HISTORY_VERSION,
+                "plan": intake["plan"],
+                "views": list(kwargs["views"]),
+                "source_intake": str(intake_path.absolute()),
+                "tables": [{"files": {"rows": {**info, "path": str(relative)}}}],
+            },
+        )
         return publication
 
     monkeypatch.setattr(operations.history, "build_history", build)
@@ -417,6 +613,24 @@ def test_raw_complete_is_distinct_from_ready_and_build_failures_are_isolated(
         "AAA": "READY",
         "BBB": "BUILD_FAILED",
     }
+    marker = json.loads((tmp_path / "run/companies/AAA/build_manifest.json").read_text())
+    assert marker["intake_sha256"]
+    assert marker["history_manifest_sha256"]
+    assert marker["declared_files"] == {
+        "0000000001/LATEST_REPORTED/QTD_3M/rows.parquet": published_info["sha256"]
+    }
+    monkeypatch.setattr(
+        operations.history,
+        "HistoryPublicationReader",
+        lambda *args, **kwargs: pytest.fail("ordinary status must use offline digests only"),
+    )
+    assert operations.read_universe_status(manifest_path=manifest).ready_companies == 1
+    (tmp_path / "publications/AAA/panels/0000000001/LATEST_REPORTED/QTD_3M/rows.parquet").write_bytes(
+        b"corrupt"
+    )
+    corrupted = operations.read_universe_status(manifest_path=manifest)
+    assert corrupted.ready_companies == 0
+    assert {row.ticker: row.state for row in corrupted.companies}["AAA"] == "BUILD_FAILED"
 
 
 def test_existing_plan_rejects_cik_asof_and_coverage_mismatch(tmp_path: Path) -> None:
