@@ -11,6 +11,8 @@ import re
 from collections.abc import Callable
 from decimal import Decimal, localcontext
 
+from regex import compile as regex_compile
+
 SEC_TRANSFORM_NAMESPACE = "http://www.sec.gov/inlineXBRL/transformation/2015-08-31"
 
 _NUMBER_WORDS = {
@@ -46,39 +48,16 @@ _SEC_DECIMAL_RE = re.compile(
     r"^[ \t\n\r]*[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)[ \t\n\r]*$"
 )
 _SEC_NIL_RE = re.compile(r"^[ \t\n\r]*[Nn]il[ \t\n\r]*$")
-_SEC_WORD_HYPHEN_RE = re.compile(r"[\u058A\u05BE\u2010-\u2015\uFE58\uFE63\uFF0D-]")
-
-
-def _initial_case_pattern(*words: str) -> str:
-    return "(?:" + "|".join(f"[{word[0].upper()}{word[0]}]{word[1:]}" for word in words) + ")"
-
-
-_WORD_DURATION_SMALL_NUMBER = _initial_case_pattern(
-    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-    "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
-    "eighteen", "nineteen",
+# SEC-staff public-domain durwordsenPattern, copied verbatim (17 U.S.C. 105).
+# https://github.com/Arelle/EDGAR/blob/master/transform/__init__.py
+# Retrieved 2026-10-08; source SHA-256:
+# 2296586f945ffd95ab37d3d4147c4e45f42ce4e5f397f61143e053208adefbf1
+# Keep the reference capture groups: amounts are groups 2, 66, and 130.
+# Validate the original source; replacing hyphens first changes the grammar.
+_WORD_DURATION_RE = regex_compile(
+    r"^[ \t\n\r]*((((([Oo]ne|[Tt](wo|hree|en|welve|hirteen)|[Ff](our(teen)?|ive|ifteen)|[Ss](ix(teen)?|even(teen)?)|[Ee](ight(een)?|leven)|[Nn]ine(teen)?)([\u058A\u05BE\u2010\u2011\u2012\u2013\u2014\u2015\uFE58\uFE63\uFF0D-]|\s+)[Hh]undred(([\u058A\u05BE\u2010\u2011\u2012\u2013\u2014\u2015\uFE58\uFE63\uFF0D-]|\s+)(and\s+)?(([Oo]ne|[Tt](wo|hree|en|welve|hirteen)|[Ff](our(teen)?|ive|ifteen)|[Ss](ix(teen)?|even(teen)?)|[Ee](ight(een)?|leven)|[Nn]ine(teen)?)|([Tt](wenty|hirty)|[Ff](orty|ifty)|[Ss](ixty|eventy)|[Ee]ighty|[Nn]inety)(([\u058A\u05BE\u2010\u2011\u2012\u2013\u2014\u2015\uFE58\uFE63\uFF0D-]|\s+)([Oo]ne|[Tt](wo|hree)|[Ff](our|ive)|[Ss](ix|even)|[Ee]ight|[Nn]ine))?))?)|(([Oo]ne|[Tt](wo|hree|en|welve|hirteen)|[Ff](our(teen)?|ive|ifteen)|[Ss](ix(teen)?|even(teen)?)|[Ee](ight(een)?|leven)|[Nn]ine(teen)?)|([Tt](wenty|hirty)|[Ff](orty|ifty)|[Ss](ixty|eventy)|[Ee]ighty|[Nn]inety)(([\u058A\u05BE\u2010\u2011\u2012\u2013\u2014\u2015\uFE58\uFE63\uFF0D-]|\s+)([Oo]ne|[Tt](wo|hree)|[Ff](our|ive)|[Ss](ix|even)|[Ee]ight|[Nn]ine))?))|[Zz]ero|[Nn]o|[0-9][0-9]{0,3})([\u058A\u05BE\u2010\u2011\u2012\u2013\u2014\u2015\uFE58\uFE63\uFF0D-]|\s+)[Yy]ears?(,?([\u058A\u05BE\u2010\u2011\u2012\u2013\u2014\u2015\uFE58\uFE63\uFF0D-]|\s+)(and\s+)?|$))?((((([Oo]ne|[Tt](wo|hree|en|welve|hirteen)|[Ff](our(teen)?|ive|ifteen)|[Ss](ix(teen)?|even(teen)?)|[Ee](ight(een)?|leven)|[Nn]ine(teen)?)([\u058A\u05BE\u2010\u2011\u2012\u2013\u2014\u2015\uFE58\uFE63\uFF0D-]|\s+)[Hh]undred(([\u058A\u05BE\u2010\u2011\u2012\u2013\u2014\u2015\uFE58\uFE63\uFF0D-]|\s+)(and\s+)?(([Oo]ne|[Tt](wo|hree|en|welve|hirteen)|[Ff](our(teen)?|ive|ifteen)|[Ss](ix(teen)?|even(teen)?)|[Ee](ight(een)?|leven)|[Nn]ine(teen)?)|([Tt](wenty|hirty)|[Ff](orty|ifty)|[Ss](ixty|eventy)|[Ee]ighty|[Nn]inety)(([\u058A\u05BE\u2010\u2011\u2012\u2013\u2014\u2015\uFE58\uFE63\uFF0D-]|\s+)([Oo]ne|[Tt](wo|hree)|[Ff](our|ive)|[Ss](ix|even)|[Ee]ight|[Nn]ine))?))?)|(([Oo]ne|[Tt](wo|hree|en|welve|hirteen)|[Ff](our(teen)?|ive|ifteen)|[Ss](ix(teen)?|even(teen)?)|[Ee](ight(een)?|leven)|[Nn]ine(teen)?)|([Tt](wenty|hirty)|[Ff](orty|ifty)|[Ss](ixty|eventy)|[Ee]ighty|[Nn]inety)(([\u058A\u05BE\u2010\u2011\u2012\u2013\u2014\u2015\uFE58\uFE63\uFF0D-]|\s+)([Oo]ne|[Tt](wo|hree)|[Ff](our|ive)|[Ss](ix|even)|[Ee]ight|[Nn]ine))?))|[Zz]ero|[Nn]o|[0-9][0-9]{0,3})([\u058A\u05BE\u2010\u2011\u2012\u2013\u2014\u2015\uFE58\uFE63\uFF0D-]|\s+)[Mm]onths?(,?([\u058A\u05BE\u2010\u2011\u2012\u2013\u2014\u2015\uFE58\uFE63\uFF0D-]|\s+)(and\s+)?|$))?((((([Oo]ne|[Tt](wo|hree|en|welve|hirteen)|[Ff](our(teen)?|ive|ifteen)|[Ss](ix(teen)?|even(teen)?)|[Ee](ight(een)?|leven)|[Nn]ine(teen)?)([\u058A\u05BE\u2010\u2011\u2012\u2013\u2014\u2015\uFE58\uFE63\uFF0D-]|\s+)[Hh]undred(([\u058A\u05BE\u2010\u2011\u2012\u2013\u2014\u2015\uFE58\uFE63\uFF0D-]|\s+)(and\s+)?(([Oo]ne|[Tt](wo|hree|en|welve|hirteen)|[Ff](our(teen)?|ive|ifteen)|[Ss](ix(teen)?|even(teen)?)|[Ee](ight(een)?|leven)|[Nn]ine(teen)?)|([Tt](wenty|hirty)|[Ff](orty|ifty)|[Ss](ixty|eventy)|[Ee]ighty|[Nn]inety)(([\u058A\u05BE\u2010\u2011\u2012\u2013\u2014\u2015\uFE58\uFE63\uFF0D-]|\s+)([Oo]ne|[Tt](wo|hree)|[Ff](our|ive)|[Ss](ix|even)|[Ee]ight|[Nn]ine))?))?)|(([Oo]ne|[Tt](wo|hree|en|welve|hirteen)|[Ff](our(teen)?|ive|ifteen)|[Ss](ix(teen)?|even(teen)?)|[Ee](ight(een)?|leven)|[Nn]ine(teen)?)|([Tt](wenty|hirty)|[Ff](orty|ifty)|[Ss](ixty|eventy)|[Ee]ighty|[Nn]inety)(([\u058A\u05BE\u2010\u2011\u2012\u2013\u2014\u2015\uFE58\uFE63\uFF0D-]|\s+)([Oo]ne|[Tt](wo|hree)|[Ff](our|ive)|[Ss](ix|even)|[Ee]ight|[Nn]ine))?))|[Zz]ero|[Nn]o|[0-9][0-9]{0,3})([\u058A\u05BE\u2010\u2011\u2012\u2013\u2014\u2015\uFE58\uFE63\uFF0D-]|\s+)[Dd]ays?)?[ \t\n\r]*$"
 )
-_WORD_DURATION_TENS = _initial_case_pattern(
-    "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
-)
-_WORD_DURATION_ONES = _initial_case_pattern(
-    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
-)
-_WORD_DURATION_SUB_HUNDRED = (
-    rf"(?:{_WORD_DURATION_SMALL_NUMBER}|{_WORD_DURATION_TENS}(?:\s+{_WORD_DURATION_ONES})?)"
-)
-_WORD_DURATION_AMOUNT = (
-    rf"(?:{_WORD_DURATION_ONES}\s+[Hh]undred(?:\s+(?:and\s+)?"
-    rf"{_WORD_DURATION_SUB_HUNDRED})?|{_WORD_DURATION_SUB_HUNDRED}|[Zz]ero|[Nn]o|[0-9]{{1,4}})"
-)
-_WORD_DURATION_SEPARATOR = r"(?:,?\s+(?:and\s+)?)"
-_WORD_DURATION_RE = re.compile(
-    rf"^[ \t\n\r]*(?:(?P<years>{_WORD_DURATION_AMOUNT})\s+[Yy]ears?"
-    rf"{_WORD_DURATION_SEPARATOR}?)?"
-    rf"(?:(?P<months>{_WORD_DURATION_AMOUNT})\s+[Mm]onths?"
-    rf"{_WORD_DURATION_SEPARATOR}?)?"
-    rf"(?:(?P<days>{_WORD_DURATION_AMOUNT})\s+[Dd]ays?)?[ \t\n\r]*$"
-)
+_WORD_DURATION_AMOUNT_GROUPS = ((2, "Y"), (66, "M"), (130, "D"))
 
 
 def register_sec_inline_transforms() -> None:
@@ -225,19 +204,15 @@ def _number_words_transform(value: str) -> str:
 
 
 def _word_duration(value: str) -> str:
-    normalized = _SEC_WORD_HYPHEN_RE.sub(" ", value)
-    match = _WORD_DURATION_RE.fullmatch(normalized)
-    if match is None or not any(match.group(unit) for unit in ("years", "months", "days")):
+    match = _WORD_DURATION_RE.fullmatch(value) if isinstance(value, str) else None
+    if match is None or not value.strip():
         raise ValueError(f"unsupported English duration: {value}")
-    components = {
-        unit: int(_word_number(amount)) if amount is not None else 0
-        for unit, amount in (
-            ("Y", match.group("years")),
-            ("M", match.group("months")),
-            ("D", match.group("days")),
-        )
-    }
-    result = "P" + (f"{components['Y']}Y" if components["Y"] else "") + (f"{components['M']}M" if components["M"] else "") + (f"{components['D']}D" if components["D"] else "")
+    components = [
+        (int(_word_number(match.group(group))), unit)
+        for group, unit in _WORD_DURATION_AMOUNT_GROUPS
+        if match.group(group) is not None
+    ]
+    result = "P" + "".join(f"{amount}{unit}" for amount, unit in components if amount)
     return result if result != "P" else "P0D"
 
 

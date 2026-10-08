@@ -441,3 +441,69 @@ def test_sec_numeric_durations_are_exact_under_small_ambient_decimal_precision(
         actual = FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE][transform_name](lexical)
 
     assert actual == expected
+
+
+def test_sec_word_duration_reference_pattern_identity() -> None:
+    # Pin the actual SEC-staff grammar, including capture positions. Intentional
+    # reference updates require a new source review and differential evidence.
+    import hashlib
+
+    from sec_xbrl.filing.sec_inline_transforms import _WORD_DURATION_RE
+
+    assert hashlib.sha256(_WORD_DURATION_RE.pattern.encode()).hexdigest() == (
+        "719632f2757928992442309bc278b4df187b900c40767984cc5006756c67ee18"
+    )
+    match = _WORD_DURATION_RE.fullmatch("one year two months three days")
+    assert match is not None
+    assert tuple(match.group(i) for i in (2, 66, 130)) == ("one", "two", "three")
+
+
+@pytest.mark.parametrize("word,number", (
+    ("one", 1), ("two", 2), ("three", 3), ("four", 4), ("five", 5),
+    ("six", 6), ("seven", 7), ("eight", 8), ("nine", 9), ("ten", 10),
+    ("eleven", 11), ("twelve", 12), ("thirteen", 13), ("fourteen", 14),
+    ("fifteen", 15), ("sixteen", 16), ("seventeen", 17), ("eighteen", 18),
+    ("nineteen", 19),
+))
+@pytest.mark.parametrize("separator", tuple("-֊־‐‑‒–—―﹘﹣－") + (" ", "\t\n"))
+def test_sec_word_duration_all_reference_hundreds_and_separators(
+    word: str, number: int, separator: str,
+) -> None:
+    from sec_xbrl.filing.sec_inline_transforms import _word_duration
+
+    assert _word_duration(f"{word}{separator}hundred{separator}years") == f"P{number * 100}Y"
+    assert _word_duration(f"{word}{separator}hundred{separator}twenty{separator}one days") == (
+        f"P{number * 100 + 21}D"
+    )
+
+
+@pytest.mark.parametrize("source", (
+    "one yearone month", "one monthone day", "-three years", "‑three years",
+    "three days-", "three days‑", "three--years", "three - years", "three-yearish",
+    "three‑years garbage", "one year,two months", "one year And two months",
+    "twenty hundred years", "one thousand years", "10000 years", "none years",
+    "nil years", "THREE years", "three YEARS", "1.5 years", "", " ",
+    "\u00a0three years", "three days\u00a0", "three\x1cyears",
+))
+def test_sec_word_duration_reference_rejections(source: str) -> None:
+    from sec_xbrl.filing.sec_inline_transforms import _word_duration
+
+    with pytest.raises(ValueError, match="unsupported English duration"):
+        _word_duration(source)
+
+
+@pytest.mark.parametrize("source,expected", (
+    ("\t\nThree Years\r ", "P3Y"), ("9999 years", "P9999Y"),
+    ("one year-two months-three days", "P1Y2M3D"),
+    ("one year, two months, and three days", "P1Y2M3D"),
+    ("one year,‑two months", "P1Y2M"), ("three years-", "P3Y"),
+    ("three months‑", "P3M"), ("three years and ", "P3Y"),
+    ("No years zero months three days", "P3D"), ("zero years", "P0D"),
+    ("0003 years", "P3Y"), ("0 years 1 month", "P1M"),
+    ("0000 years 00 months 0 days", "P0D"),
+    ("nineteen hundred and ninety-nine days", "P1999D"),
+))
+def test_sec_word_duration_reference_compounds(source: str, expected: str) -> None:
+    from sec_xbrl.filing.sec_inline_transforms import _word_duration
+
+    assert _word_duration(source) == expected

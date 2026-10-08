@@ -426,6 +426,88 @@ and `git diff --check` reported no errors. These are writer self-test results;
 the superseding v5 commit still requires an independent read-only
 verification result.
 
+### Exact English-duration grammar corrective candidate — 2026-10-08
+
+Independent verification of `00e5f363daf67d760b2a8515abc78c4dd49007f9`
+returned **FAIL**. The approximation still accepted `one yearone month`,
+`one monthone day`, leading ASCII/Unicode hyphens and trailing day hyphens,
+and rejected valid `ten hundred years` / `nineteen hundred years`. The
+independent mutation evidence is preserved at
+`/tmp/sec-transform-v5-independent-68kw0gge/mutation-results.json`.
+The lead escalated the implementation role to a replacement Astra sole writer
+under the delivery workflow's repeated-rework rule. The previous Sol writer
+stopped editing; the independent Astra verifier remains a separate read-only
+role. This is a scoped staffing decision, not a general model-performance claim.
+
+The new implementation vendors the SEC-staff public-domain
+`durwordsenPattern` verbatim from the primary reference, using its `regex`
+engine and unchanged amount capture groups 2, 66, and 130. It validates the
+original source before any token interpretation. The retrieved reference
+module SHA-256 is
+`2296586f945ffd95ab37d3d4147c4e45f42ce4e5f397f61143e053208adefbf1`;
+the regex string SHA-256 is
+`719632f2757928992442309bc278b4df187b900c40767984cc5006756c67ee18`.
+Both reference provenance and the stable capture contract are recorded in code
+and regression tests. The previous normalized-input approximation described
+above is superseded. Reference quirks remain deliberate: a terminal separator
+after years/months can be valid (`three years-`), whereas a terminal separator
+after days (`three days-`) is invalid. One-through-nineteen hundred forms,
+all twelve specified hyphens, case restrictions, ordered compound separators,
+and original-source whitespace behavior follow the exact reference grammar.
+
+The lead explicitly retained the existing local word-duration rendering:
+integer digit spelling is canonicalized and zero components are omitted, with
+`P0D` for an all-zero result. The reference returns `P0003Y` for `0003 years`
+and `P0Y1M` for `0 years 1 month`; local results remain `P3Y` and `P1M`.
+These strings denote the same XSD duration. Exact equivalence for this repair
+means original-input validity plus duration-component meaning, not identical
+synthetic zero/leading-zero output spelling. This avoids unrelated changes to
+existing values. Numeric-duration Decimal arithmetic/rendering is unaffected,
+as are the four source-bound lexical repairs and the parser v5 identity.
+
+A writer differential batch executed the downloaded reference grammar and
+`durwordsen` function with its reference `text2num`, independently of the local
+helper. Of 8,368 inputs, 4,459 were valid and 3,909 invalid. There were zero
+validity or duration-component value differences. The 466 string-only
+differences were confined to the explicitly retained leading-zero/zero-component
+rendering. The batch covered one-through-nineteen hundred, zero/no, every SEC
+hyphen, case, XML and non-XML whitespace, unit names and partial units, digit
+bounds, component order, missing/leading/trailing separators and garbage.
+The machine-readable batch is `/tmp/grammar-differential.json`; these are
+writer self-checks and do not substitute for independent verification.
+
+The writer reran the seven cached filings in the table above into fresh
+`/tmp` destinations using a private copy of all 153 taxonomy-cache files, with
+network connections explicitly denied. All seven retained exactly the listed
+Fact, supported-repair and approved numeric-duration-change counts; comparison
+found only the allowed Fact value fields and Filing parser version changed.
+The report is `/tmp/sec-transform-v5-writer-d628c7gz/writer-report.json`.
+Direct before/after transform comparisons also preserved all 104 supported
+source corrections and all 3,842 numeric-duration occurrences (391 month,
+2,902 year, 481 day and 68 week) in the 381-document source inventory.
+All 4,142 protected migration-baseline files retained their recorded hashes.
+
+Fourteen actual filing mutations exercised the unchanged atomic gate. Twelve
+invalid inputs (unknown exchange/state/number/duration, partial units,
+trailing garbage, missing component separators, leading ASCII/Unicode hyphens
+and trailing day hyphens) each produced one retryable transform failure, zero
+success states and zero tables. The valid Meta mutations `ten hundred years`
+and `nineteen hundred years` produced `P1000Y` and `P1900Y`, respectively,
+with eight tables and three successful gates each. Mutation packages and
+taxonomy copies were private temporary files. Evidence is
+`/tmp/sec-transform-v5-grammar-3z54gct0/mutation-results.json`.
+
+Final writer checks: focused transform/ingestion **482 passed**; full offline
+suite **1,153 passed, 37 skipped**; repository Ruff and `git diff --check`
+passed. Reproduction uses the project Python 3.12 environment, this candidate's
+`src` on `PYTHONPATH`, `PYTHONDONTWRITEBYTECODE=1`, pytest with
+`-p no:cacheprovider`, and a private `RUFF_CACHE_DIR`. Focused command:
+`python -m pytest tests/unit/test_sec_inline_transforms.py tests/unit/test_layer1_ingestion.py -q -p no:cacheprovider`;
+full command: `python -m pytest -q -p no:cacheprovider`; lint:
+`ruff check .`. These are writer checks, not an independent PASS or cohort
+acceptance. No production cohort reprocessing, remote push, PR or merge was
+performed by this writer; no live SEC/taxonomy validation is claimed.
+
 After the writer freezes a commit, a separate Astra verifier must perform
 read-only independent verification and report `PASS` or `FAIL`. Only after that
 result may the lead decide whether to run the approved A/B/C cohort
