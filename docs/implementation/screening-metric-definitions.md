@@ -9,6 +9,13 @@
 money는 USD exact decimal, percentage/ratio는 `%` 단위의 percentage point다.
 reported 값과 derived 값은 별도 stable ID와 source kind를 가진다.
 
+percentage 산술 rule `screening-decimal-rational-v1`은 exact numerator를 만든 뒤
+precision 34, `ROUND_HALF_EVEN` local context에서 한 번 나눈다. YoY numerator는
+`(R_t-R_t-1)×100`, 나머지는 `numerator×100`이다. FCF와 net debt subtraction은
+두 Decimal을 공통 exponent의 정수로 바꿔 정확히 뺀다. fixed-point 출력은 소수부
+뒤 0만 제거하고 계산된 `-0`을 `0`으로 정규화한다. reported input은 반올림하지
+않는다.
+
 ## 2. reported 지표 21개
 
 ### FY duration 12개
@@ -46,6 +53,10 @@ EPS는 unit와 의미가 다르므로 제외한다.
 
 shares는 monetary 스크리닝 범위가 아니므로 제외한다. `liabilities`는 부채총계이며
 이자부 차입금 `debt`와 다른 지표다.
+
+`revenue`, `cfo`, `operating_income`, `net_income`은 v1과 exact semantic
+compatibility가 있으므로 definition version `annual-core-reported-v1`을 유지한다.
+나머지 reported 지표는 `screening-reported-monetary-v1`이다.
 
 ## 3. derived 지표 10개
 
@@ -91,6 +102,7 @@ MULTIPLE_CANDIDATES
 INPUT_NOT_REPORTED
 INPUT_NOT_FINITE
 UNIT_NOT_USD
+UNIT_MISMATCH
 MAPPING_REVIEW_REQUIRED
 QUALITY_BLOCKED
 DIMENSION_MISMATCH

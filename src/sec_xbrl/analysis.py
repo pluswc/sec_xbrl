@@ -452,7 +452,8 @@ def _raw_material(reader, ticker: str) -> tuple[dict, list[dict]]:
 
 
 def _compact(cell: dict, row: dict, column: dict, *, ticker: str, view: str, node_id: str) -> dict:
-    lineage = cell["value_lineage"]
+    lineage = cell.get("value_lineage")
+    lineage = lineage if isinstance(lineage, dict) else {}
     basis = lineage.get("basis_version")
     unit = [lineage.get("unit_numerator_measures"), lineage.get("unit_denominator_measures")]
     dimensions = lineage.get("analytical_dimensions") or lineage.get("canonical_dimension_signature") or []
@@ -639,7 +640,62 @@ def _apply_reviewed_q4(
             "source_publication": source_publication,
         })
 
+def _annual_fy_end_by_year(columns: tuple[dict, ...] | list[dict], years: list[int]) -> dict[int, str]:
+    """Return only fiscal years with one governed available FY end boundary."""
+    grouped: dict[int, set[str]] = defaultdict(set)
+    for column in columns:
+        if (
+            column.get("fiscal_year") in years
+            and column.get("column_status") == "AVAILABLE"
+            and isinstance(column.get("actual_end_date"), str)
+        ):
+            grouped[column["fiscal_year"]].add(column["actual_end_date"])
+    return {year: next(iter(ends)) for year, ends in grouped.items() if len(ends) == 1}
 
+
+def _analysis_columns(
+    columns: tuple[dict, ...] | list[dict],
+    *,
+    years: list[int],
+    period_class: str,
+    period_mode: str,
+    exact_fy_ends: dict[int, str] | None,
+) -> dict[str, dict]:
+    selected: dict[str, dict] = {}
+    for source in columns:
+        year = source.get("fiscal_year")
+        if year not in years:
+            continue
+        if exact_fy_ends is not None and (
+            not isinstance(source.get("actual_instant_date"), str)
+            or source.get("actual_instant_date") != exact_fy_ends.get(year)
+            or source.get("column_status") in {"MISSING_HISTORY", "UNAVAILABLE"}
+        ):
+            continue
+        column = dict(source)
+        if exact_fy_ends is not None:
+            column["screening_balance_eligibility"] = "EXACT_FY_END_INSTANT"
+            column["screening_balance_eligibility_rule_version"] = (
+                "annual-exact-year-end-instant-v1"
+            )
+        if period_mode == "ANNUAL":
+            column["fiscal_label"] = (
+                f"FY{year} 기말" if period_class == "INSTANT" else f"FY{year}"
+            )
+        selected[column["fiscal_time_series_column_id"]] = column
+    return selected
+
+
+def _with_primary_statement_evidence(
+    lineage: dict | None, binding: dict | None
+) -> tuple[dict | None, list[dict]]:
+    """Add governed statement evidence without inventing lineage for an empty cell."""
+    if not isinstance(lineage, dict):
+        return lineage, []
+    result = copy.deepcopy(lineage)
+    evidence = copy.deepcopy((binding or {}).get("primary_statement_evidence") or [])
+    result["primary_statement_evidence"] = evidence
+    return result, evidence
 
 
 def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str, ...],
@@ -647,12 +703,17 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
                      fiscal_start: int | None = None, fiscal_end: int | None = None,
                      quality_decisions: list[dict[str, str]] | None = None,
                      reviewed_q4_publication: Path | None = None,
-                     period_mode: str = "QUARTERLY") -> Path:
+                     period_mode: str = "QUARTERLY",
+                     include_year_end_balances: bool = False) -> Path:
     """Materialize a consumer bundle. This is the only raw-reading/build boundary."""
     if destination.exists() or fiscal_years < 1 or period_mode not in {"QUARTERLY", "ANNUAL"}:
         raise ValueError("new destination and positive fiscal scope required")
     if period_mode == "ANNUAL" and reviewed_q4_publication is not None:
         raise ValueError("reviewed Q4 is available only in a quarterly consumer bundle")
+    if type(include_year_end_balances) is not bool:
+        raise TypeError("include_year_end_balances must be a boolean")
+    if include_year_end_balances and period_mode != "ANNUAL":
+        raise ValueError("year-end balances are available only in an annual consumer bundle")
     configuration = copy.deepcopy(configuration or {})
     reader = open_history_publication(publication)
     reviewed_q4 = None
@@ -676,6 +737,11 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
                 "configuration": configuration, "source_manifest_hashes": source_hashes}
     if period_mode == "ANNUAL":
         manifest["period_mode"] = "ANNUAL"
+        if include_year_end_balances:
+            manifest["balance_scope"] = {
+                "included": True,
+                "rule_version": "annual-exact-year-end-instant-v1",
+            }
     if reviewed_q4 is not None:
         manifest["reviewed_q4"] = {
             "publication": str(Path(reviewed_q4_publication).resolve()),
@@ -719,26 +785,43 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
             columns, cells, traces, nodes, edges, core_cells = [], [], [], {}, {}, []
             source_index: dict[tuple, list[tuple]] = defaultdict(list)
             panels = {}
-            for period in (("FY",) if period_mode == "ANNUAL" else ("QTD_3M", "INSTANT")):
+            period_classes = (
+                ("FY", "INSTANT")
+                if period_mode == "ANNUAL" and include_year_end_balances
+                else ("FY",)
+                if period_mode == "ANNUAL"
+                else ("QTD_3M", "INSTANT")
+            )
+            for period in period_classes:
                 panel = reader.load(ticker=ticker, period_class=period, view=view)
                 panels[period] = panel
                 info["as_of"] = panel.scope["selection_as_of_date"]
-                selected_columns = {
-                    c["fiscal_time_series_column_id"]: (
-                        {**c, "fiscal_label": f"FY{c['fiscal_year']}"} if period_mode == "ANNUAL" else c
-                    )
-                    for c in panel.columns if c["fiscal_year"] in years
-                }
+                if period == "FY":
+                    fy_end_by_year = _annual_fy_end_by_year(panel.columns, years)
+                selected_columns = _analysis_columns(
+                    panel.columns,
+                    years=years,
+                    period_class=period,
+                    period_mode=period_mode,
+                    exact_fy_ends=fy_end_by_year if period == "INSTANT" and include_year_end_balances else None,
+                )
                 columns.extend(selected_columns.values())
                 rows = {r["fiscal_time_series_row_id"]: r for r in panel.rows}
                 for cell in panel.cells:
                     if cell["fiscal_time_series_column_id"] not in selected_columns:
                         continue
                     row = rows[cell["fiscal_time_series_row_id"]]
-                    lineage = cell["value_lineage"]
+                    lineage = copy.deepcopy(cell["value_lineage"])
+                    primary_evidence: list[dict] = []
+                    if include_year_end_balances:
+                        lineage, primary_evidence = _with_primary_statement_evidence(
+                            lineage, cell.get("binding")
+                        )
                     column = selected_columns[cell["fiscal_time_series_column_id"]]
                     nid = stable(ticker, view, period, row["fiscal_time_series_row_id"])
                     compact = _compact(cell, row, column, ticker=ticker, view=view, node_id=nid)
+                    if include_year_end_balances and isinstance(lineage, dict):
+                        compact["primary_statement_evidence"] = primary_evidence
                     if quality_decisions:
                         _materialize_prepared_quality(ticker=ticker, compact=compact, source_cell=cell, concepts=concepts,
                                                       decisions=quality_decisions, matched=matched_quality)
@@ -751,19 +834,21 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
                                                     ("quality_status", "quality_reasons", "quality_decisions",
                                                      "raw_value", "raw_text", "analytical_value", "analytical_text")}
                     traces.append(trace)
-                    raw_dimensions = [[concepts.get(d[0], {}).get("qname", d[0]), concepts.get(d[1], {}).get("qname", d[1]), *d[2:]] for d in lineage.get("raw_dimension_signature", [])]
-                    displayed = lineage.get("analytical_dimensions") or raw_dimensions
+                    lineage_fields = lineage if isinstance(lineage, dict) else {}
+                    raw_dimensions = [[concepts.get(d[0], {}).get("qname", d[0]), concepts.get(d[1], {}).get("qname", d[1]), *d[2:]] for d in lineage_fields.get("raw_dimension_signature", [])]
+                    displayed = lineage_fields.get("analytical_dimensions") or raw_dimensions
                     meaningful_members = [d[1] for d in displayed if d[1] and str(d[1]).split(":")[-1] != "OperatingSegmentsMember"]
                     nodes[nid] = {"node_id": nid, "kind": "VALUE", "label": " / ".join(display_name(m) for m in meaningful_members) or display_name(row["raw_concept_qname"]),
                                   "row_id": row["fiscal_time_series_row_id"], "concept": row["raw_concept_qname"],
-                                  "canonical_concept_id": lineage.get("company_canonical_concept_id"),
-                                  "dimensions": displayed, "basis_version": lineage.get("basis_version"),
+                                  "canonical_concept_id": lineage_fields.get("company_canonical_concept_id"),
+                                  "dimensions": displayed, "basis_version": lineage_fields.get("basis_version"),
                                   "period_class": period, "mapping_review_required": row.get("mapping_review_required")}
                     if reviewed_q4 is not None or period_mode == "ANNUAL":
-                        nodes[nid]["canonical_dimension_signature"] = lineage.get("canonical_dimension_signature") or []
-                    nodes[nid]["origin_kind"] = "STANDARD" if lineage.get("raw_concept_is_standard") else "CUSTOM"
-                    raw_key = (lineage.get("source_filing_id"), lineage.get("raw_concept_id"))
-                    source_index[raw_key].append((nid, compact, lineage.get("raw_dimension_signature", [])))
+                        nodes[nid]["canonical_dimension_signature"] = lineage_fields.get("canonical_dimension_signature") or []
+                    nodes[nid]["origin_kind"] = "STANDARD" if lineage_fields.get("raw_concept_is_standard") else "UNKNOWN"
+                    raw_key = (lineage_fields.get("source_filing_id"), lineage_fields.get("raw_concept_id"))
+                    if all(raw_key):
+                        source_index[raw_key].append((nid, compact, lineage_fields.get("raw_dimension_signature", [])))
             reviewed_exclusions = []
             if reviewed_q4 is not None:
                 reviewed_exclusions = [row for row in reviewed_q4.records("exclusion")
@@ -858,6 +943,7 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
             trace_index = {t["cell_id"]: t["value_lineage"] for t in traces}
             for cell in core_cells:
                 raw = trace_index.get(cell["cell_id"], {})
+                raw = raw if isinstance(raw, dict) else {}
                 inputs = raw.get("source_inputs") or [raw]
                 role_sets = [statement_roles.get((i.get("source_filing_id"), i.get("raw_concept_id")), set()) for i in inputs]
                 roles = set.union(*role_sets) if role_sets and all(role_sets) else set()
@@ -917,10 +1003,14 @@ def _definition_graph(core_cells, cells, traces, nodes, relationships, concepts,
         if not anchor.get("node_id"):
             continue
         source = lineage[anchor["cell_id"]]
+        if not isinstance(source, dict):
+            continue
         filing, primary = source.get("source_filing_id"), source.get("raw_concept_id")
         roles = {role for f, role, concept in outgoing if f == filing and concept == primary}
         for child in by_period[anchor["column_id"]]:
             target = lineage[child["cell_id"]]
+            if not isinstance(target, dict):
+                continue
             dims = target.get("raw_dimension_signature", [])
             if not dims or target.get("source_filing_id") != filing or target.get("raw_concept_id") != primary:
                 continue

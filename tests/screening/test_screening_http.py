@@ -9,6 +9,7 @@ import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from openpyxl import load_workbook
@@ -105,6 +106,46 @@ def test_server_rejects_non_loopback(screening_dataset: Path, tmp_path: Path) ->
     linked.symlink_to(outside, target_is_directory=True)
     with pytest.raises(ValueError, match="symlink"):
         create_server(service, export_root=linked)
+
+
+def test_http_metric_catalog_forwards_dataset_scoped_business_fields(tmp_path: Path) -> None:
+    expected = [
+        {
+            "metric_id": "current_ratio",
+            "label": "유동비율",
+            "category": "FINANCIAL_STABILITY",
+            "unit_kind": "PERCENT",
+            "unit": "PERCENT",
+            "definition_version": "screening-current-ratio-v1",
+            "period_class": "INSTANT",
+            "coverage": {
+                "companies_available": 5,
+                "companies_total": 21,
+                "periods_available": 17,
+            },
+            "business_availability": "AVAILABLE",
+            "unavailable_reasons": ["MISSING_INPUT"],
+        }
+    ]
+
+    def metric_catalog(dataset_id: str) -> list[dict]:
+        assert dataset_id == "expanded-v2"
+        return expected
+
+    service = SimpleNamespace(metric_catalog=metric_catalog)
+    server = create_server(service, export_root=tmp_path / "exports")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        status, body = _request(
+            f"http://127.0.0.1:{server.server_port}/api/metric-catalog?dataset_id=expanded-v2"
+        )
+        assert status == 200
+        assert json.loads(body) == expected
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def test_http_repeated_and_selected_exports_remain_immutable(

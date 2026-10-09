@@ -18,6 +18,7 @@ from sec_xbrl.screening.common import (
     sha256_file,
 )
 from sec_xbrl.screening.dataset import ScreeningDatasetReader
+from sec_xbrl.screening.dataset_v2 import ScreeningDatasetV2Reader, open_screening_dataset
 from sec_xbrl.screening.store import ScreeningStore
 
 ENGINE_VERSION = "screening-executor-v1"
@@ -47,10 +48,10 @@ class ScreeningService:
     ) -> None:
         if not isinstance(datasets, dict) or not datasets:
             raise ValueError("at least one screening dataset is required")
-        self.datasets: dict[str, ScreeningDatasetReader] = {}
+        self.datasets: dict[str, ScreeningDatasetReader | ScreeningDatasetV2Reader] = {}
         for dataset_id, root in datasets.items():
             dataset_id = require_string(dataset_id, "dataset catalog ID")
-            reader = ScreeningDatasetReader(root)
+            reader = open_screening_dataset(root)
             if reader.manifest["dataset_id"] != dataset_id:
                 raise ValueError("dataset catalog ID differs from publication")
             self.datasets[dataset_id] = reader
@@ -71,6 +72,54 @@ class ScreeningService:
             cik = require_cik(cik)
             rows = [row for row in rows if row["cik"] == cik]
         return json.loads(canonical_json(rows))
+
+    def metric_catalog(self, dataset_id: str) -> list[dict[str, Any]]:
+        reader = self._dataset(dataset_id)
+        definitions = getattr(reader, "metric_definitions", None)
+        if definitions is None:
+            labels: dict[str, str] = {}
+            for row in reader.metric_support:
+                labels.setdefault(row["metric_id"], row.get("label") or row["metric_id"])
+            definitions = [
+                {
+                    "metric_id": metric_id,
+                    "label": label,
+                    "category": "LEGACY_REPORTED",
+                    "unit_kind": "MONEY",
+                    "unit": "USD",
+                    "definition_version": next(
+                        row["definition_version"]
+                        for row in reader.metric_support
+                        if row["metric_id"] == metric_id
+                    ),
+                    "period_class": "FY",
+                    "source_kind": "REPORTED",
+                }
+                for metric_id, label in sorted(labels.items())
+            ]
+        result = []
+        for definition in definitions:
+            rows = [row for row in reader.metric_support if row["metric_id"] == definition["metric_id"]]
+            result.append(
+                {
+                    **json.loads(canonical_json(definition)),
+                    "coverage": {
+                        "companies_available": sum(row.get("execution_supported") is True for row in rows),
+                        "companies_total": len(rows),
+                        "periods_available": sum(int(row.get("available_periods") or 0) for row in rows),
+                    },
+                    "business_availability": "AVAILABLE" if any(row.get("execution_supported") for row in rows) else "UNAVAILABLE",
+                    "unavailable_reasons": sorted(
+                        {
+                            reason
+                            for row in rows
+                            for reason in (row.get("reasons") or [row.get("reason")])
+                            if reason
+                        }
+                    ),
+                }
+            )
+        return result
 
     def metric_series(self, dataset_id: str, *, cik: str, metric_id: str) -> dict[str, Any]:
         reader = self._dataset(dataset_id)
@@ -397,14 +446,14 @@ class ScreeningService:
             destination_path.unlink(missing_ok=True)
             raise
 
-    def _dataset(self, dataset_id: str) -> ScreeningDatasetReader:
+    def _dataset(self, dataset_id: str) -> ScreeningDatasetReader | ScreeningDatasetV2Reader:
         try:
             return self.datasets[require_string(dataset_id, "dataset_id")]
         except KeyError as exc:
             raise ValueError("unknown screening dataset") from exc
 
     def _validate_revision(
-        self, content: dict[str, Any], *, reader: ScreeningDatasetReader | None = None
+        self, content: dict[str, Any], *, reader: ScreeningDatasetReader | ScreeningDatasetV2Reader | None = None
     ) -> None:
         if not isinstance(content, dict):
             raise TypeError("screen revision must be an object")
@@ -454,7 +503,7 @@ class ScreeningService:
             raise ValueError("metric sort column requires a matching predicate")
 
     def _evaluate_company(
-        self, reader: ScreeningDatasetReader, company: dict[str, Any], content: dict[str, Any]
+        self, reader: ScreeningDatasetReader | ScreeningDatasetV2Reader, company: dict[str, Any], content: dict[str, Any]
     ) -> dict[str, Any]:
         evaluations = []
         for predicate in content["predicates"]:
@@ -486,7 +535,7 @@ class ScreeningService:
         }
 
 
-def _select_universe(reader: ScreeningDatasetReader, selector: dict[str, Any]) -> list[dict[str, Any]]:
+def _select_universe(reader: ScreeningDatasetReader | ScreeningDatasetV2Reader, selector: dict[str, Any]) -> list[dict[str, Any]]:
     mode = selector["mode"]
     rows = reader.companies
     if mode == "CIKS":
@@ -502,7 +551,7 @@ def _select_universe(reader: ScreeningDatasetReader, selector: dict[str, Any]) -
 
 
 def _find_observation(
-    reader: ScreeningDatasetReader,
+    reader: ScreeningDatasetReader | ScreeningDatasetV2Reader,
     cik: str,
     metric_id: str,
     policy: dict[str, Any],
@@ -511,7 +560,7 @@ def _find_observation(
 ) -> dict[str, Any] | None:
     rows = [
         row for row in reader.observations
-        if row["cik"] == cik and row["metric_id"] == metric_id and row["period_class"] == "FY"
+        if row["cik"] == cik and row["metric_id"] == metric_id
     ]
     if definition_version is not None:
         rows = [

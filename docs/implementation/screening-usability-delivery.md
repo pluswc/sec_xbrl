@@ -38,6 +38,7 @@ public API/CLI의 정확한 이름은 구현과 함께 동결하되 다음 역�
 ```python
 publish_screening_metrics(config_path, destination) -> ScreeningMetricPublication
 ScreeningMetricReader(root).verify_all()
+ScreeningMetricReader(root).verify_governed_sources()  # producer/admin offline audit
 publish_screening_dataset_v2(config_path, destination) -> ScreeningPublication
 ```
 
@@ -89,6 +90,13 @@ file hash/size와 publication ID를 묶는다. reader는 file set/hash, count, u
 source parent identity와 copied cell을 read-only로 재검증한다. 자체 JSON을 함께
 고쳐 다시 hash한 위조가 prepared parent와 달라지면 거부한다.
 
+일반 `verify_all()`과 dataset v2/service 경로는 metric publication의 file set/hash,
+publication ID, 선언된 parent manifest identity와 copied observation을 검증하되
+공식을 다시 실행하거나 전년 관측치를 다시 선택하지 않는다. analysis parent의
+cell·trace 재결합과 formula 재계산은 명시적인 producer/admin 전용
+`verify_governed_sources()`에서만 한다. 별도 독립 oracle은 producer 산술 결과를
+같은 screening executor로 만들지 않고 검증한다.
+
 reported observation은 `REPORTED`이고 derived observation은 `DERIVED_METRIC`이다.
 모두 company, actual period, fiscal year, period class, view/as-of, finite decimal
 string, unit, complete dimensions, basis/comparability/status/reason, source cell·Fact·
@@ -111,8 +119,13 @@ rule version을 추가한다. unavailable도 definition/support에서 빠지지 
   만족할 때만 typed primary BS evidence 예외를 허용함
 
 실패는 `UNAVAILABLE`와 business reason으로 남긴다. 누락을 0으로 채우지 않는다.
-계산은 고정 local Decimal context를 사용하고 exact canonical decimal string을
-발행한다. ambient Decimal precision에 의존하지 않는다.
+percentage는 exact rational numerator를 먼저 만든 뒤 precision 34,
+`ROUND_HALF_EVEN` local context에서 나눗셈을 한 번만 수행한다. YoY는
+`(current-prior)×100/prior`, margin·ratio는 `numerator×100/denominator`다. money
+subtraction은 operand의 digit/exponent를 보존하는 scaled integer 산술을 사용한다.
+canonical fixed-point 문자열은 소수부 뒤 0만 제거하고 계산된 0을 `0`으로
+정규화하며 reported input을 반올림하지 않는다. ambient Decimal precision에
+의존하지 않는다.
 
 세부 정의는 [스크리닝 지표 정의 계약](screening-metric-definitions.md)에 있다.
 
@@ -133,6 +146,11 @@ category는 `GROWTH`, `PROFITABILITY`, `CASH_FLOW`, `FINANCIAL_STABILITY`,
 `OTHER_REPORTED`다. metric catalog는 실제 coverage와 불가 사유를 보여주며 31개
 전부가 모든 회사·연도에서 사용 가능하다고 주장하지 않는다. 조건 임계값은
 사용자 입력이고 투자 추천 preset을 제공하지 않는다.
+
+기존 `revenue`, `cfo`, `operating_income`, `net_income`은 raw USD/FY 의미가
+동일하므로 v2에서도 `annual-core-reported-v1`을 유지한다. 그 외 reported와
+derived 지표는 새 definition version을 사용한다. immutable v1 revision을
+재작성하지 않고, 그 네 지표 조건은 v2에서 같은 version으로 다시 실행할 수 있다.
 
 ## 7. 검증과 전달 gate
 

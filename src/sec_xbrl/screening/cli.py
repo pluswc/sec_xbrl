@@ -7,8 +7,13 @@ import json
 from pathlib import Path
 from typing import Any
 
+from sec_xbrl.metrics.screening import publish_screening_metrics
 from sec_xbrl.screening.common import read_json
-from sec_xbrl.screening.dataset import ScreeningDatasetReader, publish_screening_dataset
+from sec_xbrl.screening.dataset import publish_screening_dataset
+from sec_xbrl.screening.dataset_v2 import (
+    open_screening_dataset,
+    publish_screening_dataset_v2,
+)
 from sec_xbrl.screening.server import serve
 from sec_xbrl.screening.service import ScreeningService
 from sec_xbrl.screening.store import ScreeningStore, backup_store, restore_store
@@ -20,6 +25,12 @@ def _parser() -> argparse.ArgumentParser:
     prepare = commands.add_parser("prepare", help="publish an immutable screening dataset")
     prepare.add_argument("--config", type=Path, required=True)
     prepare.add_argument("--destination", type=Path, required=True)
+    metrics = commands.add_parser("metrics", help="publish governed screening metrics")
+    metrics.add_argument("--config", type=Path, required=True)
+    metrics.add_argument("--destination", type=Path, required=True)
+    prepare_v2 = commands.add_parser("prepare-v2", help="publish a screening dataset v2")
+    prepare_v2.add_argument("--config", type=Path, required=True)
+    prepare_v2.add_argument("--destination", type=Path, required=True)
     status = commands.add_parser("status", help="verify a screening dataset")
     status.add_argument("--dataset", type=Path, required=True)
     server = commands.add_parser("serve", help="start the loopback dashboard")
@@ -43,7 +54,13 @@ def main(argv: list[str] | None = None) -> int:
         result = publish_screening_dataset(args.config, args.destination)
         _print({"publication_id": result.publication_id, "root": str(result.root)})
     elif args.command == "status":
-        _print(ScreeningDatasetReader(args.dataset).verify_all())
+        _print(open_screening_dataset(args.dataset).verify_all())
+    elif args.command == "metrics":
+        result = publish_screening_metrics(args.config, args.destination)
+        _print({"publication_id": result.publication_id, "root": str(result.root)})
+    elif args.command == "prepare-v2":
+        result = publish_screening_dataset_v2(args.config, args.destination)
+        _print({"publication_id": result.publication_id, "root": str(result.root)})
     elif args.command == "serve":
         catalog = _catalog(args.catalog)
         service = ScreeningService(catalog, ScreeningStore(args.store))

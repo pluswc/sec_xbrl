@@ -1,0 +1,8 @@
+{
+  "schema_version": "screening-prepare-config-v2",
+  "dataset_id": "replace-with-frozen-expanded-cohort-id",
+  "fixture_kind": "ACTUAL_PREPARED",
+  "financial_as_of": "2026-10-08",
+  "metric_root": "/absolute/path/to/screening-metrics-v1",
+  "source_dataset_root": "/absolute/path/to/accepted-screening-dataset-v1"
+}

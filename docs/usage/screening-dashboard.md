@@ -22,6 +22,12 @@ v1에서 실행 가능한 지표는 실제 prepared coverage가 있는 직접 �
 비활성 상태와 사유만 보인다. 임계값은 사용자가 입력한 조건이며 제품의 투자
 추천이나 매수 기준이 아니다.
 
+R1 dataset v2는 기존 v1을 그대로 보존하면서 21개 reported monetary 지표와
+10개 governed derived 지표를 추가한다. 각 지표는 실제 support matrix가 있는
+회사·연도만 실행 가능하다. 비율은 `%`의 percentage point, 금액은 raw USD다.
+기존 네 reported 지표의 `annual-core-reported-v1` 조건은 v2에서도 그대로
+호환된다.
+
 필요한 입력은 다음과 같다.
 
 - overall `READY` 회사-universe completion publication
@@ -56,6 +62,49 @@ PYTHONPATH="$PWD/src" .venv/bin/python -m sec_xbrl.screening status \
 prepared parent의 exact file set/hash, source snapshot의 cell/context/trace identity를
 다시 확인한다. source anchor가 없거나 바뀐 `ACTUAL_PREPARED` publication은
 자체 JSON을 일관되게 다시 hash했더라도 거부한다.
+
+### R1 expanded metric와 dataset v2
+
+먼저 각 회사의 새 `ANNUAL` analysis bundle을 12개 FY monetary row와 9개 INSTANT
+monetary row profile, `include_year_end_balances=True`로 준비한다. INSTANT는 unique FY
+end-exclusive와 날짜가 정확히 같은 값만 포함한다. 기존 v1 analysis를 덮어쓰지
+않는다.
+
+metric config는
+[`metric_prepare_config.example.json`](../../examples/screening/metric_prepare_config.example.json)을
+따른다. 예시는 한 회사만 보이지만 actual config는 v1 identity dataset의 전체
+CIK/ticker membership을 정확히 한 번씩 선언해야 한다. 각 analysis manifest
+SHA-256도 caller가 고정한다.
+
+```bash
+PYTHONPATH="$PWD/src" .venv/bin/python -m sec_xbrl.screening metrics \
+  --config /absolute/run/metric_prepare_config.json \
+  --destination /absolute/run/screening_metrics_v1
+```
+
+publisher/admin 검증에서는 `ScreeningMetricReader(root).verify_governed_sources()`로
+prepared parent cell·trace 재결합과 formula를 검증한다. 일반 dataset reader와
+HTTP serving은 이 deep audit을 호출하지 않으며 frozen metric publication의
+hash/ID와 copied row만 검증한다.
+
+이어서
+[`prepare_config_v2.example.json`](../../examples/screening/prepare_config_v2.example.json)을
+사용해 v2를 발행한다.
+
+```bash
+PYTHONPATH="$PWD/src" .venv/bin/python -m sec_xbrl.screening prepare-v2 \
+  --config /absolute/run/prepare_config_v2.json \
+  --destination /absolute/run/screening_dataset_v2
+
+PYTHONPATH="$PWD/src" .venv/bin/python -m sec_xbrl.screening status \
+  --dataset /absolute/run/screening_dataset_v2
+```
+
+catalog에는 v1과 v2를 별도 `dataset_id`로 함께 등록한다. v2의
+`GET /api/metric-catalog?dataset_id=...`는 label/category/unit/period,
+definition version, source kind, formula/input IDs, company·period coverage와 business
+unavailable reasons를 반환한다. 기존 run은 결합된 v1 publication을 계속 읽고 새
+dataset으로 자동 이동하지 않는다.
 
 출력은 다음과 같다.
 
@@ -126,6 +175,7 @@ PowerShell에서 `Ctrl+C`를 눌러 Windows listener와 relay를 함께 닫는�
 | --- | --- |
 | service/dataset 상태 | `GET /api/status` |
 | 지표 지원·시계열 | `GET /api/availability`, `GET /api/series` |
+| 지표 정의·coverage | `GET /api/metric-catalog?dataset_id=...` |
 | metadata/SIC peer | `GET /api/metadata`, `GET /api/peers` |
 | 조건 저장·revision | `GET/POST /api/screens`, `POST /api/screens/{id}/revisions` |
 | 실행·재열기·trace | `GET/POST /api/runs`, `GET /api/runs/{id}`, `GET /api/runs/{id}/trace` |

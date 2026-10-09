@@ -101,6 +101,8 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
                 self._json(service.decisions(query.get("cik")))
             elif parsed.path == "/api/availability":
                 self._json(service.metric_availability(query["dataset_id"], cik=query.get("cik")))
+            elif parsed.path == "/api/metric-catalog":
+                self._json(service.metric_catalog(query["dataset_id"]))
             elif parsed.path == "/api/series":
                 self._json(service.metric_series(query["dataset_id"], cik=query["cik"], metric_id=query["metric_id"]))
             elif parsed.path == "/api/metadata":
