@@ -124,3 +124,24 @@ def test_explorer_matrix_uses_heading_units_and_concise_missing_cells() -> None:
     comparison = JS[JS.index("async function renderComparison"):JS.index("function openComparison")]
     assert "지표 · 단위" in comparison
     assert "unitLabel(row.metric)" in comparison
+
+
+def test_filtered_metric_guide_cannot_replace_complete_explorer_catalog() -> None:
+    assert "explorerCatalog:null" in JS
+    assert "explorerCatalogKey:null" in JS
+    assert "async function loadExplorerCatalog" in JS
+    load = JS[JS.index("async function loadExplorerCatalog"):JS.index("async function loadExplorer(year")]
+    assert "/api/metric-library?dataset_id=" in load
+    assert "&fiscal_year=" in load
+    assert "query" not in load
+    assert "category" not in load
+    assert "S.explorerCatalog=r" in load
+    filtered = JS[JS.index("async function loadLibrary"):JS.index("function guideCompatibility")]
+    assert 'params.set("query",q)' in filtered
+    assert 'params.set("category",c)' in filtered
+    assert "S.library=r" in filtered
+    assert "S.explorerCatalog?.metrics" in JS[JS.index("function guideCompatibility"):]
+    assert "S.explorerCatalog?.metrics||[]" in JS[JS.index("function openComparison"):]
+    metric = JS[JS.index("function explorerMetric"):JS.index("function updateExplorerSort")]
+    assert "S.explorerCatalog?.metrics.find" in metric
+    assert 'label:id,unit_kind:"MONEY"' not in metric

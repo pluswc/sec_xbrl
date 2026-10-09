@@ -35,10 +35,58 @@ try {
 
   assert(await page.locator('[data-view="library"]').isVisible(), 'metric-guide navigation hidden');
   await page.locator('[data-view="library"]').click({force: true});
-  const revenue = page.locator('.metric-card').filter({has: page.locator('h4', {hasText: /^매출$/})}).first();
-  await revenue.locator('input').fill('.5');
-  assert(await revenue.locator('button').isVisible(), 'revenue add button hidden');
-  await revenue.locator('button').click({force: true});
+  const filteredGuide = page.waitForResponse(response =>
+    response.url().includes('/api/metric-library?') && response.url().includes('query='),
+  );
+  await page.locator('#library-query').fill('영업이익률');
+  await filteredGuide;
+  await page.waitForFunction(() => document.querySelectorAll('.metric-card').length === 1);
+  await page.locator('.metric-card').filter({has: page.locator('h4', {hasText: /^영업이익률$/})}).waitFor();
+  const filteredCategory = page.waitForResponse(response =>
+    response.url().includes('/api/metric-library?') && response.url().includes('category=PROFITABILITY'),
+  );
+  await page.locator('#library-category').selectOption('PROFITABILITY');
+  await filteredCategory;
+  assert(await page.locator('.metric-card').count() === 1, 'guide search must filter only the visible cards');
+
+  await page.locator('[data-view="explorer"]').click({force: true});
+  assert((await page.locator('#explorer-head').innerText()).includes('영업이익률\n%'), 'filtered guide corrupted percent metadata');
+  const compareChecks = page.locator('[data-explorer-select]');
+  for (const index of [0, 1]) {
+    await compareChecks.nth(index).evaluate(element => {
+      element.checked = true;
+      element.dispatchEvent(new Event('change', {bubbles: true}));
+    });
+  }
+  await page.locator('#compare-selected').click({force: true});
+  assert(await page.locator('#comparison-metrics option').count() === 31, 'filtered guide truncated comparison metrics');
+  assert(await page.locator('#comparison-metrics option[value="operating_margin"]').innerText() === '영업이익률', 'comparison label lost');
+  await page.locator('#close-comparison').click({force: true});
+
+  await page.locator('[data-view="history"]').click({force: true});
+  const oldRun = page.locator('#old-run option').nth(1);
+  await oldRun.waitFor({state: 'attached'});
+  await page.locator('#old-run').selectOption(await oldRun.getAttribute('value'));
+  const runResponse = page.waitForResponse(response => /\/api\/runs\/run-/.test(response.url()));
+  const revisionResponse = page.waitForResponse(response => response.url().includes('/api/revisions/'));
+  await page.locator('#open-run').click({force: true});
+  await Promise.all([runResponse, revisionResponse]);
+  await page.waitForFunction(() => document.querySelector('#dataset')?.value.includes('annual'));
+  await page.locator('[data-view="library"]').click({force: true});
+  const margin = page.locator('.metric-card').filter({has: page.locator('h4', {hasText: /^영업이익률$/})}).first();
+  await margin.locator('input').fill('.5');
+  assert(await margin.locator('button').isVisible(), 'margin add button hidden');
+  await margin.locator('button').click({force: true});
+  await page.waitForTimeout(1000);
+  assert(
+    await page.locator('.predicate').count() === 2,
+    `compatible v1 copy failed: ${await page.locator('#criteria-error').innerText()}`,
+  );
+  assert(
+    (await page.locator('.predicate .metric').evaluateAll(nodes => nodes.map(node => node.value))).join(',') ===
+      'revenue,operating_margin',
+    'filtered guide rejected or discarded the compatible v1 revenue condition',
+  );
   await page.locator('#screen-name').fill('누적 draft 보존');
   await page.locator('#period-mode').selectOption('FIXED_FISCAL_YEAR');
   await page.locator('#fiscal-year').fill('2024');
@@ -55,10 +103,22 @@ try {
   });
 
   await page.locator('[data-view="library"]').click({force: true});
-  const margin = page.locator('.metric-card').filter({has: page.locator('h4', {hasText: /^영업이익률$/})}).first();
-  await margin.locator('input').fill('.5');
-  assert(await margin.locator('button').isVisible(), 'margin add button hidden');
-  await margin.locator('button').click({force: true});
+  const clearedCategory = page.waitForResponse(response =>
+    response.url().includes('/api/metric-library?') && !response.url().includes('category='),
+  );
+  await page.locator('#library-category').selectOption('');
+  await clearedCategory;
+  const growthGuide = page.waitForResponse(response =>
+    response.url().includes('/api/metric-library?') && response.url().includes('query='),
+  );
+  await page.locator('#library-query').fill('매출 전년 대비 성장률');
+  await growthGuide;
+  await page.waitForFunction(() => document.querySelectorAll('.metric-card').length === 1);
+  const growth = page.locator('.metric-card').filter({has: page.locator('h4', {hasText: /^매출 전년 대비 성장률$/})}).first();
+  await growth.locator('input').fill('.5');
+  assert(await growth.locator('button').isVisible(), 'growth add button hidden');
+  await growth.locator('button').click({force: true});
+  await page.waitForFunction(() => document.querySelectorAll('.predicate').length === 3);
   assert(await page.locator('#screen-name').inputValue() === '누적 draft 보존', 'name was discarded');
   assert(await page.locator('#fiscal-year').inputValue() === '2024', 'fiscal year was discarded');
   assert(await page.locator('#universe-mode').inputValue() === 'CIKS', 'universe was discarded');
@@ -67,17 +127,17 @@ try {
   assert(!(await page.locator('[name="visible-column"][value="decision"]').isChecked()), 'columns were discarded');
   assert(
     (await page.locator('.predicate .metric').evaluateAll(nodes => nodes.map(node => node.value))).join(',') ===
-      'revenue,operating_margin',
+      'revenue,operating_margin,revenue_yoy',
     'guide additions did not accumulate',
   );
   assert(
     (await page.locator('.predicate .threshold').evaluateAll(nodes => nodes.map(node => node.value))).join(',') ===
-      '.75,0.5',
+      '.75,0.5,0.5',
     'thresholds were discarded',
   );
   assert(
     (await page.locator('.predicate .operator').evaluateAll(nodes => nodes.map(node => node.value))).join(',') ===
-      'GT,GTE',
+      'GT,GTE,GTE',
     'operators were discarded',
   );
 

@@ -51,4 +51,3 @@ GET /api/company-comparison?dataset_id=ID&ciks=CIK1,CIK2&metric_ids=revenue,cfo&
 관리자용 8,016개 metadata inventory, CIK·SIC와 기술 근거는 기존 `?mode=admin`
 경계에 남는다. ordinary 화면은 SEC 식별자나 raw 코드 대신 회사명, 티커, 사람이
 읽는 업종, 재무 기준일, 실제 재무기간과 business missing reason을 보여준다.
-
