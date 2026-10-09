@@ -51,3 +51,24 @@ GET /api/company-comparison?dataset_id=ID&ciks=CIK1,CIK2&metric_ids=revenue,cfo&
 관리자용 8,016개 metadata inventory, CIK·SIC와 기술 근거는 기존 `?mode=admin`
 경계에 남는다. ordinary 화면은 SEC 식별자나 raw 코드 대신 회사명, 티커, 사람이
 읽는 업종, 재무 기준일, 실제 재무기간과 business missing reason을 보여준다.
+
+## 연결이 끊겼을 때
+
+화면에 과거 제목·버튼이 남아 있는데 회사가 열리지 않거나 `fetch failed`가 보이면
+회사 자료부터 의심하지 말고 `127.0.0.1:8884` backend와 Windows
+`127.0.0.1:18765` bridge가 모두 응답하는지 먼저 확인한다. 두 서비스가 복구된 뒤
+browser를 새로고침해 cached 화면을 교체한다.
+
+오래 유지할 로컬 실행은 backend를 호출 shell의 생명주기와 분리한다. 표준 library
+`subprocess.Popen`의 `start_new_session=True`, `stdin=DEVNULL`을 사용하고 stdout과
+stderr를 전용 logfile로 보낸다. 이번 runtime의 PID·명령·source·catalog·journal
+식별자는 `data/processed/screening_runs/20261009_explorer/dashboard-backend-process.json`,
+로그는 같은 디렉터리의 `dashboard-backend.log`에 기록한다. Windows bridge도
+`Start-Process`로 launcher가 끝난 뒤 Node가 Windows loopback에 남게 하고,
+`screening-explorer-persistent/bridge-process.json`, `bridge.log`, `bridge-error.log`에
+소유권과 출력을 기록한다.
+
+둘 다 `127.0.0.1`에만 bind하며 global network 설정, 시작 프로그램과 scheduler를
+바꾸지 않는다. 같은 실제 journal을 여는 backend를 중복 실행하지 않는다. 종료나
+재시작 전에는 port 번호만 보고 죽이지 말고 process record의 PID·명령·source와
+현재 프로세스를 대조한다. PID는 시점별 관찰값이므로 영구 식별자로 쓰지 않는다.

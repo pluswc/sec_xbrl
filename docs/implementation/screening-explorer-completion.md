@@ -116,3 +116,29 @@ R2는 새 SEC·시장 자료, 가격·가치평가, 웹사이트·주소·회사
 새 재무 공식, peer 평균·점수·순위 또는 live refresh를 추가하지 않았다. 사용자
 직접 walkthrough가 끝나기 전에는 human acceptance로 표시하지 않는다. 원격
 상태도 별도 승인과 push·PR·remote CI·`main` 병합이 실제로 끝날 때만 바꾼다.
+
+## 6. 2026-10-09 운영 세션 복구
+
+COST 버튼이 열리지 않는다는 후속 보고 당시 backend `8884`와 Windows frontend
+bridge `18765`가 모두 종료돼 있었고 browser에는 과거 v1 화면이 cache로 남아
+있었다. COST metric·source 또는 제품 source 결함은 아니었다.
+
+수락된 source `7e7ec154e15ed88a14c2a74d89042c39fa3fadbf`, 같은 R3 catalog와 실제
+journal로만 복구했다. Linux backend는 관찰 시점 PID/SID `660517`로 shell과
+분리했고, 기록과 로그는 각각
+`data/processed/screening_runs/20261009_explorer/dashboard-backend-process.json`과
+`dashboard-backend.log`에 있다. Windows loopback Node는 관찰 시점 PID `14800`이며
+`screening-explorer-persistent/bridge-process.json`, `bridge.log`,
+`bridge-error.log`가 소유권과 출력을 남긴다. system network, 시작 프로그램,
+scheduler는 바꾸지 않았다.
+
+native Windows 1,464×884 화면에서 COST를 기업 탐색과 historical-v1 결과 양쪽에서
+열어 실제 4개년 상세를 확인했다. POST와 page error는 0이었고 현재 제목은
+`기업 탐색과 스크리닝`이었다. 원본 보고서는
+`/mnt/c/Users/plusbdw/.codex/visualizations/2026/10/07/01a118cd-05d7-7842-b035-32b40d7c2817/screening-cost-click/report.json`,
+SHA-256은
+`5477bef9bf62aaab9d579ebdbd2c3c650a4143ea6d80bd3a0ef9147d16f53c57`다.
+
+복구 뒤 실제 journal은 여전히 3 screens, 4 revisions, 4 runs, 2 universe snapshots,
+0 decisions, 0 exports다. 제품 source, R3 publication과 journal 기록을 변경하지
+않았으며, 이 절은 기능 추가나 새 로컬 인수가 아니라 운영 복구 기록이다.
