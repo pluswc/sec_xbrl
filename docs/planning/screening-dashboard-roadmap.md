@@ -17,6 +17,7 @@
 | 최초 계획 산출물 | `4735215` 시점에는 로드맵, 사용자 시나리오 인수 계약, 계획 등록부 링크뿐이었으며 제품·테스트·데이터 변경이 없었음 |
 | 2026-10-09 구현 후속 | 사용자가 승인한 P0–P6의 최종 source `acce036d1f8feef2f268b1df740009a11ce537e5`가 독립 PASS했고 lead가 `LOCALLY_ACCEPTED`로 판정함. [완료 기록](../implementation/screening-dashboard-completion.md) 참조. 직접 UX walkthrough와 원격 병합은 대기 |
 | 2026-10-09 R1 후속 | 일반 투자자 중심 화면과 21 reported monetary + 10 governed derived 지표 확장의 최종 source `271fb1c968ebc03d98aea1561cd096187302a7fe`와 실제 R3가 독립 PASS했고 lead가 `LOCALLY_ACCEPTED`로 판정함. [R1 완료 기록](../implementation/screening-usability-completion.md) 참조. v1 publication·journal·run은 보존됐고 직접 UX walkthrough와 원격 병합은 대기 |
+| 2026-10-09 R2 승인 | R3를 재발행하지 않고 21개 회사 기본 탐색, 선택 FY 기준 31개 지표 안내, 독립 회사 프로필·4 FY 흐름·2–4개 비교를 로컬 구현하도록 승인함. [R2 전달 계약](../implementation/screening-explorer-delivery.md) 참조. 새 재무 공식·시장 데이터·cohort·원격 작업은 제외 |
 
 기존 회사 universe 결과는 21개 회사, 381개 공시와 21개 governed history가
 `READY`임을 증명한다. 이는 모든 회사에 같은 스크리닝 지표가 존재하거나 서로
