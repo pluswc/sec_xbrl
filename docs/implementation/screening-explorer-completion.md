@@ -68,9 +68,9 @@ SHA-256은
 - `7e7ec154e15ed88a14c2a74d89042c39fa3fadbf`: 전체 최신-v2 catalog를 필터된
   안내와 분리하고 모든 수리를 묶은 최종 **PASS / LOCALLY_ACCEPTED** 제품
 
-Linux compositor의 물리 click 정지와 native harness 파일시스템 counter 차이는
-제품 결함과 구분해 보고서에 보존했다. 같은 흐름은 native Windows와 독립
-검증에서 통과했다.
+Linux compositor의 물리 click 정지와 native harness가 `FINANCIAL_STABILITY`
+지표를 13개로 잘못 기대한 오류(불변 실제 정의는 11개)는 제품 결함과 구분해
+보고서에 보존했다. 같은 제품 흐름은 native Windows와 독립 검증에서 통과했다.
 
 ## 4. 읽기 전용 재현과 현재 runtime
 
@@ -116,4 +116,3 @@ R2는 새 SEC·시장 자료, 가격·가치평가, 웹사이트·주소·회사
 새 재무 공식, peer 평균·점수·순위 또는 live refresh를 추가하지 않았다. 사용자
 직접 walkthrough가 끝나기 전에는 human acceptance로 표시하지 않는다. 원격
 상태도 별도 승인과 push·PR·remote CI·`main` 병합이 실제로 끝날 때만 바꾼다.
-
