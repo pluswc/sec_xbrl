@@ -318,8 +318,9 @@ synthetic 오류가 한 count나 한 “실제 검증” 주장으로 섞여도 
 ## 8. 미승인 사항
 
 아래 목록은 최초 v1 범위의 경계다. 2026-10-09 R1에서 별도 계약으로 승인·검증한
-정확한 21 reported + 10 derived 정의만 첫 항목의 예외이며, 그 밖의 새 지표나
-공식은 여전히 승인되지 않았다.
+정확한 21 reported + 10 derived 정의, 그 10개 공식과 표준화
+`CFO−PP&E 취득지출` FCF는 아래 첫 세 항목의 예외다. 이 R1 계약 밖의 새 지표·
+공식, issuer가 별도로 정의한 FCF와 나머지 항목은 여전히 승인되지 않았다.
 
 - metric 후보를 실제 screening metric으로 승인하는 일
 - 새로운 formula, mapping, comparable/recast 의미 또는 Q4 scope
