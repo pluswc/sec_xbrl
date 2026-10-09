@@ -57,4 +57,8 @@ def test_accessibility_compact_results_and_admin_mode_contract() -> None:
     assert "columnEnabled" in JS
     assert 'id="company-query"' in HTML
     assert "renderCompanyOptions" in JS
+    assert "companySelection:new Set()" in JS
+    assert "syncCompanySelection" in JS
+    assert "ciks:[...S.companySelection]" in JS
+    assert "#company-query" in JS
     assert "저장된 정렬" in JS
