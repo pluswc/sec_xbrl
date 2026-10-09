@@ -36,10 +36,13 @@ def test_catalog_units_and_durable_workflows_are_bound_without_browser_math() ->
     assert 'unit_kind==="MONEY"' in JS
     assert "thresholdToApi" in JS and "thresholdFromApi" in JS
     assert 'shiftDecimal(v,m.unit_kind==="MONEY"?6:0)' in JS
+    assert 'q=w.length+Number(m[4]||0)+p-leading' in JS
+    assert 'if(/^0+$/.test(raw))return"0"' in JS
     assert "definition_version:m.definition_version" in JS
     assert "input_metric_ids" in JS
     assert "/trace?cik=" in JS
     assert "companies_available" in JS
+    assert 'class="field-caption">기준값 (<span class="threshold-unit"></span>)</span>' in JS
     assert "/api/screens" in JS and "/api/runs" in JS and "/api/decisions" in JS
     assert "localStorage" not in HTML + JS
 
