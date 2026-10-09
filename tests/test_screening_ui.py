@@ -82,7 +82,7 @@ def test_explorer_is_the_default_read_only_task_surface() -> None:
     assert "/api/company-profile?" in JS
     assert "/api/company-comparison?" in JS
     assert "explorerDataset" in JS
-    assert "newScreen();" in JS and "조건에 추가" in HTML + JS
+    assert "async function newScreen" in JS and "조건에 추가" in HTML + JS
 
 
 def test_explorer_preserves_missing_periods_and_display_only_date_conversion() -> None:
@@ -91,15 +91,36 @@ def test_explorer_preserves_missing_periods_and_display_only_date_conversion() -
     assert 'class="line"' in JS and 'class="point"' in JS
     assert "inclusiveEnd" in JS
     assert "setUTCDate(d.getUTCDate()-1)" in JS
-    assert "배타적 컨텍스트 종료일" in JS
+    assert "배타적 컨텍스트 종료일" not in JS
+    assert ".trend-chart svg{display:block;width:100%;height:100%;overflow:hidden}" in CSS
+    assert 'class="year-label' in JS
+    assert 'class="value-label"' in JS
 
 
 def test_metric_guide_uses_exact_existing_threshold_scaling_without_autosave() -> None:
     guide = JS[JS.index("async function addGuideMetric"):JS.index("function profileObservationCell")]
     assert "thresholdToApi(threshold,m)" in guide
     assert "definition_version:m.definition_version" in guide
-    assert "await newScreen()" in guide
+    assert "await newScreen()" not in guide
+    assert "guideCompatibility" in JS
+    assert "loadScreenRecord({name,content" in guide
+    assert "duplicate&&!pristine" in guide
     assert 'value="FIXED_FISCAL_YEAR"' in guide
     assert '$("#fiscal-year").value=String(S.explorerYear)' in guide
     assert "saveScreen" not in guide
     assert 'api("/api/screens"' not in guide
+
+
+def test_explorer_matrix_uses_heading_units_and_concise_missing_cells() -> None:
+    assert "CORE_SHORT_LABELS" in JS
+    assert 'm.label)}<small>${esc(unitLabel(m))}</small>' in JS
+    assert 'aria-label="자료 없음:' in JS
+    explorer_value = JS[JS.index("function explorerValue"):JS.index("function updateExplorerSort")]
+    assert "reason_labels" in explorer_value
+    assert "<small>" not in explorer_value
+    assert "min-width:1180px;table-layout:fixed" in CSS
+    assert "min-width:1480px" not in CSS
+    assert '.metric-card h4{margin:3px 0 0;font-size:16px;font-weight:600}' in CSS
+    comparison = JS[JS.index("async function renderComparison"):JS.index("function openComparison")]
+    assert "지표 · 단위" in comparison
+    assert "unitLabel(row.metric)" in comparison
