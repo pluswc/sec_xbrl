@@ -4,9 +4,12 @@
 
 기준일은 **2026-10-09 KST**다. 사용자는 locally accepted 스크리닝 v1
 `825c697050cdbf88aef46770452336bc00a3bac7`을 부모로 하는 R1 로컬 구현을
-승인했다. 현재 상태는 **APPROVED / IMPLEMENTATION_IN_PROGRESS**다. 구현 브랜치는
-`codex/screening-usability`이며 push, PR, remote CI와 `main` 병합은 승인 범위가
-아니다.
+승인했다. **2026-10-09 후속 상태:** 최종 제품
+`271fb1c968ebc03d98aea1561cd096187302a7fe`와 실제 R3 publication이 독립
+**PASS**했고 lead가 **LOCALLY_ACCEPTED**로 판정했다. 정확한 식별자, 검증 결과와
+실패 이력은 [R1 완료·로컬 인수 기록](screening-usability-completion.md)에 있다.
+구현 브랜치는 `codex/screening-usability`이며 push, PR, remote CI와 `main` 병합,
+사용자의 직접 UX walkthrough는 아직 완료되지 않았다.
 
 R1의 목적은 일반 투자자가 기술 provenance를 먼저 읽지 않고도 성장성,
 수익성, 현금흐름·재무안정성과 주요 보고 항목을 조건으로 선택하게 하는 것이다.

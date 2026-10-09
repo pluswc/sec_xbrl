@@ -24,7 +24,10 @@ cache/synthetic control에서 독립 **PASS**했고 lead가 P0–P6를
 
 사용자가 승인한 R1은 기존 S01–S08의 저장·실행·trace·journal·비교·export·오류
 계약을 유지하면서 [31개 지표 정의](screening-metric-definitions.md)를 dataset v2에서
-검증한다. R1 보강 항목은 현재 **APPROVED / IMPLEMENTATION_IN_PROGRESS**다.
+검증한다. **2026-10-09 후속 상태:** R1 최종 source `271fb1c968ebc03d98aea1561cd096187302a7fe`와
+실제 R3가 독립 **PASS**했고 lead가 **LOCALLY_ACCEPTED**로 판정했다. 식별자와
+한계는 [R1 완료 기록](screening-usability-completion.md)에 있다. 사용자의 직접
+walkthrough와 원격 상태는 계속 별도다.
 
 - actual 21사 support matrix에서 31개 정의를 모두 보존하고 available/unavailable
   회사·연도 수와 business reason을 독립 집계와 대조한다.
@@ -313,6 +316,10 @@ version이 둘 이상 바뀐 refresh는 원인을 자동으로 단정하지 않�
 synthetic 오류가 한 count나 한 “실제 검증” 주장으로 섞여도 인수할 수 없다.
 
 ## 8. 미승인 사항
+
+아래 목록은 최초 v1 범위의 경계다. 2026-10-09 R1에서 별도 계약으로 승인·검증한
+정확한 21 reported + 10 derived 정의만 첫 항목의 예외이며, 그 밖의 새 지표나
+공식은 여전히 승인되지 않았다.
 
 - metric 후보를 실제 screening metric으로 승인하는 일
 - 새로운 formula, mapping, comparable/recast 의미 또는 Q4 scope
