@@ -74,7 +74,7 @@ metric config는
 [`metric_prepare_config.example.json`](../../examples/screening/metric_prepare_config.example.json)을
 따른다. 예시는 한 회사만 보이지만 actual config는 v1 identity dataset의 전체
 CIK/ticker membership을 정확히 한 번씩 선언해야 한다. 각 analysis manifest
-SHA-256도 caller가 고정한다.
+SHA-256과 v1 identity dataset manifest SHA-256도 caller가 고정한다.
 
 ```bash
 PYTHONPATH="$PWD/src" .venv/bin/python -m sec_xbrl.screening metrics \
@@ -105,6 +105,8 @@ catalog에는 v1과 v2를 별도 `dataset_id`로 함께 등록한다. v2의
 definition version, source kind, formula/input IDs, company·period coverage와 business
 unavailable reasons를 반환한다. 기존 run은 결합된 v1 publication을 계속 읽고 새
 dataset으로 자동 이동하지 않는다.
+v2 config는 metric manifest와 v1 identity dataset manifest의 SHA-256을 각각
+선언해야 하며 publisher는 둘의 exact identity source가 같은지도 확인한다.
 
 출력은 다음과 같다.
 

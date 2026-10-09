@@ -89,6 +89,9 @@ manifest는 config, 모든 analysis parent manifest/file, 회사·CIK·financial
 file hash/size와 publication ID를 묶는다. reader는 file set/hash, count, unique grain,
 source parent identity와 copied cell을 read-only로 재검증한다. 자체 JSON을 함께
 고쳐 다시 hash한 위조가 prepared parent와 달라지면 거부한다.
+metric config는 identity dataset manifest SHA-256과 각 analysis manifest SHA-256을
+caller가 고정한다. dataset v2 config도 metric manifest와 identity dataset manifest
+SHA-256을 고정해 같은 root 안의 다른 publication을 자동 채택하지 않는다.
 
 일반 `verify_all()`과 dataset v2/service 경로는 metric publication의 file set/hash,
 publication ID, 선언된 parent manifest identity와 copied observation을 검증하되

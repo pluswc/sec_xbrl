@@ -64,6 +64,7 @@ def _reported(
         "mapping_review_required": False,
         "semantic_identity": qname or metric_id,
         "raw_concept_qname": qname or f"us-gaap:{metric_id}",
+        "raw_concept_is_standard": True,
         "raw_concept_taxonomy_family": "us-gaap",
         "raw_concept_data_type": "xbrli:monetaryItemType",
         "raw_concept_period_type": "duration" if period_class == "FY" else "instant",
@@ -74,7 +75,11 @@ def _reported(
         "source_fact_ids": [f"fact-{metric_id}-{year}"],
         "source_filings": [f"filing-{year}"],
         "primary_statement_evidence": [
-            {"statement_types": [statement_type], "source_relationship_edge_id": f"edge-{metric_id}"}
+            {
+                "statement_types": [statement_type],
+                "source_relationship_edge_id": f"edge-{metric_id}",
+                "source_filing_id": f"filing-{year}",
+            }
         ] if statement_type else [],
         "source_snapshot_id": "snapshot",
     }
@@ -297,6 +302,7 @@ def test_rational_percentage_and_money_subtraction_have_explicit_precision() -> 
         (lambda current, prior: prior.update(period_start="2024-02-01"), "FY_DURATION_OUT_OF_RANGE"),
         (lambda current, prior: current.update(basis_version="new"), "BASIS_INCOMPATIBLE"),
         (lambda current, prior: prior.update(value="0"), "NON_POSITIVE_DENOMINATOR"),
+        (lambda current, prior: current.update(value="-1"), "NEGATIVE_NUMERATOR"),
     ],
 )
 def test_revenue_yoy_fails_closed_on_semantic_period_basis_and_zero(mutation, reason) -> None:
@@ -333,6 +339,19 @@ def test_margin_allows_loss_but_rejects_zero_revenue_and_role_mismatch() -> None
         first=loss, second=revenue, fiscal_year=2025, statement_types=({"IS"}, {"IS"}), operation="PERCENT",
     )
     assert "PRIMARY_STATEMENT_EVIDENCE_MISSING" in no_role["diagnostic_reasons"]
+    revenue = _reported("revenue", "100")
+    revenue["primary_statement_evidence"][0]["source_filing_id"] = "unrelated-filing"
+    wrong_filing_evidence = _derive_pair(
+        ticker="TEST",
+        cik="0000000001",
+        definition=DEFINITION_BY_ID["operating_margin"],
+        first=loss,
+        second=revenue,
+        fiscal_year=2025,
+        statement_types=({"IS"}, {"IS"}),
+        operation="PERCENT",
+    )
+    assert "PRIMARY_STATEMENT_EVIDENCE_MISSING" in wrong_filing_evidence["diagnostic_reasons"]
 
 
 @pytest.mark.parametrize(
@@ -402,6 +421,7 @@ def test_net_debt_exact_standard_note_allowance_and_nonnegative_components() -> 
     )
     assert result["value"] == "-30"
     assert result["debt_input_policy"] == "EXACT_STANDARD_COMBINED_DEBT_NOTE_ALLOWANCE"
+    assert result["debt_note_locator"]["source_fact_ids"] == ["fact-debt-2025"]
     custom = copy.deepcopy(debt)
     custom["raw_concept_qname"] = "test:CombinedDebt"
     rejected = _derive_net_debt(
@@ -416,4 +436,41 @@ def test_net_debt_exact_standard_note_allowance_and_nonnegative_components() -> 
         debt=negative, cash=cash, fiscal_year=2025,
     )
     assert rejected_negative["unavailable_reason"] == "NEGATIVE_BALANCE_COMPONENT"
+
+
+def test_derived_inputs_reject_cross_company_scope_and_nonstandard_debt() -> None:
+    numerator = _reported("gross_profit", "30")
+    revenue = _reported("revenue", "100")
+    numerator["cik"] = "0000000002"
+    result = _derive_pair(
+        ticker="TEST",
+        cik="0000000001",
+        definition=DEFINITION_BY_ID["gross_margin"],
+        first=numerator,
+        second=revenue,
+        fiscal_year=2025,
+        statement_types=({"IS"}, {"IS"}),
+        operation="PERCENT",
+    )
+    assert "COMPANY_MISMATCH" in result["diagnostic_reasons"]
+
+    debt = _reported(
+        "debt",
+        "70",
+        period_class="INSTANT",
+        start=None,
+        statement_type="",
+        qname="us-gaap:DebtLongtermAndShorttermCombinedAmount",
+    )
+    debt["raw_concept_is_standard"] = False
+    cash = _reported("cash", "20", period_class="INSTANT", start=None, statement_type="BS")
+    rejected = _derive_net_debt(
+        ticker="TEST",
+        cik="0000000001",
+        definition=DEFINITION_BY_ID["net_debt"],
+        debt=debt,
+        cash=cash,
+        fiscal_year=2025,
+    )
+    assert "DIRECT_COMBINED_DEBT_UNAVAILABLE" in rejected["diagnostic_reasons"]
 

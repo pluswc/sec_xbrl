@@ -49,6 +49,16 @@ def publish_screening_dataset_v2(
     destination_path = safe_new_destination(Path(destination), "screening v2 publication")
     metrics_root = real_directory(Path(config["metric_root"]), "screening metric publication")
     source_root = real_directory(Path(config["source_dataset_root"]), "screening source dataset")
+    metric_manifest_path = regular_file(
+        metrics_root / "screening_metric_manifest.json", "screening metric manifest"
+    )
+    source_manifest_path = regular_file(
+        source_root / MANIFEST, "screening source dataset manifest"
+    )
+    if sha256_file(metric_manifest_path) != config["metric_manifest_sha256"]:
+        raise ValueError("screening metric manifest differs from v2 config")
+    if sha256_file(source_manifest_path) != config["source_dataset_manifest_sha256"]:
+        raise ValueError("screening source dataset manifest differs from v2 config")
     metrics = ScreeningMetricReader(metrics_root)
     source = ScreeningDatasetReader(source_root)
     if metrics.manifest["financial_as_of"] != config["financial_as_of"]:
@@ -261,8 +271,22 @@ def _validate_config(value: Any) -> dict[str, Any]:
         "fixture_kind": fixture_kind,
         "financial_as_of": require_string(value.get("financial_as_of"), "financial_as_of"),
         "metric_root": require_string(value.get("metric_root"), "metric_root"),
+        "metric_manifest_sha256": _require_sha256(
+            value.get("metric_manifest_sha256"), "metric_manifest_sha256"
+        ),
         "source_dataset_root": require_string(value.get("source_dataset_root"), "source_dataset_root"),
+        "source_dataset_manifest_sha256": _require_sha256(
+            value.get("source_dataset_manifest_sha256"),
+            "source_dataset_manifest_sha256",
+        ),
     }
+
+
+def _require_sha256(value: Any, field: str) -> str:
+    digest = require_string(value, field)
+    if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+        raise ValueError(f"{field} must be a lowercase SHA-256")
+    return digest
 
 
 def _file_manifest(root: Path) -> list[dict[str, Any]]:

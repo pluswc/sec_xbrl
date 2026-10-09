@@ -49,7 +49,7 @@ def test_loopback_http_native_ui_origin_and_restart(
         status, html = _request(base + "/")
         assert status == 200
         text = html.decode()
-        assert "기업 스크리닝 작업대" in text and "전 회사 결과" in text
+        assert "기업 스크리너" in text and "기업 결과" in text
         assert "localStorage" not in text
         status, icon = _request(base + "/favicon.ico")
         assert status == 204 and icon == b""

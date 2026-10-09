@@ -20,6 +20,24 @@ cache/synthetic control에서 독립 **PASS**했고 lead가 P0–P6를
 사용자의 직접 UX walkthrough와 push·PR·remote CI·`main` 병합은 계속
 **PENDING**이다.
 
+### 2026-10-09 R1 지표 확장 보강
+
+사용자가 승인한 R1은 기존 S01–S08의 저장·실행·trace·journal·비교·export·오류
+계약을 유지하면서 [31개 지표 정의](screening-metric-definitions.md)를 dataset v2에서
+검증한다. R1 보강 항목은 현재 **APPROVED / IMPLEMENTATION_IN_PROGRESS**다.
+
+- actual 21사 support matrix에서 31개 정의를 모두 보존하고 available/unavailable
+  회사·연도 수와 business reason을 독립 집계와 대조한다.
+- 기존 네 `annual-core-reported-v1` 조건은 immutable revision을 고치지 않고 v2에
+  재실행하며, 새 reported/derived 조건은 각자의 exact definition version을 쓴다.
+- FY와 연도말 INSTANT는 같은 fiscal year 아래에서도 period class와 실제 날짜를
+  분리해 보여주고, missing/review/block를 0이나 FAIL로 바꾸지 않는다.
+- 화면·HTTP·export는 frozen metric observation을 소비할 뿐 formula나 predecessor
+  selection을 실행하지 않는다. 산술 expected 값은 screening executor를 oracle로
+  사용하지 않는 별도 검증으로 만든다.
+- v1과 v2를 같은 catalog에서 열어도 과거 run의 bound dataset/publication과 현재
+  사용자 journal revision/event가 바뀌지 않아야 한다.
+
 인수 목표는 “화면이 열린다”가 아니다. 사용자가 실제 조건을 저장하고 실행한
 뒤 모든 대상 회사의 결과와 이유를 보고, 값의 출처를 추적하고, 자신의 판단을
 이력으로 남기고, 과거 실행과 새 실행을 구분해 다시 열고, 같은 governed 결과를

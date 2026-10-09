@@ -276,11 +276,17 @@ def publish_screening_metrics(
     source_dataset_root = real_directory(
         Path(config["source_dataset_root"]), "screening identity source dataset"
     )
+    source_manifest_path = regular_file(
+        source_dataset_root / "screening_dataset_manifest.json",
+        "screening identity source manifest",
+    )
+    if sha256_file(source_manifest_path) != config["source_dataset_manifest_sha256"]:
+        raise ValueError("screening identity source manifest differs from metric config")
     source_dataset = ScreeningDatasetReader(source_dataset_root)
     if source_dataset.manifest["financial_as_of"] != config["financial_as_of"]:
         raise ValueError("screening identity source financial-as-of differs from metric config")
-    if {row["cik"] for row in source_dataset.companies} != {
-        row["cik"] for row in config["companies"]
+    if {(row["cik"], row["ticker"]) for row in source_dataset.companies} != {
+        (row["cik"], row["ticker"]) for row in config["companies"]
     }:
         raise ValueError("screening metric config company membership differs from identity source")
     definitions = [copy.deepcopy(row) for row in METRIC_DEFINITIONS]
@@ -349,6 +355,7 @@ def publish_screening_metrics(
             "config": config,
             "definitions": definitions,
             "observations": observations,
+            "support": support,
             "sources": sources,
         }
     )[:24]
@@ -461,6 +468,9 @@ class ScreeningMetricReader:
             "metric observation grain",
         )
         _assert_unique(self.support, ("cik", "metric_id"), "metric support")
+        expected_support = _support_rows(self.manifest["config"]["companies"], self.observations)
+        if expected_support != self.support:
+            raise ValueError("screening metric support differs from frozen observations")
         config_path = regular_file(Path(self.manifest["config_path"]), "screening metric source config")
         if (
             sha256_file(config_path) != self.manifest.get("config_sha256")
@@ -474,6 +484,7 @@ class ScreeningMetricReader:
                 "config": self.manifest["config"],
                 "definitions": self.definitions,
                 "observations": self.observations,
+                "support": self.support,
                 "sources": self.manifest["sources"],
             }
         )[:24]
@@ -520,7 +531,11 @@ class ScreeningMetricReader:
         if (
             reader.publication_id != source.get("publication_id")
             or reader.manifest.get("versions", {}) != source.get("versions", {})
-            or {row["cik"] for row in reader.companies} != set(self.manifest["configured_ciks"])
+            or {(row["cik"], row["ticker"]) for row in reader.companies}
+            != {
+                (row["cik"], row["ticker"])
+                for row in self.manifest["config"]["companies"]
+            }
             or reader.manifest["financial_as_of"] != self.manifest["financial_as_of"]
         ):
             raise ValueError("screening metric identity source scope changed")
@@ -609,14 +624,26 @@ def _validate_config(value: Any) -> dict[str, Any]:
         date.fromisoformat(financial_as_of)
     except ValueError as exc:
         raise ValueError("financial_as_of must be an ISO date") from exc
+    source_manifest_sha = _require_sha256(
+        value.get("source_dataset_manifest_sha256"),
+        "source_dataset_manifest_sha256",
+    )
     return {
         "schema_version": CONFIG_VERSION,
         "financial_as_of": financial_as_of,
         "source_dataset_root": require_string(
             value.get("source_dataset_root"), "source_dataset_root"
         ),
+        "source_dataset_manifest_sha256": source_manifest_sha,
         "companies": normalized,
     }
+
+
+def _require_sha256(value: Any, field: str) -> str:
+    digest = require_string(value, field)
+    if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+        raise ValueError(f"{field} must be a lowercase SHA-256")
+    return digest
 
 
 def _validate_analysis_scope(manifest: dict[str, Any], ticker: str, financial_as_of: str) -> None:
@@ -732,8 +759,10 @@ def _reported_observation(
         reasons.append("QUALITY_BLOCKED")
     if cell.get("dimensions"):
         reasons.append("DIMENSION_MISMATCH")
-    if lineage.get("mapping_review_required") is True:
+    if lineage.get("mapping_review_required") is not False:
         reasons.append("MAPPING_REVIEW_REQUIRED")
+    if lineage.get("raw_concept_is_standard") is not True:
+        reasons.append("NON_STANDARD_CONCEPT")
     if not _is_usd_unit(cell.get("unit")):
         reasons.append("UNIT_NOT_USD")
     try:
@@ -803,6 +832,7 @@ def _reported_observation(
         "mapping_review_required": lineage.get("mapping_review_required"),
         "semantic_identity": lineage.get("company_canonical_concept_id") or cell.get("semantic_id"),
         "raw_concept_qname": qname,
+        "raw_concept_is_standard": lineage.get("raw_concept_is_standard"),
         "raw_concept_taxonomy_family": lineage.get("raw_concept_taxonomy_family"),
         "raw_concept_data_type": lineage.get("raw_concept_data_type"),
         "raw_concept_period_type": lineage.get("raw_concept_period_type"),
@@ -864,6 +894,7 @@ def _unavailable_observation(
         "mapping_review_required": None,
         "semantic_identity": None,
         "raw_concept_qname": None,
+        "raw_concept_is_standard": None,
         "raw_concept_taxonomy_family": None,
         "raw_concept_data_type": None,
         "raw_concept_period_type": None,
@@ -1029,7 +1060,9 @@ def _derive_revenue_yoy(
     value = None
     if not reasons and current is not None and prior is not None:
         top, bottom = Decimal(current["value"]), Decimal(prior["value"])
-        if bottom <= 0 or top < 0:
+        if top < 0:
+            reasons.append("NEGATIVE_NUMERATOR")
+        elif bottom <= 0:
             reasons.append("NON_POSITIVE_DENOMINATOR")
         else:
             with localcontext(DECIMAL_CONTEXT):
@@ -1165,6 +1198,18 @@ def _derive_net_debt(
     record["debt_input_policy"] = (
         "EXACT_STANDARD_COMBINED_DEBT_NOTE_ALLOWANCE" if note_allowance else "TYPED_PRIMARY_BS"
     )
+    record["debt_note_locator"] = (
+        {
+            "input_observation_id": debt["metric_observation_id"],
+            "cell_id": debt.get("cell_id"),
+            "source_fact_ids": copy.deepcopy(debt.get("source_fact_ids", [])),
+            "source_filings": copy.deepcopy(debt.get("source_filings", [])),
+            "source_snapshot_id": copy.deepcopy(debt.get("source_snapshot_id")),
+            "raw_concept_qname": debt.get("raw_concept_qname"),
+        }
+        if note_allowance and debt is not None
+        else None
+    )
     return record
 
 
@@ -1253,6 +1298,8 @@ def _input_reasons(inputs: tuple[dict[str, Any] | None, ...]) -> list[str]:
             reasons.append("MISSING_INPUT")
         elif row.get("availability_status") != "AVAILABLE" or row.get("value") is None:
             reasons.append(str(row.get("unavailable_reason") or "MISSING_INPUT"))
+        elif row.get("source_kind") not in {"REPORTED", "DERIVED_METRIC"}:
+            reasons.append("INPUT_SOURCE_KIND_UNSUPPORTED")
         elif row.get("mapping_review_required") is not False:
             reasons.append("MAPPING_REVIEW_REQUIRED")
         elif row.get("quality_status") == "BLOCK":
@@ -1268,6 +1315,11 @@ def _input_reasons(inputs: tuple[dict[str, Any] | None, ...]) -> list[str]:
                     reasons.append("INPUT_NOT_FINITE")
             except (InvalidOperation, TypeError, ValueError):
                 reasons.append("INPUT_NOT_FINITE")
+    present = [row for row in inputs if row is not None]
+    if len({row.get("cik") for row in present}) > 1:
+        reasons.append("COMPANY_MISMATCH")
+    if len({(row.get("financial_as_of"), row.get("view")) for row in present}) > 1:
+        reasons.append("SOURCE_SCOPE_MISMATCH")
     return _unique(reasons)
 
 
@@ -1284,8 +1336,21 @@ def _basis_compatibility(inputs: tuple[dict[str, Any] | None, ...]) -> str | Non
 
 
 def _has_statement_type(row: dict[str, Any], allowed: set[str]) -> bool:
+    source_filings = set(row.get("source_filings", []))
     return any(
         allowed.intersection(set(evidence.get("statement_types") or []))
+        and bool(
+            source_filings.intersection(
+                {
+                    str(value)
+                    for value in (
+                        evidence.get("accession"),
+                        evidence.get("source_filing_id"),
+                    )
+                    if value
+                }
+            )
+        )
         for evidence in row.get("primary_statement_evidence", [])
         if isinstance(evidence, dict)
     )
@@ -1294,6 +1359,7 @@ def _has_statement_type(row: dict[str, Any], allowed: set[str]) -> bool:
 def _debt_note_allowed(row: dict[str, Any]) -> bool:
     return (
         row.get("source_kind") == "REPORTED"
+        and row.get("raw_concept_is_standard") is True
         and row.get("raw_concept_qname") == "us-gaap:DebtLongtermAndShorttermCombinedAmount"
         and row.get("raw_concept_data_type") == "xbrli:monetaryItemType"
         and row.get("raw_concept_period_type") == "instant"

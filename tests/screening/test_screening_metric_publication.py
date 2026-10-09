@@ -81,7 +81,13 @@ def _analysis_bundle(root: Path) -> Path:
             start = f"{year - 1}-12-31" if row["period_class"] == "FY" else None
             end = f"{year}-12-29"
             qname = qnames[row["row_id"]]
-            evidence = [{"statement_types": [statement[row["row_id"]]], "source_relationship_edge_id": f"edge-{row['row_id']}"}]
+            evidence = [
+                {
+                    "statement_types": [statement[row["row_id"]]],
+                    "source_relationship_edge_id": f"edge-{row['row_id']}",
+                    "accession": f"0000000001-{year}-000001",
+                }
+            ]
             cell = {
                 "row_id": row["row_id"],
                 "cell_id": cell_id,
@@ -159,6 +165,9 @@ def prepared(tmp_path: Path, monkeypatch):
                 "schema_version": "screening-metric-config-v1",
                 "financial_as_of": "2026-10-08",
                 "source_dataset_root": str(identity),
+                "source_dataset_manifest_sha256": sha256_file(
+                    identity / "screening_dataset_manifest.json"
+                ),
                 "companies": [
                     {
                         "ticker": "TEST", "cik": "0000000001", "analysis_root": str(analysis),
@@ -203,6 +212,7 @@ def test_metric_reader_rejects_coordinated_output_rehash_and_parent_change(prepa
             "config": manifest["config"],
             "definitions": json.loads((prepared.metrics / "metric_definitions.json").read_text()),
             "observations": observations,
+            "support": json.loads((prepared.metrics / "metric_support.json").read_text()),
             "sources": manifest["sources"],
         }
     )[:24]
@@ -220,6 +230,38 @@ def test_metric_reader_rejects_changed_prepared_parent(prepared) -> None:
         reader.verify_governed_sources()
 
 
+def test_publishers_require_exact_declared_parent_manifest_hashes(
+    prepared, monkeypatch
+) -> None:
+    bad_metric_config = prepared.root / "bad-metric-config.json"
+    metric_config = json.loads(prepared.config.read_text())
+    metric_config["source_dataset_manifest_sha256"] = "0" * 64
+    bad_metric_config.write_text(json.dumps(metric_config))
+    with pytest.raises(ValueError, match="identity source manifest differs"):
+        publish_screening_metrics(bad_metric_config, prepared.root / "bad-metrics")
+
+    monkeypatch.setattr("sec_xbrl.screening.dataset_v2.ScreeningDatasetReader", _IdentityDataset)
+    bad_v2_config = prepared.root / "bad-v2-config.json"
+    bad_v2_config.write_text(
+        json.dumps(
+            {
+                "schema_version": "screening-prepare-config-v2",
+                "dataset_id": "bad-v2",
+                "fixture_kind": "ACTUAL_PREPARED",
+                "financial_as_of": "2026-10-08",
+                "metric_root": str(prepared.metrics),
+                "metric_manifest_sha256": "0" * 64,
+                "source_dataset_root": str(prepared.identity),
+                "source_dataset_manifest_sha256": sha256_file(
+                    prepared.identity / "screening_dataset_manifest.json"
+                ),
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="metric manifest differs"):
+        publish_screening_dataset_v2(bad_v2_config, prepared.root / "bad-v2")
+
+
 def test_dataset_v2_catalog_old_revision_and_instant_predicate(prepared, monkeypatch) -> None:
     monkeypatch.setattr("sec_xbrl.screening.dataset_v2.ScreeningDatasetReader", _IdentityDataset)
     config = prepared.root / "v2-config.json"
@@ -231,7 +273,13 @@ def test_dataset_v2_catalog_old_revision_and_instant_predicate(prepared, monkeyp
                 "fixture_kind": "ACTUAL_PREPARED",
                 "financial_as_of": "2026-10-08",
                 "metric_root": str(prepared.metrics),
+                "metric_manifest_sha256": sha256_file(
+                    prepared.metrics / "screening_metric_manifest.json"
+                ),
                 "source_dataset_root": str(prepared.identity),
+                "source_dataset_manifest_sha256": sha256_file(
+                    prepared.identity / "screening_dataset_manifest.json"
+                ),
             }
         )
     )
@@ -280,7 +328,13 @@ def test_dataset_v2_reader_does_not_recompute_financial_formulas(prepared, monke
                 "fixture_kind": "ACTUAL_PREPARED",
                 "financial_as_of": "2026-10-08",
                 "metric_root": str(prepared.metrics),
+                "metric_manifest_sha256": sha256_file(
+                    prepared.metrics / "screening_metric_manifest.json"
+                ),
                 "source_dataset_root": str(prepared.identity),
+                "source_dataset_manifest_sha256": sha256_file(
+                    prepared.identity / "screening_dataset_manifest.json"
+                ),
             }
         )
     )
