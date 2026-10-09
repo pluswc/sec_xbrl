@@ -27,7 +27,7 @@
 | [회사 universe 완료 기록](../implementation/universe-data-delivery-completion.md) | A/B/C 후보 이력, 최종 동결 소스, 실제 runtime·browser 독립 검증, 로컬 인수와 잔여 원격 상태 |
 | [스크리닝 대시보드 로드맵](screening-dashboard-roadmap.md), [v1 구현 전달 계약](../implementation/screening-dashboard-delivery.md), [사용자 시나리오 인수 계약](../implementation/screening-dashboard-user-acceptance.md), [완료·로컬 인수](../implementation/screening-dashboard-completion.md), [이용 가이드](../usage/screening-dashboard.md) | annual-first 지표 가용성, 영속 screen/run/decision, S01–S08와 화면·운영 경계. **2026-10-09 최종 `acce036…` 독립 PASS·P0–P6 `LOCALLY_ACCEPTED`; 직접 UX walkthrough·P7·원격은 미완료** |
 | [일반 투자자 스크리닝 R1 전달](../implementation/screening-usability-delivery.md), [31개 지표 정의](../implementation/screening-metric-definitions.md), [R1 완료·로컬 인수](../implementation/screening-usability-completion.md) | FY+연도말 INSTANT opt-in 준비, 21 reported+10 governed derived publication, dataset v2/catalog와 v1 호환. **최종 `271fb1c…`·실제 R3 독립 PASS·`LOCALLY_ACCEPTED`; 직접 UX walkthrough·원격 미완료** |
-| [스크리닝 기업 탐색 R2 전달](../implementation/screening-explorer-delivery.md) · [사용법](../usage/screening-explorer.md) | 21개 회사 cold-start 탐색, 선택 FY 기준 31개 지표 안내, 독립 회사 프로필·4 FY 흐름·2–4개 비교. **2026-10-09 로컬 구현 승인·진행 중; 독립 검증·인수·원격 미완료** |
+| [스크리닝 기업 탐색 R2 전달](../implementation/screening-explorer-delivery.md) · [완료·로컬 인수](../implementation/screening-explorer-completion.md) · [사용법](../usage/screening-explorer.md) | 21개 회사 cold-start 탐색, 선택 FY 기준 31개 지표 안내, 독립 회사 프로필·4 FY 흐름·2–4개 비교. **최종 `7e7ec15…` 독립 PASS·`LOCALLY_ACCEPTED`; 직접 walkthrough·원격 미완료** |
 | [기간 규칙](../implementation/period-rules.md), [Layer 2 연결](../implementation/layer2-longitudinal.md), [공시 발견 계약](../implementation/accession-contract.md) | 표시 계획으로 바꿀 수 없는 의미·입력 경계 |
 
 충돌 시 적용되는 사용자 결정과 승인 범위를 먼저 확인하고, 해당 평면의 계약을
@@ -47,7 +47,7 @@
 | 21사 universe A/B/C 전달 | [전달 계약](../implementation/universe-data-delivery.md) | **2026-10-08 APPROVED**; A/B/C, SEC duration 표준 교정, 4종 supported-lexical 보완, 381건 fresh v5 재생성 및 governed source-binding 보완 | final product `8320ef06292c3855f57f2b01f4ce6b6c85ea03b7`; source-binding producer `eff3bff3`; parser `c1fdc21`; A/B/C 검증 후보 이력은 [완료 기록](../implementation/universe-data-delivery-completion.md)에 보존 | final consumer 1,288 passed / 31 skipped, focused 41, Ruff PASS; 실제 21사·381공시·741 history Parquet 및 browser PASS | **2026-10-08 LOCALLY_ACCEPTED** | 미병합; push·PR·remote CI 미수행 |
 | 스크리닝 대시보드 | [로드맵](screening-dashboard-roadmap.md), [구현 전달 계약](../implementation/screening-dashboard-delivery.md), [S01–S08 인수 계약](../implementation/screening-dashboard-user-acceptance.md), [완료 기록](../implementation/screening-dashboard-completion.md) | **2026-10-09 APPROVED**; P0–P6 로컬 v1, 기존 annual reported metric만. P7·새 회계 정책·원격 제외 | final `acce036d1f8feef2f268b1df740009a11ce537e5`; actual 21사 publication | **PASS**; 1,322 passed / 35 skipped, focused 38, Ruff·JS/CJS, S01–S08·native evidence | **2026-10-09 LOCALLY_ACCEPTED** | 미병합 |
 | 일반 투자자 스크리닝 R1 | [R1 전달 계약](../implementation/screening-usability-delivery.md), [지표 정의](../implementation/screening-metric-definitions.md), [완료 기록](../implementation/screening-usability-completion.md) | **2026-10-09 APPROVED**; 21 reported+10 derived, opt-in FY-end INSTANT, v1 호환 | final `271fb1c968ebc03d98aea1561cd096187302a7fe`; metrics `screening-metrics-2a512baef9131d3dcef0e1da`; dataset `screening-dataset-370c328056802a7fb42d02a6` | **PASS**; 1,351 passed / 35 skipped, 651 FY2025 control 일치, native 31조건·XLSX·live GET PASS | **2026-10-09 LOCALLY_ACCEPTED** | 미병합; push·PR·remote CI 미수행 |
-| 스크리닝 기업 탐색 R2 | [R2 전달 계약](../implementation/screening-explorer-delivery.md) | **2026-10-09 APPROVED**; R3 prepared rows의 read-only 탐색·library·profile·compare, 새 재무정책 제외 | 구현 진행 중 | 대기 | 대기 | 미병합; push·PR·remote CI 미수행 |
+| 스크리닝 기업 탐색 R2 | [R2 전달 계약](../implementation/screening-explorer-delivery.md), [완료 기록](../implementation/screening-explorer-completion.md) | **2026-10-09 APPROVED**; R3 prepared rows의 read-only 탐색·library·profile·compare, 새 재무정책 제외 | final `7e7ec154e15ed88a14c2a74d89042c39fa3fadbf`; unchanged actual R3 | **PASS**; final relevant 82, oracle·native·export·filtered/legacy flow PASS | **2026-10-09 LOCALLY_ACCEPTED** | 미병합; push·PR·remote CI 미수행 |
 
 현재 전달 상태(2026-09-10): U3–U5 누적 이력은
 [PR #63](https://github.com/pluswc/sec_xbrl/pull/63)으로 `main`에 병합됐다. merge
@@ -92,6 +92,10 @@ SHA는 `9708508ec953ee4323ae29318c639abc9e0650b6`이고, 병합 시각은
   `271fb1c968ebc03d98aea1561cd096187302a7fe`다. metric/dataset publication과
   과거 `edf555d…`·`1d9c7c4…` FAIL의 수리 이력은
   [R1 완료 기록](../implementation/screening-usability-completion.md)에 있다.
+- 스크리닝 기업 탐색 R2의 최종 로컬 제품은
+  `7e7ec154e15ed88a14c2a74d89042c39fa3fadbf`다. unchanged R3 입력, 과거
+  `a501d10…`·`dd67e5e…` FAIL과 독립·native 근거는
+  [R2 완료 기록](../implementation/screening-explorer-completion.md)에 있다.
 - 최초 계획 설계의 기준 부모는 위 `32212ca`였다. 당시 단일 작성자 문서와 별도
   읽기 전용 검증을 요구한 기록은 보존한다. 후속 제품의 독립 PASS·로컬 인수는
   완료 기록에만 반영하며, 아직 수행하지 않은 원격 병합을 완료로 표시하지 않는다.

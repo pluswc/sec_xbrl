@@ -4,7 +4,7 @@
 
 기준일은 **2026-10-09 KST**다. 사용자는 locally accepted R1 제품
 `271fb1c968ebc03d98aea1561cd096187302a7fe`를 부모로 하는 R2 로컬 구현을
-승인했다. 현재 상태는 **APPROVED / IMPLEMENTATION_IN_PROGRESS**다. 구현 브랜치는
+승인했다. 이 절의 상태는 승인 당시 **APPROVED / IMPLEMENTATION_IN_PROGRESS**였다. 구현 브랜치는
 `codex/screening-explorer`이며 push, PR, remote CI와 `main` 병합은 승인 범위가
 아니다.
 
@@ -109,3 +109,10 @@ API의 `period_start`/`period_end`와 `end_convention=EXCLUSIVE`는 그대로 �
 구현자는 unit·HTTP·consumer·UI integration, Ruff와 JS syntax를 실행하고 source
 SHA를 동결한다. 별도 verifier의 PASS와 lead의 로컬 인수, 사용자의 직접
 walkthrough, 원격 병합은 서로 다른 상태다.
+
+## 5. 2026-10-09 완료 상태 추가
+
+최종 제품 `7e7ec154e15ed88a14c2a74d89042c39fa3fadbf`가 독립 **PASS**했고 lead가
+**LOCALLY_ACCEPTED**로 판정했다. 실제 R3 publication은 바뀌지 않았다. 검증
+식별자, 앞선 FAIL 후보와 남은 human walkthrough·원격 상태는
+[R2 완료·로컬 인수 기록](screening-explorer-completion.md)에 보존한다.
