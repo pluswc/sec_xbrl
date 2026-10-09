@@ -65,3 +65,6 @@ def test_accessibility_compact_results_and_admin_mode_contract() -> None:
     assert "ciks:[...S.companySelection]" in JS
     assert "#company-query" in JS
     assert "저장된 정렬" in JS
+    assert "defaultDataset:null" in JS and "contextToken:0" in JS
+    assert "await loadInputContext(r.dataset_id)" in JS
+    assert "await loadInputContext(d.dataset_id)" in JS
