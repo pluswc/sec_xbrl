@@ -845,7 +845,14 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
                                   "period_class": period, "mapping_review_required": row.get("mapping_review_required")}
                     if reviewed_q4 is not None or period_mode == "ANNUAL":
                         nodes[nid]["canonical_dimension_signature"] = lineage_fields.get("canonical_dimension_signature") or []
-                    nodes[nid]["origin_kind"] = "STANDARD" if lineage_fields.get("raw_concept_is_standard") else "UNKNOWN"
+                    is_standard = lineage_fields.get("raw_concept_is_standard")
+                    nodes[nid]["origin_kind"] = (
+                        "STANDARD"
+                        if is_standard is True
+                        else "CUSTOM"
+                        if is_standard is False
+                        else "UNKNOWN"
+                    )
                     raw_key = (lineage_fields.get("source_filing_id"), lineage_fields.get("raw_concept_id"))
                     if all(raw_key):
                         source_index[raw_key].append((nid, compact, lineage_fields.get("raw_dimension_signature", [])))
