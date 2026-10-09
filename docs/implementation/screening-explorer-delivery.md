@@ -36,7 +36,14 @@ GET /api/company-comparison?dataset_id=ID&ciks=CIK,...&metric_ids=ID,...&fiscal_
 projection은 `revenue`, `revenue_yoy`, `operating_margin`, `net_income`, `cfo`,
 `standardized_fcf`, `current_ratio`, `liabilities_to_assets`다. 값은 publication의
 status·reason·source kind·definition version을 유지하며 missing은 0이 아니다.
-정렬은 같은 선택 FY의 frozen Decimal 값만 비교하고 null은 마지막이다.
+정렬은 표에 보이는 공통 8개 항목 중 하나 또는 기업명만 허용하며 같은 선택 FY의
+frozen Decimal 값만 비교하고 null은 마지막이다. 알 수 없거나 숨은 지표 정렬은
+silently no-op 하지 않고 거절한다. 기본 FY는 21사 모두에 준비된 가장 최근
+FY2025다. 일반화된 cohort에 공통 FY가 없으면 회사 coverage가 가장 큰 한 연도를
+고르고 동률이면 최근 연도를 쓰며, `default_year_is_common=false`와 실제 coverage를
+반환한다. 서로 다른 회사 연도를 섞지는 않는다. 전체 union인 FY2022–2026도
+회사 coverage와 함께 제공하되 FY2026을 선택해도 5개 회사를 “최신 연도”로
+바꾸지 않고 21행 중 16행을 `선택 연도 자료 없음`으로 유지한다.
 
 `/api/metric-library`는 31개 정의의 label, category, 쉬운 한국어 의미·사용 맥락,
 FY/연도말 구분, reported/derived, money/percentage unit, exact definition version과
@@ -72,6 +79,17 @@ exact metric definition을 추가할 뿐 자동 저장·실행하지 않는다. 
 gap을 0으로 연결하지 않는다. ordinary 화면은 CIK·SIC code·raw ID·QName·hash를
 노출하지 않고, source/date와 business missing reason은 사람이 읽는 말로 보여준다.
 기술 근거와 8,016 metadata inventory는 기존 admin mode에서 유지한다.
+
+API의 `period_start`/`period_end`와 `end_convention=EXCLUSIVE`는 그대로 보존한다.
+사람이 읽는 explorer/profile/compare/trend 날짜만 ISO `period_end`에서 UTC 하루를
+빼 포함 종료일로 표시한다. 예를 들어 canonical `2024-12-29 → 2025-12-28`은
+`2024-12-29 ~ 2025-12-27`로 보인다. 경계가 없으면 날짜를 추측하지 않는다.
+
+정보 구조 참고는 2026-10-09에 확인한 [Koyfin 기능 도움말](https://www.koyfin.com/help/topic/functionality/),
+[TradingView 재무자료 도움말](https://www.tradingview.com/support/solutions/43000543506-how-to-access-financial-data-on-tradingview/),
+[Finviz Screener 도움말](https://elite.finviz.com/help/screener)의 column view, 재무항목
+그룹 탐색, 회사별 시계열 chart/table 패턴으로 한정한다. 외부 자산·수치·점수·재무
+정의는 복사하지 않는다.
 
 ## 4. 불변성과 수락 gate
 

@@ -103,6 +103,28 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
                 self._json(service.metric_availability(query["dataset_id"], cik=query.get("cik")))
             elif parsed.path == "/api/metric-catalog":
                 self._json(service.metric_catalog(query["dataset_id"]))
+            elif parsed.path == "/api/explorer":
+                self._json(service.company_explorer(
+                    query["dataset_id"], fiscal_year=_optional_int(query.get("fiscal_year")),
+                    query=query.get("query"), sort=query.get("sort", "company"),
+                    direction=query.get("direction", "asc"),
+                ))
+            elif parsed.path == "/api/metric-library":
+                self._json(service.metric_library(
+                    query["dataset_id"], fiscal_year=_optional_int(query.get("fiscal_year")),
+                    query=query.get("query"), category=query.get("category"),
+                ))
+            elif parsed.path == "/api/company-profile":
+                self._json(service.company_profile(
+                    query["dataset_id"], cik=query["cik"],
+                    fiscal_year=_optional_int(query.get("fiscal_year")),
+                ))
+            elif parsed.path == "/api/company-comparison":
+                self._json(service.company_comparison(
+                    query["dataset_id"], ciks=query["ciks"].split(","),
+                    metric_ids=query["metric_ids"].split(","),
+                    fiscal_year=_optional_int(query.get("fiscal_year")),
+                ))
             elif parsed.path == "/api/series":
                 self._json(service.metric_series(query["dataset_id"], cik=query["cik"], metric_id=query["metric_id"]))
             elif parsed.path == "/api/metadata":
@@ -233,3 +255,12 @@ def _bool(value: str) -> bool:
     if value not in {"true", "false"}:
         raise ValueError("boolean query must be true or false")
     return value == "true"
+
+
+def _optional_int(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError("query value must be an integer") from exc

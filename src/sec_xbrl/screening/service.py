@@ -20,6 +20,7 @@ from sec_xbrl.screening.common import (
 )
 from sec_xbrl.screening.dataset import ScreeningDatasetReader
 from sec_xbrl.screening.dataset_v2 import ScreeningDatasetV2Reader, open_screening_dataset
+from sec_xbrl.screening.explorer import ScreeningExplorer, public_copy
 from sec_xbrl.screening.store import ScreeningStore
 
 ENGINE_VERSION = "screening-executor-v1"
@@ -53,12 +54,15 @@ class ScreeningService:
         if not isinstance(datasets, dict) or not datasets:
             raise ValueError("at least one screening dataset is required")
         self.datasets: dict[str, ScreeningDatasetReader | ScreeningDatasetV2Reader] = {}
+        self.explorers: dict[str, ScreeningExplorer] = {}
         for dataset_id, root in datasets.items():
             dataset_id = require_string(dataset_id, "dataset catalog ID")
             reader = open_screening_dataset(root)
             if reader.manifest["dataset_id"] != dataset_id:
                 raise ValueError("dataset catalog ID differs from publication")
             self.datasets[dataset_id] = reader
+            if isinstance(reader, ScreeningDatasetV2Reader):
+                self.explorers[dataset_id] = ScreeningExplorer(reader)
         self.store = store if isinstance(store, ScreeningStore) else ScreeningStore(store)
 
     def status(self) -> dict[str, Any]:
@@ -124,6 +128,70 @@ class ScreeningService:
                 }
             )
         return result
+
+    def company_explorer(
+        self,
+        dataset_id: str,
+        *,
+        fiscal_year: int | None = None,
+        query: str | None = None,
+        sort: str = "company",
+        direction: str = "asc",
+    ) -> dict[str, Any]:
+        """Return the company browse matrix without creating a screen or run."""
+        return public_copy(
+            self._explorer(dataset_id).explore(
+                fiscal_year=fiscal_year,
+                query=query,
+                sort=sort,
+                direction=direction,
+            )
+        )
+
+    def metric_library(
+        self,
+        dataset_id: str,
+        *,
+        fiscal_year: int | None = None,
+        query: str | None = None,
+        category: str | None = None,
+    ) -> dict[str, Any]:
+        """Return selected-year coverage and guidance for every governed metric."""
+        return public_copy(
+            self._explorer(dataset_id).metric_library(
+                fiscal_year=fiscal_year,
+                query=query,
+                category=category,
+            )
+        )
+
+    def company_profile(
+        self, dataset_id: str, *, cik: str, fiscal_year: int | None = None
+    ) -> dict[str, Any]:
+        """Return a run-independent company profile over prepared observations."""
+        return public_copy(
+            self._explorer(dataset_id).company_profile(
+                cik=cik,
+                fiscal_year=fiscal_year,
+            )
+        )
+
+    def company_comparison(
+        self,
+        dataset_id: str,
+        *,
+        ciks: list[str],
+        metric_ids: list[str],
+        fiscal_year: int | None = None,
+    ) -> dict[str, Any]:
+        """Return a same-year matrix for two to four prepared companies."""
+        return public_copy(
+            self._explorer(dataset_id).compare(
+                ciks=ciks,
+                metric_ids=metric_ids,
+                fiscal_year=fiscal_year,
+            )
+        )
 
     def metric_series(self, dataset_id: str, *, cik: str, metric_id: str) -> dict[str, Any]:
         reader = self._dataset(dataset_id)
@@ -457,6 +525,15 @@ class ScreeningService:
             return self.datasets[require_string(dataset_id, "dataset_id")]
         except KeyError as exc:
             raise ValueError("unknown screening dataset") from exc
+
+    def _explorer(self, dataset_id: str) -> ScreeningExplorer:
+        dataset_id = require_string(dataset_id, "dataset_id")
+        if dataset_id not in self.datasets:
+            raise ValueError("unknown screening dataset")
+        try:
+            return self.explorers[dataset_id]
+        except KeyError as exc:
+            raise ValueError("company explorer requires a v2 screening dataset") from exc
 
     def _validate_revision(
         self, content: dict[str, Any], *, reader: ScreeningDatasetReader | ScreeningDatasetV2Reader | None = None

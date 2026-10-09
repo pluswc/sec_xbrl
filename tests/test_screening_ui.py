@@ -68,3 +68,38 @@ def test_accessibility_compact_results_and_admin_mode_contract() -> None:
     assert "defaultDataset:null" in JS and "contextToken:0" in JS
     assert "await loadInputContext(r.dataset_id)" in JS
     assert "await loadInputContext(d.dataset_id)" in JS
+
+
+def test_explorer_is_the_default_read_only_task_surface() -> None:
+    assert 'data-task-view="explorer"' in HTML
+    assert 'data-task-view="library"' in HTML
+    assert 'data-task-view="screening" hidden' in HTML
+    assert 'data-task-view="history" hidden' in HTML
+    assert "await loadExplorer();await loadLibrary();const initial=" in JS
+    assert '"#results-title":"screening"' in JS
+    assert "/api/explorer?" in JS
+    assert "/api/metric-library?" in JS
+    assert "/api/company-profile?" in JS
+    assert "/api/company-comparison?" in JS
+    assert "explorerDataset" in JS
+    assert "newScreen();" in JS and "조건에 추가" in HTML + JS
+
+
+def test_explorer_preserves_missing_periods_and_display_only_date_conversion() -> None:
+    assert "선택 연도 자료 없음" in JS
+    assert "누락 연도는 연결하지 않습니다" in JS
+    assert 'class="line"' in JS and 'class="point"' in JS
+    assert "inclusiveEnd" in JS
+    assert "setUTCDate(d.getUTCDate()-1)" in JS
+    assert "배타적 컨텍스트 종료일" in JS
+
+
+def test_metric_guide_uses_exact_existing_threshold_scaling_without_autosave() -> None:
+    guide = JS[JS.index("async function addGuideMetric"):JS.index("function profileObservationCell")]
+    assert "thresholdToApi(threshold,m)" in guide
+    assert "definition_version:m.definition_version" in guide
+    assert "await newScreen()" in guide
+    assert 'value="FIXED_FISCAL_YEAR"' in guide
+    assert '$("#fiscal-year").value=String(S.explorerYear)' in guide
+    assert "saveScreen" not in guide
+    assert 'api("/api/screens"' not in guide

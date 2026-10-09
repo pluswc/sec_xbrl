@@ -148,6 +148,68 @@ def test_http_metric_catalog_forwards_dataset_scoped_business_fields(tmp_path: P
         thread.join(timeout=5)
 
 
+def test_http_forwards_explorer_library_profile_and_comparison_queries(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[str, tuple, dict]] = []
+
+    def capture(name: str):
+        def method(*args, **kwargs):
+            calls.append((name, args, kwargs))
+            return {"endpoint": name}
+
+        return method
+
+    service = SimpleNamespace(
+        company_explorer=capture("explorer"),
+        metric_library=capture("library"),
+        company_profile=capture("profile"),
+        company_comparison=capture("comparison"),
+    )
+    server = create_server(service, export_root=tmp_path / "exports")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        requests = (
+            "/api/explorer?dataset_id=v2&fiscal_year=2025&query=semi&sort=revenue&direction=desc",
+            "/api/metric-library?dataset_id=v2&fiscal_year=2025&query=margin&category=PROFITABILITY",
+            "/api/company-profile?dataset_id=v2&cik=0000000001&fiscal_year=2025",
+            "/api/company-comparison?dataset_id=v2&ciks=0000000001,0000000002&metric_ids=revenue,cfo&fiscal_year=2025",
+        )
+        for request in requests:
+            status, body = _request(base + request)
+            assert status == 200
+            assert json.loads(body)["endpoint"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert calls == [
+        (
+            "explorer",
+            ("v2",),
+            {"fiscal_year": 2025, "query": "semi", "sort": "revenue", "direction": "desc"},
+        ),
+        (
+            "library",
+            ("v2",),
+            {"fiscal_year": 2025, "query": "margin", "category": "PROFITABILITY"},
+        ),
+        ("profile", ("v2",), {"cik": "0000000001", "fiscal_year": 2025}),
+        (
+            "comparison",
+            ("v2",),
+            {
+                "ciks": ["0000000001", "0000000002"],
+                "metric_ids": ["revenue", "cfo"],
+                "fiscal_year": 2025,
+            },
+        ),
+    ]
+
+
 def test_http_repeated_and_selected_exports_remain_immutable(
     screening_dataset: Path, revision_content: dict, tmp_path: Path
 ) -> None:
