@@ -18,8 +18,10 @@ S&P 500 구성이나 모든 지표의 완전성을 뜻하지 않는다.
 inventory는 8,016건이지만 SIC 분류는 21건이고 7,995건은 unknown이다. 스크리너는
 31개 지표, observation 2,604건, 회사별 4 FY를 갖고 FY union은 2022–2026,
 21사 공통 기본연도는 FY2025다. FY2025 가용성은 revenue 18/21, gross profit
-9/21이다. 따라서 첫 과제는 종목 수를 바로 늘리는 일이 아니라 “왜 값이 없는지”를
-구분하는 일이다.
+9/21이며, 제안한 basic core 3종(revenue·CFO·assets)은 18/21사가 준비됐다.
+COST·TSLA·WMT는 revenue blocker가 남아 있다. 따라서 첫 과제는 종목 수를 바로
+늘리는 일이 아니라 “왜 값이 없는지”를 구분하고 critical systemic blocker를
+검증된 방식으로 해소하는 일이다.
 
 Apple은 이미 등록돼 있다. FY2022 raw revenue `394328000000`, gross profit
 `170782000000`이 존재하지만 mapping review가 필요하고 방법은
@@ -58,16 +60,18 @@ Apple은 이미 등록돼 있다. FY2022 raw revenue `394328000000`, gross profi
 
 | 단계 | 산출물 | 다음 단계 gate |
 | --- | --- | --- |
-| **M0: 현재 21사 품질 진단** | 회사×FY×지표 missing-reason inventory. `ABSENT_YEAR`, `RAW_PRESENT_REVIEW`, `CANDIDATE_AMBIGUITY`, `EXACT_ITEM_NOT_FOUND`, 검증된 `NOT_APPLICABLE`, parser failure를 분리. standard QName, PRE primary, unit, full dimensions, period, source filing 근거와 blocker queue | 원본 보존, 모든 21사 상태 존재, silent failure 0, 실제 screenability와 blocker 수 측정. Apple·WMT·COST·TSLA 사례를 원본 상태까지 대조 |
+| **M0: 현재 21사 품질 진단·수리 gate** | 회사×FY×지표 missing-reason inventory. `ABSENT_YEAR`, `RAW_PRESENT_REVIEW`, `CANDIDATE_AMBIGUITY`, `EXACT_ITEM_NOT_FOUND`, 검증된 `NOT_APPLICABLE`, parser failure를 분리. standard QName, PRE primary, unit, full dimensions, period, source filing 근거와 blocker queue를 만든다. 진단 뒤 critical systemic 문제만 별도 승인된 scoped repair로 처리하고 새 immutable publication을 발행한다 | 원본 보존, 모든 21사 상태 존재, silent failure 0, 실제 screenability와 blocker 수 측정. Apple·WMT·COST·TSLA를 원본 상태까지 대조하고, 새 발행본을 독립 재검증해 systemic mapping·representative-value selection·reason propagation blocker가 남지 않아야 함 |
 | **M1: candidate master** | as-of별 issuer/security snapshot, SEC alias·CIK conflict, ticker/exchange/share class, source hash·observed/effective-known 시각, security type·제외/보류 이유. SEC SIC는 coarse peer 1차 분류, 수동 business group은 별도 version | CIK join conflict 0 또는 명시적 hold. 8,016건을 “상장 보통주 전체”라고 부르지 않음. unknown·unsupported도 reason과 함께 유지 |
-| **M2: 21→50** | 아래 29개 후보의 identity·eligibility 검토, 5개 annual baseline+현재 FY 공시 plan, raw/history/metric coverage matrix | 50 issuer의 선택/보류/제외가 모두 설명되고 source trace·실패가 남음. 선택적 목표로 eligible cohort의 basic core `≥90%`; quota를 맞추려고 규칙을 약화하지 않음 |
+| **M2: 21→50** | 아래 29개 후보의 identity·eligibility 검토, 5개 annual baseline+현재 FY 공시 plan, raw/history/metric coverage matrix | M0 독립 재검증 PASS 후 재무 처리 규모를 늘림. 50 issuer의 선택/보류/제외가 모두 설명되고 source trace·실패가 남음. 선택적 목표로 eligible cohort의 basic core `≥90%`; quota를 맞추려고 규칙을 약화하지 않음 |
 | **M3: 50→150** | sector·industry stress, 신규 IPO·issuer 변경, restart/idempotence·memory·storage·시간 benchmark, finance/insurance/REIT 별도 profile pilot | 첫 5사 pilot과 batch 실측으로 예산·ETA 제시. 자동 재개, 중복 없는 산출물, quality-rule coverage와 모든 candidate 상태 확인 |
 | **M4: 150→500** | 승인된 batch benchmark에 따른 immutable universe/run과 전체 coverage·오류 보고 | 운영 용량·저장량·실행시간·독립 데이터/화면 검증이 수락된 뒤에만 진행. 500은 index membership 또는 완전 데이터 보장 아님 |
 | **M5: 유지 관리 제안** | nightly filing discovery·metadata refresh·incremental new filing, weekly quality check, versioned universe/run | 별도 자동화 승인, 실패 알림·재개·rollback·source preservation 수락. 이 계획에서는 생성하지 않음 |
 
 M0–M4 완료 보고는 요청·선택·보류·성공·실패 수, 실제 기간, source trace,
 coverage matrix와 silent failure 0을 함께 제시한다. 회사가 제외되면 eligibility 이유를,
-포함됐지만 지표가 없으면 metric reason을 각각 남긴다.
+포함됐지만 지표가 없으면 metric reason을 각각 남긴다. 실제 FY 부재, direct item
+미발견, 검증된 비적용은 reasoned missing으로 남을 수 있으며 모든 gross profit을
+채우는 것이 gate가 아니다. M0 repair는 전역 review 해제나 자동 정책 승인이 아니다.
 
 ## 4. 50사 후보 구성
 
@@ -105,8 +109,9 @@ CIK에 연결하지 않는다.
 - **C — 공시 처리**: 기존 discovery adapter, cache/live filing intake와 parser batch
 - **D — 독립 수락**: source 대조, coverage, consumer·frontend 시나리오 검증
 
-A와 B는 병렬 가능하지만 C는 M0/M1의 identity·scope gate를 통과한 company plan만
-받는다. D는 동결 publication을 읽는다. SEC 요청은 모든 machine/process 합계로
+A와 B는 병렬 가능하다. 특히 M1 metadata 발견은 M0 repair를 기다리지 않지만,
+C의 확대 재무 처리는 M0 독립 재검증과 M1 identity·scope gate를 통과한 company
+plan만 받는다. D는 동결 publication을 읽는다. SEC 요청은 모든 machine/process 합계로
 공식 상한 10 requests/s를 넘지 않으며, 초기 운영은 shared 2–5 requests/s,
 I/O worker 2–4개를 제안한다. parser는 초기에는 company process 1개씩 실행한다.
 실제 CAT combined build에서 RSS 약 26 GB가 관찰됐기 때문이다. cache·resume을
