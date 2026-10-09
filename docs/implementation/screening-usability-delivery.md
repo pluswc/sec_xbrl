@@ -159,6 +159,17 @@ category는 `GROWTH`, `PROFITABILITY`, `CASH_FLOW`, `FINANCIAL_STABILITY`,
 derived 지표는 새 definition version을 사용한다. immutable v1 revision을
 재작성하지 않고, 그 네 지표 조건은 v2에서 같은 version으로 다시 실행할 수 있다.
 
+XLSX도 canonical `screen-run-export-v1` payload를 그대로 보존한다. Excel cell
+한계를 넘는 `record_json` 또는 metadata text는 별도
+`screen-run-xlsx-long-text-v1` encoding으로 `LongText` sheet에 기록한다. 원래
+cell에는 stable record key, ordered chunk count와 전체 UTF-8 SHA-256을 가진 작은
+JSON descriptor가 남고, side sheet에는 16,000 Unicode codepoint 이하이면서
+32,000 UTF-16 code unit 이하인 순서 있는 chunk가 남는다. 한계 안의 text는 기존처럼
+cell에 직접 기록한다. descriptor와 chunk를 재조립한 payload는 manifest의
+`canonical_payload_hash`와 정확히 같아야 하며, XLSX `ExportManifest`는 독립
+`xlsx_encoding_version`을 선언한다. 이 encoding은 canonical JSON/CSV 계약이나
+기존 fitting XLSX cell 의미를 바꾸지 않는다.
+
 ## 7. 검증과 전달 gate
 
 구현 writer는 다음을 확인하고 source SHA를 동결한다.

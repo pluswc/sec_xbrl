@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import uuid
 from decimal import Decimal, InvalidOperation
@@ -23,6 +24,9 @@ from sec_xbrl.screening.store import ScreeningStore
 
 ENGINE_VERSION = "screening-executor-v1"
 EXPORT_VERSION = "screen-run-export-v1"
+XLSX_LONG_TEXT_VERSION = "screen-run-xlsx-long-text-v1"
+XLSX_DIRECT_TEXT_LIMIT = 32_000
+XLSX_CHUNK_TEXT_LIMIT = 16_000
 OPERATORS = {"GT", "GTE", "LT", "LTE", "EQ"}
 AGGREGATES = {"PASS", "FAIL", "UNDETERMINED"}
 VISIBLE_COLUMNS = {
@@ -440,6 +444,8 @@ class ScreeningService:
             "size": destination_path.stat().st_size,
             "canonical_payload_hash": digest_value(payload),
         }
+        if selected_format == "xlsx":
+            manifest["xlsx_encoding_version"] = XLSX_LONG_TEXT_VERSION
         try:
             return self.store.record_export(manifest)
         except Exception:
@@ -729,26 +735,94 @@ def _write_xlsx(path: Path, payload: dict[str, Any]) -> None:
     workbook = Workbook()
     rows_sheet = workbook.active
     rows_sheet.title = "Rows"
+    long_records: list[dict[str, Any]] = []
     headers = ["cik", "ticker", "name", "sic_code", "aggregate", "quality_blocking", "record_json"]
     rows_sheet.append(headers)
-    for row in payload["rows"]:
-        rows_sheet.append([str(row.get(key, "")) if key != "record_json" else canonical_json(row) for key in headers])
+    for index, row in enumerate(payload["rows"]):
+        rows_sheet.append(
+            [
+                str(row.get(key, ""))
+                if key != "record_json"
+                else _xlsx_text(
+                    canonical_json(row),
+                    record_key=f"row:{index}:{row['cik']}",
+                    long_records=long_records,
+                )
+                for key in headers
+            ]
+        )
     metadata = workbook.create_sheet("Metadata")
     metadata.append(["key", "value"])
     for key, value in (
         ("export_version", payload["export_version"]),
+        ("xlsx_long_text_encoding", XLSX_LONG_TEXT_VERSION),
         ("scope", payload["scope"]),
         ("selected_ciks_json", canonical_json(payload["selected_ciks"])),
         ("run_json", canonical_json(payload["run"])),
         ("canonical_payload_hash", digest_value(payload)),
     ):
-        metadata.append([key, value])
+        metadata.append(
+            [
+                key,
+                _xlsx_text(
+                    value,
+                    record_key=f"metadata:{key}",
+                    long_records=long_records,
+                ),
+            ]
+        )
+    long_text = workbook.create_sheet("LongText")
+    long_text.append(["record_key", "chunk_index", "chunk_count", "sha256", "chunk_text"])
+    for record in long_records:
+        long_text.append(
+            [
+                record["record_key"],
+                str(record["chunk_index"]),
+                str(record["chunk_count"]),
+                record["sha256"],
+                record["chunk_text"],
+            ]
+        )
     for sheet in workbook.worksheets:
         sheet.freeze_panes = "A2"
         for row in sheet.iter_rows():
             for cell in row:
                 cell.data_type = "s"
     workbook.save(path)
+
+
+def _xlsx_text(
+    value: str, *, record_key: str, long_records: list[dict[str, Any]]
+) -> str:
+    """Return inline text or a lossless descriptor backed by safe XLSX chunks."""
+    utf16_units = len(value.encode("utf-16-le")) // 2
+    if len(value) <= XLSX_DIRECT_TEXT_LIMIT and utf16_units <= 32_000:
+        return value
+    chunks = [
+        value[offset : offset + XLSX_CHUNK_TEXT_LIMIT]
+        for offset in range(0, len(value), XLSX_CHUNK_TEXT_LIMIT)
+    ]
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    for index, chunk in enumerate(chunks):
+        if len(chunk.encode("utf-16-le")) // 2 > 32_000:
+            raise AssertionError("XLSX long-text chunk exceeds the UTF-16 safety limit")
+        long_records.append(
+            {
+                "record_key": record_key,
+                "chunk_index": index,
+                "chunk_count": len(chunks),
+                "sha256": digest,
+                "chunk_text": chunk,
+            }
+        )
+    return canonical_json(
+        {
+            "encoding": XLSX_LONG_TEXT_VERSION,
+            "record_key": record_key,
+            "chunk_count": len(chunks),
+            "sha256": digest,
+        }
+    )
 
 
 def _csv_safe(value: Any) -> str:

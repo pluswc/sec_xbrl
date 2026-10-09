@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import shutil
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,7 +23,13 @@ from sec_xbrl.screening.dataset import (
     _observation,
     _verify_analysis_files,
 )
-from sec_xbrl.screening.service import ScreeningService
+from sec_xbrl.screening.service import (
+    XLSX_DIRECT_TEXT_LIMIT,
+    XLSX_LONG_TEXT_VERSION,
+    ScreeningService,
+    _write_xlsx,
+    _xlsx_text,
+)
 from sec_xbrl.screening.store import ScreeningStore, backup_store, restore_store
 
 
@@ -186,11 +194,12 @@ def test_full_and_selected_csv_xlsx_equal_frozen_run(
         assert digest_value(rebuilt) == outputs[(scope, "csv")]["canonical_payload_hash"]
     for scope, expected in (("full", 3), ("selected", 1)):
         workbook = load_workbook(tmp_path / f"{scope}.xlsx", data_only=False)
-        assert workbook.sheetnames == ["Rows", "Metadata"]
+        assert workbook.sheetnames == ["Rows", "Metadata", "LongText"]
         assert workbook["Rows"].max_row == expected + 1
         assert all(cell.data_type != "f" for sheet in workbook for row in sheet.iter_rows() for cell in row)
+        resolve = _xlsx_resolver(workbook)
         metadata = {
-            row[0].value: row[1].value
+            row[0].value: resolve(row[1].value)
             for row in workbook["Metadata"].iter_rows(min_row=2)
         }
         headers = [cell.value for cell in workbook["Rows"][1]]
@@ -203,12 +212,14 @@ def test_full_and_selected_csv_xlsx_equal_frozen_run(
             "scope": metadata["scope"],
             "selected_ciks": json.loads(metadata["selected_ciks_json"]),
             "run": json.loads(metadata["run_json"]),
-            "rows": [json.loads(row["record_json"]) for row in records],
+            "rows": [json.loads(resolve(row["record_json"])) for row in records],
         }
+        assert metadata["xlsx_long_text_encoding"] == XLSX_LONG_TEXT_VERSION
         assert digest_value(rebuilt) == metadata["canonical_payload_hash"]
         assert digest_value(rebuilt) == outputs[(scope.upper(), "xlsx")][
             "canonical_payload_hash"
         ]
+        assert outputs[(scope.upper(), "xlsx")]["xlsx_encoding_version"] == XLSX_LONG_TEXT_VERSION
     assert all(result["canonical_payload_hash"] for result in outputs.values())
     full_path = tmp_path / "full.csv"
     assert service.store.export_for_path(full_path)["row_count"] == 3
@@ -219,6 +230,97 @@ def test_full_and_selected_csv_xlsx_equal_frozen_run(
     full_path.write_text("changed", encoding="utf-8")
     with pytest.raises(ValueError, match="integrity mismatch"):
         service.store.export_for_path(full_path)
+
+
+def test_xlsx_long_text_chunks_reassemble_full_and_selected_payloads(tmp_path: Path) -> None:
+    long_text = ("장기근거😀" * 7_000) + "끝"
+    rows = [
+        {
+            "cik": f"{index + 1:010d}",
+            "ticker": f"T{index}",
+            "name": f"기업 {index}",
+            "sic_code": "3571",
+            "aggregate": "PASS",
+            "quality_blocking": False,
+            "predicates": [{"metric_id": "revenue", "trace": long_text + str(index)}],
+        }
+        for index in range(21)
+    ]
+    base = {
+        "export_version": "screen-run-export-v1",
+        "selected_ciks": None,
+        "run": {"run_id": "run-long", "provenance": long_text},
+    }
+    for suffix, selected_rows in (("full", rows), ("selected", rows[:2]), ("repeat", rows)):
+        payload = {
+            **base,
+            "scope": "FULL" if suffix != "selected" else "SELECTED",
+            "selected_ciks": None if suffix != "selected" else [row["cik"] for row in selected_rows],
+            "rows": selected_rows,
+        }
+        destination = tmp_path / f"{suffix}.xlsx"
+        _write_xlsx(destination, payload)
+        workbook = load_workbook(destination, data_only=False)
+        resolve = _xlsx_resolver(workbook)
+        metadata = {
+            row[0].value: resolve(row[1].value)
+            for row in workbook["Metadata"].iter_rows(min_row=2)
+        }
+        headers = [cell.value for cell in workbook["Rows"][1]]
+        records = [
+            dict(zip(headers, (cell.value for cell in row), strict=True))
+            for row in workbook["Rows"].iter_rows(min_row=2)
+        ]
+        rebuilt = {
+            "export_version": metadata["export_version"],
+            "scope": metadata["scope"],
+            "selected_ciks": json.loads(metadata["selected_ciks_json"]),
+            "run": json.loads(metadata["run_json"]),
+            "rows": [json.loads(resolve(row["record_json"])) for row in records],
+        }
+        assert rebuilt == payload
+        assert metadata["canonical_payload_hash"] == digest_value(payload)
+        assert workbook["LongText"].max_row > 1
+        assert all(
+            len(str(cell.value or "").encode("utf-16-le")) // 2 <= 32_000
+            for sheet in workbook
+            for row in sheet.iter_rows()
+            for cell in row
+        )
+
+
+def test_xlsx_keeps_fitting_legacy_text_inline() -> None:
+    text = "a" * XLSX_DIRECT_TEXT_LIMIT
+    long_records: list[dict] = []
+
+    assert _xlsx_text(text, record_key="row:0:0000000001", long_records=long_records) == text
+    assert long_records == []
+
+
+def _xlsx_resolver(workbook) -> Callable[[str], str]:
+    grouped: dict[str, list[tuple[int, int, str, str]]] = {}
+    for row in workbook["LongText"].iter_rows(min_row=2, values_only=True):
+        record_key, chunk_index, chunk_count, digest, chunk_text = row
+        grouped.setdefault(record_key, []).append(
+            (int(chunk_index), int(chunk_count), digest, chunk_text)
+        )
+
+    def resolve(value: str) -> str:
+        try:
+            descriptor = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return value
+        if not isinstance(descriptor, dict) or descriptor.get("encoding") != XLSX_LONG_TEXT_VERSION:
+            return value
+        chunks = sorted(grouped[descriptor["record_key"]])
+        assert [row[0] for row in chunks] == list(range(descriptor["chunk_count"]))
+        assert all(row[1] == descriptor["chunk_count"] for row in chunks)
+        assert all(row[2] == descriptor["sha256"] for row in chunks)
+        rebuilt = "".join(row[3] for row in chunks)
+        assert hashlib.sha256(rebuilt.encode("utf-8")).hexdigest() == descriptor["sha256"]
+        return rebuilt
+
+    return resolve
 
 
 def test_export_registration_failure_leaves_no_downloadable_file(

@@ -227,6 +227,14 @@ universe/publication/date/version, 전 row의 status·unknown·reason과 순서�
 발급하므로 같은 full export를 다시 받거나 같은 run에서 다른 selected subset을
 받아도 이전 파일과 `ExportManifest`를 덮어쓰지 않는다.
 
+긴 `record_json` 또는 metadata가 Excel cell 한계를 넘으면 XLSX는
+`screen-run-xlsx-long-text-v1`을 사용한다. 원래 cell의 JSON descriptor와
+`LongText` sheet의 stable key, 순서 있는 chunk, chunk count, 전체 SHA-256으로
+원문을 손실 없이 재조립할 수 있다. 각 chunk는 16,000 Unicode codepoint와
+32,000 UTF-16 code unit 이하이고, 짧은 text는 계속 cell에 직접 들어간다.
+XLSX export manifest의 `xlsx_encoding_version`으로 이 표현을 확인할 수 있으며,
+재조립한 canonical payload hash는 같은 run export hash와 일치해야 한다.
+
 ## backup과 restore
 
 ```bash
