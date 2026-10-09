@@ -1067,7 +1067,7 @@ def _derive_revenue_yoy(
         else:
             with localcontext(DECIMAL_CONTEXT):
                 value = _decimal_string(_percentage(top, bottom, subtract_one=True))
-    return _derived_record(
+    record = _derived_record(
         ticker=ticker,
         cik=cik,
         definition=definition,
@@ -1078,6 +1078,10 @@ def _derive_revenue_yoy(
         compatibility=compatibility,
         warnings=warnings,
     )
+    record["period_start"] = current.get("period_start") if current is not None else None
+    record["period_end"] = current.get("period_end") if current is not None else None
+    record["metric_observation_id"] = _observation_id(record)
+    return record
 
 
 def _derive_pair(
@@ -1279,7 +1283,15 @@ def _derived_record(
         "formula": definition["formula"],
         "input_observation_ids": [row["metric_observation_id"] for row in present],
         "input_values": [
-            {"metric_id": row["metric_id"], "observation_id": row["metric_observation_id"], "value": row.get("value")}
+            {
+                "metric_id": row["metric_id"],
+                "observation_id": row["metric_observation_id"],
+                "value": row.get("value"),
+                "fiscal_year": row.get("fiscal_year"),
+                "period_class": row.get("period_class"),
+                "period_start": row.get("period_start"),
+                "period_end": row.get("period_end"),
+            }
             for row in present
         ],
         "compatibility": compatibility,

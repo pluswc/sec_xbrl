@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 from typing import ClassVar
@@ -315,6 +316,39 @@ def test_dataset_v2_catalog_old_revision_and_instant_predicate(prepared, monkeyp
     run = service.execute(screen["revision_id"], "expanded-v2")
     assert run["counts"] == {"fail": 0, "pass": 1, "undetermined": 0, "target": 1, "quality_block": 0}
     assert {row["observation"]["period_class"] for row in run["rows"][0]["predicates"]} == {"FY", "INSTANT"}
+
+    attacks = {
+        "as-of": lambda manifest: manifest.update(financial_as_of="2099-01-01"),
+        "publication": lambda manifest: manifest.update(publication_id="screening-dataset-forged"),
+        "fixture": lambda manifest: manifest.update(fixture_kind="SYNTHETIC_ERROR_FIXTURE"),
+        "ciks": lambda manifest: manifest.update(configured_ciks=[]),
+        "companies": lambda manifest: manifest.update(configured_companies=[]),
+        "count": lambda manifest: manifest.update(company_count=99),
+        "source": lambda manifest: manifest["sources"]["metrics"].update(
+            publication_id="screening-metrics-forged"
+        ),
+        "versions": lambda manifest: manifest.update(versions={}),
+    }
+    for name, mutate in attacks.items():
+        attacked = prepared.root / f"dataset-v2-{name}"
+        shutil.copytree(destination, attacked)
+        manifest_path = attacked / "screening_dataset_manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        mutate(manifest)
+        manifest_path.write_text(canonical_json(manifest) + "\n")
+        with pytest.raises(ValueError):
+            ScreeningDatasetV2Reader(attacked)
+
+    copied_config = prepared.root / "copied-v2-config.json"
+    copied_config.write_bytes(config.read_bytes())
+    attacked = prepared.root / "dataset-v2-config-path"
+    shutil.copytree(destination, attacked)
+    manifest_path = attacked / "screening_dataset_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["config_path"] = str(copied_config)
+    manifest_path.write_text(canonical_json(manifest) + "\n")
+    with pytest.raises(ValueError, match="publication identity"):
+        ScreeningDatasetV2Reader(attacked)
 
 
 def test_dataset_v2_reader_does_not_recompute_financial_formulas(prepared, monkeypatch) -> None:

@@ -107,6 +107,9 @@ unavailable reasons를 반환한다. 기존 run은 결합된 v1 publication을 �
 dataset으로 자동 이동하지 않는다.
 v2 config는 metric manifest와 v1 identity dataset manifest의 SHA-256을 각각
 선언해야 하며 publisher는 둘의 exact identity source가 같은지도 확인한다.
+`status`는 v2 config의 원래 path/hash/content와 dataset scope/count/version/source를
+재결합해 publication ID를 재계산한다. config 또는 manifest 한쪽만 바꾼 publication은
+서비스 catalog에 열리지 않는다.
 
 출력은 다음과 같다.
 

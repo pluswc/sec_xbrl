@@ -89,15 +89,16 @@ def publish_screening_dataset_v2(
     ]
     companies = copy.deepcopy(source.companies)
     metadata = copy.deepcopy(source.metadata)
-    publication_id = "screening-dataset-" + digest_value(
-        {
-            "config": config,
-            "metric_publication_id": metrics.manifest["publication_id"],
-            "definitions": definitions,
-            "support": support,
-            "observations": observations,
-        }
-    )[:24]
+    config_sha = sha256_file(config_file)
+    publication_id = _publication_id(
+        config_path=config_file,
+        config_sha256=config_sha,
+        config=config,
+        metric_publication_id=metrics.manifest["publication_id"],
+        definitions=definitions,
+        support=support,
+        observations=observations,
+    )
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     staging = destination_path.parent / f".{destination_path.name}.partial-{uuid.uuid4().hex}"
     staging.mkdir()
@@ -124,6 +125,9 @@ def publish_screening_dataset_v2(
             "fixture_kind": config["fixture_kind"],
             "financial_as_of": config["financial_as_of"],
             "configured_ciks": [row["cik"] for row in companies],
+            "configured_companies": [
+                {"cik": row["cik"], "ticker": row["ticker"]} for row in companies
+            ],
             "company_count": len(companies),
             "metadata_count": len(metadata),
             "definition_count": len(definitions),
@@ -132,7 +136,7 @@ def publish_screening_dataset_v2(
             "versions": versions,
             "config": config,
             "config_path": str(config_file),
-            "config_sha256": sha256_file(config_file),
+            "config_sha256": config_sha,
             "sources": {
                 "metrics": {
                     "root": str(metrics_root),
@@ -204,11 +208,41 @@ class ScreeningDatasetV2Reader:
         }
         if any(self.manifest.get(key) != value for key, value in counts.items()):
             raise ValueError("screening v2 declared counts changed")
+        config_path = regular_file(
+            Path(self.manifest.get("config_path", "")), "screening v2 source config"
+        )
+        config_sha = sha256_file(config_path)
+        config = _validate_config(read_json(config_path, "screening v2 source config"))
+        if (
+            config_sha != self.manifest.get("config_sha256")
+            or config != self.manifest.get("config")
+        ):
+            raise ValueError("screening v2 source config changed")
+        if (
+            self.manifest.get("dataset_id") != config["dataset_id"]
+            or self.manifest.get("fixture_kind") != config["fixture_kind"]
+            or self.manifest.get("financial_as_of") != config["financial_as_of"]
+        ):
+            raise ValueError("screening v2 scope differs from pinned config")
+        expected_ciks = [row["cik"] for row in self.companies]
+        expected_companies = [
+            {"cik": row["cik"], "ticker": row["ticker"]} for row in self.companies
+        ]
+        if (
+            self.manifest.get("configured_ciks") != expected_ciks
+            or self.manifest.get("configured_companies") != expected_companies
+        ):
+            raise ValueError("screening v2 configured company scope changed")
         sources = self.manifest["sources"]
         metric_root = real_directory(Path(sources["metrics"]["root"]), "screening metric source")
         metric_manifest = regular_file(metric_root / "screening_metric_manifest.json", "screening metric manifest")
         if sha256_file(metric_manifest) != sources["metrics"]["manifest_sha256"]:
             raise ValueError("screening metric parent changed")
+        if (
+            metric_root != real_directory(Path(config["metric_root"]), "configured metric source")
+            or sources["metrics"]["manifest_sha256"] != config["metric_manifest_sha256"]
+        ):
+            raise ValueError("screening metric parent differs from pinned config")
         metric_reader = ScreeningMetricReader(metric_root)
         if metric_reader.manifest["publication_id"] != sources["metrics"]["publication_id"]:
             raise ValueError("screening metric parent identity changed")
@@ -216,6 +250,13 @@ class ScreeningDatasetV2Reader:
         source_manifest = regular_file(source_root / MANIFEST, "screening v1 manifest")
         if sha256_file(source_manifest) != sources["source_dataset"]["manifest_sha256"]:
             raise ValueError("screening v1 identity parent changed")
+        if (
+            source_root
+            != real_directory(Path(config["source_dataset_root"]), "configured identity source")
+            or sources["source_dataset"]["manifest_sha256"]
+            != config["source_dataset_manifest_sha256"]
+        ):
+            raise ValueError("screening v1 parent differs from pinned config")
         source_reader = ScreeningDatasetReader(source_root)
         if source_reader.publication_id != sources["source_dataset"]["publication_id"]:
             raise ValueError("screening v1 parent identity changed")
@@ -242,6 +283,40 @@ class ScreeningDatasetV2Reader:
             or self.metadata != source_reader.metadata
         ):
             raise ValueError("screening v2 rows differ from governed parents")
+        if (
+            self.manifest["financial_as_of"] != metric_reader.manifest["financial_as_of"]
+            or self.manifest["financial_as_of"] != source_reader.manifest["financial_as_of"]
+            or expected_companies
+            != [{"cik": row["cik"], "ticker": row["ticker"]} for row in source_reader.companies]
+            or sources.get("metadata") != source_reader.manifest["sources"]["metadata"]
+        ):
+            raise ValueError("screening v2 scope differs from verified parents")
+        expected_versions = {
+            "metric_definition_versions": sorted(
+                {row["definition_version"] for row in self.metric_definitions}
+            ),
+            "metric_publication_id": metric_reader.manifest["publication_id"],
+            "metric_publication_versions": copy.deepcopy(
+                metric_reader.manifest.get("versions", {})
+            ),
+            "source_dataset_publication_id": source_reader.publication_id,
+            "source_dataset_versions": copy.deepcopy(
+                source_reader.manifest.get("versions", {})
+            ),
+        }
+        if self.manifest.get("versions") != expected_versions:
+            raise ValueError("screening v2 version vector changed")
+        expected_publication_id = _publication_id(
+            config_path=config_path,
+            config_sha256=config_sha,
+            config=config,
+            metric_publication_id=metric_reader.manifest["publication_id"],
+            definitions=self.metric_definitions,
+            support=self.metric_support,
+            observations=self.observations,
+        )
+        if self.publication_id != expected_publication_id:
+            raise ValueError("screening v2 publication identity changed")
         return {
             "publication_id": self.publication_id,
             "dataset_id": self.manifest["dataset_id"],
@@ -287,6 +362,29 @@ def _require_sha256(value: Any, field: str) -> str:
     if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
         raise ValueError(f"{field} must be a lowercase SHA-256")
     return digest
+
+
+def _publication_id(
+    *,
+    config_path: Path,
+    config_sha256: str,
+    config: dict[str, Any],
+    metric_publication_id: str,
+    definitions: list[dict[str, Any]],
+    support: list[dict[str, Any]],
+    observations: list[dict[str, Any]],
+) -> str:
+    return "screening-dataset-" + digest_value(
+        {
+            "config_path": str(config_path),
+            "config_sha256": config_sha256,
+            "config": config,
+            "metric_publication_id": metric_publication_id,
+            "definitions": definitions,
+            "support": support,
+            "observations": observations,
+        }
+    )[:24]
 
 
 def _file_manifest(root: Path) -> list[dict[str, Any]]:

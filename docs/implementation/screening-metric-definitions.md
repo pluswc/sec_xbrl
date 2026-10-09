@@ -76,6 +76,10 @@ compatibility가 있으므로 definition version `annual-core-reported-v1`을 �
 `revenue_yoy`는 QOQ, TTM 또는 CAGR이 아니다. 364/365/366/371일 normal FY를
 허용하되 실제 duration 차이를 warning에 보존한다. short transition 또는
 recast 검증이 없는 의미 변경은 unavailable이다.
+YoY observation의 표시 period는 현재 FY의 actual start/end다. ordered input
+provenance에는 현재·직전 FY 각각의 fiscal year, period class, actual start/end,
+observation ID와 exact input value를 모두 보존한다. 현재 FY input 자체가 없으면
+observation period를 직전 FY로 대신 채우지 않는다.
 
 margin은 발행사가 직접 보고한 non-GAAP margin이라고 표시하지 않는다. FCF도
 발행사 FCF 정의와 동등하다고 주장하지 않는다. SEC staff의 non-GAAP C&DI

@@ -271,6 +271,40 @@ def test_revenue_yoy_accepts_53_week_duration_and_ignores_ambient_precision() ->
     assert result["availability_status"] == "AVAILABLE"
     assert result["value"] == "30"
     assert result["warnings"] == ["ACTUAL_DURATION_DIFFERS"]
+    assert (result["period_start"], result["period_end"]) == (
+        current["period_start"],
+        current["period_end"],
+    )
+    assert [
+        (row["fiscal_year"], row["period_start"], row["period_end"])
+        for row in result["input_values"]
+    ] == [
+        (2025, current["period_start"], current["period_end"]),
+        (2024, prior["period_start"], prior["period_end"]),
+    ]
+
+
+def test_revenue_yoy_without_current_input_keeps_observation_bounds_empty() -> None:
+    prior = _reported(
+        "revenue",
+        "100",
+        year=2024,
+        start="2023-12-31",
+        end="2024-12-29",
+        qname="us-gaap:Revenues",
+    )
+    result = _derive_revenue_yoy(
+        ticker="TEST",
+        cik="0000000001",
+        definition=DEFINITION_BY_ID["revenue_yoy"],
+        current=None,
+        prior=prior,
+        fiscal_year=2025,
+    )
+    assert result["availability_status"] == "UNAVAILABLE"
+    assert result["unavailable_reason"] == "MISSING_INPUT"
+    assert result["period_start"] is None and result["period_end"] is None
+    assert result["input_values"][0]["fiscal_year"] == 2024
 
 
 def test_rational_percentage_and_money_subtraction_have_explicit_precision() -> None:

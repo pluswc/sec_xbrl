@@ -139,6 +139,10 @@ analysis, raw/history, SEC/XML을 직접 읽거나 metric을 다시 계산하지
 metric parent publication ID/manifest SHA와 모든 copied row/hash를 묶고, v2 reader가
 이를 다시 검증한다. source kind와 stable metric observation/input ID를 보존하며
 FY와 INSTANT를 같은 연도 key로 합치지 않는다.
+v2 reader는 외부 config의 exact path/hash/content, dataset ID, fixture kind,
+financial-as-of, ordered CIK/ticker scope, counts, parent roots/manifest hashes,
+metadata identity와 version vector를 다시 결합한다. 이 값과 copied row로 publication
+ID도 재계산하므로 manifest만 고친 as-of·fixture·CIK·source·ID 변경을 거부한다.
 
 predicate는 각 metric의 definition version을 사용한다. money threshold는 USD,
 rate/ratio threshold는 percentage point다. NaN/Infinity와 unit/period mismatch를
