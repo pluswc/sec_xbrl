@@ -11,18 +11,55 @@
 3. cutoff까지 최근 완료 calendar-quarter-end bucket 8개를 준비하되, reported quarter,
    cumulative YTD, governed derived quarter를 분리한다.
 
-이 계약 작성과 metadata·Filing Discovery 계획은 **APPROVED**다. 상태는
-**CONTRACT_IMPLEMENTED / METADATA_AND_DISCOVERY_ALLOWED**이며, 확대 financial parsing,
-history build, metric publication과 consumer 연결은 **BLOCKED_PENDING_M0_REPAIR_AND_INTERFACE**다.
-lead가 현재 21사의 M0 source diagnosis와 별도 승인된 bounded correction을 끝내고 producer
-interface를 확정하기 전에는 그 단계를 시작하지 않는다. 문서의 수락 조건은 새 회계
-정책이나 UI 구현을 자동 승인하지 않는다.
+이 계약 작성과 metadata·Filing Discovery 계획, 아래 M0 bounded correction 구현은
+**APPROVED**다. 상태는 **M0_CORRECTION_IMPLEMENTATION_APPROVED**이며, 확대 financial
+parsing, 29사 추가 history build, quarterly publication과 consumer 연결은
+**BLOCKED_PENDING_CORRECTED_21_INDEPENDENT_PASS**다. 새 21사 publication이 독립 검증을
+통과하기 전에는 확대 단계로 넘어가지 않는다. 문서의 수락 조건은 이 절에 적은 범위를
+넘는 회계 정책이나 UI 구현을 자동 승인하지 않는다.
 
 기준 소스는 `1e2733c61d4c21617c658093137957369af29b8b`이며 기존 actual 21사 Raw,
 history, R3 financial publication과 사용자 journal은 읽기 전용이다. 회사 설명 기능의
 provider 권리 gate와 이 작업은 무관하며 Investing.com 본문 취득은 계속 비활성이다.
 이번 브랜치는 producer 전용이다. `src/sec_xbrl/screening/ui.py`, `service.py`, `server.py`,
 `store.py`, `dataset*`, `cli.py`는 별도 consumer 작성자 소유이며 수정하지 않는다.
+
+### 1.1 승인된 M0 correction과 진단 근거
+
+읽기 전용 진단은 `/tmp/universe50-quarterly-diagnosis/diagnosis-report.json`에 보존됐고
+SHA-256은 `50a473931920f1ef8d6b5a21e5ac7a4ee7aea367bf336d78bc7f143cb71b8e56`다.
+진단은 cached JSON과 제한된 Parquet 조회만 사용했으며 SEC network, Arelle 재실행,
+원본 수정이나 정책 release를 하지 않았다. 다음 네 correction만 승인됐다.
+
+1. **공식 historical FASB namespace 연속성.** `http(s)://fasb.org/us-gaap/YYYY`와
+   유효한 `http(s)://fasb.org/us-gaap/YYYY-MM-DD`를 공식 annual release 형태로
+   인식한다. 두 concept의 `STANDARD`, taxonomy family, local name, data type, period type,
+   balance, abstract fingerprint가 기존 규칙대로 모두 맞아야 한다. Raw namespace와 Raw ID는
+   바꾸지 않고 새 mapping publication에서만 continuity를 표현한다. lookalike host/path,
+   custom concept, 유효하지 않은 달력일, type·period·balance·abstract 변화는 거부한다.
+2. **typed primary-statement 우선 선택.** exact company, source filing, actual period, USD,
+   full dimension scope를 먼저 맞춘 후보 중 revenue·operating income·net income·gross
+   profit은 primary IS, CFO는 primary CF, assets는 primary BS evidence가 있는 후보만
+   대표값 자격을 갖는다. 자격 후보가 하나면 그 existing reported fact를 선택하되 모든
+   후보와 채택·탈락 evidence를 lineage에 남긴다.
+3. **revenue-only reported total.** typed primary revenue 후보가 여러 개이면, 같은 primary
+   IS role의 CAL에서 `us-gaap:Revenues`가 competing revenue child와 다른 reported component의
+   parent이고 모든 edge weight가 `+1`, measurement scope가 같으며 reported parent 금액과
+   child 합계가 exact Decimal 또는 기존 CAL tolerance로 일치할 때만 이미 보고된 parent
+   fact를 선택한다. WMT FY2025의 `680985000000 = 674538000000 + 6447000000`이 positive
+   control이다. 합계를 새로 만들지 않고, 이 규칙을 net income·cost·custom concept·label·
+   order·issuer 예외로 일반화하지 않는다.
+4. **reason과 candidate lineage 보존.** 해결되지 않은 경우 source
+   `MULTIPLE_CANDIDATES`와 전체 후보/evidence가 analysis에서 metric publication까지
+   유지돼야 한다. 이를 `INPUT_NOT_REPORTED`, missing unit 또는 period 오류로 바꾸지 않는다.
+   COST cost 항목 두 cell은 별도 evidence가 없으므로 계속 hold이며 core 수락을 위해
+   강제로 채우지 않는다.
+
+필수 regression은 historical AAPL FY2022 revenue·gross-profit continuity, COST·TSLA의
+unique primary IS 후보, WMT의 reported CAL parent, CAL footing·role·weight·scope 실패,
+revenue 외 항목의 비적용, unresolved candidate reason 전파를 포함한다. 새 21사 source,
+analysis, metric publication은 기존 파일을 덮지 않는 destination에 작성하고 mapping과
+대표값 선택을 독립적으로 재확인한다.
 
 ## 2. 불변 입력과 새 run 경계
 
