@@ -7,6 +7,7 @@ import pytest
 
 from sec_xbrl.analytics.history_quarters import (
     _has_materialized_cell,
+    _merge_staged_rows,
     _period_attestation_index,
     _read_staged_records,
     derive_quarter,
@@ -103,6 +104,43 @@ def test_staged_chunk_round_trip_checks_hash_and_count(tmp_path: Path) -> None:
     path.write_bytes(corrupted)
     with pytest.raises(ValueError, match="integrity mismatch"):
         _read_staged_records(path, info)
+
+
+def test_staged_row_collision_preserves_legacy_later_source_precedence() -> None:
+    rows = {
+        "same-row": {
+            "fiscal_time_series_row_id": "same-row",
+            "label": "earlier metadata",
+            "full_metadata": {"source": "first", "network": ["old-edge"]},
+        }
+    }
+    _merge_staged_rows(
+        rows,
+        (
+            {
+                "fiscal_time_series_row_id": "same-row",
+                "label": "later metadata",
+                "full_metadata": {"source": "second", "network": ["new-edge"]},
+            },
+            {
+                "fiscal_time_series_row_id": "new-row",
+                "label": "new row",
+                "full_metadata": {"source": "second", "network": ["new-row-edge"]},
+            },
+        ),
+    )
+    assert rows == {
+        "same-row": {
+            "fiscal_time_series_row_id": "same-row",
+            "label": "later metadata",
+            "full_metadata": {"source": "second", "network": ["new-edge"]},
+        },
+        "new-row": {
+            "fiscal_time_series_row_id": "new-row",
+            "label": "new row",
+            "full_metadata": {"source": "second", "network": ["new-row-edge"]},
+        },
+    }
 
 
 def test_period_attestation_index_projects_only_validated_fields() -> None:

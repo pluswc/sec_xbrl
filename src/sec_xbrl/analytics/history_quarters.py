@@ -123,6 +123,14 @@ def _read_staged_records(path: Path, info: dict[str, Any]) -> tuple[dict[str, An
     )
 
 
+def _merge_staged_rows(
+    destination: dict[str, dict[str, Any]], rows: tuple[dict[str, Any], ...]
+) -> None:
+    """Match the legacy table-order merge: later source row metadata wins."""
+    for row in rows:
+        destination[row["fiscal_time_series_row_id"]] = row
+
+
 def derive_quarter(later: dict[str, Any], earlier: dict[str, Any], *, quarter: int) -> dict[str, Any] | None:
     """One reviewed additive difference; reject all incompatible scopes."""
     if quarter not in {2, 3, 4} or not approved_additive(later) or not approved_additive(earlier):
@@ -303,8 +311,10 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
         for chunk in target["chunks"]:
             for column in _read_staged_records(chunk["columns"]["path"], chunk["columns"]):
                 bundle["columns"][column["fiscal_time_series_column_id"]] = column
-            for row in _read_staged_records(chunk["rows"]["path"], chunk["rows"]):
-                bundle["rows"].setdefault(row["fiscal_time_series_row_id"], row)
+            _merge_staged_rows(
+                bundle["rows"],
+                _read_staged_records(chunk["rows"]["path"], chunk["rows"]),
+            )
             bundle["cells"].extend(_read_staged_records(chunk["cells"]["path"], chunk["cells"]))
         for column_id, column in target["extra_columns"].items():
             bundle["columns"].setdefault(column_id, column)
