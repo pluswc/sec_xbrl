@@ -756,16 +756,27 @@ def _validate_universe(value: Any) -> None:
 
 
 def _validate_period_policy(value: Any) -> None:
-    if not isinstance(value, dict) or value.get("mode") not in {"FIXED_FISCAL_YEAR", "LATEST_COMPLETE_ANNUAL"}:
+    modes = {"FIXED_FISCAL_YEAR", "LATEST_COMPLETE_ANNUAL", "FIXED_CALENDAR_QUARTER_END"}
+    if not isinstance(value, dict) or value.get("mode") not in modes:
         raise ValueError("invalid period policy")
     if value["mode"] == "FIXED_FISCAL_YEAR":
         year = value.get("fiscal_year")
         if type(year) is not int or not 1900 <= year <= 2200 or set(value) != {"mode", "fiscal_year"}:
             raise ValueError("fixed annual policy requires one fiscal year")
-    else:
+    elif value["mode"] == "LATEST_COMPLETE_ANNUAL":
         offset = value.get("offset", 0)
         if type(offset) is not int or not 0 <= offset <= 20 or set(value) - {"mode", "offset"}:
             raise ValueError("latest annual offset is invalid")
+    else:
+        year, quarter = value.get("calendar_year"), value.get("calendar_quarter")
+        if (
+            type(year) is not int
+            or not 1900 <= year <= 2200
+            or type(quarter) is not int
+            or quarter not in {1, 2, 3, 4}
+            or set(value) != {"mode", "calendar_year", "calendar_quarter"}
+        ):
+            raise ValueError("fixed calendar quarter-end policy requires one year and quarter")
 
 
 def _sort_rows(rows: list[dict[str, Any]], spec: dict[str, Any]) -> list[dict[str, Any]]:
