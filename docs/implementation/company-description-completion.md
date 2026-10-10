@@ -16,8 +16,8 @@ collector/importer, 불변 publication, portable reader와 선택적 회사 prof
   삭제·변경하거나 publication 디렉터리를 옮겨도 소비자는 embedded snapshot으로
   검증한다.
 - raw HTML은 저장하지 않는다. 명시적 id/class selector의 한 요소에서 plain text만
-  추출하고 script/style, 선택 영역 밖 문구, broad selector와 중복 id/class 속성을
-  거절한다.
+  추출하며 script/style과 선택 영역 밖 문구는 제외·폐기한 뒤 유효한 대상 본문을
+  게시한다. broad selector와 모호한 중복 id/class 속성은 입력 자체를 거절한다.
 - 만료는 재무 service를 중단시키지 않고 설명·링크만 `RIGHTS_EXPIRED`로 숨긴다.
   description 옵션을 생략한 기존 API·UI·journal·export 동작은 유지한다.
 - 실제 R3를 읽기 전용으로 사용한 별도 합성 publication은 21사 중 1건을
@@ -32,13 +32,15 @@ collector/importer, 불변 publication, portable reader와 선택적 회사 prof
 | 항목 | 결과와 증거 |
 | --- | --- |
 | 최종 독립 검증 | exact `51aeff7665a1f09e4bab2cce562b2250e0f316a0`, 109 relevant PASS / 0 SKIP. `work/company_descriptions_20261010/verification/51aeff-report.json`, SHA-256 `ca67ec49363777bbd51cbf2541613b4e43b781f8ff73ef6c8a1e6fa48fb59c7e` |
-| Native Windows 확인 | 26개 물리 제어 PASS. `work/company_descriptions_20261010/native_final/browser-report.json`, SHA-256 `29c8b1e17686607aad422e9abfb90ff99846803fdbdf252f341b179c1e7aed23`; helper SHA-256 `40a2faf86060d200da363247809357aba32fce3bd0b24855f91b30bf2959af7d` |
+| Native Windows 확인 | Playwright가 native Chrome에서 DOM click/key로 수행한 26개 실제 브라우저 동작 PASS. `work/company_descriptions_20261010/native_final/browser-report.json`, SHA-256 `29c8b1e17686607aad422e9abfb90ff99846803fdbdf252f341b179c1e7aed23`; helper SHA-256 `40a2faf86060d200da363247809357aba32fce3bd0b24855f91b30bf2959af7d` |
 | 합성 publication | `company-descriptions-863346570c8c420c515e3493`, manifest SHA-256 `0f4d2d8a0af36266719c08520f8f30345dbd6358d62d21b1049e04e555f0cbc3` |
 | 보존 확인 | actual journal SHA-256 `fbc0f7604e7a6aebb578bdaadc9bc46a980b3d43f7c857c8efeeab4ca465384c` 유지. 기존 21 profile·651 FY2025 slot·4 historical run 및 CSV/JSON/XLSX 호환 evidence는 변경되지 않은 e98 product blob에 대한 기존 검증을 정확히 재사용 |
 
 Native 확인은 138자 한국어 multiline plain text와 script literal의 비실행, newline,
 합성 표시, HTTPS `noopener`, source 새 탭, Tab/Escape/focus return, 1440·1024·768 폭,
-draft 불변, POST 0과 page error 0을 확인했다. 첫 native FAIL은 새 화면 준비를 기다리지
+draft 불변, POST 0과 page error 0을 확인했다. source 클릭의 popup은
+`example.invalid`에 대한 **OWNED mock/intercepted response**였으며 실제 provider 요청이나
+provider page 가용성 검증이 아니다. 첫 native FAIL은 새 화면 준비를 기다리지
 않은 lead helper timing 오류였고 `browser-first-draft-helper-fail.json`에 보존했다.
 수정된 helper가 같은 제품 소스에서 PASS했으며 제품 결함으로 재분류하지 않는다.
 
