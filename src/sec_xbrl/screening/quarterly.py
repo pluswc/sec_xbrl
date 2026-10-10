@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from sec_xbrl.screening.common import (
+    canonical_json,
     contained_file,
     read_json,
     real_directory,
@@ -161,6 +162,9 @@ class QuarterlyScreeningMetricReader:
             for year, quarter in spine
         }:
             raise ValueError("quarterly observations do not cover metric/company/spine grain")
+        self._prepared_identity_records: dict[str, str] = {}
+        for row in self.observations:
+            self._remember_prepared_identity(row)
         for row in self.observations:
             self._verify_observation(row, definitions)
         self._verify_support(spine)
@@ -207,17 +211,24 @@ class QuarterlyScreeningMetricReader:
             if not isinstance(row["value"], str) or not value.is_finite():
                 raise ValueError("quarterly value must be an exact decimal string")
             required = (
-                "period_start",
                 "period_end",
                 "filed_date",
                 "report_date",
                 "fiscal_year",
                 "fiscal_quarter",
             )
-            if any(row.get(field) is None for field in required):
+            if (
+                any(row.get(field) is None for field in required)
+                or "period_start" not in row
+                or (
+                    definition["observation_basis"] != "INSTANT" and row.get("period_start") is None
+                )
+            ):
                 raise ValueError(
                     "available quarterly observation requires actual dates and fiscal labels"
                 )
+            if definition["observation_basis"] == "INSTANT" and row["period_start"] is not None:
+                raise ValueError("quarterly instant observation cannot have a duration start")
             if row.get("selection_as_of_date") != self.manifest.get("financial_as_of"):
                 raise ValueError("quarterly observation as-of differs from publication")
             if date.fromisoformat(row["filed_date"]) > date.fromisoformat(
@@ -270,6 +281,9 @@ class QuarterlyScreeningMetricReader:
             if len(inputs) != 4:
                 raise ValueError("available TTM requires exactly four eligible QTD inputs")
             sources = inputs
+        elif kind == "DERIVED_METRIC":
+            self._verify_generic_metric(row, definition)
+            return
         else:
             raise ValueError("quarterly derived metric requires a supported input contract")
 
@@ -297,35 +311,7 @@ class QuarterlyScreeningMetricReader:
                 if source_definition is None:
                     raise ValueError("TTM derived input definition is missing")
                 self._verify_observation(source, {source_metric: source_definition})
-        ineligible_fields = (
-            "compatibility_failure",
-            "ambiguity",
-            "ambiguous",
-            "mapping_uncertainty",
-            "mapping_review_required",
-        )
-        if kind != "REPORTED":
-            # Comparison breaks do not erase an independently known reported value.
-            ineligible_fields += (
-                "basis_break",
-                "structural_break",
-                "recast_break",
-                "continuity_break",
-                "recast_review_required",
-            )
-        for item in [row, lineage, *sources]:
-            if any(item.get(key) for key in ineligible_fields):
-                raise ValueError(
-                    "available quarterly observation contains incompatible selected inputs"
-                )
-        if any(
-            source.get("quality_blocking") or source.get("quality_status") == "BLOCK"
-            for source in sources
-        ) and not (
-            kind == "REPORTED"
-            and (row.get("quality_blocking") or row.get("quality_status") == "BLOCK")
-        ):
-            raise ValueError("quarterly selected source blocking is not preserved")
+        self._verify_selected_eligibility(row, lineage, sources)
 
         if kind == "REPORTED":
             for field in (
@@ -396,6 +382,237 @@ class QuarterlyScreeningMetricReader:
         if row["report_date"] != sources[0 if kind == "DERIVED_QUARTER" else -1]["report_date"]:
             raise ValueError("quarterly derived report date differs from endpoint source")
 
+    def _verify_selected_eligibility(
+        self, row: dict[str, Any], lineage: dict[str, Any], sources: list[dict[str, Any]]
+    ) -> None:
+        kind = row["source_kind"]
+        ineligible_fields = (
+            "compatibility_failure",
+            "ambiguity",
+            "ambiguous",
+            "mapping_uncertainty",
+            "mapping_review_required",
+        )
+        if kind != "REPORTED":
+            # Comparison breaks do not erase an independently known reported value.
+            ineligible_fields += (
+                "basis_break",
+                "structural_break",
+                "recast_break",
+                "continuity_break",
+                "recast_review_required",
+            )
+        for item in [row, lineage, *sources]:
+            if any(item.get(key) for key in ineligible_fields):
+                raise ValueError(
+                    "available quarterly observation contains incompatible selected inputs"
+                )
+        if any(
+            source.get("quality_blocking") or source.get("quality_status") == "BLOCK"
+            for source in sources
+        ) and not (
+            kind == "REPORTED"
+            and (row.get("quality_blocking") or row.get("quality_status") == "BLOCK")
+        ):
+            raise ValueError("quarterly selected source blocking is not preserved")
+
+    def _verify_generic_metric(self, row: dict[str, Any], definition: dict[str, Any]) -> None:
+        """Validate a producer's two prepared inputs without evaluating its formula."""
+        contract = definition.get("input_contract")
+        roles_by_kind = {
+            "SAME_PERIOD_DIFFERENCE": ("CFO", "CAPEX"),
+            "SAME_PERIOD_RATIO": ("NUMERATOR", "DENOMINATOR"),
+            "ADJACENT_FISCAL_QUARTER_GROWTH": ("CURRENT", "PRIOR"),
+            "SAME_FISCAL_QUARTER_YOY_GROWTH": ("CURRENT", "PRIOR"),
+        }
+        if (
+            not isinstance(contract, dict)
+            or contract.get("version") != "quarter-derived-input-scope-v1"
+        ):
+            raise ValueError("quarterly derived metric input contract is unsupported")
+        contract_kind = contract.get("kind")
+        roles = roles_by_kind.get(contract_kind) if isinstance(contract_kind, str) else None
+        if (
+            roles is None
+            or definition["observation_basis"] not in {"QTD_3M", "INSTANT"}
+            or set(contract) - {"version", "kind", "inputs", "denominator_policy", "basis_policy"}
+        ):
+            raise ValueError("quarterly derived metric kind or period is unsupported")
+        declarations = contract.get("inputs")
+        if (
+            not isinstance(declarations, list)
+            or len(declarations) != 2
+            or not all(
+                isinstance(item, dict)
+                and set(item) == {"input_role", "metric_id", "value_constraint"}
+                for item in declarations
+            )
+            or tuple(item["input_role"] for item in declarations) != roles
+        ):
+            raise ValueError("quarterly derived metric input role declarations differ")
+        declared_metrics = {
+            item["input_role"]: require_string(item["metric_id"], "input metric")
+            for item in declarations
+        }
+        expected_constraints = (
+            ("FINITE", "NONNEGATIVE")
+            if contract_kind == "SAME_PERIOD_DIFFERENCE"
+            else (
+                ("NONNEGATIVE", "POSITIVE")
+                if contract_kind.endswith("GROWTH") or definition["observation_basis"] == "INSTANT"
+                else ("FINITE", "POSITIVE")
+            )
+        )
+        if tuple(item["value_constraint"] for item in declarations) != expected_constraints:
+            raise ValueError(
+                "quarterly derived metric value constraints differ from approved policy"
+            )
+        lineage = row["source_lineage"]
+        inputs = lineage.get("derivation_inputs")
+        if (
+            not isinstance(inputs, list)
+            or len(inputs) != 2
+            or not all(isinstance(item, dict) for item in inputs)
+            or tuple(item.get("input_role") for item in inputs) != roles
+        ):
+            raise ValueError("quarterly derived metric requires exact named prepared inputs")
+        if not row["metric_id"].startswith("quarter_") or "basis_version" not in row:
+            raise ValueError("quarterly derived metric must declare quarter identity and basis")
+        require_string(row.get("observation_id"), "quarterly derived observation identity")
+        input_ids = [
+            require_string(item.get("observation_id"), "prepared input observation identity")
+            for item in inputs
+        ]
+        if len(set(input_ids)) != 2 or row["observation_id"] in input_ids:
+            raise ValueError("quarterly derived metric input identity cycle or duplicate")
+        definitions = {item["metric_id"]: item for item in self.definitions}
+        for item in inputs:
+            metric_id = declared_metrics[item["input_role"]]
+            input_definition = definitions.get(metric_id)
+            if (
+                item.get("metric_id") != metric_id
+                or input_definition is None
+                or input_definition.get("observation_basis") not in {"QTD_3M", "INSTANT"}
+                or input_definition.get("unit_kind") != "MONEY"
+                or item.get("unit") != "USD"
+                or item.get("source_kind") not in {"REPORTED", "DERIVED_QUARTER"}
+                or item.get("availability_status") != "AVAILABLE"
+            ):
+                raise ValueError("quarterly derived metric input is not an eligible prepared value")
+            if (
+                "basis_version" not in item
+                or "quality_status" not in item
+                or type(item.get("quality_blocking")) is not bool
+            ):
+                raise ValueError("quarterly prepared input must declare basis and quality")
+            if item["basis_version"] is not None:
+                require_string(item["basis_version"], "prepared input basis version")
+            if item["source_kind"] == "DERIVED_QUARTER":
+                require_string(item.get("derived_metric_id"), "prepared derived quarter identity")
+            # Generic derived inputs cannot recurse into another generic metric or TTM.
+            self._verify_observation(item, definitions)
+            if item["period_class"] == "QTD_3M" and not 75 <= _duration(item) <= 105:
+                raise ValueError("quarterly derived metric input is not an eligible QTD duration")
+            self._remember_prepared_identity(item)
+            constraint = declarations[roles.index(item["input_role"])]["value_constraint"]
+            if (constraint == "NONNEGATIVE" and Decimal(item["value"]) < 0) or (
+                constraint == "POSITIVE" and Decimal(item["value"]) <= 0
+            ):
+                raise ValueError("quarterly derived metric input violates its value constraint")
+            _fiscal_coordinate(item)
+            for field in ("cik", "dimensions", "selection_view", "selection_as_of_date"):
+                if item.get(field) != row.get(field):
+                    raise ValueError(f"quarterly derived metric input {field} differs")
+        scopes = [scope for item in inputs for scope in _prepared_input_scopes(item)]
+        self._verify_selected_eligibility(row, lineage, scopes)
+        for field in ("basis_version", "structural_version", "recast_version"):
+            for item in inputs:
+                if item.get(field) != row.get(field) or any(
+                    scope[field] != item.get(field)
+                    for scope in _prepared_input_scopes(item)
+                    if field in scope
+                ):
+                    raise ValueError(f"quarterly derived metric input {field} differs")
+        if (
+            contract.get("basis_policy") != "ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"
+            or lineage.get("compatibility_policy") != contract["basis_policy"]
+        ):
+            raise ValueError("quarterly derived metric requires declared arithmetic basis policy")
+        if (
+            not definition.get("rule_version")
+            or lineage.get("derivation_rule_version") != definition["rule_version"]
+        ):
+            raise ValueError("quarterly derivation rule differs from definition")
+        current, prior = inputs
+        period_fields = (
+            "period_start",
+            "period_end",
+            "end_convention",
+            "period_class",
+            "fiscal_year",
+            "fiscal_quarter",
+        )
+        if any(current.get(field) != row.get(field) for field in period_fields):
+            raise ValueError("quarterly derived metric output differs from current input period")
+        if contract_kind.startswith("SAME_PERIOD_"):
+            if any(prior.get(field) != row.get(field) for field in period_fields):
+                raise ValueError("quarterly derived metric inputs must share the exact period")
+        else:
+            if (
+                definition["observation_basis"] != "QTD_3M"
+                or current["metric_id"] != prior["metric_id"]
+                or current["definition_version"] != prior["definition_version"]
+                or current["unit"] != prior["unit"]
+                or prior["period_class"] != "QTD_3M"
+            ):
+                raise ValueError("quarterly growth inputs require the same QTD metric definition")
+            year, quarter = _fiscal_coordinate(current)
+            prior_coordinate = _fiscal_coordinate(prior)
+            if contract_kind == "ADJACENT_FISCAL_QUARTER_GROWTH":
+                expected = (year, quarter - 1) if quarter > 1 else (year - 1, 4)
+                if prior_coordinate != expected or prior["period_end"] != current["period_start"]:
+                    raise ValueError("QoQ inputs must be adjacent actual issuer fiscal quarters")
+            elif (
+                prior_coordinate != (year - 1, quarter)
+                or prior["period_end"] > current["period_start"]
+            ):
+                raise ValueError(
+                    "YoY predecessor must be the prior issuer fiscal year same quarter"
+                )
+            if _company_binding(current) != _company_binding(prior):
+                raise ValueError("quarterly growth inputs have different company semantic bindings")
+        if contract_kind == "SAME_PERIOD_DIFFERENCE":
+            if (
+                definition["observation_basis"] != "QTD_3M"
+                or definition.get("unit_kind") != "MONEY"
+                or row["unit"] != "USD"
+                or contract.get("denominator_policy") != "NOT_APPLICABLE"
+            ):
+                raise ValueError("quarterly difference requires monetary QTD output")
+        else:
+            if (
+                definition.get("unit_kind") not in {"PERCENT", "RATIO"}
+                or contract.get("denominator_policy") != "STRICTLY_POSITIVE"
+                or Decimal(prior["value"]) <= 0
+            ):
+                raise ValueError(
+                    "quarterly ratio or growth requires a strictly positive denominator"
+                )
+        if row["filed_date"] != max(item["filed_date"] for item in inputs):
+            raise ValueError("quarterly derived filing date differs from source inputs")
+        if row["report_date"] != current["report_date"]:
+            raise ValueError("quarterly derived report date differs from current endpoint")
+
+    def _remember_prepared_identity(self, row: dict[str, Any]) -> None:
+        observation_id = row.get("observation_id")
+        if observation_id is None:
+            return
+        observation_id = require_string(observation_id, "prepared observation identity")
+        identity = canonical_json({key: value for key, value in row.items() if key != "input_role"})
+        previous = self._prepared_identity_records.setdefault(observation_id, identity)
+        if previous != identity:
+            raise ValueError("quarterly prepared observation identity has contradictory content")
+
     def _verify_source_scope(
         self, source: dict[str, Any], row: dict[str, Any], source_metric: str
     ) -> None:
@@ -406,7 +623,6 @@ class QuarterlyScreeningMetricReader:
             "unit",
             "canonical_metric_id",
             "canonical_mapping_version",
-            "period_start",
             "period_end",
             "filed_date",
             "report_date",
@@ -445,10 +661,21 @@ class QuarterlyScreeningMetricReader:
             raise ValueError("quarterly source metric or unit differs from observation scope")
         if source.get("dimensions") != row["dimensions"]:
             raise ValueError("quarterly source dimensions differ from observation scope")
-        if type(source.get("duration_days")) is not int or source["duration_days"] != _duration(
-            source
-        ):
-            raise ValueError("quarterly source period duration differs from its dates")
+        if source["period_class"] == "INSTANT":
+            if (
+                "period_start" not in source
+                or source["period_start"] is not None
+                or "duration_days" not in source
+                or source["duration_days"] is not None
+                or source.get("context_instant_date") != source["period_end"]
+            ):
+                raise ValueError("quarterly instant source scope must preserve its exact instant")
+        else:
+            require_string(source.get("period_start"), "quarterly source period_start")
+            if type(source.get("duration_days")) is not int or source["duration_days"] != _duration(
+                source
+            ):
+                raise ValueError("quarterly source period duration differs from its dates")
         if source.get("availability_status", "AVAILABLE") != "AVAILABLE":
             raise ValueError("quarterly selected input is unavailable")
         if source.get("reason") or source.get("reasons"):
@@ -554,3 +781,31 @@ def _source_anchors(lineage: dict[str, Any]) -> list[dict[str, Any]]:
         if isinstance(source, dict):
             anchors.extend(_source_anchors(source.get("source_lineage", source)))
     return anchors
+
+
+def _prepared_input_scopes(row: dict[str, Any]) -> list[dict[str, Any]]:
+    """Only the bounded, already-validated reported/M8 value path is selected evidence."""
+    lineage = row["source_lineage"]
+    return [
+        row,
+        lineage,
+        *(lineage["derivation_inputs"] if row["source_kind"] == "DERIVED_QUARTER" else []),
+    ]
+
+
+def _fiscal_coordinate(row: dict[str, Any]) -> tuple[int, int]:
+    year, quarter = row.get("fiscal_year"), row.get("fiscal_quarter")
+    if type(year) is not int or quarter not in {"Q1", "Q2", "Q3", "Q4"}:
+        raise ValueError("quarterly derived input requires exact issuer fiscal coordinates")
+    return year, int(quarter[1])
+
+
+def _company_binding(row: dict[str, Any]) -> tuple[str, ...]:
+    bindings = {
+        require_string(scope["company_canonical_concept_id"], "company canonical concept")
+        for scope in _prepared_input_scopes(row)
+        if scope.get("company_canonical_concept_id") is not None
+    }
+    if len(bindings) > 1:
+        raise ValueError("quarterly growth input has inconsistent company semantic bindings")
+    return tuple(sorted(bindings))

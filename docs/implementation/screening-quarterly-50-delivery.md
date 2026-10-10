@@ -226,3 +226,88 @@ AVAILABLE DERIVED_QUARTER/TTM 입력에서는 계속 거부하며, 단순 null b
 증거 디렉터리는 `/tmp/quarter-consumer-eligibility`다. 원본 v5 fixture, UI/service,
 생산자와 실제 journal은 수정하지 않았다. 새 동결 SHA의 독립 재검증과 로컬 인수는
 대기이며 이전 FAIL 판단을 지우지 않는다.
+
+### 2026-10-10 core 인수와 generic prepared-input 확장
+
+리드는 `8c1aa2961ce26e5d2c812943181e70ba59778c7b`의 source 검증과 fresh-checkout
+portability를 로컬 인수했다. 독립 보고서 SHA-256은
+`528163ee4a6303a43e49694d08b1a04d975313ac95ba7a003ed1024c2f27162f`다.
+이 판단은 실제 50사 재무 publication, native rollout, main 병합을 포함하지 않는다.
+후속 승인 범위는 기존 R1의 FCF·마진·QoQ·YoY·동일 시점 비율을 생산자가 준비한
+`DERIVED_METRIC`으로 읽기 위한 입력 검증이다. 반복 재작업 후 지정된 단일 구현
+작성자가 계속 담당하고, 별도 읽기 전용 검증과 리드 인수는 새 SHA별로 수행한다.
+
+정의의 `input_contract`는 아래 필드를 정확히 선언한다. 버전은
+`quarter-derived-input-scope-v1`, `basis_policy`는
+`ARITHMETIC_ONLY_NOT_RECAST_VALIDATED`다. `source_lineage.compatibility_policy`도
+같은 문자열이며 `derivation_rule_version`은 definition의 `rule_version`과 같다.
+
+| kind | 순서대로 선언할 input_role | value_constraint | denominator_policy |
+| --- | --- | --- | --- |
+| SAME_PERIOD_DIFFERENCE | CFO, CAPEX | FINITE, NONNEGATIVE | NOT_APPLICABLE |
+| SAME_PERIOD_RATIO, QTD | NUMERATOR, DENOMINATOR | FINITE, POSITIVE | STRICTLY_POSITIVE |
+| SAME_PERIOD_RATIO, INSTANT | NUMERATOR, DENOMINATOR | NONNEGATIVE, POSITIVE | STRICTLY_POSITIVE |
+| ADJACENT_FISCAL_QUARTER_GROWTH | CURRENT, PRIOR | NONNEGATIVE, POSITIVE | STRICTLY_POSITIVE |
+| SAME_FISCAL_QUARTER_YOY_GROWTH | CURRENT, PRIOR | NONNEGATIVE, POSITIVE | STRICTLY_POSITIVE |
+
+`inputs`의 각 선언은 `input_role`, `metric_id`, `value_constraint`만 가진다.
+`source_lineage.derivation_inputs`에는 같은 순서의 역할과 완전한 prepared 관측
+레코드를 넣는다. `value_constraint`는 정의에만 두며 관측 레코드에 복제하지 않는다.
+관측 ID는 기존 wire의 `observation_id`다. 같은 publication 안에서 동일 ID의
+레코드는 `input_role`만 제외한 canonical JSON 내용 전체가 같아야 한다. 다른 값·
+scope·품질을 같은 ID에 담을 수 없다. 정의·버전, 가용성, quality, 실제 기간,
+unit, basis, view/as-of, canonical metric ID와 선택 계보를 상위 행에서 추정하지 않는다.
+
+입력은 AVAILABLE REPORTED 또는 governed DERIVED_QUARTER다. 후자는 자체
+`derived_metric_id`와 승인된 누적 raw 입력까지 검증한다. generic derived를 다시
+입력으로 쓰거나 TTM·FY·YTD로 대체하지 않는다. 선택 PRE/CAL 후보를 입력으로
+추정하지 않으며, 누락·부적격 입력은 생산자가 UNAVAILABLE로 발행한다. 소비자는
+금액 차이·비율·성장률을 계산하지 않고 생산자가 제공한 exact decimal 값을 보존한다.
+부호 검사는 기존 R1의 적격성 제약만 확인한다.
+
+두 입력은 CIK, dimensions, 분석 view/as-of가 같고 USD MONEY여야 한다. 선택
+입력 경로에 quality BLOCK, mapping/ambiguity 또는 명시적 continuity/basis/recast
+break가 있으면 AVAILABLE generic 결과를 거부한다. null basis는 위 arithmetic
+정책 아래 양쪽 모두 null일 때 허용하며, 선언한 non-null basis와 structural/recast
+version은 서로 및 출력과 일치해야 한다. 이를 recast 또는 회계 동등성 인수로
+표현하지 않는다. TTM은 별도의 네 연속 QTD·non-null 동일 basis 계약을 유지한다.
+
+SAME_PERIOD 두 입력은 출력과 실제 시작·끝·exclusive end·period class 및 fiscal
+좌표가 같다. QTD는 75–105일 범위다. INSTANT는 start=null, exclusive period_end,
+선택 raw anchor의 duration_days=null 및 context_instant_date=period_end를 보존한다.
+차이는 QTD MONEY USD, 비율·성장률은 정의에 명시한 정확한 PERCENT/RATIO 단위를
+쓴다. 비율 입력 USD를 출력 dimensionless 단위와 같다고 요구하지 않는다.
+
+성장률은 같은 지표 정의·버전·단위를 사용한다. CURRENT는 출력 기간/fiscal 좌표와
+같다. QoQ PRIOR는 실제 날짜가 붙어 있는 이전 issuer fiscal quarter이고 Q1의
+이전 분기는 전 fiscal year Q4다. YoY는 이전 fiscal year의 같은 fiscal quarter다.
+calendar bucket에서 1년을 빼서 판단하지 않는다. 명시된 company_canonical_concept_id는
+양쪽 선택 경로에서 일관되어야 하며 QName·label로 binding을 추정하지 않는다.
+8개 출력 spine보다 오래된 YoY 선행값은 완전한 nested prepared input으로만 존재할
+수 있으며 출력 spine을 늘리지 않는다. 출력 filed date는 사용 입력의 최대값,
+report date는 CURRENT/동일 기간 endpoint의 값이고 모든 입력은 같은 cutoff 안이다.
+
+양성·음성 사례는 추적 v5 fixture의 임시 복사본에 명시적으로 labelled synthetic
+정의와 raw/derived 입력을 추가한다. v5 원본과 non-bindable synthetic parent는
+실제 자료로 바꾸지 않는다. 새 테스트는 세션 `/tmp` 입력 없이 재현된다.
+
+```bash
+PYTHONPATH=src python -m pytest -q tests/screening/test_quarterly_generic_metrics.py
+PYTHONPATH=src python -m pytest -q tests/screening tests/test_screening_ui.py
+ruff check --no-cache src/sec_xbrl/screening/quarterly.py tests/screening/test_quarterly_generic_metrics.py
+```
+
+이 확장은 구현 및 자체 검증 단계다. 동결 후 독립 검증과 로컬 인수는 대기이며,
+producer v6·실자료 재무 계산·UI 변경·원격 PR/CI/병합은 이 slice의 범위 밖이다.
+
+이 slice의 최종 자체 검증은 **335 passed / 0 skipped**(screening/UI 전체 선택,
+7.98초)다. 기존 core 251개와 generic 계약 회귀 84개를 포함한다. 세션의
+`/tmp/universe50-quarterly-*` 파일 접근을 차단한 별도 실행에서 quarterly
+consumer/source/generic **224 passed**를 확인했다. Ruff check/format check와
+`git diff --check`가 통과했다. 원본 및 추적 v5 manifest SHA는
+`84e652322e570f4768c278fa924aaf6c1de98f1158be0d162b9be0a488fa359a`로 유지됐다.
+임의 producer 값을 보존하는 다섯 종류의 합성 예시는 `/tmp/quarter-consumer-generic`
+아래 별도 복사본으로 내보냈다. 해당 경로는 재현의 필수 입력이 아니며 테스트는
+추적 v5에서 예시를 재구성한다. consumer quarterly validator 외 product source,
+UI·service·wrapper 및 실제 journal에는 변경을 하지 않았다. native browser,
+전체 프로젝트 suite, actual 재무 인수나 원격 CI를 수행했다고 주장하지 않는다.
