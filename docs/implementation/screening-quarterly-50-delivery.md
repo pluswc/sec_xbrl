@@ -311,3 +311,49 @@ consumer/source/generic **224 passed**를 확인했다. Ruff check/format check�
 추적 v5에서 예시를 재구성한다. consumer quarterly validator 외 product source,
 UI·service·wrapper 및 실제 journal에는 변경을 하지 않았다. native browser,
 전체 프로젝트 suite, actual 재무 인수나 원격 CI를 수행했다고 주장하지 않는다.
+
+### 6cccbdb 독립 FAIL 후 G1/G2 교정
+
+`6cccbdb42b8be7e253459d1254ee7c1652750a5c`의 독립 검증은 두 경계에서 FAIL이었다.
+보고서 SHA-256은 `28bf011cfbedb746c83a06df1b880e9fe139c93c50cecc91f2d4c0cf163c7b3e`다.
+G1은 PERCENT kind를 유지한 채 정의와 출력 unit을 모두 USD로 바꾸면 통과하는
+문제였고, G2는 새 observation ID 아래 동일 Raw source의 금액을 바꾸면 기존
+prepared ID 검사만으로 검출하지 못하는 문제였다. 리드는 같은 단일 작성자에게
+이 두 검증과 회귀 테스트만 재개하도록 승인했다.
+
+AVAILABLE generic definition은 `canonical_value_scale`을 정확한 문자열 `"1"`로
+선언해야 한다. MONEY는 USD, PERCENT는 PERCENT 단위만 허용한다. 명시적
+`SAME_PERIOD_RATIO` 계약과 `unit_kind=RATIO`가 함께 있을 때만 `unit=RATIO` 또는
+문자열 `"1"`을 허용하며 이는 배율을 곱하지 않은 dimensionless ratio다. 별도
+input-contract 필드를 만들거나 값·단위·배율을 변환하지 않는다. 성장률은 PERCENT,
+차이는 MONEY/USD 계약을 유지한다. 이 필드는 generic 정의의 임시 합성 복사본에만
+추가하며 기존 reported/core 정의와 불변 v5 fixture를 변경하지 않는다.
+
+선택된 REPORTED raw anchor는 prepared 관측 ID와 별도로 publication 전체에서
+불변 identity를 검증한다. `(CIK, source_id)` alias와 `(CIK, source_filing_id,
+source_fact_id, 선언된 source_file_id/source_file/source_snapshot_id)`의 qualified
+fact identity를 등록한다. 동일 identity는 exact Decimal 의미의 금액, context,
+QName/namespace, unit/unit ID, dimensions, 실제 기간과 instant, filing/report 날짜,
+accession·filing·source origin이 같아야 한다. `1`과 `1.0` 같은 Decimal-equal 표현은
+허용한다. 분석 selection view/as-of, 품질, mapping/basis와 input-role wrapper는
+Raw 내용으로 비교하지 않는다. 그 메타데이터의 유효성은 기존 prepared 입력
+검증이 별도로 담당한다. 같은 Raw fact가 다른 prepared ID·분석 view·비차단 품질
+메타데이터로 재사용되는 정상 사례를 보존한다.
+
+등록은 검증된 선택 경로의 raw anchor에만 적용한다. top-level 보고값과 generic,
+M8 derived-quarter, TTM의 하위 선택 입력을 포함하고 PRE/CAL·candidate evidence는
+포함하지 않는다. 누락된 unavailable 후보 식별자를 만들어 채우거나 Raw 저장소를
+조회하지 않는다. 같은 observation ID의 완전한 prepared-record 일치 규칙도 유지한다.
+
+교정 자체 검증은 **374 passed / 0 skipped**(screening/UI, 8.25초)이며, 경로 접근
+차단을 적용한 quarterly consumer/source/generic 선택은 **263 passed**다. generic
+검증은 122개이며 기존 core 및 TTM 중첩 Raw 모순 회귀가 포함된다. 독립 원본
+probe 11개를 새 복사본에서 재실행하여 기대 결과와 불일치가 없었다. Ruff
+check/format check와 `git diff --check`가 통과했다. 기존 TTM 양성 합성 helper는
+Revenue Raw fact ID를 보존한 채 CFO QName을 만들던 문제를 고쳐, 새 합성 CFO
+fact/source ID와 선택 ID를 명시했다. 권위 있는 v5 fixture는 그대로다.
+
+재현 증거와 labelled synthetic 예시는 `/tmp/quarter-consumer-g1g2`에 있으며
+fresh checkout의 필수 입력이 아니다. source 변경은 quarterly validator에 한정된다.
+이 기록은 자체 검증이며 새 동결 SHA의 독립 재검증·리드 인수, actual 재무자료
+인수·native rollout·원격 작업 완료를 뜻하지 않는다.

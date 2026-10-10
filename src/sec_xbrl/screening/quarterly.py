@@ -163,6 +163,7 @@ class QuarterlyScreeningMetricReader:
         }:
             raise ValueError("quarterly observations do not cover metric/company/spine grain")
         self._prepared_identity_records: dict[str, str] = {}
+        self._raw_identity_records: dict[tuple[str, ...], tuple[Decimal, str]] = {}
         for row in self.observations:
             self._remember_prepared_identity(row)
         for row in self.observations:
@@ -438,6 +439,16 @@ class QuarterlyScreeningMetricReader:
             or set(contract) - {"version", "kind", "inputs", "denominator_policy", "basis_policy"}
         ):
             raise ValueError("quarterly derived metric kind or period is unsupported")
+        output_kind = definition.get("unit_kind")
+        permitted_units = {"MONEY": {"USD"}, "PERCENT": {"PERCENT"}, "RATIO": {"RATIO", "1"}}
+        if (
+            definition.get("unit") not in permitted_units.get(output_kind, set())
+            or definition.get("canonical_value_scale") != "1"
+            or (output_kind == "RATIO" and contract_kind != "SAME_PERIOD_RATIO")
+        ):
+            raise ValueError(
+                "quarterly derived output unit or canonical value scale is incompatible"
+            )
         declarations = contract.get("inputs")
         if (
             not isinstance(declarations, list)
@@ -613,6 +624,45 @@ class QuarterlyScreeningMetricReader:
         if previous != identity:
             raise ValueError("quarterly prepared observation identity has contradictory content")
 
+    def _remember_raw_identity(self, source: dict[str, Any]) -> None:
+        """One elected immutable Raw fact cannot change beneath prepared identities."""
+        if source["source_kind"] != "REPORTED":
+            return
+        origin_fields = ("source_file_id", "source_file", "source_snapshot_id")
+        intrinsic_fields = (
+            "cik",
+            "accession",
+            "source_filing_id",
+            "source_fact_id",
+            "context_id",
+            "raw_concept_qname",
+            "raw_concept_namespace_uri",
+            "unit",
+            "unit_id",
+            "dimensions",
+            "period_start",
+            "period_end",
+            "end_convention",
+            "context_instant_date",
+            "filed_date",
+            "report_date",
+            *origin_fields,
+        )
+        # Decimal equality preserves exact numeric meaning without context rounding.
+        intrinsic = (
+            Decimal(source["value"]),
+            canonical_json({field: source.get(field) for field in intrinsic_fields}),
+        )
+        origin = canonical_json({field: source.get(field) for field in origin_fields})
+        identities = (
+            ("source", source["cik"], source["source_id"]),
+            ("fact", source["cik"], source["source_filing_id"], source["source_fact_id"], origin),
+        )
+        for identity in identities:
+            previous = self._raw_identity_records.setdefault(identity, intrinsic)
+            if previous != intrinsic:
+                raise ValueError("quarterly raw source identity has contradictory content")
+
     def _verify_source_scope(
         self, source: dict[str, Any], row: dict[str, Any], source_metric: str
     ) -> None:
@@ -692,6 +742,7 @@ class QuarterlyScreeningMetricReader:
             source["filed_date"]
         ):
             raise ValueError("quarterly source period is after filing")
+        self._remember_raw_identity(source)
 
     def _verify_support(self, spine: list[tuple[int, int]]) -> None:
         for support in self.support:

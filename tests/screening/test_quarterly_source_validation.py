@@ -361,7 +361,11 @@ def _nested_quarter_ttm(reader):
         source.update(
             canonical_metric_id="quarter_cfo",
             raw_concept_qname="us-gaap:NetCashProvidedByUsedInOperatingActivities",
+            source_id=f"synthetic-nested-ttm-cfo-source:{q}",
+            source_fact_id=f"synthetic-nested-ttm-cfo-fact:{q}",
         )
+        source["selected_source_ids"] = [source["source_id"]]
+        source["candidate_source_ids"] = [source["source_id"]]
         inputs.append(source)
     row["source_lineage"] = {
         "derivation_inputs": inputs,
@@ -545,3 +549,13 @@ def test_comparison_breaks_still_disqualify_available_derivations(
 
     with pytest.raises(ValueError, match="incompatible selected inputs"):
         QuarterlyScreeningMetricReader(_publication(tmp_path, mutate))
+
+
+def test_ttm_nested_selected_raw_identity_cannot_contradict_loaded_fact():
+    reader = QuarterlyScreeningMetricReader(WIRE)
+    row, definition = _nested_quarter_ttm(reader)
+    row["source_lineage"]["derivation_inputs"][1]["source_lineage"]["derivation_inputs"][0][
+        "value"
+    ] = "42"
+    with pytest.raises(ValueError, match="raw source identity has contradictory content"):
+        reader._verify_observation(row, {"ttm_cfo": definition})

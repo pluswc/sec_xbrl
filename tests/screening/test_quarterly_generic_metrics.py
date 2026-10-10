@@ -154,6 +154,7 @@ def _documents(case: str) -> dict[str, Any]:
         "definition_version": output["definition_version"],
         "unit": output["unit"],
         "unit_kind": "MONEY" if case == "fcf" else "PERCENT",
+        "canonical_value_scale": "1",
         "observation_basis": left["period_class"],
         "allowed_source_kinds": ["DERIVED_METRIC"],
         "rule_version": "synthetic-quarter-derived-rule-v1",
@@ -516,8 +517,8 @@ def test_existing_r1_sign_constraints_are_enforced_without_calculation(
     docs = _documents(case)
     row, _ = _target(docs)
     item = row["source_lineage"]["derivation_inputs"][index]
-    item["observation_id"] += ":sign-probe"
     _coherent_input_field(item, "value", value)
+    _sync_top_inputs(docs)
     with pytest.raises(ValueError, match="value constraint"):
         QuarterlyScreeningMetricReader(_publish(tmp_path, docs))
 
@@ -660,3 +661,136 @@ def test_nonnull_prepared_basis_declaration_is_not_empty(tmp_path: Path):
     _sync_top_inputs(docs)
     with pytest.raises(ValueError):
         QuarterlyScreeningMetricReader(_publish(tmp_path, docs))
+
+
+@pytest.mark.parametrize("case", ["margin", "instant_ratio", "qoq", "yoy", "fcf"])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("unit", "USD_INVALID"),
+        ("canonical_value_scale", None),
+        ("canonical_value_scale", 1),
+        ("canonical_value_scale", "100"),
+    ],
+)
+def test_generic_output_requires_typed_unit_and_explicit_canonical_scale(
+    tmp_path: Path, case, field, value
+):
+    docs = _documents(case)
+    row, definition = _target(docs)
+    definition[field] = value
+    if field == "unit":
+        definition[field] = "PERCENT" if case == "fcf" else "USD"
+        for item in docs["quarter_metric_observations.json"]["records"]:
+            if item["metric_id"] == row["metric_id"]:
+                item["unit"] = definition[field]
+    with pytest.raises(ValueError, match="unit or canonical value scale"):
+        QuarterlyScreeningMetricReader(_publish(tmp_path, docs))
+
+
+@pytest.mark.parametrize("unit", ["RATIO", "1"])
+def test_explicit_same_period_ratio_contract_permits_dimensionless_unit(tmp_path: Path, unit):
+    docs = _documents("instant_ratio")
+    row, definition = _target(docs)
+    definition.update(unit_kind="RATIO", unit=unit)
+    for item in docs["quarter_metric_observations.json"]["records"]:
+        if item["metric_id"] == row["metric_id"]:
+            item["unit"] = unit
+    QuarterlyScreeningMetricReader(_publish(tmp_path, docs))
+
+
+@pytest.mark.parametrize("case", ["margin", "qoq"])
+@pytest.mark.parametrize("identity_change", ["prepared_only", "source_alias", "fact_alias"])
+def test_new_prepared_id_cannot_change_elected_immutable_raw_amount(
+    tmp_path: Path, case, identity_change
+):
+    docs = _documents(case)
+    row, _ = _target(docs)
+    item = row["source_lineage"]["derivation_inputs"][0]
+    item["observation_id"] += ":new-prepared"
+    _coherent_input_field(item, "value", "42")
+    source = item["source_lineage"]
+    if identity_change == "source_alias":
+        source["source_id"] += ":new-source-alias"
+        source["selected_source_ids"] = [source["source_id"]]
+    elif identity_change == "fact_alias":
+        source["source_fact_id"] += ":new-fact-alias"
+    with pytest.raises(ValueError, match="raw source identity has contradictory content"):
+        QuarterlyScreeningMetricReader(_publish(tmp_path, docs))
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("context_id", "different-context"),
+        ("raw_concept_qname", "us-gaap:OperatingIncomeLoss"),
+        ("raw_concept_namespace_uri", "http://example.invalid/other"),
+        ("unit_id", "different-unit-id"),
+        ("source_file_id", "different-origin-file"),
+        ("source_filing_id", "different-origin-filing"),
+    ],
+)
+def test_new_prepared_id_cannot_change_raw_intrinsic_origin(tmp_path: Path, field, value):
+    docs = _documents("margin")
+    row, _ = _target(docs)
+    item = row["source_lineage"]["derivation_inputs"][0]
+    item["observation_id"] += ":new-prepared"
+    item["source_lineage"][field] = value
+    with pytest.raises(ValueError, match="raw source identity has contradictory content"):
+        QuarterlyScreeningMetricReader(_publish(tmp_path, docs))
+
+
+def test_identical_raw_fact_can_have_distinct_prepared_views_and_quality_metadata(tmp_path: Path):
+    docs = _documents("margin")
+    row, _ = _target(docs)
+    item = row["source_lineage"]["derivation_inputs"][0]
+    original = next(
+        r
+        for r in docs["quarter_metric_observations.json"]["records"]
+        if r["observation_id"] == item["observation_id"]
+    )
+    _coherent_input_field(original, "selection_view", "AS_FILED")
+    original["quality_reasons"] = ["SYNTHETIC_NONBLOCKING_REVIEW"]
+    original["source_lineage"]["quality_reasons"] = ["SYNTHETIC_NONBLOCKING_REVIEW"]
+    item["observation_id"] += ":another-governed-view"
+    _coherent_input_field(item, "value", "-5000000.0000000000000000000000")
+    QuarterlyScreeningMetricReader(_publish(tmp_path, docs))
+
+
+def test_fact_id_is_qualified_by_source_file_when_source_aliases_are_distinct(tmp_path: Path):
+    docs = _documents("margin")
+    row, _ = _target(docs)
+    item = row["source_lineage"]["derivation_inputs"][0]
+    original = next(
+        r
+        for r in docs["quarter_metric_observations.json"]["records"]
+        if r["observation_id"] == item["observation_id"]
+    )
+    original["source_lineage"]["source_file_id"] = "synthetic-file-A"
+    item["observation_id"] += ":distinct-raw-file"
+    source = item["source_lineage"]
+    source["source_file_id"] = "synthetic-file-B"
+    source["source_id"] += ":distinct-raw-file"
+    source["selected_source_ids"] = [source["source_id"]]
+    _coherent_input_field(item, "value", "42")
+    QuarterlyScreeningMetricReader(_publish(tmp_path, docs))
+
+
+def test_generic_m8_nested_raw_cannot_change_under_new_prepared_id(tmp_path: Path):
+    docs = _documents("fcf")
+    row, _ = _target(docs)
+    item = row["source_lineage"]["derivation_inputs"][0]
+    item["observation_id"] += ":different-m8-prepared"
+    item["source_lineage"]["derivation_inputs"][0]["value"] = "42"
+    with pytest.raises(ValueError, match="raw source identity has contradictory content"):
+        QuarterlyScreeningMetricReader(_publish(tmp_path, docs))
+
+
+def test_candidate_evidence_does_not_register_an_elected_raw_identity(tmp_path: Path):
+    docs = _documents("margin")
+    row, _ = _target(docs)
+    item = row["source_lineage"]["derivation_inputs"][0]
+    candidate = copy.deepcopy(item["source_lineage"])
+    candidate["value"] = "42"
+    row["source_lineage"]["candidate_evidence"] = [candidate]
+    QuarterlyScreeningMetricReader(_publish(tmp_path, docs))
