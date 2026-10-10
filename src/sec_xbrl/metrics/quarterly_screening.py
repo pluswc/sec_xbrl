@@ -844,6 +844,11 @@ def _prepared_observation(
             _reported_anchor_reasons(source_lineage, financial_as_of, cik)
         )
     elif source_kind == "DERIVED_QUARTER":
+        # A governed M8 value is eligible only when both selected raw inputs and
+        # the prepared derived output retain an arithmetic-compatible scope.
+        # Preserve the outer flags in lineage; never clear them from the source
+        # projection merely because the two nested inputs agree with each other.
+        reasons.extend(_arithmetic_source_reasons(lineage))
         source_lineage = _derived_quarter_lineage(
             ticker=ticker,
             cik=cik,

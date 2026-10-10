@@ -403,6 +403,36 @@ def test_m8_preserves_and_rejects_ineligible_nested_source(flag: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "flag",
+    [
+        "mapping_uncertainty",
+        "ambiguous",
+        "compatibility_failure",
+        "basis_break",
+        "structural_break",
+        "recast_break",
+    ],
+)
+def test_m8_preserves_and_rejects_ineligible_outer_lineage(flag: str) -> None:
+    columns, cells, traces = _m8_cfo_inputs()
+    traces[0]["value_lineage"][flag] = True
+    observations, _ = build_quarterly_company_records(
+        ticker="TEST", cik=CIK, financial_as_of=AS_OF, columns=columns,
+        rows=_profile_rows(), cells=cells, traces=traces, spine=_quarter_spine(AS_OF),
+    )
+    row = next(
+        item for item in observations
+        if item["metric_id"] == "quarter_cfo"
+        and (item["calendar_year"], item["calendar_quarter"]) == (2025, 2)
+    )
+    assert row["availability_status"] == "UNAVAILABLE"
+    assert row[flag] is True
+    assert row["source_lineage"][flag] is True
+    expected_reason = "SOURCE_AMBIGUITY" if flag == "ambiguous" else flag.upper()
+    assert expected_reason in row["reasons"]
+
+
+@pytest.mark.parametrize(
     "outer_dates",
     [
         {"filed_date": "2030-01-01"},

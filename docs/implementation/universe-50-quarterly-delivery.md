@@ -183,6 +183,15 @@ endpoint, non-empty TTM basis, 40자리 Git SHA 경계는 통과했지만 다음
   `None`, list, dict가 섞여도 기존 full-materialization과 동일한 값·순서·schema·count·hash
   검증 경계를 유지한다.
 
+보정 후보 `093cba0a8e3c0255b302390bf72d1bccf8b3a4fb`은 위 R1–R5 경계와 streaming
+동등성을 통과했지만, 바깥 `DERIVED_QUARTER` lineage에만 identity·comparison flag가 있는
+경우 그 적격성 검사를 호출하지 않아 독립 검증에서 **FAIL**했다. 보고서 SHA-256은
+`c4f16a678abcda11031ce8f195b773c5d87ad2bd02edcfa9175262314e1492df`다. 후속 보정은
+동일한 arithmetic eligibility 검사를 M8의 바깥 lineage에도 적용한다. 두 raw input과 바깥
+prepared output이 모두 적격할 때만 M8을 AVAILABLE로 게시하며, 원래 flag와 reason을
+지우거나 `False`로 바꾸지 않는다. 알려진 REPORTED 값의 comparison-only break·null basis
+보존 경계와 R1–R5 규칙은 바꾸지 않는다.
+
 수정 후보는 독립 source PASS 전까지 **REWORK_SOURCE_FROZEN_PENDING_VERIFICATION**이며,
 heavy CAT golden, JNJ retry, CVX build와 후속 50사 history 확대는 계속 보류한다.
 
