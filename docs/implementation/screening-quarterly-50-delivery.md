@@ -193,3 +193,36 @@ fresh checkout 테스트의 필수 입력이 아니다.
 로컬 인수는 아직 대기다. 화면 소스는 수정하지 않았고 기존 1440/1024 native
 검증을 이번 교정에서 재수행했다고 주장하지 않는다. 전체 프로젝트 suite, actual
 회사 재무 인수, 원격 CI·PR·병합도 이 기록의 범위 밖이다.
+
+### 8abb4c 독립 FAIL 후 선택 보고값 적격성 교정
+
+`8abb4c27416cda4adb8f63549a4c07833f76705e` 독립 검증에서 이전 식별자·기간·scope·
+금액·TTM 교정은 통과했지만, 선택된 REPORTED anchor의 BLOCK과 mapping 검토
+상태를 early return이 건너뛰는 결함이 남았다. source BLOCK이 관측 행에서
+숨겨지면 잘못된 screening PASS로 이어졌다. 리드는 같은 단일 작성자에게
+공통 선택 입력 적격성 검사와 회귀 테스트만 재개하도록 승인했다.
+
+보고값도 선택된 metric identity에 대한 검토·ambiguity를 무시할 수 없다.
+선택 출처가 BLOCK인데 관측 행이 차단 상태를 보존하지 않으면 발행물을 거부한다.
+관측 행도 BLOCK 또는 quality_blocking을 명시한 알려진 보고값은 그대로 보존하며
+실행에서는 UNDETERMINED로 남는다. 소비자는 source 상태를 임의로 정리하거나
+UNAVAILABLE 후보의 누락 식별자를 만들어 넣지 않는다.
+
+리드의 추가 범위 결정: REPORTED의 `mapping_review_required`, `mapping_uncertainty`,
+`ambiguity`, `ambiguous`, 명시적 `compatibility_failure`는 선택된 binding의
+유효성에 관한 부적격 상태로 거부한다. 그러나 비교에 관한 `basis_break`,
+`structural_break`, `recast_break`, `continuity_break`, `recast_review_required`와
+`comparability_status=REVIEW`는 알려진 보고값 자체를 지우지 않는다. null basis도
+보고값에 허용된다. 명시적 품질 차단은 그대로 유지한다. 동일 비교 break는
+AVAILABLE DERIVED_QUARTER/TTM 입력에서는 계속 거부하며, 단순 null basis의
+보고값·승인된 arithmetic quarter 예외를 TTM의 non-null basis 요건으로 확대하지 않는다.
+
+이 후속 교정의 자체 전체 screening/UI 검사는 **251 passed / 0 skipped**
+(7.50초, local loopback 허용)이며, 이전 207개에 선택 보고값 적격성·품질 보존·
+비교 전용 검토 메타데이터·기존 null basis 경계 회귀 44개를 추가했다. Ruff와
+`git diff --check`가 통과했다. 기존 원본·잔여 probe 및 8abb 독립 extended probe를
+새 합성 복사본에서 재실행했다. 잘못된 선택 source BLOCK/mapping 상태를 포함한
+음성 사례는 거부했고, 유효한 TTM 양성은 재계산 없이 그대로 수용했다.
+증거 디렉터리는 `/tmp/quarter-consumer-eligibility`다. 원본 v5 fixture, UI/service,
+생산자와 실제 journal은 수정하지 않았다. 새 동결 SHA의 독립 재검증과 로컬 인수는
+대기이며 이전 FAIL 판단을 지우지 않는다.

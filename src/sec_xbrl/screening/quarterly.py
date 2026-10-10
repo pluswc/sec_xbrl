@@ -297,6 +297,36 @@ class QuarterlyScreeningMetricReader:
                 if source_definition is None:
                     raise ValueError("TTM derived input definition is missing")
                 self._verify_observation(source, {source_metric: source_definition})
+        ineligible_fields = (
+            "compatibility_failure",
+            "ambiguity",
+            "ambiguous",
+            "mapping_uncertainty",
+            "mapping_review_required",
+        )
+        if kind != "REPORTED":
+            # Comparison breaks do not erase an independently known reported value.
+            ineligible_fields += (
+                "basis_break",
+                "structural_break",
+                "recast_break",
+                "continuity_break",
+                "recast_review_required",
+            )
+        for item in [row, lineage, *sources]:
+            if any(item.get(key) for key in ineligible_fields):
+                raise ValueError(
+                    "available quarterly observation contains incompatible selected inputs"
+                )
+        if any(
+            source.get("quality_blocking") or source.get("quality_status") == "BLOCK"
+            for source in sources
+        ) and not (
+            kind == "REPORTED"
+            and (row.get("quality_blocking") or row.get("quality_status") == "BLOCK")
+        ):
+            raise ValueError("quarterly selected source blocking is not preserved")
+
         if kind == "REPORTED":
             for field in (
                 "period_start",
@@ -319,28 +349,6 @@ class QuarterlyScreeningMetricReader:
         require_string(lineage.get("derivation_rule_version"), "quarterly derivation rule")
         if lineage["derivation_rule_version"] != definition.get("rule_version"):
             raise ValueError("quarterly derivation rule differs from definition")
-        for item in [row, lineage, *sources]:
-            if any(
-                item.get(key)
-                for key in (
-                    "compatibility_failure",
-                    "basis_break",
-                    "structural_break",
-                    "recast_break",
-                    "ambiguity",
-                    "ambiguous",
-                    "mapping_uncertainty",
-                    "continuity_break",
-                    "recast_review_required",
-                    "mapping_review_required",
-                )
-            ):
-                raise ValueError("available quarterly derivation contains incompatible inputs")
-        if any(
-            source.get("quality_blocking") or source.get("quality_status") == "BLOCK"
-            for source in sources
-        ):
-            raise ValueError("available quarterly derivation contains blocked inputs")
         for field in (
             "canonical_mapping_version",
             "dimensions",

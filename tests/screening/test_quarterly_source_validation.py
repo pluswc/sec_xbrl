@@ -398,3 +398,150 @@ def test_ttm_cannot_hide_ineligible_inputs_inside_derived_quarter(case: str):
         quarter["source_lineage"]["derivation_inputs"].pop()
     with pytest.raises(ValueError):
         reader._verify_observation(row, {"ttm_cfo": definition})
+
+
+@pytest.mark.parametrize(
+    "source_block",
+    [
+        {"quality_blocking": True},
+        {"quality_status": "BLOCK"},
+        {"quality_blocking": True, "quality_status": "BLOCK"},
+    ],
+)
+@pytest.mark.parametrize(
+    "row_block", [None, {"quality_blocking": True}, {"quality_status": "BLOCK"}]
+)
+def test_reported_selected_source_block_cannot_be_cleared(tmp_path: Path, source_block, row_block):
+    def mutate(rows):
+        rows[0]["source_lineage"].update(source_block)
+        if row_block:
+            rows[0].update(row_block)
+
+    root = _publication(tmp_path, mutate)
+    if row_block is None:
+        with pytest.raises(ValueError, match="blocking is not preserved"):
+            QuarterlyScreeningMetricReader(root)
+    else:
+        reader = QuarterlyScreeningMetricReader(root)
+        assert all(reader.observations[0][key] == value for key, value in row_block.items())
+        assert all(
+            reader.observations[0]["source_lineage"][key] == value
+            for key, value in source_block.items()
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "compatibility_failure",
+        "ambiguity",
+        "ambiguous",
+        "mapping_uncertainty",
+        "mapping_review_required",
+    ],
+)
+@pytest.mark.parametrize("location", ["observation", "source"])
+def test_reported_selected_scope_must_be_eligible(tmp_path: Path, field: str, location: str):
+    def mutate(rows):
+        target = rows[0] if location == "observation" else rows[0]["source_lineage"]
+        target[field] = True
+
+    with pytest.raises(ValueError, match="incompatible selected inputs"):
+        QuarterlyScreeningMetricReader(_publication(tmp_path, mutate))
+
+
+@pytest.mark.parametrize("source_kind", ["REPORTED", "DERIVED_QUARTER"])
+def test_null_basis_reported_and_declared_arithmetic_quarter_remain_valid(
+    tmp_path: Path, source_kind
+):
+    def mutate(rows):
+        row = next(
+            row
+            for row in rows
+            if row["source_kind"] == source_kind and row["availability_status"] == "AVAILABLE"
+        )
+        row["basis_version"] = None
+        lineage = row["source_lineage"]
+        if source_kind == "REPORTED":
+            lineage["basis_version"] = None
+        else:
+            for source in lineage["derivation_inputs"]:
+                source["basis_version"] = None
+
+    reader = QuarterlyScreeningMetricReader(_publication(tmp_path, mutate))
+    if source_kind == "DERIVED_QUARTER":
+        row = next(row for row in reader.observations if row["source_kind"] == source_kind)
+        assert (
+            row["source_lineage"]["compatibility_policy"] == "ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"
+        )
+
+
+def test_unavailable_partial_candidate_review_lineage_is_preserved(tmp_path: Path):
+    def mutate(rows):
+        row = next(row for row in rows if row["availability_status"] == "UNAVAILABLE")
+        row["source_lineage"]["candidate_evidence"] = [
+            {
+                "source_fact_id": None,
+                "context_id": None,
+                "mapping_review_required": True,
+                "ambiguity": True,
+                "quality_status": "BLOCK",
+                "quality_blocking": True,
+            }
+        ]
+
+    reader = QuarterlyScreeningMetricReader(_publication(tmp_path, mutate))
+    row = next(row for row in reader.observations if row["availability_status"] == "UNAVAILABLE")
+    assert row["source_lineage"]["candidate_evidence"][0]["mapping_review_required"] is True
+    assert row["source_lineage"]["candidate_evidence"][0]["source_fact_id"] is None
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("basis_break", True),
+        ("structural_break", True),
+        ("recast_break", True),
+        ("continuity_break", True),
+        ("recast_review_required", True),
+        ("comparability_status", "REVIEW"),
+    ],
+)
+@pytest.mark.parametrize("location", ["observation", "source"])
+def test_comparison_review_does_not_erase_known_reported_value(
+    tmp_path: Path, field, value, location
+):
+    def mutate(rows):
+        target = rows[0] if location == "observation" else rows[0]["source_lineage"]
+        target[field] = value
+
+    reader = QuarterlyScreeningMetricReader(_publication(tmp_path, mutate))
+    row = reader.observations[0]
+    assert row["availability_status"] == "AVAILABLE"
+    assert (row if location == "observation" else row["source_lineage"])[field] == value
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "basis_break",
+        "structural_break",
+        "recast_break",
+        "continuity_break",
+        "recast_review_required",
+    ],
+)
+@pytest.mark.parametrize("source_kind", ["DERIVED_QUARTER", "DERIVED_METRIC"])
+def test_comparison_breaks_still_disqualify_available_derivations(
+    tmp_path: Path, field, source_kind
+):
+    def mutate(rows):
+        row = (
+            _available_ttm(rows)
+            if source_kind == "DERIVED_METRIC"
+            else next(row for row in rows if row["source_kind"] == source_kind)
+        )
+        row["source_lineage"]["derivation_inputs"][0][field] = True
+
+    with pytest.raises(ValueError, match="incompatible selected inputs"):
+        QuarterlyScreeningMetricReader(_publication(tmp_path, mutate))

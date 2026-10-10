@@ -233,6 +233,8 @@ def test_quality_block_and_selected_bucket_coverage_are_preserved(tmp_path: Path
         and (x["calendar_year"], x["calendar_quarter"]) == (2025, 1)
     )
     row.update(quality_status="BLOCK", quality_blocking=True)
+    row["source_lineage"].update(quality_status="BLOCK", quality_blocking=True)
+    service.datasets["synthetic-v3"].quarterly.verify_all()
     content = copy.deepcopy(ANNUAL_REVISION)
     content["predicates"][0].update(
         metric_id="quarter_revenue", threshold="1", definition_version="quarter-reported-core-v1"
