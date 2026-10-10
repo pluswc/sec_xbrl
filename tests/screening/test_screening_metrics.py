@@ -99,6 +99,7 @@ def test_expanded_profile_and_opt_in_signature_are_exact() -> None:
     assert "eps" not in {row["row_id"] for row in profile}
     assert "shares" not in {row["row_id"] for row in profile}
     assert inspect.signature(prepare_analysis).parameters["include_year_end_balances"].default is False
+    assert inspect.signature(prepare_analysis).parameters["include_quarter_source_evidence"].default is False
 
 
 def test_metric_config_year_windows_are_opt_in_and_legacy_shape_is_unchanged() -> None:
@@ -240,6 +241,51 @@ def test_missing_cell_keeps_absent_lineage_when_statement_evidence_is_requested(
     )
     assert lineage is None
     assert evidence == []
+
+
+def test_quarter_source_evidence_preserves_each_derived_input_filing() -> None:
+    lineage, evidence = _with_primary_statement_evidence(
+        {
+            "source_inputs": [
+                {"source_filing_id": "filing-later"},
+                {"source_filing_id": "filing-earlier"},
+            ]
+        },
+        {
+            "primary_statement_evidence": [],
+            "source_bindings": [
+                {
+                    "primary_statement_evidence": [
+                        {
+                            "source_filing_id": "filing-later",
+                            "source_network_type": "PRE",
+                            "statement_types": ["CF"],
+                            "role_uri": "role:cash-flow-later",
+                        }
+                    ]
+                },
+                {
+                    "primary_statement_evidence": [
+                        {
+                            "source_filing_id": "filing-earlier",
+                            "source_network_type": "PRE",
+                            "statement_types": ["CF"],
+                            "role_uri": "role:cash-flow-earlier",
+                        }
+                    ]
+                },
+            ],
+        },
+    )
+    assert lineage is not None
+    assert [
+        source["primary_statement_evidence"][0]["source_filing_id"]
+        for source in lineage["source_inputs"]
+    ] == ["filing-later", "filing-earlier"]
+    assert {row["role_uri"] for row in evidence} == {
+        "role:cash-flow-later",
+        "role:cash-flow-earlier",
+    }
 
 
 def test_opt_in_prepare_preserves_unavailable_cell_with_no_lineage(

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from sec_xbrl.analytics.history_quarters import (
+    _concatenate_staged_records,
     _has_materialized_cell,
     _merge_staged_rows,
     _period_attestation_index,
@@ -141,6 +142,53 @@ def test_staged_row_collision_preserves_legacy_later_source_precedence() -> None
             "full_metadata": {"source": "second", "network": ["new-row-edge"]},
         },
     }
+
+
+def test_staged_cell_concatenation_preserves_order_full_payload_and_schema(
+    tmp_path: Path,
+) -> None:
+    import polars as pl
+
+    chunks = []
+    for index, records in enumerate(
+        (
+            (
+                {
+                    "id": "first",
+                    "value_lineage": {"candidate": ["a", "b"]},
+                    "large_text": "가" * 20_000,
+                },
+                {"id": "second", "value_lineage": {"candidate": ["c"]}},
+            ),
+            (
+                {
+                    "id": "third",
+                    "value_lineage": {"candidate": ["d"]},
+                    "extra_metadata": {"network": ["later"]},
+                },
+            ),
+        )
+    ):
+        path = tmp_path / f"chunk-{index}.parquet"
+        info = {**_write_records(path, records), "path": path}
+        chunks.append(info)
+    destination = tmp_path / "combined.parquet"
+    info = _concatenate_staged_records(destination, chunks)
+    actual = []
+    for row in pl.read_parquet(destination).to_dicts():
+        actual.append(
+            {
+                key: __import__("json").loads(value)
+                if key in info["json_fields"] and value is not None
+                else value
+                for key, value in row.items()
+            }
+        )
+    assert [row["id"] for row in actual] == ["first", "second", "third"]
+    assert actual[0]["large_text"] == "가" * 20_000
+    assert actual[2]["extra_metadata"] == {"network": ["later"]}
+    assert info["count"] == 3
+    assert info["sha256"]
 
 
 def test_period_attestation_index_projects_only_validated_fields() -> None:

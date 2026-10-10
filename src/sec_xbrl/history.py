@@ -488,7 +488,15 @@ def _write_records(path: Path, records: tuple[dict[str, Any], ...]) -> dict[str,
                 for key, value in row.items()} for row in records]
     frame = pl.from_dicts(encoded, infer_schema_length=None) if encoded else pl.DataFrame()
     frame.write_parquet(path)
-    return {"count": len(records), "json_fields": json_fields, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    return {"count": len(records), "json_fields": json_fields, "sha256": _sha256_file(path)}
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def open_history_publication(root: Path):
@@ -516,7 +524,7 @@ class HistoryPublicationReader:
         if relative.is_absolute() or ".." in relative.parts:
             raise ValueError("unsafe history dataset path")
         path = self.root / relative
-        if path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != info["sha256"]:
+        if path.is_symlink() or _sha256_file(path) != info["sha256"]:
             raise ValueError("history dataset integrity mismatch")
         records = pl.read_parquet(path).to_dicts()
         if len(records) != info["count"]:

@@ -55,6 +55,7 @@ FILES = (DEFINITIONS_FILE, SUPPORT_FILE, OBSERVATIONS_FILE, INVENTORY_FILE)
 VIEW = "LATEST_REPORTED"
 ARITHMETIC_POLICY = "ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"
 DECIMAL_CONTEXT = Context(prec=34, rounding=ROUND_HALF_EVEN)
+GIT_SHA1_LENGTH = 40
 
 
 def _reported_definition(
@@ -502,7 +503,7 @@ def _validate_config(value: Any) -> dict[str, Any]:
         )
     if len({row["ticker"] for row in normalized}) != len(normalized) or len({row["cik"] for row in normalized}) != len(normalized):
         raise ValueError("quarterly config companies must have unique ticker and CIK")
-    source_commit = _require_sha(value.get("source_commit_sha"), "source_commit_sha")
+    source_commit = _require_git_sha(value.get("source_commit_sha"), "source_commit_sha")
     fixture_kind = require_string(value.get("fixture_kind", "ACTUAL_PREPARED"), "fixture_kind")
     if fixture_kind != "ACTUAL_PREPARED":
         raise ValueError("production quarterly publisher accepts ACTUAL_PREPARED only")
@@ -534,6 +535,11 @@ def _open_company_source(
     _verify_analysis_files(root, client.manifest)
     if client.manifest.get("period_mode", "QUARTERLY") != "QUARTERLY":
         raise ValueError(f"{company['ticker']}: quarterly analysis period mode differs")
+    if client.manifest.get("quarter_source_evidence") != {
+        "included": True,
+        "rule_version": "quarter-typed-primary-pre-evidence-v1",
+    }:
+        raise ValueError(f"{company['ticker']}: quarterly analysis lacks typed source evidence")
     if set(client.manifest.get("companies", {})) != {company["ticker"]}:
         raise ValueError(f"{company['ticker']}: quarterly analysis must contain one company")
     scope = client.manifest["companies"][company["ticker"]]
@@ -776,6 +782,17 @@ def _prepared_observation(
         duration = (date.fromisoformat(end) - date.fromisoformat(start)).days
         if definition["observation_basis"] == "QTD_3M" and not 75 <= duration <= 105:
             reasons.append("UNSUPPORTED_FISCAL_QUARTER_DURATION")
+    reasons.extend(
+        _prepared_source_scope_reasons(
+            cell=cell,
+            lineage=lineage,
+            source_kind=source_kind,
+            expected_period_class=definition["observation_basis"],
+            expected_start=start,
+            expected_end=end,
+            expected_value=value,
+        )
+    )
     fiscal_year = cell.get("fiscal_year")
     quarter = cell.get("fiscal_quarter")
     fiscal_quarter = f"Q{quarter}" if quarter in {1, 2, 3, 4} else None
@@ -797,7 +814,9 @@ def _prepared_observation(
             quality_reasons=quality_reasons,
             quality_blocking=quality_blocking,
         )
-        reasons.extend(_reported_anchor_reasons(source_lineage))
+        reasons.extend(
+            _reported_anchor_reasons(source_lineage, financial_as_of, cik)
+        )
     elif source_kind == "DERIVED_QUARTER":
         source_lineage = _derived_quarter_lineage(
             ticker=ticker,
@@ -813,7 +832,7 @@ def _prepared_observation(
         if len(source_lineage["derivation_inputs"]) != 2:
             reasons.append("DERIVATION_INPUTS_INCOMPLETE")
         for source in source_lineage["derivation_inputs"]:
-            reasons.extend(_reported_anchor_reasons(source))
+            reasons.extend(_reported_anchor_reasons(source, financial_as_of, cik))
         if lineage.get("derivation_rule_version") != definition["rule_version"]:
             reasons.append("DERIVATION_RULE_MISMATCH")
         reasons.extend(
@@ -895,10 +914,24 @@ def _reported_source(
     snapshot = lineage.get("source_snapshot_id")
     source_id = f"{snapshot}:{fact_id}" if snapshot and fact_id else None
     source_filing_id = lineage.get("source_filing_id")
-    evidence = _statement_evidence(cell, source_filing_id)
+    actual_start = lineage.get("context_start_date")
+    actual_end = lineage.get("context_end_date") or lineage.get("context_instant_date")
+    actual_dimensions = copy.deepcopy(
+        lineage.get("canonical_dimension_signature")
+        if lineage.get("canonical_dimension_signature") is not None
+        else cell.get("dimensions") or []
+    )
+    actual_basis = lineage.get("basis_version")
+    actual_cik = _source_cik(lineage)
+    evidence = _statement_evidence(
+        cell=cell,
+        lineage=lineage,
+        source_filing_id=source_filing_id,
+        statement_type=_statement_type(metric_id.removeprefix("quarter_")),
+    )
     return {
         "accession": lineage.get("accession"),
-        "cik": cik,
+        "cik": actual_cik,
         "ticker": ticker,
         "canonical_metric_id": metric_id,
         "company_canonical_concept_id": lineage.get("company_canonical_concept_id"),
@@ -911,30 +944,33 @@ def _reported_source(
         "context_id": lineage.get("context_id"),
         "raw_concept_qname": lineage.get("raw_concept_qname"),
         "raw_concept_namespace_uri": lineage.get("raw_concept_namespace_uri"),
-        "unit": "USD",
+        "unit": "USD" if _lineage_is_usd(lineage) else None,
         "unit_id": lineage.get("unit_id"),
-        "dimensions": copy.deepcopy(cell.get("dimensions") or []),
-        "period_class": cell.get("period_class"),
-        "period_start": start,
-        "period_end": end,
-        "context_instant_date": end if cell.get("period_class") == "INSTANT" else None,
-        "duration_days": duration,
-        "end_convention": "EXCLUSIVE" if end else None,
+        "dimensions": actual_dimensions,
+        "period_class": lineage.get("period_class"),
+        "period_start": actual_start,
+        "period_end": actual_end,
+        "context_instant_date": lineage.get("context_instant_date"),
+        "duration_days": _duration_days(actual_start, actual_end),
+        "end_convention": "EXCLUSIVE" if actual_end else None,
         "filed_date": lineage.get("filed_date"),
         "report_date": lineage.get("report_date"),
-        "selection_view": VIEW,
-        "selection_as_of_date": financial_as_of,
-        "basis_version": cell.get("basis_version"),
+        "selection_view": lineage.get("selection_view"),
+        "selection_as_of_date": lineage.get("selection_as_of_date"),
+        "basis_version": actual_basis,
         "structural_version": lineage.get("structural_version"),
         "recast_version": lineage.get("recast_version"),
-        "value": value,
+        "value": _finite_decimal_string(lineage.get("value_numeric")),
         "availability_status": "AVAILABLE",
         "reason": None,
         "reasons": [],
-        "quality_status": quality_status,
-        "quality_reasons": quality_reasons,
-        "quality_blocking": quality_blocking,
+        "quality_status": lineage.get("quality_status", quality_status),
+        "quality_reasons": list(lineage.get("quality_reasons") or quality_reasons),
+        "quality_blocking": bool(lineage.get("quality_blocking")) or quality_blocking,
         "mapping_review_required": lineage.get("mapping_review_required"),
+        "ambiguity": lineage.get("ambiguity"),
+        "continuity_break": lineage.get("continuity_break"),
+        "recast_review_required": lineage.get("recast_review_required"),
         "primary_statement_evidence": evidence,
         "candidate_evidence": [],
         "candidate_source_ids": [source_id] if source_id else [],
@@ -942,6 +978,49 @@ def _reported_source(
         "derivation_inputs": [],
         "compatibility_policy": None,
     }
+
+
+def _prepared_source_scope_reasons(
+    *,
+    cell: dict[str, Any],
+    lineage: dict[str, Any],
+    source_kind: str,
+    expected_period_class: str,
+    expected_start: str | None,
+    expected_end: str | None,
+    expected_value: str | None,
+) -> list[str]:
+    """Attest the prepared projection without replacing elected source scope."""
+    reasons: list[str] = []
+    if lineage.get("period_class") != expected_period_class:
+        reasons.append("SOURCE_SCOPE_MISMATCH")
+    lineage_start = lineage.get("context_start_date")
+    lineage_end = lineage.get("context_end_date") or lineage.get("context_instant_date")
+    if lineage_start != expected_start or lineage_end != expected_end:
+        reasons.append("SOURCE_SCOPE_MISMATCH")
+    dimensions = lineage.get("canonical_dimension_signature")
+    if dimensions is not None and dimensions != (cell.get("dimensions") or []):
+        reasons.append("SOURCE_SCOPE_MISMATCH")
+    if lineage.get("basis_version") != cell.get("basis_version"):
+        reasons.append("BASIS_INCOMPATIBLE")
+    if source_kind == "REPORTED":
+        if (
+            lineage.get("selected_source_fact_id") != cell.get("source_fact_id")
+            or lineage.get("source_filing_id") not in (cell.get("source_filing_ids") or [])
+        ):
+            reasons.append("SOURCE_IDENTITY_MISMATCH")
+        raw_value = _finite_decimal_string(lineage.get("value_numeric"))
+        if raw_value is None or raw_value != expected_value:
+            reasons.append("SOURCE_VALUE_MISMATCH")
+    if not _lineage_is_usd(lineage):
+        reasons.append("UNIT_NOT_USD")
+    if lineage.get("ambiguity"):
+        reasons.append("SOURCE_AMBIGUITY")
+    if lineage.get("continuity_break"):
+        reasons.append("CONTINUITY_BREAK")
+    if lineage.get("recast_review_required"):
+        reasons.append("RECAST_REVIEW_REQUIRED")
+    return _unique(reasons)
 
 
 def _derived_quarter_lineage(
@@ -963,7 +1042,9 @@ def _derived_quarter_lineage(
         input_cell = {
             "row_id": cell.get("row_id"),
             "dimensions": copy.deepcopy(raw.get("canonical_dimension_signature") or []),
-            "statement_evidence": cell.get("statement_evidence") or {},
+            "primary_statement_evidence": copy.deepcopy(
+                raw.get("primary_statement_evidence") or []
+            ),
         }
         inputs.append(
             _reported_source(
@@ -976,7 +1057,7 @@ def _derived_quarter_lineage(
                     "source_fact_id": raw.get("selected_source_fact_id"),
                     "source_filing_ids": [raw.get("source_filing_id")],
                     "period_class": raw.get("period_class"),
-                    "basis_version": lineage.get("basis_version") or cell.get("basis_version"),
+                    "basis_version": raw.get("basis_version"),
                 },
                 lineage=raw,
                 start=start,
@@ -1009,19 +1090,31 @@ def _derived_quarter_lineage(
     }
 
 
-def _statement_evidence(cell: dict[str, Any], source_filing_id: Any) -> list[dict[str, Any]]:
-    mapping = cell.get("statement_evidence")
-    if not isinstance(mapping, dict) or not isinstance(source_filing_id, str):
+def _statement_evidence(
+    *,
+    cell: dict[str, Any],
+    lineage: dict[str, Any],
+    source_filing_id: Any,
+    statement_type: str,
+) -> list[dict[str, Any]]:
+    candidates = (
+        cell.get("primary_statement_evidence")
+        or lineage.get("primary_statement_evidence")
+        or []
+    )
+    if not isinstance(candidates, list) or not isinstance(source_filing_id, str):
         return []
-    roles = mapping.get(source_filing_id) or []
     return [
-        {
-            "source_filing_id": source_filing_id,
-            "role_uri": role,
-            "statement_type": _statement_type(str(cell.get("row_id"))),
-        }
-        for role in roles
-        if isinstance(role, str) and role
+        copy.deepcopy(evidence)
+        for evidence in candidates
+        if isinstance(evidence, dict)
+        and evidence.get("source_filing_id") == source_filing_id
+        and evidence.get("cik") == _source_cik(lineage)
+        and evidence.get("accession") == lineage.get("accession")
+        and evidence.get("source_network_type") == "PRE"
+        and statement_type in (evidence.get("statement_types") or [])
+        and isinstance(evidence.get("role_uri"), str)
+        and evidence["role_uri"]
     ]
 
 
@@ -1058,6 +1151,20 @@ def _derived_quarter_reasons(
         or later.get("period_end") != period_end
     ):
         reasons.append("DERIVATION_PERIOD_MISMATCH")
+    for field in (
+        "cik",
+        "unit",
+        "dimensions",
+        "selection_view",
+        "selection_as_of_date",
+        "basis_version",
+        "structural_version",
+        "recast_version",
+        "canonical_mapping_version",
+        "company_canonical_concept_id",
+    ):
+        if canonical_json(later.get(field)) != canonical_json(earlier.get(field)):
+            reasons.append("DERIVATION_SCOPE_MISMATCH")
     try:
         expected = _exact_subtract(Decimal(later["value"]), Decimal(earlier["value"]))
         actual = Decimal(value) if value is not None else None
@@ -1069,7 +1176,9 @@ def _derived_quarter_reasons(
     return reasons
 
 
-def _reported_anchor_reasons(source: dict[str, Any]) -> list[str]:
+def _reported_anchor_reasons(
+    source: dict[str, Any], financial_as_of: str, expected_cik: str
+) -> list[str]:
     """Reject an elected value unless its immutable prepared-source scope is complete."""
     reasons: list[str] = []
     for field in (
@@ -1091,6 +1200,7 @@ def _reported_anchor_reasons(source: dict[str, Any]) -> list[str]:
         "report_date",
         "selection_view",
         "selection_as_of_date",
+        "value",
     ):
         if not isinstance(source.get(field), str) or not source[field]:
             reasons.append("SOURCE_ANCHOR_INCOMPLETE")
@@ -1106,17 +1216,43 @@ def _reported_anchor_reasons(source: dict[str, Any]) -> list[str]:
             reasons.append("PERIOD_SCOPE_INCOMPLETE")
     else:
         start, end = source.get("period_start"), source.get("period_end")
-        if (
-            not isinstance(start, str)
-            or not isinstance(end, str)
-            or source.get("duration_days")
-            != (date.fromisoformat(end) - date.fromisoformat(start)).days
-        ):
+        duration = _duration_days(start, end)
+        if duration is None or source.get("duration_days") != duration:
             reasons.append("PERIOD_SCOPE_INCOMPLETE")
     if source.get("mapping_review_required") is not False:
         reasons.append("MAPPING_REVIEW_REQUIRED")
+    if source.get("ambiguity"):
+        reasons.append("SOURCE_AMBIGUITY")
+    if source.get("continuity_break"):
+        reasons.append("CONTINUITY_BREAK")
+    if source.get("recast_review_required"):
+        reasons.append("RECAST_REVIEW_REQUIRED")
     if source.get("quality_blocking") or source.get("quality_status") == "BLOCK":
         reasons.append("QUALITY_BLOCKED")
+    if not source.get("primary_statement_evidence"):
+        reasons.append("PRIMARY_STATEMENT_EVIDENCE_MISSING")
+    snapshot = source.get("source_snapshot_id")
+    if (
+        source.get("cik") != expected_cik
+        or not isinstance(snapshot, str)
+        or not snapshot.startswith(f"l1:{source.get('cik')}:")
+    ):
+        reasons.append("SOURCE_IDENTITY_MISMATCH")
+    try:
+        cutoff = date.fromisoformat(financial_as_of)
+        filed = date.fromisoformat(str(source.get("filed_date")))
+        report = date.fromisoformat(str(source.get("report_date")))
+        period_end = date.fromisoformat(str(source.get("period_end")))
+    except ValueError:
+        reasons.append("SOURCE_DATE_INVALID")
+    else:
+        if filed > cutoff or report > filed or period_end > filed:
+            reasons.append("SOURCE_DATE_INVALID")
+    if (
+        source.get("selection_view") != VIEW
+        or source.get("selection_as_of_date") != financial_as_of
+    ):
+        reasons.append("SOURCE_SCOPE_MISMATCH")
     return _unique(reasons)
 
 
@@ -1337,7 +1473,12 @@ def _generic_input_reasons(
     for field in ("cik", "dimensions", "selection_view", "selection_as_of_date"):
         if current.get(field) != second.get(field):
             reasons.append("SOURCE_SCOPE_MISMATCH")
-    for field in ("basis_version", "structural_version", "recast_version"):
+    for field in (
+        "basis_version",
+        "structural_version",
+        "recast_version",
+        "canonical_mapping_version",
+    ):
         if current.get(field) != second.get(field):
             reasons.append("BASIS_INCOMPATIBLE")
     if current.get("unit") != "USD" or second.get("unit") != "USD":
@@ -1346,6 +1487,28 @@ def _generic_input_reasons(
         for field in ("period_start", "period_end", "period_class", "fiscal_year", "fiscal_quarter"):
             if current.get(field) != second.get(field):
                 reasons.append("PERIOD_MISMATCH")
+        current_endpoint = _endpoint_source(current)
+        second_endpoint = _endpoint_source(second)
+        if current_endpoint is None or second_endpoint is None:
+            reasons.append("SOURCE_ENDPOINT_MISSING")
+        else:
+            endpoint_fields = (
+                "cik",
+                "source_filing_id",
+                "accession",
+                "period_end",
+                "selection_view",
+                "selection_as_of_date",
+                "unit",
+                "dimensions",
+                "basis_version",
+            )
+            if any(
+                canonical_json(current_endpoint.get(field))
+                != canonical_json(second_endpoint.get(field))
+                for field in endpoint_fields
+            ):
+                reasons.append("SOURCE_FILING_MISMATCH")
     elif (
         current.get("metric_id") != second.get("metric_id")
         or current.get("definition_version") != second.get("definition_version")
@@ -1358,6 +1521,22 @@ def _generic_input_reasons(
     elif kind == "SAME_FISCAL_QUARTER_YOY_GROWTH" and second.get("period_end") > current.get("period_start"):
         reasons.append("PERIOD_OVERLAP")
     return _unique(reasons)
+
+
+def _endpoint_source(row: dict[str, Any]) -> dict[str, Any] | None:
+    lineage = row.get("source_lineage")
+    if not isinstance(lineage, dict):
+        return None
+    if row.get("source_kind") == "REPORTED":
+        return lineage
+    if row.get("source_kind") != "DERIVED_QUARTER":
+        return None
+    matches = [
+        source
+        for source in lineage.get("derivation_inputs") or []
+        if isinstance(source, dict) and source.get("period_end") == row.get("period_end")
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _derived_output_base(
@@ -1442,9 +1621,22 @@ def _ttm_observation(
         if any(a["period_end"] != b["period_start"] for a, b in pairwise(prepared)):
             reasons.append("INPUTS_NOT_CONTIGUOUS")
         bases = [row.get("basis_version") for row in prepared]
-        if any(value is None for value in bases) or len(set(bases)) != 1:
+        if (
+            any(not isinstance(value, str) or not value for value in bases)
+            or len(set(bases)) != 1
+        ):
             reasons.append("INPUTS_NOT_COMPATIBLE")
-        for field in ("cik", "unit", "dimensions", "selection_view", "selection_as_of_date", "company_canonical_concept_id"):
+        for field in (
+            "cik",
+            "unit",
+            "dimensions",
+            "selection_view",
+            "selection_as_of_date",
+            "company_canonical_concept_id",
+            "canonical_mapping_version",
+            "structural_version",
+            "recast_version",
+        ):
             if len({canonical_json(row.get(field)) for row in prepared}) != 1:
                 reasons.append("INPUTS_NOT_COMPATIBLE")
     if reasons or current is None:
@@ -1545,6 +1737,15 @@ def _require_sha(value: Any, field: str) -> str:
     return digest
 
 
+def _require_git_sha(value: Any, field: str) -> str:
+    commit = require_string(value, field)
+    if len(commit) != GIT_SHA1_LENGTH or any(
+        char not in "0123456789abcdef" for char in commit
+    ):
+        raise ValueError(f"{field} must be a lowercase 40-character Git commit SHA")
+    return commit
+
+
 def _is_usd_unit(value: Any) -> bool:
     if not isinstance(value, list) or len(value) != 2:
         return False
@@ -1554,6 +1755,41 @@ def _is_usd_unit(value: Any) -> bool:
     except (json.JSONDecodeError, TypeError):
         return False
     return numerator == ["iso4217:USD"] and denominator == []
+
+
+def _lineage_is_usd(lineage: dict[str, Any]) -> bool:
+    numerator = lineage.get("unit_numerator_measures")
+    denominator = lineage.get("unit_denominator_measures")
+    try:
+        numerator = json.loads(numerator) if isinstance(numerator, str) else numerator
+        denominator = json.loads(denominator) if isinstance(denominator, str) else denominator
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return numerator == ["iso4217:USD"] and denominator == []
+
+
+def _source_cik(lineage: dict[str, Any]) -> str | None:
+    snapshot = lineage.get("source_snapshot_id")
+    if not isinstance(snapshot, str):
+        return None
+    parts = snapshot.split(":", 3)
+    if (
+        len(parts) != 4
+        or parts[0] != "l1"
+        or len(parts[1]) != 10
+        or not parts[1].isdigit()
+    ):
+        return None
+    return parts[1]
+
+
+def _duration_days(start: Any, end: Any) -> int | None:
+    if not isinstance(start, str) or not isinstance(end, str):
+        return None
+    try:
+        return (date.fromisoformat(end) - date.fromisoformat(start)).days
+    except ValueError:
+        return None
 
 
 def _finite_decimal_string(value: Any) -> str | None:

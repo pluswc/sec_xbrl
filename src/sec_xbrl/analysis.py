@@ -693,7 +693,26 @@ def _with_primary_statement_evidence(
     if not isinstance(lineage, dict):
         return lineage, []
     result = copy.deepcopy(lineage)
-    evidence = copy.deepcopy((binding or {}).get("primary_statement_evidence") or [])
+    binding = binding or {}
+    evidence = copy.deepcopy(binding.get("primary_statement_evidence") or [])
+    source_bindings = binding.get("source_bindings") or []
+    source_inputs = result.get("source_inputs") or []
+    if isinstance(source_bindings, list) and isinstance(source_inputs, list):
+        for source in source_inputs:
+            if not isinstance(source, dict):
+                continue
+            source_filing_id = source.get("source_filing_id")
+            matching = [
+                copy.deepcopy(row)
+                for source_binding in source_bindings
+                if isinstance(source_binding, dict)
+                for row in source_binding.get("primary_statement_evidence") or []
+                if isinstance(row, dict)
+                and row.get("source_filing_id") == source_filing_id
+            ]
+            source["primary_statement_evidence"] = matching
+            evidence.extend(copy.deepcopy(matching))
+    evidence = list({json.dumps(row, sort_keys=True): row for row in evidence}.values())
     result["primary_statement_evidence"] = evidence
     return result, evidence
 
@@ -1075,7 +1094,8 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
                      quality_decisions: list[dict[str, str]] | None = None,
                      reviewed_q4_publication: Path | None = None,
                      period_mode: str = "QUARTERLY",
-                     include_year_end_balances: bool = False) -> Path:
+                     include_year_end_balances: bool = False,
+                     include_quarter_source_evidence: bool = False) -> Path:
     """Materialize a consumer bundle. This is the only raw-reading/build boundary."""
     if destination.exists() or fiscal_years < 1 or period_mode not in {"QUARTERLY", "ANNUAL"}:
         raise ValueError("new destination and positive fiscal scope required")
@@ -1083,8 +1103,12 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
         raise ValueError("reviewed Q4 is available only in a quarterly consumer bundle")
     if type(include_year_end_balances) is not bool:
         raise TypeError("include_year_end_balances must be a boolean")
+    if type(include_quarter_source_evidence) is not bool:
+        raise TypeError("include_quarter_source_evidence must be a boolean")
     if include_year_end_balances and period_mode != "ANNUAL":
         raise ValueError("year-end balances are available only in an annual consumer bundle")
+    if include_quarter_source_evidence and period_mode != "QUARTERLY":
+        raise ValueError("quarter source evidence is available only in a quarterly consumer bundle")
     configuration = copy.deepcopy(configuration or {})
     reader = open_history_publication(publication)
     reviewed_q4 = None
@@ -1113,6 +1137,11 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
                 "included": True,
                 "rule_version": "annual-exact-year-end-instant-v1",
             }
+    elif include_quarter_source_evidence:
+        manifest["quarter_source_evidence"] = {
+            "included": True,
+            "rule_version": "quarter-typed-primary-pre-evidence-v1",
+        }
     if reviewed_q4 is not None:
         manifest["reviewed_q4"] = {
             "publication": str(Path(reviewed_q4_publication).resolve()),
@@ -1184,14 +1213,16 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
                     row = rows[cell["fiscal_time_series_row_id"]]
                     lineage = copy.deepcopy(cell["value_lineage"])
                     primary_evidence: list[dict] = []
-                    if include_year_end_balances:
+                    if include_year_end_balances or include_quarter_source_evidence:
                         lineage, primary_evidence = _with_primary_statement_evidence(
                             lineage, cell.get("binding")
                         )
                     column = selected_columns[cell["fiscal_time_series_column_id"]]
                     nid = stable(ticker, view, period, row["fiscal_time_series_row_id"])
                     compact = _compact(cell, row, column, ticker=ticker, view=view, node_id=nid)
-                    if include_year_end_balances and isinstance(lineage, dict):
+                    if (
+                        include_year_end_balances or include_quarter_source_evidence
+                    ) and isinstance(lineage, dict):
                         compact["primary_statement_evidence"] = primary_evidence
                     if quality_decisions:
                         _materialize_prepared_quality(ticker=ticker, compact=compact, source_cell=cell, concepts=concepts,

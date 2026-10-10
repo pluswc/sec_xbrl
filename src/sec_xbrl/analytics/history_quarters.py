@@ -29,6 +29,7 @@ from sec_xbrl.analytics.fiscal_time_series import (
 from sec_xbrl.history import (
     HISTORY_VERSION,
     HistoryPublicationReader,
+    _sha256_file,
     _write_json,
     _write_records,
     build_history,
@@ -107,7 +108,7 @@ def _read_staged_records(path: Path, info: dict[str, Any]) -> tuple[dict[str, An
     """Read one producer-owned chunk with the same hash/count checks as history."""
     import polars as pl
 
-    if path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != info["sha256"]:
+    if path.is_symlink() or _sha256_file(path) != info["sha256"]:
         raise ValueError("quarter history staging chunk integrity mismatch")
     rows = pl.read_parquet(path).to_dicts()
     if len(rows) != info["count"]:
@@ -129,6 +130,76 @@ def _merge_staged_rows(
     """Match the legacy table-order merge: later source row metadata wins."""
     for row in rows:
         destination[row["fiscal_time_series_row_id"]] = row
+
+
+def _resolve_additive_locator(
+    locator: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Resolve one unique additive candidate from verified producer chunks."""
+    chunks = locator["chunks"]
+    cells = _read_staged_records(chunks["cells"]["path"], chunks["cells"])
+    index = locator["cell_index"]
+    if type(index) is not int or index < 0 or index >= len(cells):
+        raise ValueError("quarter additive cell locator is invalid")
+    cell = cells[index]
+    if (
+        cell.get("fiscal_time_series_column_id") != locator["column_id"]
+        or cell.get("fiscal_time_series_row_id") != locator["row_id"]
+        or not approved_additive(cell)
+    ):
+        raise ValueError("quarter additive cell locator changed")
+    columns = _read_staged_records(chunks["columns"]["path"], chunks["columns"])
+    rows = _read_staged_records(chunks["rows"]["path"], chunks["rows"])
+    matching_columns = [
+        row
+        for row in columns
+        if row["fiscal_time_series_column_id"] == locator["column_id"]
+    ]
+    matching_rows = [
+        row
+        for row in rows
+        if row["fiscal_time_series_row_id"] == locator["row_id"]
+    ]
+    if len(matching_columns) != 1 or len(matching_rows) != 1:
+        raise ValueError("quarter additive row or column locator changed")
+    return cell, matching_columns[0], matching_rows[0]
+
+
+def _concatenate_staged_records(
+    destination: Path,
+    chunks: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Stream validated encoded chunks into one ordered Parquet dataset."""
+    import polars as pl
+
+    if not chunks:
+        return _write_records(destination, ())
+    frames = []
+    count = 0
+    json_fields: set[str] = set()
+    for info in chunks:
+        path = info["path"]
+        if path.is_symlink() or _sha256_file(path) != info["sha256"]:
+            raise ValueError("quarter history staging chunk integrity mismatch")
+        actual_count = (
+            pl.scan_parquet(path).select(pl.len().alias("count")).collect().item()
+        )
+        if actual_count != info["count"]:
+            raise ValueError("quarter history staging chunk count mismatch")
+        frames.append(pl.scan_parquet(path))
+        count += info["count"]
+        json_fields.update(info["json_fields"])
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    pl.concat(frames, how="diagonal_relaxed").sink_parquet(
+        destination,
+        maintain_order=True,
+        mkdir=True,
+    )
+    return {
+        "count": count,
+        "json_fields": sorted(json_fields),
+        "sha256": _sha256_file(destination),
+    }
 
 
 def derive_quarter(later: dict[str, Any], earlier: dict[str, Any], *, quarter: int) -> dict[str, Any] | None:
@@ -197,7 +268,10 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
     chunk_root = staging / ".chunks"
     chunk_root.mkdir()
     targets: dict[tuple[str, str, str], dict[str, Any]] = {}
-    additive_by_pair: dict[tuple[str, str], dict[tuple[int, str, str], list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]]] = {}
+    additive_by_pair: dict[
+        tuple[str, str],
+        dict[tuple[int, str, str], list[dict[str, Any]]],
+    ] = {}
     materialized: dict[tuple[str, str, str], set[tuple[str, str]]] = defaultdict(set)
     changes = defaultdict(int)
     for table_index, table in enumerate(old.manifest["tables"]):
@@ -245,11 +319,6 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
             bundle["rows"][cell["fiscal_time_series_row_id"]] = rows[cell["fiscal_time_series_row_id"]]
             bundle["cells"].append(cell)
             materialized[key].add((cell["fiscal_time_series_row_id"], cell["fiscal_time_series_column_id"]))
-            if approved_additive(cell):
-                pair_groups = additive_by_pair.setdefault((table["ticker"], table["view"]), {})
-                pair_groups.setdefault((column["fiscal_year"], period_class, _scope(cell["value_lineage"])), []).append(
-                    (cell, column, rows[cell["fiscal_time_series_row_id"]])
-                )
         for chunk_index, (key, bundle) in enumerate(chunks.items()):
             chunk_files = {}
             for name, records in (
@@ -260,6 +329,27 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
                 path = chunk_root / f"{table_index:04d}-{chunk_index:02d}-{name}.parquet"
                 chunk_files[name] = {**_write_records(path, records), "path": path}
             targets[key]["chunks"].append(chunk_files)
+            pair_groups = additive_by_pair.setdefault((key[0], key[1]), {})
+            for cell_index, cell in enumerate(bundle["cells"]):
+                if not approved_additive(cell):
+                    continue
+                column = bundle["columns"][cell["fiscal_time_series_column_id"]]
+                pair_groups.setdefault(
+                    (
+                        column["fiscal_year"],
+                        key[2],
+                        _scope(cell["value_lineage"]),
+                    ),
+                    [],
+                ).append(
+                    {
+                        "chunks": chunk_files,
+                        "cell_index": cell_index,
+                        "column_id": cell["fiscal_time_series_column_id"],
+                        "row_id": cell["fiscal_time_series_row_id"],
+                    }
+                )
+            del bundle
     derived = []
     for ticker, view in sorted({(key[0], key[1]) for key in targets}):
         qtd_key = (ticker, view, "QTD_3M")
@@ -274,11 +364,15 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
             previous = {2: "QTD_3M", 3: "YTD_6M", 4: "YTD_9M"}[quarter]
             partners = grouped.get((year, previous, scope), [])
             if quarter == 2:
-                partners = [item for item in partners if item[1]["fiscal_quarter"] == 1]
+                partners = [
+                    item
+                    for item in partners
+                    if _resolve_additive_locator(item)[1]["fiscal_quarter"] == 1
+                ]
             if len(choices) != 1 or len(partners) != 1:
                 continue
-            later, annual_column, source_row = choices[0]
-            earlier = partners[0][0]
+            later, annual_column, source_row = _resolve_additive_locator(choices[0])
+            earlier = _resolve_additive_locator(partners[0])[0]
             metric = derive_quarter(later, earlier, quarter=quarter)
             if metric is None:
                 continue
@@ -305,9 +399,11 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
                                   "value_text": None, "comparability_status": "COMPATIBLE_INPUTS", "comparability_reason": metric["basis_compatibility"],
                                   "definition": definition, "binding": binding, "value_lineage": value})
     tables = []
-    for key, target in sorted(targets.items()):
+    for target_index, (key, target) in enumerate(sorted(targets.items())):
         table = {**target["table"], "files": {}}
-        bundle: dict[str, Any] = {"columns": {}, "rows": {}, "cells": []}
+        bundle: dict[str, Any] = {"columns": {}, "rows": {}}
+        boundaries: dict[str, set[tuple[Any, Any, Any]]] = defaultdict(set)
+        cell_chunks: list[dict[str, Any]] = []
         for chunk in target["chunks"]:
             for column in _read_staged_records(chunk["columns"]["path"], chunk["columns"]):
                 bundle["columns"][column["fiscal_time_series_column_id"]] = column
@@ -315,28 +411,89 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
                 bundle["rows"],
                 _read_staged_records(chunk["rows"]["path"], chunk["rows"]),
             )
-            bundle["cells"].extend(_read_staged_records(chunk["cells"]["path"], chunk["cells"]))
+            for cell in _read_staged_records(chunk["cells"]["path"], chunk["cells"]):
+                lineage = cell.get("value_lineage")
+                if isinstance(lineage, dict):
+                    boundaries[cell["fiscal_time_series_column_id"]].add(
+                        (
+                            lineage.get("context_start_date"),
+                            lineage.get("context_end_date"),
+                            lineage.get("context_instant_date"),
+                        )
+                    )
+            cell_chunks.append(chunk["cells"])
         for column_id, column in target["extra_columns"].items():
             bundle["columns"].setdefault(column_id, column)
         for row_id, row in target["extra_rows"].items():
             bundle["rows"].setdefault(row_id, row)
-        bundle["cells"].extend(target["extra_cells"])
+        if target["extra_cells"]:
+            extra_path = chunk_root / f"derived-{target_index:04d}-cells.parquet"
+            extra_info = {
+                **_write_records(extra_path, tuple(target["extra_cells"])),
+                "path": extra_path,
+            }
+            cell_chunks.append(extra_info)
+            for cell in target["extra_cells"]:
+                lineage = cell.get("value_lineage")
+                if isinstance(lineage, dict):
+                    boundaries[cell["fiscal_time_series_column_id"]].add(
+                        (
+                            lineage.get("context_start_date"),
+                            lineage.get("context_end_date"),
+                            lineage.get("context_instant_date"),
+                        )
+                    )
         # Recompute column boundaries from the corrected partition, not the old
         # FY/TTM mixture. Include derived durations as explicit source evidence.
         columns = []
         for column in bundle["columns"].values():
-            values = [{**cell["value_lineage"], "value_status": "REPORTED"} for cell in bundle["cells"]
-                      if cell["fiscal_time_series_column_id"] == column["fiscal_time_series_column_id"] and cell.get("value_lineage")]
+            values = [
+                {
+                    "context_start_date": start,
+                    "context_end_date": end,
+                    "context_instant_date": instant,
+                    "value_status": "REPORTED",
+                }
+                for start, end, instant in sorted(
+                    boundaries.get(column["fiscal_time_series_column_id"], set()),
+                    key=lambda item: tuple(value or "" for value in item),
+                )
+            ]
             rebuilt = _column((column["fiscal_year"], column["fiscal_quarter"], table["period_class"]), column.get("fiscal_year_end_as_filed"),
                               _period_evidence(SimpleNamespace(values=values)))
             columns.append(rebuilt)
-        payloads = {"columns": _annotate_comparability(tuple(sorted(columns, key=lambda c: c["column_order_key"]))),
-                    "rows": tuple(bundle["rows"].values()), "cells": tuple(bundle["cells"])}
+        payloads = {
+            "columns": _annotate_comparability(
+                tuple(sorted(columns, key=lambda c: c["column_order_key"]))
+            ),
+            "rows": tuple(bundle["rows"].values()),
+        }
         for name, records in payloads.items():
             relative = Path(table["cik"]) / table["view"] / table["period_class"] / f"{name}.parquet"
             table["files"][name] = {**_write_records(staging / relative, records), "path": str(relative)}
+        cell_relative = (
+            Path(table["cik"])
+            / table["view"]
+            / table["period_class"]
+            / "cells.parquet"
+        )
+        table["files"]["cells"] = {
+            **_concatenate_staged_records(staging / cell_relative, cell_chunks),
+            "path": str(cell_relative),
+        }
         tables.append(table)
-        print(json.dumps({"stage": "QUARTER_PANEL", "ticker": key[0], "view": key[1], "period_class": key[2], "cells": len(bundle["cells"])}), flush=True)
+        print(
+            json.dumps(
+                {
+                    "stage": "QUARTER_PANEL",
+                    "ticker": key[0],
+                    "view": key[1],
+                    "period_class": key[2],
+                    "cells": table["files"]["cells"]["count"],
+                }
+            ),
+            flush=True,
+        )
     shutil.rmtree(chunk_root)
     derived_info = _write_records(staging / "derived_quarter.parquet", tuple(derived))
     manifest = {**old.manifest, "version": HISTORY_VERSION, "tables": tables, "period_rule": PERIOD_RULE,

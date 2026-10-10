@@ -120,6 +120,45 @@ FY2024 네 칸은 typed primary-statement evidence 부족으로 보수적으로 
    만들지 않는다. 짧은 history는 가능한 집합과 `PARTIAL_HISTORY`를 유지한다. 기존 필드만
    가진 config는 기존 결과와 byte-equivalent여야 한다.
 
+### 1.3 분기 producer 재검증 범위
+
+첫 분기 producer 후보 `178bed39d95cb9f4439c562992dc215748aaae68`은 source scope를
+검증하기 전에 바깥 cell metadata로 덮어쓰고, typed PRE evidence 대신 row ID에서 statement
+종류를 만들며, 빈 basis의 TTM과 64자리 Git commit 표기를 허용한 결함으로 독립 검증에서
+**FAIL**했다. 보고서 SHA-256은
+`7514f6f81b65dea3974b405decabef042a6e9b3d5ca66582cbf344bc7729616d`다. 이 후보로 만든
+분기 publication은 수락 산출물이 아니다.
+
+후속 source는 다음 경계를 지킨다.
+
+- QUARTERLY analysis 준비가 명시적으로 `quarter-typed-primary-pre-evidence-v1`을 켠 경우에만
+  각 reported 입력과 M8의 두 source input에 실제 binding의 `PRE` role·statement type
+  evidence를 복사한다. 없는 evidence를 row ID, label 또는 metric 이름에서 만들지 않는다.
+- elected source의 CIK, filing·Fact, actual start/end 또는 instant, period class, USD unit,
+  full dimensions, view, as-of, basis, mapping·quality·ambiguity·continuity·recast 상태와 filed
+  date를 먼저 확인한다. 바깥 cell 값으로 충돌한 source metadata를 고쳐 쓰지 않으며, 실패
+  시 양쪽 evidence를 가진 `UNAVAILABLE`로 남긴다.
+- 같은 기간 difference/ratio의 direct leg endpoint는 그 reported filing이고, M8 leg
+  endpoint는 output end와 같은 later cumulative input filing이다. 두 endpoint의 CIK,
+  filing/accession, period end, view/as-of, unit, dimensions, basis가 같아야 한다. M8 earlier
+  input은 별도로 완전하게 검증한다. Q2 `CFO(YTD_6M filing-q2 − Q1 filing-q1)`과 direct
+  capex `filing-q2`는 허용할 수 있지만 capex가 다른 filing이면 hold다. 성장률은 서로 다른
+  기간 filing을 쓰되 기존 fiscal adjacency와 semantic identity gate를 유지한다.
+- TTM은 네 QTD가 연속이고 같은 non-empty basis, mapping, structural/recast version과
+  measurement scope를 가질 때만 가능하다. FY/YTD fallback이나 빈 basis strand는 허용하지
+  않는다.
+- `source_commit_sha`는 source provenance의 lowercase 40자리 Git SHA-1이고,
+  publication·file checksum은 lowercase 64자리 SHA-256이다.
+
+JNJ 실제 OOM은 d378 runtime에서 base `PANEL_WRITTEN`을 마친 뒤 첫 `QUARTER_PANEL`을 쓰기
+전, additive 후보의 전체 중첩 object 보관과 최종 cell 전체 재물질화, `read_bytes` hashing이
+겹친 구간에서 발생했다. 승인된 두 번째 메모리 슬라이스는 검증된 chunk locator만 보관하고
+unique pair를 필요할 때 읽으며, column boundary의 작은 집합과 derived chunk만 유지한 채
+원래 source 순서로 Parquet chunk를 streaming concatenate한다. row metadata의 later-source
+precedence, 모든 row/cell/candidate/trace/source/network lineage, schema/count/hash 검증은
+그대로 유지하며 period·mapping·recast·selection·회계 규칙을 바꾸거나 payload를 줄이지
+않는다. 이 source는 focused/golden 검증과 독립 source gate 전에는 JNJ/CVX build에 쓰지 않는다.
+
 ## 2. 불변 입력과 새 run 경계
 
 재실행 가능한 새 run identity는 `universe-50-quarterly-20261010`으로 제안한다.
@@ -350,16 +389,20 @@ actual data gate 전의 운영 증거다.
 
 - TXN 22/22와 HD 22/22 accession이 Raw complete, history와 5FY annual analysis verified다.
   TXN total wall 154.354초/peak RSS 6,239,848KB, HD 99.010초/4,898,628KB였다.
+- NEE 22/22 accession도 Raw complete, history와 5FY annual analysis verified다. total wall
+  252.752초, history wall 172.903초, peak RSS 11,124,084KB였다.
 - JNJ의 과거 2021 filing 하나는 package 손상이 아니라 pilot taxonomy cache에
   SRT 2019, US-GAAP 2019, country 2017 import가 없어서 실패했다. read-only 진단 보고서
   `/tmp/jnj-20210404-readonly-diagnosis/report.json` SHA-256
   `09e06c077b2ace95e9fac77c587ed96336cd9cdbbd41bc2aa2ffa08f2237fe34` 뒤, 기존 명시적
   `bootstrap_taxonomy=True` 경로로 cache를 채웠고 해당 accession은 새 attempt에서
-  INGESTED됐다. 기존 실패, ZIP, 21개 성공 snapshot은 변경하지 않았다.
+  INGESTED됐다. JNJ Raw는 22/22 complete지만 d378 history는 base panel 다음 quarter
+  materialization에서 peak RSS 31,414,428KB로 종료 code 137이 발생했다. partial output은
+  실패 증거로 보존하며 READY로 재사용하지 않는다.
 - CVX 최초 23 package 요청은 transport 단계에서 실패했다. 단일 exact URI를 body 없이
-  재확인했을 때 HTTP 200/application-zip였고, 재시도에서 22개가 INGESTED됐다. 남은 2021
-  filing 하나는 같은 historical taxonomy import gate로 분리됐다. 이는 metric 미공시가
-  아니며 taxonomy recovery 후에만 재시도한다.
+  재확인했을 때 HTTP 200/application-zip였고, 지원된 historical taxonomy recovery 뒤
+  CVX Raw도 23/23 complete가 됐다. 기존 PackageCache/IOerror/missing-import attempts는
+  append-only로 보존한다. memory source gate 전에는 history를 시작하지 않는다.
 - `held_filings`는 validated successful Raw snapshot/outcome 수이며 품질 hold를 뜻하지 않는다.
   회사가 `RAW_COMPLETE`, history verified, annual analysis verified를 모두 통과하기 전에는
   financial READY로 세지 않는다.
@@ -386,7 +429,8 @@ actual data gate 전의 운영 증거다.
   `status --publication ...`이다. `status`는 외부 source를 다시 열지 않는다.
 
 config schema `quarterly-screening-metric-config-v1`은 `financial_as_of`, `fixture_kind =
-ACTUAL_PREPARED`, `source_commit_sha`, exact `annual_metric_root`와 manifest SHA, 그리고
+ACTUAL_PREPARED`, 40자리 Git `source_commit_sha`, exact `annual_metric_root`와 64자리 manifest
+SHA-256, 그리고
 `{ticker,cik,analysis_root,analysis_manifest_sha256}` 회사 목록을 요구한다. manifest의
 `annual_parent`는 같은 CIK membership의 annual **metric** publication ID/SHA를 가리킨다.
 annual dataset이나 UI publication을 대신 가리키지 않는다.
