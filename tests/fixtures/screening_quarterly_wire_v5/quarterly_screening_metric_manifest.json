@@ -1,0 +1,149 @@
+{
+  "annual_parent": {
+    "binding_status": "SYNTHETIC_NON_BINDABLE_PARENT",
+    "company_membership_sha256": "415b71146c93ad3f1965f1f2ce8bfb057cf8b0aee9596c383ac5da7a27b705ae",
+    "manifest_sha256": "a747475545f0b8652da5fb94ddc80ff6bf77a606c60ecb4e8fa4f012c613fb4c",
+    "publication_id": "synthetic-annual-parent-v1",
+    "schema_version": "screening-metric-publication-v1"
+  },
+  "counts": {
+    "definitions": 4,
+    "observations": 64,
+    "period_inventory": 16,
+    "support": 8
+  },
+  "created_at": "2026-10-10T00:00:00Z",
+  "files": {
+    "quarter_metric_definitions.json": {
+      "record_count": 4,
+      "sha256": "287970e25cd5115079c7af1673485c389e43bd7d818112d99799ded8ba39b4da",
+      "size": 2158
+    },
+    "quarter_metric_observations.json": {
+      "record_count": 64,
+      "sha256": "e87baae2de9dc42023fa29a8b9d5b293c07a5410dd14c92687d6ee658fad892c",
+      "size": 112060
+    },
+    "quarter_metric_support.json": {
+      "record_count": 8,
+      "sha256": "12c5b9df2189b050df2fe488084e041caa392d6f2303c04727bbd3ffcfa3bd58",
+      "size": 3716
+    },
+    "quarter_period_inventory.json": {
+      "record_count": 16,
+      "sha256": "5a55e081c5fdb2060018c91f6b137c417d5287e160ac455f6849856a91f76314",
+      "size": 11796
+    }
+  },
+  "financial_as_of": "2026-10-10",
+  "fixture_kind": "SYNTHETIC_QUARTER_SCHEMA_FIXTURE_V5",
+  "global_quarter_spine": [
+    {
+      "calendar_quarter": 4,
+      "calendar_year": 2024,
+      "status": "COMPLETED_BUCKET"
+    },
+    {
+      "calendar_quarter": 1,
+      "calendar_year": 2025,
+      "status": "COMPLETED_BUCKET"
+    },
+    {
+      "calendar_quarter": 2,
+      "calendar_year": 2025,
+      "status": "COMPLETED_BUCKET"
+    },
+    {
+      "calendar_quarter": 3,
+      "calendar_year": 2025,
+      "status": "COMPLETED_BUCKET"
+    },
+    {
+      "calendar_quarter": 4,
+      "calendar_year": 2025,
+      "status": "COMPLETED_BUCKET"
+    },
+    {
+      "calendar_quarter": 1,
+      "calendar_year": 2026,
+      "status": "COMPLETED_BUCKET"
+    },
+    {
+      "calendar_quarter": 2,
+      "calendar_year": 2026,
+      "status": "COMPLETED_BUCKET"
+    },
+    {
+      "calendar_quarter": 3,
+      "calendar_year": 2026,
+      "status": "COMPLETED_BUCKET"
+    }
+  ],
+  "governance_parents": [
+    {
+      "binding_status": "SYNTHETIC_NON_BINDABLE_PARENT",
+      "kind": "HISTORY_PUBLICATION",
+      "manifest_sha256": "0e2ae67b5013249a79b75cd9d404f9a5be88f9602362c9a655657e474e72efdd",
+      "publication_id": "synthetic-history-parent-v1"
+    },
+    {
+      "binding_status": "SYNTHETIC_NON_BINDABLE_PARENT",
+      "kind": "SOURCE_QUALITY",
+      "manifest_sha256": "1deaf4c77279de4148bc1923da14c48f9cf07025fbf65576545b33cea147aef3",
+      "publication_id": "synthetic-source-quality-v1"
+    }
+  ],
+  "limitations": [
+    "All values and parent identities are synthetic wire examples.",
+    "Synthetic parent hashes are non-bindable and do not establish actual financial acceptance.",
+    "Selected-bucket coverage must be computed from observation rows, not aggregate support alone.",
+    "No omitted observation or source-anchor scope field may be inherited by an actual publication."
+  ],
+  "publication_id": "quarterly-screening-metrics-synthetic-wire-v5",
+  "schema_version": "quarterly-screening-metric-manifest-v1",
+  "serialization_contract": {
+    "allowed_selection_views": [
+      "AS_FILED",
+      "LATEST_REPORTED"
+    ],
+    "derived_meaning_fields": [
+      "source_kind",
+      "derivation_rule_version",
+      "compatibility_policy",
+      "basis_version"
+    ],
+    "fixture_selection_view": "LATEST_REPORTED",
+    "observation_required_scope_fields": [
+      "cik",
+      "canonical_metric_id",
+      "selection_view",
+      "selection_as_of_date",
+      "dimensions",
+      "quality_status",
+      "quality_reasons",
+      "quality_blocking"
+    ],
+    "recast_view_declared": false,
+    "scope_inheritance": "FORBIDDEN",
+    "source_anchor_required_scope_fields": [
+      "cik",
+      "canonical_metric_id",
+      "source_kind",
+      "selection_view",
+      "selection_as_of_date",
+      "dimensions",
+      "quality_status",
+      "quality_reasons",
+      "quality_blocking"
+    ]
+  },
+  "source_commit_sha": "7eb721cb018ee3723c66fa2801a9836c48d2e0bb",
+  "universe": {
+    "ciks": [
+      "0000000001",
+      "0000000002"
+    ],
+    "company_count": 2,
+    "company_membership_sha256": "415b71146c93ad3f1965f1f2ce8bfb057cf8b0aee9596c383ac5da7a27b705ae"
+  }
+}

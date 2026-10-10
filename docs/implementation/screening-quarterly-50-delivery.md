@@ -16,9 +16,9 @@ Raw 파싱, Fact 선택, 분기 산술·recast 판단은 소비자에서 실행�
 
 Consumer engineering의 양성 wire fixture는 `quarterly-screening-metric-manifest-v1`
 manifest SHA-256
-`aad6f74c6fdfe23f0663b4adc5b12b49d8b22af09ea130ec06a316e589bcd9c2`인
-synthetic v4이다. 이는 schema/consumer 계약 검증용이며 actual 50사 재무 정확성 인수
-증거가 아니다. v1–v3 synthetic wire는 모순 재현용 실패 이력으로만 남긴다.
+`84e652322e570f4768c278fa924aaf6c1de98f1158be0d162b9be0a488fa359a`인
+synthetic v5이다. 이는 schema/consumer 계약 검증용이며 actual 50사 재무 정확성 인수
+증거가 아니다. v1–v4 synthetic wire는 모순 재현용 실패 이력으로만 남긴다.
 
 Reader는 파일 hash만 신뢰하지 않는다. CIK membership hash, 정확한 8개 연속 완료
 calendar bucket, CIK×definition support grain과 집계, definition의 period/source/basis,
@@ -126,3 +126,70 @@ quarter save/run`, `U4 fixed-eight gaps and CFO source kinds`, `U5 fiscal/date-v
 comparison`, `U6 112-day and null-basis TTM holds`, `U7 protected annual restart/export`,
 `U8 keyboard and 1440/1024 layout`을 이름 있는 시나리오로 기록한다. 이 목록은 제품
 동작 점검표이며 actual 수량·재무 정확성의 독립 인수 증거를 대신하지 않는다.
+
+## 2026-10-10 잔여 F1 교정과 source scope 계약
+
+`ce01d0ceb45c243c72277afaca34c88fb525f61f` 독립 재검증은 F2–F6 PASS,
+F1 잔여 FAIL이었다. 필드 이름만 검사하여 빈 source identity, 출처와 관측값의
+범위 불일치, 미래 source filing, 세 입력 TTM을 허용했다. 리드는 반복 재작업
+근거로 공통 전달 절차의 구현 역할 상향을 승인했다. 이전 작성자는 동결하고
+별도 GPT-6 Astra 구현 세션을 단일 source writer로 배정했다. 독립 검증은
+구현 세션과 다른 읽기 전용 세션이 맡으며 자체 테스트는 독립 PASS나 로컬 인수를
+대신하지 않는다.
+
+리드의 source-scope 결정은 다음과 같다. 실제 분석 view는 `AS_FILED` 또는
+`LATEST_REPORTED`이며 원자료와 파생값 구분은 `source_kind`로 표현한다.
+과거 합성 v4의 `EXISTING_REPORTED` / `RECAST_DERIVED` 문자열은 실제 recast
+의미를 부여하지 않는다. v4 원본은 불변 실패 이력으로 보존하고, 명시적 범위가
+있는 후속 합성 wire를 양성 검증 입력으로 사용한다.
+
+- AVAILABLE observation은 canonical metric, full dimensions, 실제 period class,
+  분석 view와 as-of를 명시한다. 각 선택 입력도 CIK/view/as-of/metric/dimensions/
+  unit/mapping/basis를 직접 선언한다. 소비자는 누락 범위를 상위 행에서 추정하지 않는다.
+- REPORTED의 선택 raw anchor는 nonempty fact/context/QName/namespace/unit와
+  filing/source ID를 가지며 행의 실제 기간·공시일·보고일·basis·measurement scope와
+  일치한다. source value와 reported value의 정확한 일치는 검사하지만 계산하지 않는다.
+- DERIVED_QUARTER는 승인된 두 누적 입력의 scope, 동일 fiscal start, 허용된
+  period pair와 output residual dates를 검사한다. 출력과 입력은 동일 분석 view를
+  보존한다. `ARITHMETIC_ONLY_NOT_RECAST_VALIDATED` 같은 품질·basis 한계를
+  recast clearance로 바꾸지 않는다.
+- TTM은 정확히 네 개의 유효 QTD 입력, 전체 연속 span, 동일한 non-null basis와
+  scope를 요구한다. 입력이 governed DERIVED_QUARTER면 그 자체의 derived ID와
+  승인된 하위 누적 입력 계보도 검사한다. FY/YTD 대체, EPS·shares·ratio의 단순
+  합산, 소비자 금액·비율 계산은 허용하지 않는다.
+- 선택된 값의 계보만 source anchor로 검증한다. PRE/CAL·후보 evidence의 accession을
+  선택된 입력으로 오인하지 않는다. UNAVAILABLE 행은 알려진 후보와 사유를 그대로
+  유지하며 synthetic ID나 clearance를 만들어 채우지 않는다.
+
+재현 명령은 프로젝트 Python 환경에서 다음과 같다. 네트워크 없이 추적 합성 fixture와
+임시 SQLite만 사용한다.
+
+```bash
+PYTHONPATH=src python -m pytest -q tests/screening tests/test_screening_ui.py
+ruff check --no-cache src/sec_xbrl/screening/quarterly.py tests/screening/test_quarterly_source_validation.py
+```
+
+이 교정은 소비자 검증 경계의 구현이다. 실제 21/50사 재무 publication 인수,
+실제 journal 운영, main 병합 또는 원격 발행 완료를 뜻하지 않는다.
+
+AVAILABLE TTM의 definition은 `input_metric_id`로 QTD 입력 지표를 명시한다.
+소비자는 이름의 접두사로 입력 지표를 추정하지 않는다. 합성 v5의 TTM은
+UNAVAILABLE이며 이 입력 지표 선언이 없다. AVAILABLE 양성 회귀 fixture는
+분리된 복사본에 `input_metric_id=quarter_revenue`를 명시한다. 선택된 파생 분기
+입력의 자체 식별자는 생산자와 같은 `derived_metric_id`다.
+
+### 교정 자체 검증 기록
+
+2026-10-10 구현 세션의 전체 screening/UI 선택은 **207 passed / 0 skipped**,
+그중 quarterly consumer/source 집중 선택은 **96 passed**다. 최초 sandbox 실행은
+202 passed와 loopback socket 생성 권한 오류 5건이었으며, 승인된 local loopback
+환경에서 전체 선택을 재실행하여 207건 모두 통과했다. Ruff와 `git diff --check`도
+통과했다. 기존 독립 원본·잔여 probe를 v5의 별도 복사본에 적용하여 모든 음성
+사례를 거부했다. 알려진 품질 BLOCK의 UNDETERMINED 처리와 선택 bucket coverage를
+다시 확인했다. 임시 재현 증거는 `/tmp/quarter-consumer-scope-v5`이며 규범적 계약이나
+fresh checkout 테스트의 필수 입력이 아니다.
+
+이는 구현자의 자체 검증 결과다. 동결 SHA에 대한 별도 read-only 검증과 lead의
+로컬 인수는 아직 대기다. 화면 소스는 수정하지 않았고 기존 1440/1024 native
+검증을 이번 교정에서 재수행했다고 주장하지 않는다. 전체 프로젝트 suite, actual
+회사 재무 인수, 원격 CI·PR·병합도 이 기록의 범위 밖이다.

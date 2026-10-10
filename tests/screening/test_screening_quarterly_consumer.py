@@ -69,7 +69,7 @@ from sec_xbrl.screening.quarterly import QuarterlyScreeningMetricReader
 
 def test_wire_v2_is_rejected_for_cross_record_source_contradictions() -> None:
     root = Path(__file__).parents[1] / "fixtures" / "screening_quarterly_wire_v2"
-    with pytest.raises(ValueError, match="source|filing"):
+    with pytest.raises(ValueError, match="source|filing|view"):
         QuarterlyScreeningMetricReader(
             root,
             manifest_sha256="fa743d5d24a228e7f4fd5c541127361f17046f3574184c4b2f17de72252143e3",
@@ -84,11 +84,11 @@ def test_superseded_wire_fixture_rejects_noncanonical_ttm_namespace() -> None:
         )
 
 
-def test_authoritative_quarter_wire_v4_is_verified() -> None:
-    root = Path(__file__).parents[1] / "fixtures" / "screening_quarterly_wire_v4"
+def test_authoritative_quarter_wire_v5_is_verified() -> None:
+    root = Path(__file__).parents[1] / "fixtures" / "screening_quarterly_wire_v5"
     reader = QuarterlyScreeningMetricReader(
         root,
-        manifest_sha256="aad6f74c6fdfe23f0663b4adc5b12b49d8b22af09ea130ec06a316e589bcd9c2",
+        manifest_sha256="84e652322e570f4768c278fa924aaf6c1de98f1158be0d162b9be0a488fa359a",
     )
     status = reader.verify_all()
     assert status["observations"] == 64
@@ -121,7 +121,7 @@ from sec_xbrl.screening.store import ScreeningStore
 
 def _quarter_service(tmp_path: Path) -> ScreeningService:
     wire = QuarterlyScreeningMetricReader(
-        Path(__file__).parents[1] / "fixtures" / "screening_quarterly_wire_v4"
+        Path(__file__).parents[1] / "fixtures" / "screening_quarterly_wire_v5"
     )
     reader = object.__new__(ScreeningDatasetV3Reader)
     reader.publication_id = "synthetic-v3-dataset"
@@ -292,7 +292,7 @@ def test_rehashed_semantic_corruption_is_rejected(tmp_path: Path, case: str) -> 
     import json
     import shutil
 
-    source = Path(__file__).parents[1] / "fixtures" / "screening_quarterly_wire_v4"
+    source = Path(__file__).parents[1] / "fixtures" / "screening_quarterly_wire_v5"
     root = tmp_path / case
     shutil.copytree(source, root)
     manifest_path = root / "quarterly_screening_metric_manifest.json"
@@ -317,3 +317,11 @@ def test_rehashed_semantic_corruption_is_rejected(tmp_path: Path, case: str) -> 
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
     with pytest.raises(ValueError):
         QuarterlyScreeningMetricReader(root)
+
+
+def test_v4_wire_is_preserved_but_rejects_implicit_available_scope() -> None:
+    root = Path(__file__).parents[1] / "fixtures" / "screening_quarterly_wire_v4"
+    with pytest.raises(ValueError, match="view|scope"):
+        QuarterlyScreeningMetricReader(
+            root, manifest_sha256="aad6f74c6fdfe23f0663b4adc5b12b49d8b22af09ea130ec06a316e589bcd9c2"
+        )

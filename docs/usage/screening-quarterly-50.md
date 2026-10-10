@@ -66,3 +66,9 @@ python -m sec_xbrl.screening prepare-v3 --config CONFIG.json --destination NEW_V
 7. 기존 annual revision/run을 재시작 후 열고 JSON/CSV/XLSX를 원래 identity로
    내보낸다.
 8. 키보드, Escape·focus return과 1440px/1024px 결과표를 확인한다.
+
+분기 발행물은 파일 hash와 별도로 선택 입력의 실제 기간·회사·단위·차원·분석 view·
+as-of를 검증한다. 누락된 식별자나 서로 다른 범위를 가진 AVAILABLE 값은 로드되지
+않는다. TTM은 네 개의 연속 QTD와 동일 non-null basis가 선언되어야 하며,
+미확인 basis·기간 불연속·명시적 break는 값을 임의로 채우는 근거가 되지 않는다.
+합성 검증 fixture의 통과는 실제 회사 재무자료의 인수를 의미하지 않는다.
