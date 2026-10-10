@@ -6,7 +6,7 @@
 Investing.com을 우선 기준으로 진행하려는 제품 의도를 승인했다. 다만 콘텐츠
 복제·편집·번역·요약·파생물 작성·자동 접근의 이용 방식과 권리 근거는 확정하지
 않았다. 초기 설계는 **PROPOSED**였고, section 6의 최소 수직 기능은 현재
-**SOURCE_IMPLEMENTED / PENDING_INDEPENDENT_VERIFICATION**이다. 보호된 Investing.com 본문의 실제 취득·게시와
+**SOURCE_IMPLEMENTED / INDEPENDENT_PASS / LOCALLY_ACCEPTED_INFRA_ONLY**다. 보호된 Investing.com 본문의 실제 취득·게시와
 actual 21사 enablement는 계속 **RIGHTS_DECISION_PENDING / BLOCKED**다.
 
 2026-10-10 검토한 [Investing.com 이용약관 PDF](https://cdn.investing.com/about-us/terms_and_conditions.pdf)의
@@ -203,7 +203,9 @@ HTTPS URL, 확인시각과 유효한 권리 scope가 모두 필요하다. 나머
 합성 helper 점검은 21사 중 1건 `SYNTHETIC_DESCRIPTION_FIXTURE`, 20건 explicit
 `UNAVAILABLE` publication과 pinned status를 확인했다. 이는 실제 회사 설명이나 제공자
 권리 승인 evidence가 아니다. 별도 독립 검증·lead 로컬 인수·사용자 화면 확인·remote
-push/PR/main merge는 모두 미수행이다.
+push/PR/main merge는 초기 후보 동결 당시 모두 미수행이었다. 후속 독립 검증과 로컬
+인수 결과는 아래 최종 기록으로 갱신하며 사용자 walkthrough와 원격 작업은 여전히
+미수행이다.
 
 초기 source freeze `e98fbf116bd25ad87e880aea37e0dae9742e892c`는 독립 검증에서
 축약·대체 표기 numeric IP가 private-address guard를 우회한 점과 HTML 중복
@@ -211,7 +213,15 @@ push/PR/main merge는 모두 미수행이다.
 후속 후보는 numeric alias를 DNS 없이 fail closed하고 selector 관련 중복 속성을
 추출 전에 거절한다. 후속 작성자 검증은 focused 35 PASS, 전체 관련 screening 회귀
 109 PASS, Ruff와 browser JS syntax PASS다. 그 외 product blob은 바뀌지 않아 초기
-전체 회귀 결과를 기준선으로 보존했고 전체 suite는 반복하지 않았다. 후속 후보의
-독립 검증 상태는 아직 `PENDING`이다. 독립 FAIL 보고서는
-`/tmp/company-description-independent/e98fbf-report.json`
+전체 회귀 결과를 기준선으로 보존했고 전체 suite는 반복하지 않았다.
+
+최종 제품 `51aeff7665a1f09e4bab2cce562b2250e0f316a0`의 별도 독립 검증은
+109 relevant PASS / 0 SKIP였고 lead가 인프라 범위만 로컬 인수했다. 초기 전체 회귀
+1,373 PASS / 38 SKIP는 e98 작성자 기준선이며 최종 후보의 전체-suite 재실행으로
+표시하지 않는다. 독립 PASS 보고서는
+`work/company_descriptions_20261010/verification/51aeff-report.json`
+(SHA-256 `ca67ec49363777bbd51cbf2541613b4e43b781f8ff73ef6c8a1e6fa48fb59c7e`)에 있다. 독립 FAIL 보고서는
+`work/company_descriptions_20261010/verification/e98fbf-report.json`
 (SHA-256 `272026109925fa53463486919dfa06e08c36089a3ee0170be92ed32bb0079548`)에 있다.
+Native 화면 확인과 실제 콘텐츠가 보류된 경계는
+[회사 설명 인프라 완료·로컬 인수](company-description-completion.md)에 기록한다.

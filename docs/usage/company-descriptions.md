@@ -3,6 +3,9 @@
 기준일은 **2026-10-10 KST**다. 이 기능은 검증된 screening dataset에 CIK·ticker로
 묶인 한국어 plain text를 별도 불변 publication으로 준비한다. 재무 dataset과 사용자
 journal은 수정하지 않으며, publication을 명시하지 않은 기존 server 동작은 그대로다.
+최종 인프라 소스와 검증·로컬 인수·미완료 범위는
+[회사 설명 인프라 완료·로컬 인수](../implementation/company-description-completion.md)에
+기록한다. 현재 actual provider 본문 publication과 live enablement는 포함하지 않는다.
 
 사용자는 비상업적 개인 투자 용도로 Investing.com 기준 텍스트 연결·수집을 원했다.
 그러나 비상업적 목적만으로 해당 제공자의 자동 접근·복제·재표시 허가가 확인된 것은
