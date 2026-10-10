@@ -10,7 +10,12 @@ from types import SimpleNamespace
 import pytest
 from openpyxl import load_workbook
 
-from sec_xbrl.analysis import open_analysis, prepare_analysis, render_analysis
+from sec_xbrl.analysis import (
+    _select_expanded_annual_core,
+    open_analysis,
+    prepare_analysis,
+    render_analysis,
+)
 from sec_xbrl.consumer.export import export_snapshot, prepare_axis_snapshot
 
 
@@ -77,6 +82,188 @@ def _reader() -> SimpleNamespace:
         manifest={"tables": [{"ticker": "TEST", "period_class": "FY"}]},
         load=lambda **kwargs: result,
     )
+
+
+def _core_candidate_fixture(
+    name: str,
+    qname: str,
+    value: str,
+    *,
+    primary: bool,
+    role: str = "role:is",
+) -> tuple[dict, dict, dict]:
+    cell = {
+        "cell_id": name,
+        "node_id": f"node-{name}",
+        "column_id": "fy-2025",
+        "ticker": "TEST",
+        "status": "REPORTED",
+        "value": value,
+        "unit": ['["iso4217:USD"]', "[]"],
+        "dimensions": [],
+        "start": "2024-01-01",
+        "end": "2025-01-01",
+        "source_fact_id": f"fact-{name}",
+        "primary_statement_evidence": [
+            {
+                "statement_types": ["IS"],
+                "source_filing_id": "filing",
+                "role_uri": role,
+            }
+        ] if primary else [],
+    }
+    node = {
+        "node_id": f"node-{name}",
+        "concept": qname,
+        "dimensions": [],
+        "mapping_review_required": False,
+    }
+    trace = {
+        "cell_id": name,
+        "value_lineage": {
+            "raw_concept_id": f"concept-{name}",
+            "raw_concept_qname": qname,
+            "raw_concept_is_standard": True,
+            "raw_concept_taxonomy_family": "us-gaap",
+            "mapping_review_required": False,
+            "source_filing_id": "filing",
+            "selected_source_fact_id": f"fact-{name}",
+            "primary_statement_evidence": copy.deepcopy(
+                cell["primary_statement_evidence"]
+            ),
+        },
+    }
+    return cell, node, trace
+
+
+def _select_fixture(
+    candidates: list[tuple[dict, dict, dict]],
+    *,
+    row_id: str = "revenue",
+    relationships: list[dict] | None = None,
+    extra_sources: list[tuple[dict, dict, dict]] | None = None,
+):
+    nodes = {node["node_id"]: node for _, node, _ in [*candidates, *(extra_sources or [])]}
+    traces = {trace["cell_id"]: trace for _, _, trace in [*candidates, *(extra_sources or [])]}
+    source_index = {}
+    for cell, _node, trace in [*candidates, *(extra_sources or [])]:
+        lineage = trace["value_lineage"]
+        source_index.setdefault(
+            (lineage["source_filing_id"], lineage["raw_concept_id"]), []
+        ).append((cell["node_id"], cell, []))
+    return _select_expanded_annual_core(
+        spec={"row_id": row_id},
+        matches=[row[0] for row in candidates],
+        nodes=nodes,
+        trace_by_cell=traces,
+        relationships=relationships or [],
+        source_index=source_index,
+    )
+
+
+def test_expanded_annual_core_prefers_unique_typed_primary_statement_candidate() -> None:
+    note = _core_candidate_fixture("note", "us-gaap:Revenues", "100", primary=False)
+    statement = _core_candidate_fixture(
+        "statement",
+        "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+        "100",
+        primary=True,
+    )
+    selected, reason, candidates, evidence = _select_fixture([note, statement])
+
+    assert selected["cell_id"] == "statement"
+    assert reason is None
+    assert evidence == {"method": "UNIQUE_TYPED_PRIMARY_STATEMENT", "statement_type": "IS"}
+    assert {row["candidate_status"] for row in candidates} == {
+        "PRIMARY_STATEMENT_EVIDENCE_MISSING",
+        "PRIMARY_STATEMENT_ELIGIBLE",
+    }
+
+
+def test_expanded_annual_revenue_selects_exact_reported_cal_parent() -> None:
+    parent = _core_candidate_fixture("total", "us-gaap:Revenues", "110", primary=True)
+    revenue = _core_candidate_fixture(
+        "contract",
+        "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+        "100",
+        primary=True,
+    )
+    other = _core_candidate_fixture("other", "us-gaap:OtherIncome", "10", primary=True)
+    relationships = [
+        {
+            "network_type": "CAL",
+            "filing_id": "filing",
+            "role_uri": "role:is",
+            "from_raw_concept_id": "concept-total",
+            "to_raw_concept_id": "concept-contract",
+            "weight": "1",
+            "relationship_id": "cal-contract",
+        },
+        {
+            "network_type": "CAL",
+            "filing_id": "filing",
+            "role_uri": "role:is",
+            "from_raw_concept_id": "concept-total",
+            "to_raw_concept_id": "concept-other",
+            "weight": "1.0",
+            "relationship_id": "cal-other",
+        },
+    ]
+    selected, reason, _candidates, evidence = _select_fixture(
+        [parent, revenue], relationships=relationships, extra_sources=[other]
+    )
+
+    assert selected["cell_id"] == "total"
+    assert reason is None
+    assert evidence["method"] == "REPORTED_REVENUE_CAL_TOTAL"
+    assert evidence["relationship_ids"] == ["cal-contract", "cal-other"]
+    assert evidence["reported_parent_value"] == evidence["reported_child_sum"] == "110"
+
+
+def test_reported_revenue_total_fails_closed_for_weight_role_scope_and_footing() -> None:
+    parent = _core_candidate_fixture("total", "us-gaap:Revenues", "110", primary=True)
+    revenue = _core_candidate_fixture(
+        "contract",
+        "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+        "100",
+        primary=True,
+    )
+    other = _core_candidate_fixture("other", "us-gaap:OtherIncome", "10", primary=True)
+    base = [
+        {
+            "network_type": "CAL", "filing_id": "filing", "role_uri": "role:is",
+            "from_raw_concept_id": "concept-total", "to_raw_concept_id": "concept-contract",
+            "weight": "1", "relationship_id": "cal-contract",
+        },
+        {
+            "network_type": "CAL", "filing_id": "filing", "role_uri": "role:is",
+            "from_raw_concept_id": "concept-total", "to_raw_concept_id": "concept-other",
+            "weight": "1", "relationship_id": "cal-other",
+        },
+    ]
+    mutations = (
+        lambda rels, extra: rels[0].update(weight="-1"),
+        lambda rels, extra: rels[0].update(role_uri="role:note"),
+        lambda rels, extra: extra[0][0].update(unit=['["iso4217:EUR"]', "[]"]),
+        lambda rels, extra: extra[0][0].update(value="9"),
+    )
+    for mutate in mutations:
+        relationships = copy.deepcopy(base)
+        sources = copy.deepcopy([other])
+        mutate(relationships, sources)
+        selected, reason, _candidates, evidence = _select_fixture(
+            copy.deepcopy([parent, revenue]),
+            relationships=relationships,
+            extra_sources=sources,
+        )
+        assert selected is None
+        assert reason == "MULTIPLE_CANDIDATES"
+        assert evidence is None
+
+    selected, reason, _candidates, evidence = _select_fixture(
+        [parent, revenue], row_id="operating_income", relationships=base, extra_sources=[other]
+    )
+    assert selected is None and reason == "MULTIPLE_CANDIDATES" and evidence is None
 
 
 def test_annual_bundle_isolated_fy_axis_and_xlsx_label(tmp_path: Path, monkeypatch) -> None:

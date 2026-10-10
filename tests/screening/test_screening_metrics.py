@@ -22,6 +22,7 @@ from sec_xbrl.metrics.screening import (
     _derive_pair,
     _derive_revenue_yoy,
     _exact_subtract,
+    _reported_observation,
     expanded_analysis_profile,
 )
 
@@ -253,6 +254,63 @@ def test_opt_in_prepare_preserves_unavailable_cell_with_no_lineage(
     ]
     trace = next(row for row in traces if row["cell_id"] == missing["cell_id"])
     assert trace["value_lineage"] is None
+
+
+def test_unresolved_core_candidates_preserve_source_reason_and_lineage_in_metrics() -> None:
+    candidates = [
+        {
+            "cell_id": "candidate-a",
+            "source_fact_id": "fact-a",
+            "source_filing_id": "filing-a",
+            "raw_concept_qname": "us-gaap:Revenues",
+            "candidate_status": "PRIMARY_STATEMENT_ELIGIBLE",
+            "selection_outcome": "NOT_SELECTED",
+            "value_lineage": {"source_filing_id": "filing-a"},
+        },
+        {
+            "cell_id": "candidate-b",
+            "source_fact_id": "fact-b",
+            "source_filing_id": "filing-a",
+            "raw_concept_qname": "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+            "candidate_status": "PRIMARY_STATEMENT_ELIGIBLE",
+            "selection_outcome": "NOT_SELECTED",
+            "value_lineage": {"source_filing_id": "filing-a"},
+        },
+    ]
+    cell = {
+        "cell_id": "missing:revenue",
+        "status": "UNAVAILABLE",
+        "reason": "MULTIPLE_CANDIDATES",
+        "source_reason": "MULTIPLE_CANDIDATES",
+        "fiscal_year": 2025,
+        "start": "2024-01-01",
+        "end": "2025-01-01",
+        "value": None,
+        "unit": ['["iso4217:USD"]', "[]"],
+        "dimensions": [],
+        "candidate_lineage": candidates,
+        "core_selection_rule_version": "annual-core-primary-statement-v2",
+    }
+    observation = _reported_observation(
+        ticker="TEST",
+        cik="0000000001",
+        definition=DEFINITION_BY_ID["revenue"],
+        financial_as_of="2026-10-08",
+        cell=cell,
+        trace=None,
+        source_snapshot_id="snapshot",
+    )
+
+    assert observation["availability_status"] == "UNAVAILABLE"
+    assert observation["unavailable_reason"] == "MULTIPLE_CANDIDATES"
+    assert observation["diagnostic_reasons"] == ["MULTIPLE_CANDIDATES"]
+    assert observation["source_fact_ids"] == ["fact-a", "fact-b"]
+    assert observation["source_filings"] == ["filing-a"]
+    assert observation["candidate_lineage"] == candidates
+    assert observation["core_selection_rule_version"] == "annual-core-primary-statement-v2"
+    assert "INPUT_NOT_REPORTED" not in observation["diagnostic_reasons"]
+    assert "UNIT_NOT_USD" not in observation["diagnostic_reasons"]
+    assert "PERIOD_MISMATCH" not in observation["diagnostic_reasons"]
 
 
 def test_revenue_yoy_accepts_53_week_duration_and_ignores_ambient_precision() -> None:

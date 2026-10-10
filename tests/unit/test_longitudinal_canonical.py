@@ -350,6 +350,61 @@ def test_standard_us_gaap_concept_continues_across_annual_namespaces() -> None:
     assert rows[1]["evidence"]["namespace_uri"].endswith("/2025")
 
 
+def test_standard_us_gaap_concept_continues_from_historical_dated_namespace() -> None:
+    rows = CompanyCanonicalizer().build(
+        filings=_filings(),
+        concepts=(
+            _concept(
+                "revenue-2021", "k24", is_standard=True, qname="us-gaap:Revenues",
+                taxonomy_family="us-gaap",
+                namespace_uri="http://fasb.org/us-gaap/2021-01-31",
+            ),
+            _concept(
+                "revenue-2022", "k25", is_standard=True, qname="us-gaap:Revenues",
+                taxonomy_family="us-gaap", namespace_uri="http://fasb.org/us-gaap/2022",
+            ),
+        ),
+    ).company_concept_map
+
+    assert rows[1]["relation"] == MappingRelation.SAME
+    assert rows[1]["method"] == "STANDARD_US_GAAP_NAMESPACE_CONTINUITY"
+    assert rows[1]["company_canonical_id"] == rows[0]["company_canonical_id"]
+
+
+def test_historical_us_gaap_namespace_continuity_rejects_lookalikes_and_semantic_changes() -> None:
+    mutations = (
+        {"namespace_uri": "https://example.test/us-gaap/2022"},
+        {"namespace_uri": "http://fasb.org/us-gaap/2021-13-40"},
+        {"taxonomy_family": "company-extension"},
+        {"is_standard": False},
+        {"data_type": "xbrli:stringItemType"},
+        {"period_type": "instant"},
+        {"balance": "debit"},
+        {"abstract": True},
+    )
+    for index, mutation in enumerate(mutations):
+        prior = _concept(
+            f"prior-{index}", "k24", is_standard=True, qname="us-gaap:Revenues",
+            taxonomy_family="us-gaap", namespace_uri="http://fasb.org/us-gaap/2021-01-31",
+            balance="credit", abstract=False,
+        )
+        current_fields = {
+            "is_standard": True,
+            "qname": "us-gaap:Revenues",
+            "taxonomy_family": "us-gaap",
+            "namespace_uri": "http://fasb.org/us-gaap/2022",
+            "balance": "credit",
+            "abstract": False,
+            **mutation,
+        }
+        current = _concept(f"current-{index}", "k25", **current_fields)
+        rows = CompanyCanonicalizer().build(
+            filings=_filings(), concepts=(prior, current),
+        ).company_concept_map
+        assert rows[1]["relation"] == MappingRelation.UNCERTAIN
+        assert rows[1]["company_canonical_id"] != rows[0]["company_canonical_id"]
+
+
 def test_us_gaap_continuity_requires_official_versioned_namespace() -> None:
     rows = CompanyCanonicalizer().build(
         filings=_filings(),
@@ -375,10 +430,12 @@ def test_us_gaap_continuity_does_not_depend_on_qname_prefix() -> None:
         concepts=(
             _concept(
                 "revenue-2024", "k24", is_standard=True, qname="us-gaap:Revenues",
+                taxonomy_family="us-gaap",
                 namespace_uri="http://fasb.org/us-gaap/2024",
             ),
             _concept(
                 "revenue-2025", "q25", is_standard=True, qname="alternate:Revenues",
+                taxonomy_family="us-gaap",
                 namespace_uri="http://fasb.org/us-gaap/2025",
             ),
         ),

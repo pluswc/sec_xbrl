@@ -60,6 +60,9 @@ unique primary IS 후보, WMT의 reported CAL parent, CAL footing·role·weight�
 revenue 외 항목의 비적용, unresolved candidate reason 전파를 포함한다. 새 21사 source,
 analysis, metric publication은 기존 파일을 덮지 않는 destination에 작성하고 mapping과
 대표값 선택을 독립적으로 재확인한다.
+새 mapping rule version은 `l2-m2-company-canonical-v4`, expanded annual core selector는
+`annual-core-primary-statement-v2`다. 기존 publication과 그 안의 v3 mapping은 변경하지
+않으며 새 publication lineage가 적용 rule version을 명시한다.
 
 ## 2. 불변 입력과 새 run 경계
 

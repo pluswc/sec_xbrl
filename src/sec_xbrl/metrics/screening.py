@@ -751,28 +751,32 @@ def _reported_observation(
     source_snapshot_id: str,
 ) -> dict[str, Any]:
     lineage = copy.deepcopy((trace or {}).get("value_lineage") or {})
+    candidate_lineage = copy.deepcopy(cell.get("candidate_lineage") or [])
+    source_reason = cell.get("source_reason") or cell.get("reason")
+    input_unavailable = cell.get("status") != "REPORTED"
     reasons: list[str] = []
     value: str | None = None
-    if cell.get("status") != "REPORTED":
-        reasons.append("INPUT_NOT_REPORTED")
-    if cell.get("quality_status") == "BLOCK":
-        reasons.append("QUALITY_BLOCKED")
-    if cell.get("dimensions"):
-        reasons.append("DIMENSION_MISMATCH")
-    if lineage.get("mapping_review_required") is not False:
-        reasons.append("MAPPING_REVIEW_REQUIRED")
-    if lineage.get("raw_concept_is_standard") is not True:
-        reasons.append("NON_STANDARD_CONCEPT")
-    if not _is_usd_unit(cell.get("unit")):
-        reasons.append("UNIT_NOT_USD")
-    try:
-        numeric = Decimal(str(cell.get("value")))
-        if not numeric.is_finite():
-            reasons.append("INPUT_NOT_FINITE")
-        else:
-            value = _decimal_string(numeric)
-    except (InvalidOperation, TypeError, ValueError):
-        reasons.append("INPUT_NOT_FINITE" if cell.get("value") is not None else "MISSING_INPUT")
+    if input_unavailable:
+        reasons.append(str(source_reason or "INPUT_NOT_REPORTED"))
+    else:
+        if cell.get("quality_status") == "BLOCK":
+            reasons.append("QUALITY_BLOCKED")
+        if cell.get("dimensions"):
+            reasons.append("DIMENSION_MISMATCH")
+        if lineage.get("mapping_review_required") is not False:
+            reasons.append("MAPPING_REVIEW_REQUIRED")
+        if lineage.get("raw_concept_is_standard") is not True:
+            reasons.append("NON_STANDARD_CONCEPT")
+        if not _is_usd_unit(cell.get("unit")):
+            reasons.append("UNIT_NOT_USD")
+        try:
+            numeric = Decimal(str(cell.get("value")))
+            if not numeric.is_finite():
+                reasons.append("INPUT_NOT_FINITE")
+            else:
+                value = _decimal_string(numeric)
+        except (InvalidOperation, TypeError, ValueError):
+            reasons.append("INPUT_NOT_FINITE" if cell.get("value") is not None else "MISSING_INPUT")
     source_inputs = lineage.get("source_inputs") or [lineage]
     source_filings = sorted(
         {
@@ -788,15 +792,31 @@ def _reported_observation(
             if item.get("selected_source_fact_id") or item.get("source_fact_id")
         }
     )
-    if not source_filings or not source_fact_ids or trace is None:
+    if input_unavailable:
+        source_filings = sorted(
+            {
+                str(row.get("source_filing_id"))
+                for row in candidate_lineage
+                if row.get("source_filing_id")
+            }
+        )
+        source_fact_ids = sorted(
+            {
+                str(row.get("source_fact_id"))
+                for row in candidate_lineage
+                if row.get("source_fact_id")
+            }
+        )
+    elif not source_filings or not source_fact_ids or trace is None:
         reasons.append("SOURCE_TRACE_INCOMPLETE")
     period_class = definition["period_class"]
     start = cell.get("start")
     end = cell.get("end")
-    if period_class == "FY" and (not isinstance(start, str) or not isinstance(end, str)):
-        reasons.append("PERIOD_MISMATCH")
-    if period_class == "INSTANT" and (start is not None or not isinstance(end, str)):
-        reasons.append("PERIOD_MISMATCH")
+    if not input_unavailable:
+        if period_class == "FY" and (not isinstance(start, str) or not isinstance(end, str)):
+            reasons.append("PERIOD_MISMATCH")
+        if period_class == "INSTANT" and (start is not None or not isinstance(end, str)):
+            reasons.append("PERIOD_MISMATCH")
     evidence = copy.deepcopy(
         cell.get("primary_statement_evidence")
         or lineage.get("primary_statement_evidence")
@@ -827,6 +847,7 @@ def _reported_observation(
         "basis_version": cell.get("basis_version"),
         "comparability_policy": ARITHMETIC_POLICY if cell.get("basis_version") is None else "DECLARED_BASIS",
         "status": cell.get("status"),
+        "source_reason": source_reason,
         "quality_status": cell.get("quality_status"),
         "quality_reasons": copy.deepcopy(cell.get("quality_reasons") or []),
         "mapping_review_required": lineage.get("mapping_review_required"),
@@ -844,6 +865,9 @@ def _reported_observation(
         "source_fact_ids": source_fact_ids,
         "source_filings": source_filings,
         "primary_statement_evidence": evidence,
+        "candidate_lineage": candidate_lineage,
+        "core_selection_rule_version": cell.get("core_selection_rule_version"),
+        "core_selection_evidence": copy.deepcopy(cell.get("core_selection_evidence")),
         "source_snapshot_id": source_snapshot_id,
         "formula": None,
         "input_observation_ids": [],

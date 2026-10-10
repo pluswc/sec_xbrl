@@ -14,7 +14,7 @@ import re
 import uuid
 from collections import defaultdict
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -698,6 +698,253 @@ def _with_primary_statement_evidence(
     return result, evidence
 
 
+_CORE_PRIMARY_STATEMENT_TYPE = {
+    "revenue": "IS",
+    "gross_profit": "IS",
+    "operating_income": "IS",
+    "net_income": "IS",
+    "cfo": "CF",
+    "assets": "BS",
+}
+_ANNUAL_CORE_SELECTION_VERSION = "annual-core-primary-statement-v2"
+
+
+def _core_candidate(
+    cell: dict[str, Any],
+    *,
+    nodes: dict[str, dict[str, Any]],
+    trace_by_cell: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Return a complete, immutable selection candidate with its source lineage."""
+    trace = trace_by_cell.get(str(cell.get("cell_id"))) or {}
+    lineage = trace.get("value_lineage")
+    lineage = lineage if isinstance(lineage, dict) else {}
+    evidence = copy.deepcopy(
+        cell.get("primary_statement_evidence")
+        or lineage.get("primary_statement_evidence")
+        or []
+    )
+    node = nodes.get(str(cell.get("node_id"))) or {}
+    return {
+        **copy.deepcopy(cell),
+        "raw_concept_id": lineage.get("raw_concept_id"),
+        "raw_concept_qname": lineage.get("raw_concept_qname") or node.get("concept"),
+        "raw_concept_is_standard": lineage.get("raw_concept_is_standard"),
+        "raw_concept_taxonomy_family": lineage.get("raw_concept_taxonomy_family"),
+        "mapping_review_required": lineage.get(
+            "mapping_review_required", node.get("mapping_review_required")
+        ),
+        "source_filing_id": lineage.get("source_filing_id"),
+        "primary_statement_evidence": evidence,
+        "value_lineage": copy.deepcopy(lineage),
+    }
+
+
+def _core_is_usd(candidate: dict[str, Any]) -> bool:
+    unit = candidate.get("unit")
+    if not isinstance(unit, list) or len(unit) != 2:
+        return False
+    numerator, denominator = unit
+    try:
+        numerator = json.loads(numerator) if isinstance(numerator, str) else numerator
+        denominator = json.loads(denominator) if isinstance(denominator, str) else denominator
+    except json.JSONDecodeError:
+        return False
+    return numerator == ["iso4217:USD"] and denominator == []
+
+
+def _primary_statement_roles(candidate: dict[str, Any], statement_type: str) -> set[str]:
+    source_filing_id = candidate.get("source_filing_id")
+    roles = set()
+    for evidence in candidate.get("primary_statement_evidence") or []:
+        if (
+            isinstance(evidence, dict)
+            and statement_type in (evidence.get("statement_types") or [])
+            and evidence.get("source_filing_id") == source_filing_id
+            and isinstance(evidence.get("role_uri"), str)
+            and evidence["role_uri"]
+        ):
+            roles.add(evidence["role_uri"])
+    return roles
+
+
+def _core_scope(candidate: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        candidate.get("ticker"),
+        candidate.get("column_id"),
+        candidate.get("source_filing_id"),
+        candidate.get("start"),
+        candidate.get("end"),
+        json.dumps(candidate.get("unit"), sort_keys=True, separators=(",", ":")),
+        json.dumps(candidate.get("dimensions") or [], sort_keys=True, separators=(",", ":")),
+    )
+
+
+def _eligible_primary_candidate(
+    candidate: dict[str, Any], statement_type: str
+) -> tuple[bool, str]:
+    if candidate.get("status") != "REPORTED":
+        return False, "NOT_REPORTED"
+    if candidate.get("mapping_review_required") is not False:
+        return False, "MAPPING_REVIEW_REQUIRED"
+    if candidate.get("raw_concept_is_standard") is not True:
+        return False, "NON_STANDARD_CONCEPT"
+    if candidate.get("raw_concept_taxonomy_family") != "us-gaap":
+        return False, "NON_US_GAAP_CONCEPT"
+    if candidate.get("dimensions"):
+        return False, "DIMENSION_MISMATCH"
+    if not _core_is_usd(candidate):
+        return False, "UNIT_NOT_USD"
+    if not _primary_statement_roles(candidate, statement_type):
+        return False, "PRIMARY_STATEMENT_EVIDENCE_MISSING"
+    try:
+        value = Decimal(str(candidate.get("value")))
+    except (InvalidOperation, TypeError, ValueError):
+        return False, "INPUT_NOT_FINITE"
+    if not value.is_finite():
+        return False, "INPUT_NOT_FINITE"
+    return True, "PRIMARY_STATEMENT_ELIGIBLE"
+
+
+def _reported_revenue_total(
+    candidates: list[dict[str, Any]],
+    *,
+    relationships: list[dict[str, Any]],
+    source_index: dict[tuple[Any, Any], list[tuple[str, dict, list]]],
+    nodes: dict[str, dict[str, Any]],
+    trace_by_cell: dict[str, dict[str, Any]],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Select a reported Revenues CAL parent; never synthesize the total."""
+    for parent in candidates:
+        if (
+            str(parent.get("raw_concept_qname") or "").rsplit(":", 1)[-1] != "Revenues"
+            or parent.get("raw_concept_is_standard") is not True
+            or parent.get("raw_concept_taxonomy_family") != "us-gaap"
+        ):
+            continue
+        parent_raw_id = parent.get("raw_concept_id")
+        filing_id = parent.get("source_filing_id")
+        competing_raw_ids = {
+            row.get("raw_concept_id")
+            for row in candidates
+            if row.get("cell_id") != parent.get("cell_id")
+            and _core_scope(row) == _core_scope(parent)
+        }
+        if not competing_raw_ids:
+            continue
+        for role_uri in sorted(_primary_statement_roles(parent, "IS")):
+            edges = [
+                row
+                for row in relationships
+                if row.get("network_type") == "CAL"
+                and row.get("filing_id") == filing_id
+                and row.get("role_uri") == role_uri
+                and row.get("from_raw_concept_id") == parent_raw_id
+            ]
+            if not edges:
+                continue
+            try:
+                if any(Decimal(str(row.get("weight"))) != Decimal(1) for row in edges):
+                    continue
+            except (InvalidOperation, TypeError, ValueError):
+                continue
+            if not any(row.get("to_raw_concept_id") in competing_raw_ids for row in edges):
+                continue
+            children: list[dict[str, Any]] = []
+            valid = True
+            for edge in edges:
+                raw_rows = source_index.get((filing_id, edge.get("to_raw_concept_id")), [])
+                scoped = []
+                for _node_id, cell, _dimensions in raw_rows:
+                    child = _core_candidate(
+                        cell, nodes=nodes, trace_by_cell=trace_by_cell
+                    )
+                    if (
+                        _core_scope(child) == _core_scope(parent)
+                        and child.get("status") == "REPORTED"
+                        and child.get("source_fact_id")
+                    ):
+                        scoped.append(child)
+                unique = {
+                    (row.get("source_fact_id"), row.get("value")): row for row in scoped
+                }
+                if len(unique) != 1:
+                    valid = False
+                    break
+                children.append(next(iter(unique.values())))
+            if not valid:
+                continue
+            try:
+                parent_value = Decimal(str(parent.get("value")))
+                child_values = [Decimal(str(row.get("value"))) for row in children]
+            except (InvalidOperation, TypeError, ValueError):
+                continue
+            if not parent_value.is_finite() or any(not value.is_finite() for value in child_values):
+                continue
+            if parent_value != sum(child_values, Decimal(0)):
+                continue
+            return parent, {
+                "method": "REPORTED_REVENUE_CAL_TOTAL",
+                "role_uri": role_uri,
+                "relationship_ids": sorted(str(row.get("relationship_id")) for row in edges),
+                "parent_source_fact_id": parent.get("source_fact_id"),
+                "child_source_fact_ids": [row.get("source_fact_id") for row in children],
+                "reported_parent_value": str(parent_value),
+                "reported_child_sum": str(sum(child_values, Decimal(0))),
+            }
+    return None, None
+
+
+def _select_expanded_annual_core(
+    *,
+    spec: dict[str, Any],
+    matches: list[dict[str, Any]],
+    nodes: dict[str, dict[str, Any]],
+    trace_by_cell: dict[str, dict[str, Any]],
+    relationships: list[dict[str, Any]],
+    source_index: dict[tuple[Any, Any], list[tuple[str, dict, list]]],
+) -> tuple[dict[str, Any] | None, str | None, list[dict[str, Any]], dict[str, Any] | None]:
+    """Resolve only the approved expanded-annual primary-statement rules."""
+    unique = {
+        (row.get("source_fact_id") or row.get("cell_id"), row.get("value"), str(row.get("unit"))): row
+        for row in matches
+    }
+    candidates = [
+        _core_candidate(row, nodes=nodes, trace_by_cell=trace_by_cell)
+        for row in unique.values()
+    ]
+    statement_type = _CORE_PRIMARY_STATEMENT_TYPE.get(str(spec.get("row_id")))
+    if statement_type is None:
+        chosen = next(iter(unique.values())) if len(unique) == 1 else None
+        return chosen, None if chosen else ("MULTIPLE_CANDIDATES" if matches else "REQUIRED_ITEM_NOT_IN_PREPARED_DATA"), candidates, None
+
+    eligible: list[dict[str, Any]] = []
+    for candidate in candidates:
+        ok, reason = _eligible_primary_candidate(candidate, statement_type)
+        candidate["candidate_status"] = reason
+        if ok:
+            eligible.append(candidate)
+    if len(eligible) == 1:
+        chosen_id = eligible[0].get("cell_id")
+        chosen = next(row for row in unique.values() if row.get("cell_id") == chosen_id)
+        return chosen, None, candidates, {
+            "method": "UNIQUE_TYPED_PRIMARY_STATEMENT",
+            "statement_type": statement_type,
+        }
+    if str(spec.get("row_id")) == "revenue" and len(eligible) > 1:
+        parent, evidence = _reported_revenue_total(
+            eligible,
+            relationships=relationships,
+            source_index=source_index,
+            nodes=nodes,
+            trace_by_cell=trace_by_cell,
+        )
+        if parent is not None:
+            chosen = next(row for row in unique.values() if row.get("cell_id") == parent.get("cell_id"))
+            return chosen, None, candidates, evidence
+    return None, "MULTIPLE_CANDIDATES" if candidates else "REQUIRED_ITEM_NOT_IN_PREPARED_DATA", candidates, None
+
+
 def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str, ...],
                      configuration: dict | None = None, fiscal_years: int = 3,
                      fiscal_start: int | None = None, fiscal_end: int | None = None,
@@ -875,18 +1122,71 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
                 )
             # Core row selection uses declared exact concept identities, never a
             # dimensioned note or a guessed subtotal. Competing observations fail.
+            trace_by_cell = {row["cell_id"]: row for row in traces}
             for spec in profile:
                 for column in [c for c in columns if c["period_class"] == spec["period_class"]]:
                     matches = [c for c in cells if c["column_id"] == column["fiscal_time_series_column_id"] and not nodes[c["node_id"]]["dimensions"] and nodes[c["node_id"]]["concept"] in spec["concepts"]]
                     unique = {(c["source_fact_id"] or c["cell_id"], c["value"], str(c["unit"])): c for c in matches}
-                    chosen = next(iter(unique.values())) if len(unique) == 1 else None
-                    if chosen:
-                        core_cells.append({**chosen, "row_id": spec["row_id"]})
+                    candidates: list[dict[str, Any]] = []
+                    selection_evidence = None
+                    if include_year_end_balances:
+                        chosen, unavailable_reason, candidates, selection_evidence = (
+                            _select_expanded_annual_core(
+                                spec=spec,
+                                matches=list(unique.values()),
+                                nodes=nodes,
+                                trace_by_cell=trace_by_cell,
+                                relationships=relationships,
+                                source_index=source_index,
+                            )
+                        )
                     else:
+                        chosen = next(iter(unique.values())) if len(unique) == 1 else None
+                        unavailable_reason = (
+                            None
+                            if chosen
+                            else "MULTIPLE_CANDIDATES"
+                            if matches
+                            else "REQUIRED_ITEM_NOT_IN_PREPARED_DATA"
+                        )
+                    if chosen:
+                        selected_cell_id = chosen.get("cell_id")
+                        for candidate in candidates:
+                            candidate["selection_outcome"] = (
+                                "SELECTED"
+                                if candidate.get("cell_id") == selected_cell_id
+                                else "NOT_SELECTED"
+                            )
+                        core_cell = {**chosen, "row_id": spec["row_id"]}
+                        if include_year_end_balances:
+                            core_cell.update(
+                                core_selection_rule_version=_ANNUAL_CORE_SELECTION_VERSION,
+                                core_selection_evidence=selection_evidence,
+                                candidate_lineage=candidates,
+                                candidate_count=len(candidates),
+                                source_reason=None,
+                            )
+                        core_cells.append(core_cell)
+                    else:
+                        for candidate in candidates:
+                            candidate["selection_outcome"] = "NOT_SELECTED"
+                        common_start = {row.get("start") for row in candidates}
+                        common_end = {row.get("end") for row in candidates}
+                        common_unit = {
+                            json.dumps(row.get("unit"), sort_keys=True) for row in candidates
+                        }
                         core_cells.append({"row_id": spec["row_id"], "cell_id": "missing:" + stable(ticker, view, spec["row_id"], column), "node_id": None,
                                            "column_id": column["fiscal_time_series_column_id"], "fiscal_year": column["fiscal_year"], "fiscal_quarter": column["fiscal_quarter"],
-                                           "period_class": spec["period_class"], "value": None, "status": "UNAVAILABLE", "reason": "MULTIPLE_CANDIDATES" if matches else "REQUIRED_ITEM_NOT_IN_PREPARED_DATA",
-                                           "unit": [], "comparison_scope": None, "margin_scope": None, "basis_version": None, "dimensions": [], "as_of": info["as_of"], "selection_view": view, "ticker": ticker})
+                                           "period_class": spec["period_class"], "start": next(iter(common_start)) if len(common_start) == 1 else None,
+                                           "end": next(iter(common_end)) if len(common_end) == 1 else None,
+                                           "value": None, "status": "UNAVAILABLE", "reason": unavailable_reason,
+                                           "source_reason": unavailable_reason,
+                                           "unit": candidates[0].get("unit") if len(common_unit) == 1 else [],
+                                           "comparison_scope": None, "margin_scope": None, "basis_version": None, "dimensions": [], "as_of": info["as_of"], "selection_view": view, "ticker": ticker,
+                                           **({"core_selection_rule_version": _ANNUAL_CORE_SELECTION_VERSION,
+                                               "core_selection_evidence": selection_evidence,
+                                               "candidate_lineage": candidates,
+                                               "candidate_count": len(candidates)} if include_year_end_balances else {})})
             def add_edge(parent_id, child_id, kind, period, evidence, edges=edges):
                 eid = stable(parent_id, child_id, kind, evidence)
                 edges.setdefault(eid, {"edge_id": eid, "parent_id": parent_id, "child_id": child_id, "kind": kind, "periods": [], "evidence": evidence})
