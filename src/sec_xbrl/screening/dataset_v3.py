@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,7 @@ def publish_screening_dataset_v3(config_path: Path | str, destination: Path | st
         raise ValueError("screening v3 parent differs from pinned manifest")
     annual = ScreeningDatasetV2Reader(annual_root)
     quarter = QuarterlyScreeningMetricReader(quarter_root, manifest_sha256=quarter_hash)
+    _verify_parent_binding(annual, quarter)
     if [row["cik"] for row in annual.companies] != quarter.manifest["universe"]["ciks"]:
         raise ValueError("annual and quarterly company membership differ")
     identity = {
@@ -113,6 +115,40 @@ class ScreeningDatasetV3Reader:
             raise ValueError("annual parent publication identity changed")
         if self.quarterly.publication_id != quarter_parent["publication_id"]:
             raise ValueError("quarterly parent publication identity changed")
+        _verify_parent_binding(self.annual, self.quarterly)
+        config_path = regular_file(Path(self.manifest["config_path"]), "v3 config")
+        config = read_json(config_path, "v3 config")
+        if sha256_file(config_path) != self.manifest.get(
+            "config_sha256"
+        ) or config != self.manifest.get("config"):
+            raise ValueError("screening v3 config changed")
+        identity = {
+            "config_path": str(config_path),
+            "config_sha256": sha256_file(config_path),
+            "config": config,
+            "annual_publication_id": self.annual.publication_id,
+            "quarterly_publication_id": self.quarterly.publication_id,
+        }
+        if (
+            self.manifest.get("publication_id")
+            != "screening-dataset-" + digest_value(identity)[:24]
+        ):
+            raise ValueError("screening v3 publication identity differs")
+        if self.manifest.get("dataset_id") != config.get("dataset_id"):
+            raise ValueError("screening v3 dataset ID differs from config")
+        if self.manifest.get("financial_as_of") != self.quarterly.manifest.get("financial_as_of"):
+            raise ValueError("screening v3 financial as-of differs from parents")
+        expected_versions = {
+            "annual_publication_id": self.annual.publication_id,
+            "quarterly_publication_id": self.quarterly.publication_id,
+        }
+        if self.manifest.get("versions") != expected_versions:
+            raise ValueError("screening v3 version vector differs from parents")
+        if (
+            self.manifest.get("sources", {}).get("metadata")
+            != self.annual.manifest["sources"]["metadata"]
+        ):
+            raise ValueError("screening v3 metadata source differs from annual parent")
         self.publication_id = require_string(
             self.manifest.get("publication_id"), "v3 publication ID"
         )
@@ -142,3 +178,23 @@ class ScreeningDatasetV3Reader:
             "quarter_definition_count": len(self.quarter_definitions),
             "quarter_observation_count": len(self.quarter_observations),
         }
+
+
+def _verify_parent_binding(
+    annual: ScreeningDatasetV2Reader, quarter: QuarterlyScreeningMetricReader
+) -> None:
+    annual_metrics = annual.manifest.get("sources", {}).get("metrics")
+    declared = quarter.manifest.get("annual_parent")
+    if not isinstance(annual_metrics, dict) or not isinstance(declared, dict):
+        raise TypeError("screening v3 parent metric binding is missing")
+    membership_hash = hashlib.sha256(
+        ("\n".join(row["cik"] for row in annual.companies) + "\n").encode()
+    ).hexdigest()
+    if (
+        declared.get("schema_version") != "screening-metric-publication-v1"
+        or declared.get("publication_id") != annual_metrics.get("publication_id")
+        or declared.get("manifest_sha256") != annual_metrics.get("manifest_sha256")
+        or declared.get("company_membership_sha256") != membership_hash
+        or quarter.manifest.get("financial_as_of") != annual.manifest.get("financial_as_of")
+    ):
+        raise ValueError("quarterly publication is not bound to the annual metric parent")

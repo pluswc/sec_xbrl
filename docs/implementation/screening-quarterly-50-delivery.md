@@ -20,6 +20,13 @@ manifest SHA-256
 synthetic v4이다. 이는 schema/consumer 계약 검증용이며 actual 50사 재무 정확성 인수
 증거가 아니다. v1–v3 synthetic wire는 모순 재현용 실패 이력으로만 남긴다.
 
+Reader는 파일 hash만 신뢰하지 않는다. CIK membership hash, 정확한 8개 연속 완료
+calendar bucket, CIK×definition support grain과 집계, definition의 period/source/basis,
+actual 날짜·filing cutoff·as-of·source anchor를 다시 검증한다. Dataset v3는 quarterly
+manifest의 `annual_parent`를 annual dataset v2의 `sources.metrics` publication ID와
+manifest hash에 직접 결합하며 cutoff와 membership도 같아야 한다. 화면의 선택 bucket
+coverage와 전체 8개 bucket coverage는 별도 필드로 제공한다.
+
 `screening-dataset-v3`는 다음 두 불변 부모를 외부 manifest SHA-256과 publication
 ID로 고정한다.
 

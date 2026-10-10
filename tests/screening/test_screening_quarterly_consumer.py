@@ -221,3 +221,99 @@ def test_quarter_explorer_keeps_all_companies_and_explicit_gaps(tmp_path: Path) 
     held = result["rows"][0]["metrics"]["ttm_revenue"]
     assert held["value"] is None
     assert held["reason"] == "INPUTS_NOT_COMPATIBLE"
+
+
+def test_quality_block_and_selected_bucket_coverage_are_preserved(tmp_path: Path) -> None:
+    service = _quarter_service(tmp_path)
+    row = next(
+        x
+        for x in service.datasets["synthetic-v3"].quarter_observations
+        if x["metric_id"] == "quarter_revenue"
+        and x["cik"] == "0000000001"
+        and (x["calendar_year"], x["calendar_quarter"]) == (2025, 1)
+    )
+    row.update(quality_status="BLOCK", quality_blocking=True)
+    content = copy.deepcopy(ANNUAL_REVISION)
+    content["predicates"][0].update(
+        metric_id="quarter_revenue", threshold="1", definition_version="quarter-reported-core-v1"
+    )
+    content["period_policy"] = {
+        "mode": "FIXED_CALENDAR_QUARTER_END",
+        "calendar_year": 2025,
+        "calendar_quarter": 1,
+    }
+    revision = service.create_screen("quality", content)
+    result = service.execute(revision["revision_id"], "synthetic-v3")["rows"][0]
+    assert result["aggregate"] == "UNDETERMINED"
+    assert result["quality_blocking"] is True
+    explorer = service.quarter_explorer("synthetic-v3", calendar_year=2024, calendar_quarter=4)
+    cfo = next(x for x in explorer["metrics"] if x["metric_id"] == "quarter_cfo")
+    assert cfo["coverage"]["companies_available"] == 0
+    assert cfo["aggregate_coverage"]["periods_available"] == 2
+
+
+def test_v3_binding_requires_exact_annual_metric_parent_and_cutoff() -> None:
+    import hashlib
+    from types import SimpleNamespace
+
+    from sec_xbrl.screening.dataset_v3 import _verify_parent_binding
+
+    ciks = ["0000000001", "0000000002"]
+    membership = hashlib.sha256(("\n".join(ciks) + "\n").encode()).hexdigest()
+    annual = SimpleNamespace(
+        companies=[{"cik": x} for x in ciks],
+        manifest={
+            "financial_as_of": "2026-10-10",
+            "sources": {
+                "metrics": {"publication_id": "annual-metrics", "manifest_sha256": "a" * 64}
+            },
+        },
+    )
+    quarter = SimpleNamespace(
+        manifest={
+            "financial_as_of": "2026-10-10",
+            "annual_parent": {
+                "schema_version": "screening-metric-publication-v1",
+                "publication_id": "annual-metrics",
+                "manifest_sha256": "a" * 64,
+                "company_membership_sha256": membership,
+            },
+        }
+    )
+    _verify_parent_binding(annual, quarter)
+    quarter.manifest["annual_parent"]["publication_id"] = "unrelated"
+    with pytest.raises(ValueError, match="annual metric parent"):
+        _verify_parent_binding(annual, quarter)
+
+
+@pytest.mark.parametrize("case", ["future_filing", "support_count", "membership"])
+def test_rehashed_semantic_corruption_is_rejected(tmp_path: Path, case: str) -> None:
+    import hashlib
+    import json
+    import shutil
+
+    source = Path(__file__).parents[1] / "fixtures" / "screening_quarterly_wire_v4"
+    root = tmp_path / case
+    shutil.copytree(source, root)
+    manifest_path = root / "quarterly_screening_metric_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    if case == "membership":
+        manifest["universe"]["company_membership_sha256"] = "f" * 64
+        manifest["annual_parent"]["company_membership_sha256"] = "f" * 64
+    else:
+        filename = (
+            "quarter_metric_observations.json"
+            if case == "future_filing"
+            else "quarter_metric_support.json"
+        )
+        payload = json.loads((root / filename).read_text())
+        if case == "future_filing":
+            payload["records"][0]["filed_date"] = "2099-01-01"
+        else:
+            payload["records"][0]["available_bucket_count"] = 999
+        data = (json.dumps(payload, indent=2) + "\n").encode()
+        (root / filename).write_bytes(data)
+        manifest["files"][filename].update(sha256=hashlib.sha256(data).hexdigest(), size=len(data))
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    with pytest.raises(ValueError):
+        QuarterlyScreeningMetricReader(root)

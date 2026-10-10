@@ -47,6 +47,11 @@ python -m sec_xbrl.screening prepare-v3 --config CONFIG.json --destination NEW_V
 `quarter-comparison` 순으로 지표·고정 8개 bucket·회사별 gap·상세·같은 bucket 비교를
 제공한다.
 
+연간·분기 전환은 각각의 저장 전 draft를 유지하지만 dataset, 지표 catalog, 기간 정책은
+항상 함께 전환한다. `새 조건`은 현재 v3의 연간 화면에서 시작한다. 과거 annual run을
+열면 그 run의 dataset을 유지하고, 이후 분기로 전환할 때에만 현재 v3로 명시적으로
+이동한다.
+
 ## 사용자 시나리오 점검
 
 배포 후보는 다음 흐름을 합성 publication과 임시 journal에서 확인한다.

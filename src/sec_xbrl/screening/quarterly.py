@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+from collections import Counter
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -87,7 +89,19 @@ class QuarterlyScreeningMetricReader:
             (row.get("calendar_year"), row.get("calendar_quarter"))
             for row in self.manifest.get("global_quarter_spine", [])
         ]
-        if len(spine) != 8 or len(set(spine)) != 8 or any(q not in {1, 2, 3, 4} for _, q in spine):
+        cutoff = date.fromisoformat(
+            require_string(self.manifest.get("financial_as_of"), "financial as-of")
+        )
+        last_index = cutoff.year * 4 + (cutoff.month - 1) // 3 - 1
+        expected_spine = [divmod(last_index - offset, 4) for offset in range(7, -1, -1)]
+        expected_spine = [(year, quarter + 1) for year, quarter in expected_spine]
+        spine_rows = self.manifest.get("global_quarter_spine", [])
+        if (
+            len(spine) != 8
+            or spine != expected_spine
+            or any(type(y) is not int or type(q) is not int for y, q in spine)
+            or any(row.get("status") != "COMPLETED_BUCKET" for row in spine_rows)
+        ):
             raise ValueError("quarterly publication must declare eight unique completed buckets")
         ciks = self.manifest.get("universe", {}).get("ciks")
         if not isinstance(ciks, list) or len(ciks) != self.manifest.get("universe", {}).get(
@@ -95,9 +109,13 @@ class QuarterlyScreeningMetricReader:
         ):
             raise ValueError("quarterly company membership differs")
         ciks = [require_cik(cik) for cik in ciks]
-        if len(ciks) != len(set(ciks)) or self.manifest.get("annual_parent", {}).get(
-            "company_membership_sha256"
-        ) != self.manifest.get("universe", {}).get("company_membership_sha256"):
+        membership_hash = hashlib.sha256(("\n".join(ciks) + "\n").encode()).hexdigest()
+        if (
+            ciks != sorted(set(ciks))
+            or membership_hash != self.manifest["universe"].get("company_membership_sha256")
+            or membership_hash
+            != self.manifest.get("annual_parent", {}).get("company_membership_sha256")
+        ):
             raise ValueError("quarterly and annual company membership differ")
         definitions = {row.get("metric_id"): row for row in self.definitions}
         if (
@@ -131,6 +149,8 @@ class QuarterlyScreeningMetricReader:
             or len(inventory_keys) != len(set(inventory_keys))
         ):
             raise ValueError("duplicate quarterly publication grain")
+        if set(support_keys) != {(cik, metric) for cik in ciks for metric in definitions}:
+            raise ValueError("quarterly support does not cover company/metric grain")
         if set(inventory_keys) != {(cik, year, quarter) for cik in ciks for year, quarter in spine}:
             raise ValueError("quarterly period inventory does not cover the fixed spine")
         if set(observation_keys) != {
@@ -142,6 +162,7 @@ class QuarterlyScreeningMetricReader:
             raise ValueError("quarterly observations do not cover metric/company/spine grain")
         for row in self.observations:
             self._verify_observation(row, definitions)
+        self._verify_support(spine)
         self._verify_source_coherence()
         counts = self.manifest.get("counts", {})
         expected = {
@@ -184,6 +205,32 @@ class QuarterlyScreeningMetricReader:
                 raise ValueError("quarterly value must be an exact decimal string") from exc
             if not isinstance(row["value"], str) or not value.is_finite():
                 raise ValueError("quarterly value must be an exact decimal string")
+            required = (
+                "period_start",
+                "period_end",
+                "filed_date",
+                "report_date",
+                "fiscal_year",
+                "fiscal_quarter",
+            )
+            if any(row.get(field) is None for field in required):
+                raise ValueError(
+                    "available quarterly observation requires actual dates and fiscal labels"
+                )
+            if row.get("selection_as_of_date") != self.manifest.get("financial_as_of"):
+                raise ValueError("quarterly observation as-of differs from publication")
+            if date.fromisoformat(row["filed_date"]) > date.fromisoformat(
+                self.manifest["financial_as_of"]
+            ):
+                raise ValueError("quarterly observation filing is after cutoff")
+            if row.get("source_kind") not in definition.get("allowed_source_kinds", []):
+                raise ValueError("quarterly observation source kind is not allowed")
+            if row.get("period_class", definition.get("observation_basis")) != definition.get(
+                "observation_basis"
+            ):
+                raise ValueError("quarterly observation period class differs from definition")
+            if definition.get("observation_basis") == "TTM" and not row.get("basis_version"):
+                raise ValueError("available TTM observation requires a basis version")
         if row.get("period_end") is not None:
             if row.get("end_convention") != "EXCLUSIVE":
                 raise ValueError("quarterly period end must remain exclusive")
@@ -196,6 +243,55 @@ class QuarterlyScreeningMetricReader:
                 raise ValueError("quarterly bucket differs from inclusive period end")
         if not isinstance(row.get("source_lineage"), dict):
             raise TypeError("quarterly observation lineage is required")
+        if available:
+            anchors = [
+                item for item in _nested_dicts(row["source_lineage"]) if item.get("accession")
+            ]
+            if not anchors:
+                raise ValueError("available quarterly observation requires source anchors")
+            required_anchor = {
+                "accession",
+                "filed_date",
+                "report_date",
+                "source_fact_id",
+                "context_id",
+                "raw_concept_qname",
+                "raw_concept_namespace_uri",
+                "unit",
+                "period_start",
+                "period_end",
+                "end_convention",
+                "period_class",
+                "duration_days",
+                "basis_version",
+            }
+            if any(not required_anchor.issubset(anchor) for anchor in anchors):
+                raise ValueError("quarterly source anchor is incomplete")
+            expected_basis = definition.get("observation_basis")
+            if row["source_kind"] == "REPORTED" and any(
+                anchor.get("period_class") != expected_basis for anchor in anchors
+            ):
+                raise ValueError("quarterly source period class differs from definition basis")
+
+    def _verify_support(self, spine: list[tuple[int, int]]) -> None:
+        for support in self.support:
+            rows = [
+                row
+                for row in self.observations
+                if row["cik"] == support["cik"] and row["metric_id"] == support["metric_id"]
+            ]
+            available = sum(row["availability_status"] == "AVAILABLE" for row in rows)
+            source_counts = Counter(row["source_kind"] for row in rows)
+            reason_counts = Counter(row["reason"] for row in rows if row.get("reason"))
+            expected = {
+                "fixed_bucket_count": len(spine),
+                "available_bucket_count": available,
+                "unavailable_bucket_count": len(spine) - available,
+                "source_kind_counts": dict(sorted(source_counts.items())),
+                "unavailable_reason_counts": dict(sorted(reason_counts.items())),
+            }
+            if any(support.get(key) != value for key, value in expected.items()):
+                raise ValueError("quarterly support counts differ from observations")
 
     def _verify_source_coherence(self) -> None:
         accession_metadata: dict[str, tuple[Any, ...]] = {}

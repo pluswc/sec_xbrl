@@ -248,11 +248,31 @@ class ScreeningService:
                     "metrics": observations,
                 }
             )
+        selected_metrics = []
+        for metric in self.quarter_metric_catalog(dataset_id):
+            matching = [row["metrics"][metric["metric_id"]] for row in rows]
+            available = sum(
+                item["availability_status"] == "AVAILABLE"
+                and not item.get("quality_blocking")
+                and item.get("quality_status") != "BLOCK"
+                for item in matching
+            )
+            selected_metrics.append(
+                {
+                    **metric,
+                    "aggregate_coverage": metric["coverage"],
+                    "coverage": {
+                        "companies_available": available,
+                        "companies_total": len(reader.companies),
+                        "periods_available": available,
+                    },
+                }
+            )
         return {
             "calendar_year": calendar_year,
             "calendar_quarter": calendar_quarter,
             "financial_as_of": reader.manifest["financial_as_of"],
-            "metrics": self.quarter_metric_catalog(dataset_id),
+            "metrics": selected_metrics,
             "rows": rows,
         }
 
@@ -893,7 +913,14 @@ def _find_observation(
             and row["calendar_quarter"] == policy["calendar_quarter"]
         ]
         rows = [
-            {**row, "quality_blocking": False, "trace": row.get("source_lineage")} for row in rows
+            {
+                **row,
+                "quality_blocking": bool(
+                    row.get("quality_blocking") or row.get("quality_status") == "BLOCK"
+                ),
+                "trace": row.get("source_lineage"),
+            }
+            for row in rows
         ]
     else:
         rows.sort(key=lambda row: row["fiscal_year"], reverse=True)
