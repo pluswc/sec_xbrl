@@ -174,7 +174,7 @@ def _concatenate_staged_records(
 
     if not chunks:
         return _write_records(destination, ())
-    frames = []
+    validated_chunks: list[tuple[dict[str, Any], Any]] = []
     count = 0
     json_fields: set[str] = set()
     for info in chunks:
@@ -186,9 +186,26 @@ def _concatenate_staged_records(
         )
         if actual_count != info["count"]:
             raise ValueError("quarter history staging chunk count mismatch")
-        frames.append(pl.scan_parquet(path))
+        frame = pl.scan_parquet(path)
+        validated_chunks.append((info, frame))
         count += info["count"]
         json_fields.update(info["json_fields"])
+    frames = []
+    for info, frame in validated_chunks:
+        columns = set(frame.collect_schema().names())
+        local_json_fields = set(info["json_fields"])
+        scalar_json_fields = sorted((json_fields - local_json_fields) & columns)
+        if scalar_json_fields:
+            frame = frame.with_columns(
+                pl.col(field)
+                .map_elements(
+                    lambda value: json.dumps(value, sort_keys=True, default=str),
+                    return_dtype=pl.String,
+                )
+                .alias(field)
+                for field in scalar_json_fields
+            )
+        frames.append(frame)
     destination.parent.mkdir(parents=True, exist_ok=True)
     pl.concat(frames, how="diagonal_relaxed").sink_parquet(
         destination,

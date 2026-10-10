@@ -243,6 +243,8 @@ def test_m8_quarter_uses_two_full_reported_anchors_and_rejects_wrong_value() -> 
         derived_metric_id="derived-quarter-revenue",
         derivation_rule_version="approved-core-cumulative-difference-v1",
         formula="FY - YTD_9M",
+        filed_date="2026-02-01",
+        report_date="2025-12-31",
     )
     source_inputs = []
     for suffix, value, period_class, end, filed, report in (
@@ -300,6 +302,129 @@ def test_m8_quarter_uses_two_full_reported_anchors_and_rejects_wrong_value() -> 
     )
     assert changed["availability_status"] == "UNAVAILABLE"
     assert changed["reason"] == "DERIVATION_VALUE_MISMATCH"
+
+
+def _m8_cfo_inputs() -> tuple[list[dict], list[dict], list[dict]]:
+    cell, trace = _prepared_input(
+        row_id="cfo", value="30", start="2025-04-01", end="2025-07-01",
+        period_class="QTD_3M", fiscal_quarter=2, suffix="cfo-q2",
+    )
+    cell.update(
+        status="DERIVED", source_fact_id=None,
+        source_filing_ids=["filing-q2", "filing-q1"],
+    )
+    lineage = trace["value_lineage"]
+    lineage.update(
+        accession=None, source_filing_id=None, source_snapshot_id=None,
+        selected_source_fact_id=None, context_id=None,
+        derived_metric_id="derived-cfo-q2",
+        derivation_rule_version="approved-core-cumulative-difference-v1",
+        formula="YTD_6M - Q1", filed_date="2025-08-01",
+        report_date="2025-06-30",
+    )
+    sources = []
+    for fiscal_quarter, value, end, period_class, filed, report in (
+        (2, "50", "2025-07-01", "YTD_6M", "2025-08-01", "2025-06-30"),
+        (1, "20", "2025-04-01", "QTD_3M", "2025-05-01", "2025-03-31"),
+    ):
+        _, source_trace = _prepared_input(
+            row_id="cfo", value=value, start="2025-01-01", end=end,
+            period_class=period_class, fiscal_quarter=fiscal_quarter,
+            suffix=f"source-cfo-{fiscal_quarter}",
+        )
+        source = source_trace["value_lineage"]
+        source.update(
+            source_filing_id=f"filing-q{fiscal_quarter}",
+            accession=f"0000000001-25-00000{fiscal_quarter}",
+            filed_date=filed, report_date=report,
+            source_snapshot_id=(
+                f"l1:{CIK}:00000000012500000{fiscal_quarter}:snapshot"
+            ),
+        )
+        for evidence in source["primary_statement_evidence"]:
+            evidence.update(
+                source_filing_id=source["source_filing_id"],
+                accession=source["accession"],
+            )
+        sources.append(source)
+    lineage["source_inputs"] = sources
+    return (
+        [{
+            "fiscal_time_series_column_id": "quarter",
+            "actual_end_date": "2025-07-01",
+            "actual_instant_date": None,
+        }],
+        [cell],
+        [trace],
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("basis_version", "other"),
+        ("canonical_dimension_signature", [{"axis": "A", "member": "M"}]),
+        ("company_canonical_concept_id", "company:OTHER:other_metric"),
+        ("structural_version", "other"),
+    ],
+)
+def test_m8_sources_must_match_outer_prepared_scope(field: str, value: object) -> None:
+    columns, cells, traces = _m8_cfo_inputs()
+    for source in traces[0]["value_lineage"]["source_inputs"]:
+        source[field] = deepcopy(value)
+    observations, _ = build_quarterly_company_records(
+        ticker="TEST", cik=CIK, financial_as_of=AS_OF, columns=columns,
+        rows=_profile_rows(), cells=cells, traces=traces, spine=_quarter_spine(AS_OF),
+    )
+    row = next(
+        item for item in observations
+        if item["metric_id"] == "quarter_cfo"
+        and (item["calendar_year"], item["calendar_quarter"]) == (2025, 2)
+    )
+    assert row["availability_status"] == "UNAVAILABLE"
+    assert "DERIVATION_OUTPUT_SCOPE_MISMATCH" in row["reasons"]
+
+
+@pytest.mark.parametrize("flag", ["mapping_uncertainty", "basis_break"])
+def test_m8_preserves_and_rejects_ineligible_nested_source(flag: str) -> None:
+    columns, cells, traces = _m8_cfo_inputs()
+    traces[0]["value_lineage"]["source_inputs"][1][flag] = True
+    observations, _ = build_quarterly_company_records(
+        ticker="TEST", cik=CIK, financial_as_of=AS_OF, columns=columns,
+        rows=_profile_rows(), cells=cells, traces=traces, spine=_quarter_spine(AS_OF),
+    )
+    row = next(
+        item for item in observations
+        if item["metric_id"] == "quarter_cfo"
+        and (item["calendar_year"], item["calendar_quarter"]) == (2025, 2)
+    )
+    assert row["availability_status"] == "UNAVAILABLE"
+    assert row["source_lineage"]["derivation_inputs"][1][flag] is True
+
+
+@pytest.mark.parametrize(
+    "outer_dates",
+    [
+        {"filed_date": "2030-01-01"},
+        {"filed_date": "2025-05-01", "report_date": "2025-03-31"},
+    ],
+)
+def test_m8_output_dates_must_attest_selected_input_dates(
+    outer_dates: dict[str, str],
+) -> None:
+    columns, cells, traces = _m8_cfo_inputs()
+    traces[0]["value_lineage"].update(outer_dates)
+    observations, _ = build_quarterly_company_records(
+        ticker="TEST", cik=CIK, financial_as_of=AS_OF, columns=columns,
+        rows=_profile_rows(), cells=cells, traces=traces, spine=_quarter_spine(AS_OF),
+    )
+    row = next(
+        item for item in observations
+        if item["metric_id"] == "quarter_cfo"
+        and (item["calendar_year"], item["calendar_quarter"]) == (2025, 2)
+    )
+    assert row["availability_status"] == "UNAVAILABLE"
+    assert "DERIVATION_SOURCE_DATE_MISMATCH" in row["reasons"]
 
 
 def test_missing_raw_anchor_cannot_be_published_as_available() -> None:
@@ -362,6 +487,70 @@ def test_elected_reported_source_must_match_prepared_scope_and_cutoff(
     )
     assert row["availability_status"] == "UNAVAILABLE"
     assert expected_reason in row["reasons"]
+
+
+def test_reported_numeric_identity_is_exact_decimal_not_string_identity() -> None:
+    columns, cells, traces = _one_quarter_inputs()
+    revenue_trace = next(
+        row["value_lineage"] for row in traces if row["cell_id"] == "cell-revenue"
+    )
+    revenue_trace["value_numeric"] = "100.0"
+    observations, _ = build_quarterly_company_records(
+        ticker="TEST", cik=CIK, financial_as_of=AS_OF, columns=columns,
+        rows=_profile_rows(), cells=cells, traces=traces, spine=_quarter_spine(AS_OF),
+    )
+    revenue = next(
+        row for row in observations
+        if row["metric_id"] == "quarter_revenue"
+        and (row["calendar_year"], row["calendar_quarter"]) == (2025, 1)
+    )
+    assert revenue["availability_status"] == "AVAILABLE"
+    assert revenue["value"] == "100"
+    assert revenue["source_lineage"]["value"] == "100.0"
+
+
+@pytest.mark.parametrize(
+    "flag", ["mapping_uncertainty", "ambiguous", "compatibility_failure"]
+)
+def test_selected_identity_failures_are_preserved_and_ineligible(flag: str) -> None:
+    columns, cells, traces = _one_quarter_inputs()
+    revenue_trace = next(
+        row["value_lineage"] for row in traces if row["cell_id"] == "cell-revenue"
+    )
+    revenue_trace[flag] = True
+    observations, _ = build_quarterly_company_records(
+        ticker="TEST", cik=CIK, financial_as_of=AS_OF, columns=columns,
+        rows=_profile_rows(), cells=cells, traces=traces, spine=_quarter_spine(AS_OF),
+    )
+    revenue = next(
+        row for row in observations
+        if row["metric_id"] == "quarter_revenue"
+        and (row["calendar_year"], row["calendar_quarter"]) == (2025, 1)
+    )
+    assert revenue["availability_status"] == "UNAVAILABLE"
+    assert revenue[flag] is True
+    assert revenue["source_lineage"][flag] is True
+
+
+@pytest.mark.parametrize("flag", ["basis_break", "structural_break", "recast_break"])
+def test_reported_comparison_break_is_visible_but_blocks_arithmetic(flag: str) -> None:
+    columns, cells, traces = _one_quarter_inputs()
+    revenue_trace = next(
+        row["value_lineage"] for row in traces if row["cell_id"] == "cell-revenue"
+    )
+    revenue_trace[flag] = True
+    observations, _ = build_quarterly_company_records(
+        ticker="TEST", cik=CIK, financial_as_of=AS_OF, columns=columns,
+        rows=_profile_rows(), cells=cells, traces=traces, spine=_quarter_spine(AS_OF),
+    )
+    selected = {
+        row["metric_id"]: row for row in observations
+        if (row["calendar_year"], row["calendar_quarter"]) == (2025, 1)
+    }
+    assert selected["quarter_revenue"]["availability_status"] == "AVAILABLE"
+    assert selected["quarter_revenue"]["source_lineage"][flag] is True
+    assert selected["quarter_gross_margin"]["availability_status"] == "UNAVAILABLE"
+    assert flag.upper() in selected["quarter_gross_margin"]["reasons"]
 
 
 def test_actual_typed_primary_evidence_and_same_endpoint_filing_are_required() -> None:
@@ -447,15 +636,20 @@ def _four_quarter_revenue_inputs() -> tuple[list[dict], list[dict], list[dict]]:
     return columns, cells, traces
 
 
-@pytest.mark.parametrize("mutation", ["EMPTY_BASIS", "STRUCTURAL_MISMATCH"])
+@pytest.mark.parametrize(
+    "mutation",
+    ["EMPTY_BASIS", "STRUCTURAL_MISMATCH", "BASIS_BREAK", "STRUCTURAL_BREAK"],
+)
 def test_ttm_requires_nonempty_common_basis_and_version_scope(mutation: str) -> None:
     columns, cells, traces = _four_quarter_revenue_inputs()
     if mutation == "EMPTY_BASIS":
         for cell, trace in zip(cells, traces):
             cell["basis_version"] = ""
             trace["value_lineage"]["basis_version"] = ""
-    else:
+    elif mutation == "STRUCTURAL_MISMATCH":
         traces[0]["value_lineage"]["structural_version"] = "struct-other"
+    else:
+        traces[0]["value_lineage"][mutation.lower()] = True
     observations, _ = build_quarterly_company_records(
         ticker="TEST", cik=CIK, financial_as_of=AS_OF, columns=columns,
         rows=_profile_rows(), cells=cells, traces=traces, spine=_quarter_spine(AS_OF),
@@ -467,7 +661,11 @@ def test_ttm_requires_nonempty_common_basis_and_version_scope(mutation: str) -> 
         and (item["calendar_year"], item["calendar_quarter"]) == (2025, 3)
     )
     assert row["availability_status"] == "UNAVAILABLE"
-    assert row["reason"] == "INPUTS_NOT_COMPATIBLE"
+    expected_reason = (
+        mutation if mutation in {"BASIS_BREAK", "STRUCTURAL_BREAK"}
+        else "INPUTS_NOT_COMPATIBLE"
+    )
+    assert row["reason"] == expected_reason
 
 
 def test_exact_decimal_arithmetic_ignores_ambient_context() -> None:

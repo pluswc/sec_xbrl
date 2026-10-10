@@ -57,6 +57,32 @@ ARITHMETIC_POLICY = "ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"
 DECIMAL_CONTEXT = Context(prec=34, rounding=ROUND_HALF_EVEN)
 GIT_SHA1_LENGTH = 40
 
+_SOURCE_ELIGIBILITY_FIELDS = (
+    "mapping_review_required",
+    "mapping_uncertainty",
+    "ambiguity",
+    "ambiguous",
+    "compatibility_failure",
+    "continuity_break",
+    "recast_review_required",
+    "basis_break",
+    "structural_break",
+    "recast_break",
+)
+_IDENTITY_FAILURE_FIELDS = (
+    "mapping_uncertainty",
+    "ambiguity",
+    "ambiguous",
+    "compatibility_failure",
+)
+_ARITHMETIC_BREAK_FIELDS = (
+    "basis_break",
+    "structural_break",
+    "recast_break",
+    "continuity_break",
+    "recast_review_required",
+)
+
 
 def _reported_definition(
     metric_id: str,
@@ -842,6 +868,23 @@ def _prepared_observation(
                 period_end=end,
                 value=value,
                 sources=source_lineage["derivation_inputs"],
+                expected_scope={
+                    "cik": cik,
+                    "unit": "USD" if _is_usd_unit(cell.get("unit")) else None,
+                    "dimensions": copy.deepcopy(cell.get("dimensions") or []),
+                    "selection_view": lineage.get("selection_view"),
+                    "selection_as_of_date": lineage.get("selection_as_of_date"),
+                    "basis_version": cell.get("basis_version"),
+                    "structural_version": lineage.get("structural_version"),
+                    "recast_version": lineage.get("recast_version"),
+                    "canonical_mapping_version": lineage.get("concept_mapping_version"),
+                    "company_canonical_concept_id": lineage.get(
+                        "company_canonical_concept_id"
+                    ),
+                },
+                output_filed_date=lineage.get("filed_date"),
+                output_report_date=lineage.get("report_date"),
+                financial_as_of=financial_as_of,
             )
         )
     else:
@@ -889,6 +932,8 @@ def _prepared_observation(
         "recast_version": lineage.get("recast_version"),
         "source_lineage": source_lineage,
     }
+    for field in _SOURCE_ELIGIBILITY_FIELDS:
+        record[field] = copy.deepcopy(lineage.get(field))
     if available and source_kind == "DERIVED_QUARTER":
         record["derived_metric_id"] = require_string(
             lineage.get("derived_metric_id"), "derived quarter identity"
@@ -929,7 +974,7 @@ def _reported_source(
         source_filing_id=source_filing_id,
         statement_type=_statement_type(metric_id.removeprefix("quarter_")),
     )
-    return {
+    source = {
         "accession": lineage.get("accession"),
         "cik": actual_cik,
         "ticker": ticker,
@@ -978,6 +1023,9 @@ def _reported_source(
         "derivation_inputs": [],
         "compatibility_policy": None,
     }
+    for field in _SOURCE_ELIGIBILITY_FIELDS:
+        source[field] = copy.deepcopy(lineage.get(field))
+    return source
 
 
 def _prepared_source_scope_reasons(
@@ -1010,7 +1058,7 @@ def _prepared_source_scope_reasons(
         ):
             reasons.append("SOURCE_IDENTITY_MISMATCH")
         raw_value = _finite_decimal_string(lineage.get("value_numeric"))
-        if raw_value is None or raw_value != expected_value:
+        if not _decimal_values_equal(raw_value, expected_value):
             reasons.append("SOURCE_VALUE_MISMATCH")
     if not _lineage_is_usd(lineage):
         reasons.append("UNIT_NOT_USD")
@@ -1069,7 +1117,7 @@ def _derived_quarter_lineage(
                 quality_blocking=bool(raw.get("quality_blocking")) or raw.get("quality_status") == "BLOCK",
             )
         )
-    return {
+    result = {
         "canonical_mapping_version": lineage.get("concept_mapping_version"),
         "company_canonical_concept_id": lineage.get("company_canonical_concept_id"),
         "dimensions": copy.deepcopy(cell.get("dimensions") or []),
@@ -1088,6 +1136,9 @@ def _derived_quarter_lineage(
         "quality_reasons": quality_reasons,
         "quality_blocking": quality_blocking,
     }
+    for field in _SOURCE_ELIGIBILITY_FIELDS:
+        result[field] = copy.deepcopy(lineage.get(field))
+    return result
 
 
 def _statement_evidence(
@@ -1133,6 +1184,10 @@ def _derived_quarter_reasons(
     period_end: str | None,
     value: str | None,
     sources: list[dict[str, Any]],
+    expected_scope: dict[str, Any],
+    output_filed_date: Any,
+    output_report_date: Any,
+    financial_as_of: str,
 ) -> list[str]:
     if len(sources) != 2:
         return ["DERIVATION_INPUTS_INCOMPLETE"]
@@ -1165,6 +1220,26 @@ def _derived_quarter_reasons(
     ):
         if canonical_json(later.get(field)) != canonical_json(earlier.get(field)):
             reasons.append("DERIVATION_SCOPE_MISMATCH")
+    for source in sources:
+        for field, expected in expected_scope.items():
+            if canonical_json(source.get(field)) != canonical_json(expected):
+                reasons.append("DERIVATION_OUTPUT_SCOPE_MISMATCH")
+        reasons.extend(_arithmetic_source_reasons(source))
+    filed_dates = [source.get("filed_date") for source in sources]
+    if (
+        any(not isinstance(value, str) for value in filed_dates)
+        or output_filed_date != max(filed_dates, default=None)
+        or output_report_date != later.get("report_date")
+    ):
+        reasons.append("DERIVATION_SOURCE_DATE_MISMATCH")
+    try:
+        cutoff = date.fromisoformat(financial_as_of)
+        output_filed = date.fromisoformat(str(output_filed_date))
+    except ValueError:
+        reasons.append("DERIVATION_SOURCE_DATE_MISMATCH")
+    else:
+        if output_filed > cutoff:
+            reasons.append("DERIVATION_SOURCE_DATE_MISMATCH")
     try:
         expected = _exact_subtract(Decimal(later["value"]), Decimal(earlier["value"]))
         actual = Decimal(value) if value is not None else None
@@ -1221,8 +1296,7 @@ def _reported_anchor_reasons(
             reasons.append("PERIOD_SCOPE_INCOMPLETE")
     if source.get("mapping_review_required") is not False:
         reasons.append("MAPPING_REVIEW_REQUIRED")
-    if source.get("ambiguity"):
-        reasons.append("SOURCE_AMBIGUITY")
+    reasons.extend(_identity_source_reasons(source))
     if source.get("continuity_break"):
         reasons.append("CONTINUITY_BREAK")
     if source.get("recast_review_required"):
@@ -1253,6 +1327,48 @@ def _reported_anchor_reasons(
         or source.get("selection_as_of_date") != financial_as_of
     ):
         reasons.append("SOURCE_SCOPE_MISMATCH")
+    return _unique(reasons)
+
+
+def _identity_source_reasons(source: dict[str, Any]) -> list[str]:
+    reasons = []
+    for field in _IDENTITY_FAILURE_FIELDS:
+        if source.get(field):
+            reasons.append(
+                "SOURCE_AMBIGUITY"
+                if field in {"ambiguity", "ambiguous"}
+                else field.upper()
+            )
+    return _unique(reasons)
+
+
+def _arithmetic_source_reasons(source: dict[str, Any]) -> list[str]:
+    """Reject declared source incompatibility without hiding reported values."""
+    reasons = _identity_source_reasons(source)
+    if source.get("mapping_review_required") is not False:
+        reasons.append("MAPPING_REVIEW_REQUIRED")
+    for field in _ARITHMETIC_BREAK_FIELDS:
+        if source.get(field):
+            reasons.append(field.upper())
+    if source.get("quality_blocking") or source.get("quality_status") == "BLOCK":
+        reasons.append("QUALITY_BLOCKED")
+    return _unique(reasons)
+
+
+def _prepared_arithmetic_reasons(row: dict[str, Any]) -> list[str]:
+    reasons = _arithmetic_source_reasons(row)
+    lineage = row.get("source_lineage")
+    if not isinstance(lineage, dict):
+        return _unique([*reasons, "SOURCE_LINEAGE_MISSING"])
+    reasons.extend(_arithmetic_source_reasons(lineage))
+    inputs = lineage.get("derivation_inputs") or []
+    if not isinstance(inputs, list):
+        return _unique([*reasons, "DERIVATION_INPUTS_INCOMPLETE"])
+    for source in inputs:
+        if not isinstance(source, dict):
+            reasons.append("DERIVATION_INPUTS_INCOMPLETE")
+            continue
+        reasons.extend(_arithmetic_source_reasons(source))
     return _unique(reasons)
 
 
@@ -1470,6 +1586,8 @@ def _generic_input_reasons(
             reasons.append(str((row or {}).get("reason") or "MISSING_INPUT"))
     if reasons or current is None or second is None:
         return _unique(reasons)
+    for row in rows:
+        reasons.extend(_prepared_arithmetic_reasons(row))
     for field in ("cik", "dimensions", "selection_view", "selection_as_of_date"):
         if current.get(field) != second.get(field):
             reasons.append("SOURCE_SCOPE_MISMATCH")
@@ -1589,6 +1707,14 @@ def _derived_output_base(
             "selected_source_ids": [],
         },
     }
+    for field in _SOURCE_ELIGIBILITY_FIELDS:
+        values = [row.get(field) for row in inputs if field in row]
+        record[field] = copy.deepcopy(current.get(field))
+        record["source_lineage"][field] = (
+            copy.deepcopy(current.get(field))
+            if not values or all(value == current.get(field) for value in values)
+            else copy.deepcopy(values)
+        )
     record["observation_id"] = _observation_id(record)
     return record
 
@@ -1618,6 +1744,8 @@ def _ttm_observation(
         reasons.append("INPUTS_NOT_COMPATIBLE")
     else:
         prepared = [row for row in inputs if row is not None]
+        for row in prepared:
+            reasons.extend(_prepared_arithmetic_reasons(row))
         if any(a["period_end"] != b["period_start"] for a, b in pairwise(prepared)):
             reasons.append("INPUTS_NOT_CONTIGUOUS")
         bases = [row.get("basis_version") for row in prepared]
@@ -1800,6 +1928,16 @@ def _finite_decimal_string(value: Any) -> str | None:
     except InvalidOperation:
         return None
     return value if number.is_finite() else None
+
+
+def _decimal_values_equal(first: str | None, second: str | None) -> bool:
+    if first is None or second is None:
+        return False
+    try:
+        left, right = Decimal(first), Decimal(second)
+    except InvalidOperation:
+        return False
+    return left.is_finite() and right.is_finite() and left == right
 
 
 def _decimal_string(value: Decimal) -> str:

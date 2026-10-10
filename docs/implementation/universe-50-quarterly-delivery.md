@@ -159,6 +159,33 @@ precedence, 모든 row/cell/candidate/trace/source/network lineage, schema/count
 그대로 유지하며 period·mapping·recast·selection·회계 규칙을 바꾸거나 payload를 줄이지
 않는다. 이 source는 focused/golden 검증과 독립 source gate 전에는 JNJ/CVX build에 쓰지 않는다.
 
+두 번째 메모리·분기 보강 후보 `f111666f23fb9532269b7f182d1d7d5cf00ad042`는 독립 검증에서
+**FAIL**했다. 보고서 `/tmp/quarter-producer-f111/f111666-report.json`의 SHA-256은
+`43600dcaede5e215b58609010500b785b1e0fd529ff9f7c1479a361dfe3fbedf`다. typed PRE,
+endpoint, non-empty TTM basis, 40자리 Git SHA 경계는 통과했지만 다음 다섯 경계를 보완해야
+하므로 이 후보로 CAT·JNJ·CVX를 실행하거나 전체 확대로 넘어가지 않는다.
+
+- M8 두 raw input은 서로 일치하는 것만으로 충분하지 않다. CIK, USD unit, 전체 dimensions,
+  view/as-of, basis, mapping, company canonical identity와 structural/recast version을 바깥
+  prepared output의 선언 scope와도 맞춘다. later-minus-earlier 기간·fiscal pair를 그대로
+  확인하고 source 충돌을 바깥 값으로 고쳐 쓰지 않는다.
+- `mapping_uncertainty`, `ambiguous`, `compatibility_failure`는 selected identity를 막는다.
+  `basis_break`, `structural_break`, `recast_break`는 알려진 REPORTED 금액 자체를 지우지는
+  않지만 generic, M8, TTM 산술 입력 자격을 막는다. 모든 flag와 중첩 selected input은
+  publication lineage에 그대로 남긴다.
+- M8 output `filed_date`는 두 selected input의 최댓값이고 cutoff 이하여야 하며,
+  `report_date`는 current/later endpoint source와 같아야 한다. 불일치 날짜는 덮어쓰지 않고
+  `UNAVAILABLE`로 남긴다.
+- 원천 금액 동일성은 finite Decimal의 exact equality로 판단한다. `100`과 `100.0`은 같은
+  값이지만 원래 문자열 표현은 source lineage에 그대로 보존한다.
+- streaming Parquet concatenate는 전체 JSON field 집합을 먼저 확정하고, 앞 chunk의
+  scalar도 JSON string으로 재인코딩한 뒤 결합한다. 따라서 문자열 `"null"`, bool, number,
+  `None`, list, dict가 섞여도 기존 full-materialization과 동일한 값·순서·schema·count·hash
+  검증 경계를 유지한다.
+
+수정 후보는 독립 source PASS 전까지 **REWORK_SOURCE_FROZEN_PENDING_VERIFICATION**이며,
+heavy CAT golden, JNJ retry, CVX build와 후속 50사 history 확대는 계속 보류한다.
+
 ## 2. 불변 입력과 새 run 경계
 
 재실행 가능한 새 run identity는 `universe-50-quarterly-20261010`으로 제안한다.

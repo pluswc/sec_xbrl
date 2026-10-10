@@ -150,25 +150,35 @@ def test_staged_cell_concatenation_preserves_order_full_payload_and_schema(
     import polars as pl
 
     chunks = []
-    for index, records in enumerate(
-        (
+    record_groups = (
             (
                 {
                     "id": "first",
                     "value_lineage": {"candidate": ["a", "b"]},
                     "large_text": "가" * 20_000,
+                    "extra_metadata": "null",
+                    "mixed_bool": True,
+                    "mixed_number": 7,
                 },
-                {"id": "second", "value_lineage": {"candidate": ["c"]}},
+                {
+                    "id": "second",
+                    "value_lineage": {"candidate": ["c"]},
+                    "extra_metadata": "known",
+                    "mixed_bool": None,
+                    "mixed_number": None,
+                },
             ),
             (
                 {
                     "id": "third",
                     "value_lineage": {"candidate": ["d"]},
                     "extra_metadata": {"network": ["later"]},
+                    "mixed_bool": [False, True],
+                    "mixed_number": {"reported": 7},
                 },
             ),
         )
-    ):
+    for index, records in enumerate(record_groups):
         path = tmp_path / f"chunk-{index}.parquet"
         info = {**_write_records(path, records), "path": path}
         chunks.append(info)
@@ -186,7 +196,19 @@ def test_staged_cell_concatenation_preserves_order_full_payload_and_schema(
         )
     assert [row["id"] for row in actual] == ["first", "second", "third"]
     assert actual[0]["large_text"] == "가" * 20_000
+    assert actual[0]["extra_metadata"] == "null"
+    assert actual[1]["extra_metadata"] == "known"
     assert actual[2]["extra_metadata"] == {"network": ["later"]}
+    assert actual[0]["mixed_bool"] is True
+    assert actual[1]["mixed_bool"] is None
+    assert actual[2]["mixed_bool"] == [False, True]
+    assert actual[0]["mixed_number"] == 7
+    assert actual[1]["mixed_number"] is None
+    assert actual[2]["mixed_number"] == {"reported": 7}
+    legacy_path = tmp_path / "legacy-full-materialization.parquet"
+    legacy_records = tuple(row for group in record_groups for row in group)
+    legacy_info = _write_records(legacy_path, legacy_records)
+    assert tuple(actual) == _read_staged_records(legacy_path, legacy_info)
     assert info["count"] == 3
     assert info["sha256"]
 
