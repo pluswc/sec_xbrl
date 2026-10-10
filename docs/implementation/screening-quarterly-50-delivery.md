@@ -14,6 +14,12 @@ Raw 파싱, Fact 선택, 분기 산술·recast 판단은 소비자에서 실행�
 
 ## v3 발행물
 
+Consumer engineering의 양성 wire fixture는 `quarterly-screening-metric-manifest-v1`
+manifest SHA-256
+`aad6f74c6fdfe23f0663b4adc5b12b49d8b22af09ea130ec06a316e589bcd9c2`인
+synthetic v4이다. 이는 schema/consumer 계약 검증용이며 actual 50사 재무 정확성 인수
+증거가 아니다. v1–v3 synthetic wire는 모순 재현용 실패 이력으로만 남긴다.
+
 `screening-dataset-v3`는 다음 두 불변 부모를 외부 manifest SHA-256과 publication
 ID로 고정한다.
 
@@ -105,3 +111,11 @@ ordinary 화면은 CIK/SIC/raw ID/hash/permission metadata를 노출하지 않�
 
 구현 SHA 동결 뒤 별도 read-only verifier가 합성·actual publication과 M0 품질을
 검증하고 lead가 로컬 인수를 결정한다.
+
+## 사용자 시나리오 추적
+
+구현 검증은 `U1 annual 50 browse`, `U2 quarter metric/period discovery`, `U3 explicit
+quarter save/run`, `U4 fixed-eight gaps and CFO source kinds`, `U5 fiscal/date-visible
+comparison`, `U6 112-day and null-basis TTM holds`, `U7 protected annual restart/export`,
+`U8 keyboard and 1440/1024 layout`을 이름 있는 시나리오로 기록한다. 이 목록은 제품
+동작 점검표이며 actual 수량·재무 정확성의 독립 인수 증거를 대신하지 않는다.

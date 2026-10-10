@@ -76,51 +76,103 @@ class QuarterlyScreeningMetricReader:
     def verify_all(self) -> dict[str, Any]:
         if set(self.manifest.get("files", {})) != set(FILES):
             raise ValueError("quarterly payload file set changed")
-        actual = {path.name for path in self.root.iterdir() if path.is_file() and path.name != MANIFEST and path.name != "MANIFEST.sha256"}
+        actual = {
+            path.name
+            for path in self.root.iterdir()
+            if path.is_file() and path.name != MANIFEST and path.name != "MANIFEST.sha256"
+        }
         if actual != set(FILES) or any(path.is_symlink() for path in self.root.iterdir()):
             raise ValueError("quarterly publication file set changed")
-        spine = [(row.get("calendar_year"), row.get("calendar_quarter")) for row in self.manifest.get("global_quarter_spine", [])]
+        spine = [
+            (row.get("calendar_year"), row.get("calendar_quarter"))
+            for row in self.manifest.get("global_quarter_spine", [])
+        ]
         if len(spine) != 8 or len(set(spine)) != 8 or any(q not in {1, 2, 3, 4} for _, q in spine):
             raise ValueError("quarterly publication must declare eight unique completed buckets")
         ciks = self.manifest.get("universe", {}).get("ciks")
-        if not isinstance(ciks, list) or len(ciks) != self.manifest.get("universe", {}).get("company_count"):
+        if not isinstance(ciks, list) or len(ciks) != self.manifest.get("universe", {}).get(
+            "company_count"
+        ):
             raise ValueError("quarterly company membership differs")
         ciks = [require_cik(cik) for cik in ciks]
-        if len(ciks) != len(set(ciks)) or self.manifest.get("annual_parent", {}).get("company_membership_sha256") != self.manifest.get("universe", {}).get("company_membership_sha256"):
+        if len(ciks) != len(set(ciks)) or self.manifest.get("annual_parent", {}).get(
+            "company_membership_sha256"
+        ) != self.manifest.get("universe", {}).get("company_membership_sha256"):
             raise ValueError("quarterly and annual company membership differ")
         definitions = {row.get("metric_id"): row for row in self.definitions}
         if (
             None in definitions
             or len(definitions) != len(self.definitions)
             or any(
-                not str(metric_id).startswith("ttm_" if row.get("observation_basis") == "TTM" else "quarter_")
+                not str(metric_id).startswith(
+                    "ttm_" if row.get("observation_basis") == "TTM" else "quarter_"
+                )
                 for metric_id, row in definitions.items()
             )
         ):
             raise ValueError("quarterly metric definitions are not unique and prefixed")
         support_keys = [(row.get("cik"), row.get("metric_id")) for row in self.support]
-        observation_keys = [(row.get("cik"), row.get("metric_id"), row.get("calendar_year"), row.get("calendar_quarter")) for row in self.observations]
-        inventory_keys = [(row.get("cik"), row.get("calendar_year"), row.get("calendar_quarter")) for row in self.period_inventory]
-        if len(support_keys) != len(set(support_keys)) or len(observation_keys) != len(set(observation_keys)) or len(inventory_keys) != len(set(inventory_keys)):
+        observation_keys = [
+            (
+                row.get("cik"),
+                row.get("metric_id"),
+                row.get("calendar_year"),
+                row.get("calendar_quarter"),
+            )
+            for row in self.observations
+        ]
+        inventory_keys = [
+            (row.get("cik"), row.get("calendar_year"), row.get("calendar_quarter"))
+            for row in self.period_inventory
+        ]
+        if (
+            len(support_keys) != len(set(support_keys))
+            or len(observation_keys) != len(set(observation_keys))
+            or len(inventory_keys) != len(set(inventory_keys))
+        ):
             raise ValueError("duplicate quarterly publication grain")
         if set(inventory_keys) != {(cik, year, quarter) for cik in ciks for year, quarter in spine}:
             raise ValueError("quarterly period inventory does not cover the fixed spine")
-        if set(observation_keys) != {(cik, metric, year, quarter) for cik in ciks for metric in definitions for year, quarter in spine}:
+        if set(observation_keys) != {
+            (cik, metric, year, quarter)
+            for cik in ciks
+            for metric in definitions
+            for year, quarter in spine
+        }:
             raise ValueError("quarterly observations do not cover metric/company/spine grain")
         for row in self.observations:
             self._verify_observation(row, definitions)
         self._verify_source_coherence()
         counts = self.manifest.get("counts", {})
-        expected = {"definitions": len(self.definitions), "support": len(self.support), "observations": len(self.observations), "period_inventory": len(self.period_inventory)}
+        expected = {
+            "definitions": len(self.definitions),
+            "support": len(self.support),
+            "observations": len(self.observations),
+            "period_inventory": len(self.period_inventory),
+        }
         if counts != expected:
             raise ValueError("quarterly manifest counts differ")
-        return {"publication_id": self.publication_id, "fixture_kind": self.manifest["fixture_kind"], "financial_as_of": self.manifest["financial_as_of"], **expected}
+        return {
+            "publication_id": self.publication_id,
+            "fixture_kind": self.manifest["fixture_kind"],
+            "financial_as_of": self.manifest["financial_as_of"],
+            **expected,
+        }
 
-    def _verify_observation(self, row: dict[str, Any], definitions: dict[str, dict[str, Any]]) -> None:
+    def _verify_observation(
+        self, row: dict[str, Any], definitions: dict[str, dict[str, Any]]
+    ) -> None:
         definition = definitions.get(row.get("metric_id"))
-        if definition is None or row.get("definition_version") != definition.get("definition_version") or row.get("unit") != definition.get("unit"):
+        if (
+            definition is None
+            or row.get("definition_version") != definition.get("definition_version")
+            or row.get("unit") != definition.get("unit")
+        ):
             raise ValueError("quarterly observation differs from its definition")
-        if row.get("availability_status") not in AVAILABILITY or row.get("source_kind") not in SOURCE_KINDS:
+        if (
+            row.get("availability_status") not in AVAILABILITY
+            or row.get("source_kind") not in SOURCE_KINDS
+        ):
             raise ValueError("invalid quarterly observation status")
         available = row["availability_status"] == "AVAILABLE"
         if available != (row.get("value") is not None) or available == bool(row.get("reason")):
@@ -137,22 +189,55 @@ class QuarterlyScreeningMetricReader:
                 raise ValueError("quarterly period end must remain exclusive")
             inclusive = date.fromisoformat(row["period_end"]) - timedelta(days=1)
             expected_quarter = (inclusive.month - 1) // 3 + 1
-            if (inclusive.year, expected_quarter) != (row.get("calendar_year"), row.get("calendar_quarter")):
+            if (inclusive.year, expected_quarter) != (
+                row.get("calendar_year"),
+                row.get("calendar_quarter"),
+            ):
                 raise ValueError("quarterly bucket differs from inclusive period end")
         if not isinstance(row.get("source_lineage"), dict):
             raise TypeError("quarterly observation lineage is required")
 
     def _verify_source_coherence(self) -> None:
         accession_metadata: dict[str, tuple[Any, ...]] = {}
-        inventory = {(row["cik"], row["calendar_year"], row["calendar_quarter"]): row for row in self.period_inventory}
+        inventory = {
+            (row["cik"], row["calendar_year"], row["calendar_quarter"]): row
+            for row in self.period_inventory
+        }
         for observation in self.observations:
-            anchors = [row for row in _nested_dicts(observation["source_lineage"]) if row.get("accession")]
-            key = (observation["cik"], observation["calendar_year"], observation["calendar_quarter"])
+            anchors = [
+                row for row in _nested_dicts(observation["source_lineage"]) if row.get("accession")
+            ]
+            key = (
+                observation["cik"],
+                observation["calendar_year"],
+                observation["calendar_quarter"],
+            )
             if inventory[key]["bucket_status"] == "NO_FILING_AS_OF_CUTOFF" and anchors:
                 raise ValueError("no-filing bucket contains source filing lineage")
             for row in anchors:
+                start = row.get("period_start")
+                end = row.get("period_end")
+                if start is not None and end is not None:
+                    duration = (date.fromisoformat(end) - date.fromisoformat(start)).days
+                    if row.get("duration_days") != duration:
+                        raise ValueError("source period duration differs from its dates")
+                    period_class = row.get("period_class")
+                    permitted_hold = (
+                        observation["availability_status"] == "UNAVAILABLE"
+                        and observation.get("reason") == "UNSUPPORTED_FISCAL_QUARTER_DURATION"
+                    )
+                    if (
+                        period_class == "QTD_3M"
+                        and not 75 <= duration <= 105
+                        and not permitted_hold
+                    ):
+                        raise ValueError("QTD source duration is outside the governed range")
+                    if period_class == "YTD_6M" and not 150 <= duration <= 210:
+                        raise ValueError("YTD source duration is outside the governed range")
                 accession = str(row["accession"])
-                metadata = tuple(row.get(field) for field in ("filed_date", "report_date", "filing_id"))
+                metadata = tuple(
+                    row.get(field) for field in ("filed_date", "report_date", "filing_id")
+                )
                 prior = accession_metadata.setdefault(accession, metadata)
                 if prior != metadata:
                     raise ValueError("accession source metadata is inconsistent")

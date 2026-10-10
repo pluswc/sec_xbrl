@@ -33,3 +33,31 @@ prepared row만 나란히 보여준다. 평균·순위·점수나 회계적 동�
 운영 catalog에는 v1, v2, v3를 함께 둔다. 새 v3가 prospective default여도 과거
 run을 열면 원래 annual dataset과 값·trace·export가 유지된다. 실제 journal을
 초기화하거나 기존 publication을 덮어쓰지 않는다.
+
+운영자는 검증된 연간 v2와 분기 publication의 root, publication ID, manifest SHA를
+`screening-prepare-config-v3`에 고정한 뒤 다음처럼 새 wrapper 디렉터리를 만든다.
+
+```bash
+python -m sec_xbrl.screening prepare-v3 --config CONFIG.json --destination NEW_V3_DIR
+```
+
+`NEW_V3_DIR`은 반드시 새 경로여야 한다. 만든 v3를 catalog 끝에 추가하되 기존 v1/v2
+항목과 journal 파일을 수정하지 않는다. 분기 read-only API는
+`quarter-metric-catalog`, `quarter-periods`, `quarter-explorer`, `quarter-series`,
+`quarter-comparison` 순으로 지표·고정 8개 bucket·회사별 gap·상세·같은 bucket 비교를
+제공한다.
+
+## 사용자 시나리오 점검
+
+배포 후보는 다음 흐름을 합성 publication과 임시 journal에서 확인한다.
+
+1. 50사 연간 탐색이 첫 화면이며 공통 FY와 partial coverage를 읽는다.
+2. 분기 빈도로 전환해 지표 정의와 2024Q4–2026Q3 coverage를 확인한다. 전환 전
+   annual draft는 돌아왔을 때 복원되고 전환만으로 저장·실행되지 않는다.
+3. 명시한 calendar quarter-end bucket과 분기 지표로 조건을 저장·실행한다.
+4. 회사 상세의 고정 8개 bucket에서 gap과 reported/derived CFO source kind를 읽는다.
+5. 같은 bucket의 회사도 서로 다른 fiscal label·실제 날짜가 보이는 상태로 비교한다.
+6. 112일 분기와 null-basis TTM은 값 대신 각각의 확인 사유로 남는다.
+7. 기존 annual revision/run을 재시작 후 열고 JSON/CSV/XLSX를 원래 identity로
+   내보낸다.
+8. 키보드, Escape·focus return과 1440px/1024px 결과표를 확인한다.

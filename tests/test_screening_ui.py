@@ -25,8 +25,13 @@ def test_ordinary_screen_uses_investor_language_and_hides_admin_clutter() -> Non
     assert "현금흐름" in copy and "재무안정성" in copy and "공시항목" in copy
     assert "금액 기준: 백만 달러" in copy
     for forbidden in (
-        "SEC SIC", "CIK", "UNKNOWN_SIC", "ACTUAL_PREPARED",
-        "PREDICATE_MATCHED", "기술 근거", "회사·산업 후보 찾기",
+        "SEC SIC",
+        "CIK",
+        "UNKNOWN_SIC",
+        "ACTUAL_PREPARED",
+        "PREDICATE_MATCHED",
+        "기술 근거",
+        "회사·산업 후보 찾기",
     ):
         assert forbidden not in copy
 
@@ -36,7 +41,7 @@ def test_catalog_units_and_durable_workflows_are_bound_without_browser_math() ->
     assert 'unit_kind==="MONEY"' in JS
     assert "thresholdToApi" in JS and "thresholdFromApi" in JS
     assert 'shiftDecimal(v,m.unit_kind==="MONEY"?6:0)' in JS
-    assert 'q=w.length+Number(m[4]||0)+p-leading' in JS
+    assert "q=w.length+Number(m[4]||0)+p-leading" in JS
     assert 'if(/^0+$/.test(raw))return"0"' in JS
     assert "definition_version:m.definition_version" in JS
     assert "input_metric_ids" in JS
@@ -98,7 +103,9 @@ def test_explorer_preserves_missing_periods_and_display_only_date_conversion() -
 
 
 def test_metric_guide_uses_exact_existing_threshold_scaling_without_autosave() -> None:
-    guide = JS[JS.index("async function addGuideMetric"):JS.index("function profileObservationCell")]
+    guide = JS[
+        JS.index("async function addGuideMetric") : JS.index("function profileObservationCell")
+    ]
     assert "thresholdToApi(threshold,m)" in guide
     assert "definition_version:m.definition_version" in guide
     assert "await newScreen()" not in guide
@@ -113,15 +120,19 @@ def test_metric_guide_uses_exact_existing_threshold_scaling_without_autosave() -
 
 def test_explorer_matrix_uses_heading_units_and_concise_missing_cells() -> None:
     assert "CORE_SHORT_LABELS" in JS
-    assert 'm.label)}<small>${esc(unitLabel(m))}</small>' in JS
+    assert "m.label)}<small>${esc(unitLabel(m))}</small>" in JS
     assert 'aria-label="자료 없음:' in JS
-    explorer_value = JS[JS.index("function explorerValue"):JS.index("function updateExplorerSort")]
+    explorer_value = JS[
+        JS.index("function explorerValue") : JS.index("function updateExplorerSort")
+    ]
     assert "reason_labels" in explorer_value
     assert "<small>" not in explorer_value
     assert "min-width:1180px;table-layout:fixed" in CSS
     assert "min-width:1480px" not in CSS
-    assert '.metric-card h4{margin:3px 0 0;font-size:16px;font-weight:600}' in CSS
-    comparison = JS[JS.index("async function renderComparison"):JS.index("function openComparison")]
+    assert ".metric-card h4{margin:3px 0 0;font-size:16px;font-weight:600}" in CSS
+    comparison = JS[
+        JS.index("async function renderComparison") : JS.index("function openComparison")
+    ]
     assert "지표 · 단위" in comparison
     assert "unitLabel(row.metric)" in comparison
 
@@ -130,26 +141,32 @@ def test_filtered_metric_guide_cannot_replace_complete_explorer_catalog() -> Non
     assert "explorerCatalog:null" in JS
     assert "explorerCatalogKey:null" in JS
     assert "async function loadExplorerCatalog" in JS
-    load = JS[JS.index("async function loadExplorerCatalog"):JS.index("async function loadExplorer(year")]
+    load = JS[
+        JS.index("async function loadExplorerCatalog") : JS.index(
+            "async function loadExplorer(year"
+        )
+    ]
     assert "/api/metric-library?dataset_id=" in load
     assert "&fiscal_year=" in load
     assert "query" not in load
     assert "category" not in load
     assert "S.explorerCatalog=r" in load
-    filtered = JS[JS.index("async function loadLibrary"):JS.index("function guideCompatibility")]
+    filtered = JS[JS.index("async function loadLibrary") : JS.index("function guideCompatibility")]
     assert 'params.set("query",q)' in filtered
     assert 'params.set("category",c)' in filtered
     assert "S.library=r" in filtered
-    assert "S.explorerCatalog?.metrics" in JS[JS.index("function guideCompatibility"):]
-    assert "S.explorerCatalog?.metrics||[]" in JS[JS.index("function openComparison"):]
-    metric = JS[JS.index("function explorerMetric"):JS.index("function updateExplorerSort")]
+    assert "S.explorerCatalog?.metrics" in JS[JS.index("function guideCompatibility") :]
+    assert "S.explorerCatalog?.metrics||[]" in JS[JS.index("function openComparison") :]
+    metric = JS[JS.index("function explorerMetric") : JS.index("function updateExplorerSort")]
     assert "S.explorerCatalog?.metrics.find" in metric
     assert 'label:id,unit_kind:"MONEY"' not in metric
 
 
 def test_company_description_is_optional_plaintext_and_keyboard_accessible() -> None:
     assert 'id="profile-description"' in HTML
-    render = JS[JS.index("function renderCompanyDescription"):JS.index("function renderProfile()")]
+    render = JS[
+        JS.index("function renderCompanyDescription") : JS.index("function renderProfile()")
+    ]
     assert "copy.textContent=d.text" in render
     assert "innerHTML" not in render
     assert 'd.status!=="AVAILABLE"' in render
@@ -160,3 +177,28 @@ def test_company_description_is_optional_plaintext_and_keyboard_accessible() -> 
     assert "#company-profile a[href]" in JS
     assert ".company-description{" in CSS
     assert ".description-meta a:focus-visible" in CSS
+
+
+def test_quarter_frequency_is_explicit_unsaved_and_uses_prepared_apis() -> None:
+    assert 'id="frequency"' in HTML and 'value="QUARTERLY"' in HTML
+    assert 'id="calendar-quarter"' in HTML
+    assert "/api/quarter-metric-catalog?" in JS
+    assert "/api/quarter-periods?" in JS
+    assert "FIXED_CALENDAR_QUARTER_END" in JS
+    assert "에 종료한 분기" in JS
+    switch = JS[JS.index("async function switchFrequency") : JS.index("async function execute")]
+    assert "S.revision=null" in switch and "S.dirty=true" in switch
+    assert "S.frequencyDrafts[target]" in switch and "S.frequencyDrafts[S.frequency]" in JS
+    assert 'api("/api/screens"' not in switch and 'api("/api/runs"' not in switch
+
+
+def test_quarter_detail_uses_prepared_series_and_same_bucket_comparison() -> None:
+    detail = JS[JS.index("function quarterSourceLabel") : JS.index("async function saveDecision")]
+    assert "/api/quarter-series?" in detail
+    assert "/api/quarter-comparison?" in detail
+    assert "calendar_year=${p.calendar_year}" in detail
+    assert "calendar_quarter=${p.calendar_quarter}" in detail
+    assert "actualPeriod" in detail and "fiscalLabel" in detail
+    assert "보고값" in detail and "승인된 분기 계산" in detail
+    assert "최근 4개 분기" in detail and "3개월 분기 실적" in detail
+    assert "source_lineage" not in detail
