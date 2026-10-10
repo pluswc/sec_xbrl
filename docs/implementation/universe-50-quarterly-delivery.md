@@ -15,9 +15,10 @@
 **APPROVED**다. M0 source `7eb721cb018ee3723c66fa2801a9836c48d2e0bb`와 새 21사 annual
 metric/dataset publication은 독립 검증을 통과해 2026-10-10 KST에 lead가
 **LOCALLY_ACCEPTED**했다. 현재 상태는
-**MEMORY_AND_ANNUAL_WINDOW_IMPLEMENTATION_APPROVED**다. 확대 parsing 전에 동등한 메모리
-최적화와 5개 입력 FY/4개 표시 FY 분리를 source·golden·RSS gate로 먼저 고정한다. 이후
-분기 producer와 50사 build는 각각 별도 immutable artifact gate를 통과해야 한다. 문서의
+**FIRST_FIVE_FINANCIAL_BUILD_AND_QUARTER_PRODUCER_APPROVED**다. 동등한 메모리 최적화와
+5개 입력 FY/4개 표시 FY 분리는 source·golden·RSS gate를 통과했다. 이제 고정된 runtime에서
+첫 5사를 직렬 build하고, 별도 writer checkout에서 분기 producer를 구현한다. 이후 50사
+확대와 actual 분기 publication은 각각 별도 immutable artifact gate를 통과해야 한다. 문서의
 수락 조건은 이 절에 적은 범위를 넘는 회계 정책이나 UI 구현을 자동 승인하지 않는다.
 
 기준 소스는 `1e2733c61d4c21617c658093137957369af29b8b`이며 기존 actual 21사 Raw,
@@ -109,7 +110,10 @@ FY2024 네 칸은 typed primary-statement evidence 부족으로 보수적으로 
    15,342,152KB로, wall time이 861.06초에서 515.25초로 줄었다. 이 결과는
    `/tmp/universe50-memory-cat-golden.json`(SHA-256
    `cb57989bc13b9471873028405ad70e7aaf11bb62ec5f07afbbbb7a11fea3ded9`)의 writer
-   checkpoint 증거이며 독립 검증 전에는 최종 수락으로 간주하지 않는다.
+   checkpoint에서 확인됐다. 최종 source `d3783f5cc6a2cd2cdf2b7e39933c689e7f444900`은
+   metadata merge precedence correction까지 포함해 독립 검증을 통과했다. 보고서
+   `/tmp/universe50-d378-independent/d3783f5-report.json`의 SHA-256은
+   `f461ed4951db9b2556b3fd9fff06f8a645c83d281ba2e253de75ed229ec55819`다.
 2. annual metric config는 선택적으로 `input_years`와 `display_years`를 선언한다. 5개 완료
    FY를 입력으로 읽어 가장 오래된 표시 FY의 YoY predecessor로 쓸 수 있지만 publication은
    최신 4개 display FY만 노출한다. predecessor는 input lineage에 남고 별도 표시 observation을
@@ -224,10 +228,12 @@ quarterly QoQ·YoY·margin·standardized FCF와 TTM은 producer-owned Derived Me
 reported/M8-derived QTD 입력의 exact unit, full dimensions, actual period, source filing,
 selection view/as-of와 basis가 호환될 때만 계산하며 missing은 missing으로 남긴다. TTM은
 4개의 연속된 eligible QTD, 동일 company/metric/unit/dimensions/view/as-of와 같은 non-null
-`basis_version`이 모두 있어야 하고 FY+YTD fallback을 쓰지 않는다. 실제 첫 quarter
-publication에서는 consumer가 검증할 수 있는 reported/M8/TTM 계약을 먼저 낸다. 그 외
-승인된 generic derived row는 명시적 input contract가 consumer와 함께 고정될 때까지
-AVAILABLE로 내지 않는다.
+`basis_version`이 모두 있어야 하고 FY+YTD fallback을 쓰지 않는다. generic input contract와
+consumer 검증은 이후 함께 고정됐다. 수락된 consumer source는
+`bccd2ea12886c3fc8e479a5d85edb22647ddf7ec`이며 독립 보고서 SHA-256은
+`da2b90402fd69831b13a91b718d86897f1cdf4cce63b2c12bf3bad5f93686cdf`다. 이 수락은
+serialization/source-scope 검증에 대한 것이며 actual 분기 금액이나 50사 publication을
+수락한 것은 아니다.
 
 wire contract는 `quarterly-screening-metric-manifest-v1`과
 `quarter_metric_definitions.json`, `quarter_metric_support.json`,
@@ -240,7 +246,14 @@ recast view를 만들지 않는다. TTM definition은 `input_metric_id`를 명�
 wire manifest SHA-256은
 `84e652322e570f4768c278fa924aaf6c1de98f1158be0d162b9be0a488fa359a`이며 실제 financial
 수락 증거가 아니다. v1–v3 wire는 coherence 결함으로 실패했고 v4는 생략 scope가 있는
-schema-only 역사다.
+schema-only 역사다. actual producer는 11개 prepared core
+(`quarter_revenue`, `quarter_gross_profit`, `quarter_operating_income`,
+`quarter_net_income`, `quarter_cfo`, `quarter_capex`, `quarter_assets`, `quarter_cash`,
+`quarter_liabilities`, `quarter_current_assets`, `quarter_current_liabilities`), generic 5개
+(`quarter_revenue_qoq`, `quarter_revenue_yoy`, `quarter_gross_margin`,
+`quarter_operating_margin`, `quarter_standardized_fcf`), `ttm_revenue`를 총 17개 definition으로
+고정한다. unsupported input은 definition을 없애지 않고 8개 fixed spine의 `UNAVAILABLE`과
+정확한 reason으로 남긴다.
 
 generic quarter derived definition은 `input_contract.version =
 quarter-derived-input-scope-v1`을 쓰고 `kind`를
@@ -327,6 +340,30 @@ root에 저장한 뒤 network-free `discover_history(..., recent_fiscal_years=5)
 - package download와 Arelle parse/build는 0건이다. 이 결과는 filing plan 검증이며
   financial metric readiness나 5사 최종 eligibility를 뜻하지 않는다.
 
+### 6.2 첫 5사 financial build 진행 상태
+
+독립 수락된 d378 runtime을 별도 clean checkout에서 실행하며 회사 process는 한 번에 하나만
+띄운다. 새 immutable root는
+`data/processed/universe_runs/20261010_universe50_quarterly/pilot5_d378_*`와
+`data/raw/universe_runs/20261010_universe50_quarterly/pilot5_d378`다. 이 진행 기록은
+actual data gate 전의 운영 증거다.
+
+- TXN 22/22와 HD 22/22 accession이 Raw complete, history와 5FY annual analysis verified다.
+  TXN total wall 154.354초/peak RSS 6,239,848KB, HD 99.010초/4,898,628KB였다.
+- JNJ의 과거 2021 filing 하나는 package 손상이 아니라 pilot taxonomy cache에
+  SRT 2019, US-GAAP 2019, country 2017 import가 없어서 실패했다. read-only 진단 보고서
+  `/tmp/jnj-20210404-readonly-diagnosis/report.json` SHA-256
+  `09e06c077b2ace95e9fac77c587ed96336cd9cdbbd41bc2aa2ffa08f2237fe34` 뒤, 기존 명시적
+  `bootstrap_taxonomy=True` 경로로 cache를 채웠고 해당 accession은 새 attempt에서
+  INGESTED됐다. 기존 실패, ZIP, 21개 성공 snapshot은 변경하지 않았다.
+- CVX 최초 23 package 요청은 transport 단계에서 실패했다. 단일 exact URI를 body 없이
+  재확인했을 때 HTTP 200/application-zip였고, 재시도에서 22개가 INGESTED됐다. 남은 2021
+  filing 하나는 같은 historical taxonomy import gate로 분리됐다. 이는 metric 미공시가
+  아니며 taxonomy recovery 후에만 재시도한다.
+- `held_filings`는 validated successful Raw snapshot/outcome 수이며 품질 hold를 뜻하지 않는다.
+  회사가 `RAW_COMPLETE`, history verified, annual analysis verified를 모두 통과하기 전에는
+  financial READY로 세지 않는다.
+
 ## 7. 재사용 API와 확인된 interface gap
 
 기존 `sec_xbrl.collection_operations`의 public 경계는 다음과 같다.
@@ -335,6 +372,24 @@ root에 저장한 뒤 network-free `discover_history(..., recent_fiscal_years=5)
 - `collect_universe(..., selected_tickers=...)`
 - `build_universe(..., selected_tickers=...)`
 - `read_universe_status`와 network-free `status` CLI
+
+분기 producer의 새 public 경계는 다음과 같다.
+
+- `publish_quarterly_screening_metrics(config_path, destination)`는 외부 config, 정확한 annual
+  metric parent manifest SHA, 회사별 QUARTERLY analysis manifest SHA를 검증하고 네 payload를
+  원자적으로 새 destination에 게시한다.
+- `QuarterlyMetricReader(root, manifest_sha256=...)`는 SEC, Arelle, history selection이나
+  재무 계산을 호출하지 않고 frozen file set/hash/count/grain/publication identity를 읽는다.
+- `build_quarterly_company_records(...)`는 이미 준비된 columns/core cells/trace를 받는
+  network-free producer 경계다. HTTP/browser consumer에서 호출하지 않는다.
+- CLI는 `python -m sec_xbrl.metrics.quarterly_screening publish --config ... --destination ...`와
+  `status --publication ...`이다. `status`는 외부 source를 다시 열지 않는다.
+
+config schema `quarterly-screening-metric-config-v1`은 `financial_as_of`, `fixture_kind =
+ACTUAL_PREPARED`, `source_commit_sha`, exact `annual_metric_root`와 manifest SHA, 그리고
+`{ticker,cik,analysis_root,analysis_manifest_sha256}` 회사 목록을 요구한다. manifest의
+`annual_parent`는 같은 CIK membership의 annual **metric** publication ID/SHA를 가리킨다.
+annual dataset이나 UI publication을 대신 가리키지 않는다.
 
 현재 config는 `schema_version=1`, `universe_id`, `purpose`, `as_of_date`, optional
 `source_observed_at`, collection의 두 fiscal-year 수와 `include_subsequent_quarters=true`,
