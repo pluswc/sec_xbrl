@@ -18,11 +18,15 @@ from sec_xbrl.analysis import (
 from sec_xbrl.metrics.screening import (
     DEFINITION_BY_ID,
     METRIC_DEFINITIONS,
+    _company_year_windows,
     _derive_net_debt,
     _derive_pair,
     _derive_revenue_yoy,
+    _display_observations,
     _exact_subtract,
     _reported_observation,
+    _validate_config,
+    _validate_source_year_windows,
     expanded_analysis_profile,
 )
 
@@ -95,6 +99,111 @@ def test_expanded_profile_and_opt_in_signature_are_exact() -> None:
     assert "eps" not in {row["row_id"] for row in profile}
     assert "shares" not in {row["row_id"] for row in profile}
     assert inspect.signature(prepare_analysis).parameters["include_year_end_balances"].default is False
+
+
+def test_metric_config_year_windows_are_opt_in_and_legacy_shape_is_unchanged() -> None:
+    company = {
+        "ticker": "TEST",
+        "cik": "0000000001",
+        "analysis_root": "/prepared/test",
+        "analysis_manifest_sha256": "a" * 64,
+    }
+    legacy = {
+        "schema_version": "screening-metric-config-v1",
+        "financial_as_of": "2026-10-10",
+        "source_dataset_root": "/prepared/identity",
+        "source_dataset_manifest_sha256": "b" * 64,
+        "companies": [company],
+    }
+    assert _validate_config(legacy) == legacy
+    windowed = copy.deepcopy(legacy)
+    windowed["companies"][0].update(
+        input_years=[2021, 2022, 2023, 2024, 2025],
+        display_years=[2022, 2023, 2024, 2025],
+    )
+    assert _validate_config(windowed) == windowed
+    bad = copy.deepcopy(windowed)
+    bad["companies"][0]["display_years"] = [2021, 2022, 2023, 2024]
+    with pytest.raises(ValueError, match="latest ordered subset"):
+        _validate_config(bad)
+    bad = copy.deepcopy(windowed)
+    bad["companies"][0]["input_years"] = [2021, 2022, True, 2024, 2025]
+    with pytest.raises(ValueError, match="integer fiscal years"):
+        _validate_config(bad)
+
+
+def test_five_input_years_publish_four_and_keep_oldest_yoy_predecessor() -> None:
+    company = {
+        "ticker": "TEST",
+        "input_years": [2021, 2022, 2023, 2024, 2025],
+        "display_years": [2022, 2023, 2024, 2025],
+    }
+    input_years, display_years = _company_year_windows(
+        company, [2021, 2022, 2023, 2024, 2025]
+    )
+    assert input_years == [2021, 2022, 2023, 2024, 2025]
+    prior = _reported("revenue", "100", year=2021, qname="us-gaap:Revenues")
+    prior.update(period_start="2020-01-01", period_end="2021-01-01")
+    current = _reported("revenue", "110", year=2022, qname="us-gaap:Revenues")
+    current.update(period_start="2021-01-01", period_end="2022-01-01")
+    yoy = _derive_revenue_yoy(
+        ticker="TEST",
+        cik="0000000001",
+        definition=DEFINITION_BY_ID["revenue_yoy"],
+        current=current,
+        prior=prior,
+        fiscal_year=2022,
+    )
+    assert yoy["availability_status"] == "AVAILABLE"
+    assert yoy["input_observation_ids"] == [
+        current["metric_observation_id"],
+        prior["metric_observation_id"],
+    ]
+    published = _display_observations([prior, current], [yoy], display_years)
+    assert prior not in published
+    assert current in published and yoy in published
+
+
+def test_partial_year_window_and_prepared_year_tamper_fail_closed() -> None:
+    partial = {
+        "ticker": "IPO",
+        "input_years": [2024, 2025],
+        "display_years": [2024, 2025],
+    }
+    assert _company_year_windows(partial, [2024, 2025]) == (
+        [2024, 2025],
+        [2024, 2025],
+    )
+    with pytest.raises(ValueError, match="prepared years differ"):
+        _company_year_windows(partial, [2023, 2024, 2025])
+
+
+def test_metric_source_year_window_declaration_cannot_drift() -> None:
+    legacy = {"ticker": "TEST"}
+    _validate_source_year_windows(legacy, {"ticker": "TEST"})
+    with pytest.raises(ValueError, match="declaration changed"):
+        _validate_source_year_windows(legacy, {"input_years": [2025], "display_years": [2025]})
+
+    windowed = {
+        "ticker": "TEST",
+        "input_years": [2021, 2022, 2023, 2024, 2025],
+        "display_years": [2022, 2023, 2024, 2025],
+    }
+    _validate_source_year_windows(
+        windowed,
+        {
+            "input_years": [2021, 2022, 2023, 2024, 2025],
+            "display_years": [2022, 2023, 2024, 2025],
+        },
+    )
+    with pytest.raises(ValueError, match="year windows changed"):
+        _validate_source_year_windows(
+            windowed,
+            {
+                "input_years": [2021, 2022, 2023, 2024, 2025],
+                "display_years": [2021, 2022, 2023, 2024],
+            },
+        )
 
 
 def test_exact_year_end_instant_selection_rejects_interim_and_ambiguous_fy() -> None:

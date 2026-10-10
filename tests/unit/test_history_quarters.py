@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
-from sec_xbrl.analytics.history_quarters import _has_materialized_cell, derive_quarter
+from sec_xbrl.analytics.history_quarters import (
+    _has_materialized_cell,
+    _period_attestation_index,
+    _read_staged_records,
+    derive_quarter,
+)
+from sec_xbrl.history import _write_records
 from sec_xbrl.periods.logic import PeriodClassifier
 
 
@@ -85,3 +92,30 @@ def test_derived_gap_fill_never_replaces_materialized_report_or_conflict(status)
     cells = [{"fiscal_time_series_row_id": "r", "fiscal_time_series_column_id": "q4", "value_status": status}]
     assert _has_materialized_cell(cells, "r", "q4")
     assert not _has_materialized_cell(cells, "r", "q3")
+
+
+def test_staged_chunk_round_trip_checks_hash_and_count(tmp_path: Path) -> None:
+    path = tmp_path / "chunk.parquet"
+    records = ({"id": "one", "nested": {"source": ["fact-1"]}},)
+    info = _write_records(path, records)
+    assert _read_staged_records(path, info) == records
+    corrupted = path.read_bytes() + b"corrupt"
+    path.write_bytes(corrupted)
+    with pytest.raises(ValueError, match="integrity mismatch"):
+        _read_staged_records(path, info)
+
+
+def test_period_attestation_index_projects_only_validated_fields() -> None:
+    source = {
+        "source_filing_id": "filing-1",
+        "source_fact_id": "fact-1",
+        "comparative_type": "CURRENT_FOCUS",
+        "period_class": "FY",
+        "classification_rule_version": "period-v1",
+        "value_numeric": "10",
+        "unused_large_payload": {"must": "not remain live"},
+    }
+    publication = type("Verified", (), {"records": lambda self, name: (source,)})()
+    index = _period_attestation_index(publication)
+    assert index[("filing-1", "fact-1")]["value_numeric"] == "10"
+    assert "unused_large_payload" not in index[("filing-1", "fact-1")]

@@ -12,11 +12,13 @@
    cumulative YTD, governed derived quarter를 분리한다.
 
 이 계약 작성과 metadata·Filing Discovery 계획, 아래 M0 bounded correction 구현은
-**APPROVED**다. 상태는 **M0_CORRECTION_IMPLEMENTATION_APPROVED**이며, 확대 financial
-parsing, 29사 추가 history build, quarterly publication과 consumer 연결은
-**BLOCKED_PENDING_CORRECTED_21_INDEPENDENT_PASS**다. 새 21사 publication이 독립 검증을
-통과하기 전에는 확대 단계로 넘어가지 않는다. 문서의 수락 조건은 이 절에 적은 범위를
-넘는 회계 정책이나 UI 구현을 자동 승인하지 않는다.
+**APPROVED**다. M0 source `7eb721cb018ee3723c66fa2801a9836c48d2e0bb`와 새 21사 annual
+metric/dataset publication은 독립 검증을 통과해 2026-10-10 KST에 lead가
+**LOCALLY_ACCEPTED**했다. 현재 상태는
+**MEMORY_AND_ANNUAL_WINDOW_IMPLEMENTATION_APPROVED**다. 확대 parsing 전에 동등한 메모리
+최적화와 5개 입력 FY/4개 표시 FY 분리를 source·golden·RSS gate로 먼저 고정한다. 이후
+분기 producer와 50사 build는 각각 별도 immutable artifact gate를 통과해야 한다. 문서의
+수락 조건은 이 절에 적은 범위를 넘는 회계 정책이나 UI 구현을 자동 승인하지 않는다.
 
 기준 소스는 `1e2733c61d4c21617c658093137957369af29b8b`이며 기존 actual 21사 Raw,
 history, R3 financial publication과 사용자 journal은 읽기 전용이다. 회사 설명 기능의
@@ -84,6 +86,36 @@ CAL 구성·정밀도, 단일 부적격 reason, completed/partial history 재사
 생성된 WMT·AMD·AAPL과 중단된 MSFT 출력은 `NOT_ACCEPTED_CANDIDATE`이며 후속 수락 결과로
 재사용하지 않는다.
 
+### 1.2 M0 통과와 다음 producer checkpoint
+
+수정 source `7eb721cb018ee3723c66fa2801a9836c48d2e0bb`의 독립 source 검증 보고서 SHA-256은
+`82be077d222381be100201d3847d22c73b39aecb9fa5b5a31dbec3bbfad6fa06`다. 새 root에서
+생성한 21사·31정의·651 support·2,604 observation의 독립 artifact 검증 보고서 SHA-256은
+`2eac15e40fc0b7da85feb62bc4539dc710a5bfb110991fafde5d569ac4a29d4e`다. 기존과 새
+publication에서 함께 AVAILABLE인 1,864개 값·scope·Fact는 바뀌지 않았고, 160개가 승인된
+mapping/대표값 규칙으로 회복됐으며, DE operating income FY2022–2024와 AVGO net income
+FY2024 네 칸은 typed primary-statement evidence 부족으로 보수적으로 hold됐다.
+
+다음 source checkpoint는 두 변경만 먼저 구현한다.
+
+1. `publish_quarter_history`가 모든 view·period table의 중첩 lineage를 한꺼번에 Python
+   object로 유지하지 않도록 얇은 additive derivation index와 table-at-a-time staging을
+   사용한다. 모든 row, cell, candidate, trace, source input, network evidence, 순서와
+   manifest count/hash는 그대로 보존하고 실제 읽은 각 입력의 hash/count 검증도 생략하지
+   않는다. CAT의 accepted 7eb publication 전체 canonical table/derived records와 비교하고
+   peak RSS를 측정한다. 목표는 5FY CAT build를 32GiB 장비에서 안전하게 실행하는 것이며
+   `20GiB 이하`는 목표이지 사전 약속이 아니다. writer 후보 실측에서는 CAT의 10개 table,
+   30개 dataset, 198개 derived record가 전부 동일했고 peak RSS가 30,621,104KB에서
+   15,342,152KB로, wall time이 861.06초에서 515.25초로 줄었다. 이 결과는
+   `/tmp/universe50-memory-cat-golden.json`(SHA-256
+   `cb57989bc13b9471873028405ad70e7aaf11bb62ec5f07afbbbb7a11fea3ded9`)의 writer
+   checkpoint 증거이며 독립 검증 전에는 최종 수락으로 간주하지 않는다.
+2. annual metric config는 선택적으로 `input_years`와 `display_years`를 선언한다. 5개 완료
+   FY를 입력으로 읽어 가장 오래된 표시 FY의 YoY predecessor로 쓸 수 있지만 publication은
+   최신 4개 display FY만 노출한다. predecessor는 input lineage에 남고 별도 표시 observation을
+   만들지 않는다. 짧은 history는 가능한 집합과 `PARTIAL_HISTORY`를 유지한다. 기존 필드만
+   가진 config는 기존 결과와 byte-equivalent여야 한다.
+
 ## 2. 불변 입력과 새 run 경계
 
 재실행 가능한 새 run identity는 `universe-50-quarterly-20261010`으로 제안한다.
@@ -123,9 +155,13 @@ ordinary-security eligibility는 아직 확인하지 않았다. 해당 source는
 history는 `CIK 0000034088 / EXXON MOBIL CORP`에 있다. SEC entity identity, security
 registration, effective succession과 historical filing ownership을 별도 evidence로
 확정하기 전에는 `IDENTITY_HOLD`다. 과거 history를 새 CIK로 이어 붙이지 않는다.
-XOM이 cutoff 기준 지원 issuer로 확정되지 않으면 provisional 대체 후보는 cached inventory의
-`COP / CIK 0001163165 / CONOCOPHILLIPS / NYSE`다. COP도 똑같은 live identity·form·SIC·
-security-type gate를 통과해야 하며 자동 대체하지 않는다.
+XOM은 `IDENTITY_HOLD_SUCCESSION_REVIEW`로 남는다. SEC CIK 연결과 cached current-security
+evidence, 5개 10-K baseline/17개 10-Q plan을 별도로 검증한
+`COP / CIK 0001163165 / CONOCOPHILLIPS / NYSE`를 lead가 50사 cohort의 대체 issuer로
+승인했다. 이는 membership 승인이고 US-GAAP/USD financial readiness 승인은 아니다.
+따라서 최종 50사는 기존 21사에 TXN, ADI, AMAT, LRCX, KLAC, IBM, ORCL, CRM, ADBE, INTU,
+CSCO, HD, LOW, NKE, PEP, MCD, GE, HON, UPS, UNP, JNJ, MRK, ABBV, ABT, CVX, NEE, DUK, LIN,
+COP를 더한다. XOM hold와 제외 근거는 지우지 않는다.
 
 각 후보는 다음 상태 중 정확히 하나를 갖는다.
 
@@ -148,6 +184,10 @@ eligibility나 회계 규칙을 약화하지 않는다.
 - `analytical_fiscal_years=4`: 사용자·screening 연차 표시는 최신 완료 FY 4개다.
 - 다섯 번째 FY는 4년 growth window의 predecessor 입력이며 기본 결과 열을 하나 늘리는
   값이 아니다. 짧은 history·IPO는 가능한 범위를 보존하고 `PARTIAL_HISTORY`로 표시한다.
+- 새 metric producer는 `input_years` 전체에서 reported/derived 입력을 검증한 뒤
+  `display_years` 좌표만 publication한다. 두 집합은 company별 manifest/config와
+  publication identity에 포함되며 `display_years`는 `input_years`의 ordered subset이어야
+  한다. consumer가 predecessor를 다시 선택하거나 계산하지 않는다.
 
 기존 trailing selector는 요청한 5개 10-K와 그보다 앞선 annual의 report date를 exclusive
 window boundary로 사용한다. 즉 selector가 말하는 별도 boundary predecessor와, 이번
@@ -180,10 +220,46 @@ start, source filing/as-of, endpoint와 additive allowlist가 모두 호환될 �
 direct reported quarter가 우선하고 failed direct selection을 subtraction으로 덮지 않는다.
 EPS, margin, ratio, average, denominator unit, unreviewed custom/recast 범위에는 적용하지 않는다.
 
-quarterly YoY와 TTM은 이번 최초 publication의 자동 산출물이 아니다. 필요한 current·
-predecessor quarter 또는 rolling inputs의 semantic identity, actual duration, basis와
-source availability를 실제 corpus에서 진단한 뒤 별도 lead 승인을 받아야 한다. missing은
-missing으로 남긴다.
+quarterly QoQ·YoY·margin·standardized FCF와 TTM은 producer-owned Derived Metrics다.
+reported/M8-derived QTD 입력의 exact unit, full dimensions, actual period, source filing,
+selection view/as-of와 basis가 호환될 때만 계산하며 missing은 missing으로 남긴다. TTM은
+4개의 연속된 eligible QTD, 동일 company/metric/unit/dimensions/view/as-of와 같은 non-null
+`basis_version`이 모두 있어야 하고 FY+YTD fallback을 쓰지 않는다. 실제 첫 quarter
+publication에서는 consumer가 검증할 수 있는 reported/M8/TTM 계약을 먼저 낸다. 그 외
+승인된 generic derived row는 명시적 input contract가 consumer와 함께 고정될 때까지
+AVAILABLE로 내지 않는다.
+
+wire contract는 `quarterly-screening-metric-manifest-v1`과
+`quarter_metric_definitions.json`, `quarter_metric_support.json`,
+`quarter_metric_observations.json`, `quarter_period_inventory.json` 네 payload다. actual row와
+모든 source anchor는 CIK, canonical metric ID, `AS_FILED|LATEST_REPORTED`, as-of, full
+dimensions, quality status/reasons/blocking, filing/Fact/context/QName/namespace/unit/period를
+명시하며 상위 row에서 누락 scope를 상속하지 않는다. derived 의미는 `source_kind`,
+`derivation_rule_version`, `basis_version`, `ARITHMETIC_ONLY_NOT_RECAST_VALIDATED`로 표현하고
+recast view를 만들지 않는다. TTM definition은 `input_metric_id`를 명시한다. synthetic v5
+wire manifest SHA-256은
+`84e652322e570f4768c278fa924aaf6c1de98f1158be0d162b9be0a488fa359a`이며 실제 financial
+수락 증거가 아니다. v1–v3 wire는 coherence 결함으로 실패했고 v4는 생략 scope가 있는
+schema-only 역사다.
+
+generic quarter derived definition은 `input_contract.version =
+quarter-derived-input-scope-v1`을 쓰고 `kind`를
+`SAME_PERIOD_DIFFERENCE`, `SAME_PERIOD_RATIO`,
+`ADJACENT_FISCAL_QUARTER_GROWTH`, `SAME_FISCAL_QUARTER_YOY_GROWTH` 중 하나로 선언한다.
+`inputs`는 `{input_role, metric_id, value_constraint}`이며 FCF는
+`CFO/FINITE`, `CAPEX/NONNEGATIVE`, margin은 `NUMERATOR/FINITE`,
+`DENOMINATOR/POSITIVE`, QoQ·YoY는 `CURRENT/NONNEGATIVE`, `PRIOR/POSITIVE`다.
+ratio·growth만 `denominator_policy=STRICTLY_POSITIVE`를 쓰고, definition의
+`basis_policy=ARITHMETIC_ONLY_NOT_RECAST_VALIDATED`와 observation lineage의
+`compatibility_policy`가 정확히 같아야 한다. input은 완전한 `REPORTED` 또는
+`DERIVED_QUARTER` observation과 중첩 lineage이며 역할을 명시한다. consumer는 scope·부호·
+lineage만 검증하고 공식을 재계산하지 않는다. QTD percent output은 기존 R1처럼 이미
+100을 곱한 decimal string과 `unit_kind=PERCENT`, `unit=PERCENT`를 사용한다.
+INSTANT는 `period_start=null`, exclusive `period_end`, `duration_days=null`이며 raw
+`context_instant_date`를 lineage에 보존한다. standardized metric ID와 issuer별
+`company_canonical_concept_id`를 분리하고 성장 입력의 issuer canonical identity가
+호환돼야 한다. source anchor에 `structural_version` 또는 `recast_version`이 있으면 모든
+입력과 output 선언이 충돌하지 않아야 하며, 누락을 review-clear로 해석하지 않는다.
 
 ## 5. 최초 지표와 품질 gate
 

@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
 import tempfile
 from collections import defaultdict
 from copy import deepcopy
@@ -76,6 +77,52 @@ def _has_materialized_cell(cells: list[dict[str, Any]], row_id: str, column_id: 
     return any(cell["fiscal_time_series_row_id"] == row_id and cell["fiscal_time_series_column_id"] == column_id for cell in cells)
 
 
+_PERIOD_ATTESTATION_FIELDS = (
+    "source_filing_id", "source_fact_id", "comparative_type", "period_class",
+    "classification_rule_version", "period_classification_reason", "value_numeric", "value_text",
+    "context_start_date", "context_end_date", "context_instant_date", "context_id", "unit_id",
+    "raw_concept_id", "raw_concept_qname", "raw_concept_namespace_uri",
+    "company_canonical_concept_id", "filed_date", "source_snapshot_id", "accession",
+    "unit_numerator_measures", "unit_denominator_measures", "canonical_dimension_signature",
+)
+
+
+def _period_attestation_index(observed: Any) -> dict[tuple[str, str], dict[str, Any]]:
+    """Keep only fields used to attest a selected history cell.
+
+    ``Layer2PublicationReader`` has already validated every declared dataset and
+    row count before this projection.  Dropping unrelated tables here prevents
+    the verified publication object from remaining live while large history
+    tables are rewritten.
+    """
+    return {
+        (row["source_filing_id"], row["source_fact_id"]): {
+            field: row.get(field) for field in _PERIOD_ATTESTATION_FIELDS
+        }
+        for row in observed.records("reported_period_observation")
+    }
+
+
+def _read_staged_records(path: Path, info: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    """Read one producer-owned chunk with the same hash/count checks as history."""
+    import polars as pl
+
+    if path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != info["sha256"]:
+        raise ValueError("quarter history staging chunk integrity mismatch")
+    rows = pl.read_parquet(path).to_dicts()
+    if len(rows) != info["count"]:
+        raise ValueError("quarter history staging chunk count mismatch")
+    return tuple(
+        {
+            key: json.loads(value)
+            if key in info["json_fields"] and value is not None
+            else value
+            for key, value in row.items()
+        }
+        for row in rows
+    )
+
+
 def derive_quarter(later: dict[str, Any], earlier: dict[str, Any], *, quarter: int) -> dict[str, Any] | None:
     """One reviewed additive difference; reject all incompatible scopes."""
     if quarter not in {2, 3, 4} or not approved_additive(later) or not approved_additive(earlier):
@@ -132,15 +179,24 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
     prepared_root = operational_root or output_root
     roots = {name: prepared_root / name / prepared_root.name for name in ("t1", "t2", "t3", "t4")}
     observed = Layer2PublicationReader().load(roots["t1"])
-    if (reuse_roots or operational_root is not None) and observed.identity["layer2_run_fingerprint"] != old.manifest["input_fingerprint"]:
+    input_fingerprint = observed.identity["layer2_run_fingerprint"]
+    if (reuse_roots or operational_root is not None) and input_fingerprint != old.manifest["input_fingerprint"]:
         raise ValueError("reused period publications do not match reported panels")
-    by_fact = {(row["source_filing_id"], row["source_fact_id"]): row for row in observed.records("reported_period_observation")}
-    bundles: dict[tuple[str, str, str], dict[str, Any]] = {}
+    by_fact = _period_attestation_index(observed)
+    del observed
+
+    staging = Path(tempfile.mkdtemp(prefix=".panels.partial-", dir=output_root))
+    chunk_root = staging / ".chunks"
+    chunk_root.mkdir()
+    targets: dict[tuple[str, str, str], dict[str, Any]] = {}
+    additive_by_pair: dict[tuple[str, str], dict[tuple[int, str, str], list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]]]] = {}
+    materialized: dict[tuple[str, str, str], set[tuple[str, str]]] = defaultdict(set)
     changes = defaultdict(int)
-    for table in old.manifest["tables"]:
+    for table_index, table in enumerate(old.manifest["tables"]):
         result = old.load(ticker=table["ticker"], period_class=table["period_class"], view=table["view"])
         columns = {column["fiscal_time_series_column_id"]: column for column in result.columns}
         rows = {row["fiscal_time_series_row_id"]: row for row in result.rows}
+        chunks: dict[tuple[str, str, str], dict[str, Any]] = {}
         for original in result.cells:
             cell = deepcopy(original)
             value = cell.get("value_lineage")
@@ -169,8 +225,10 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
                     cell["prior_publication_candidate_lineage"] = cell.pop("candidate_lineage")
                     cell["prior_candidate_publication"] = str(publication.absolute())
             key = (table["ticker"], table["view"], period_class)
-            bundle = bundles.setdefault(key, {"table": {**table, "period_class": period_class,
-                "scope": {**table["scope"], "period_class": period_class}}, "rows": {}, "columns": {}, "cells": []})
+            target = targets.setdefault(key, {"table": {**table, "period_class": period_class,
+                "scope": {**table["scope"], "period_class": period_class}}, "chunks": [],
+                "extra_rows": {}, "extra_columns": {}, "extra_cells": []})
+            bundle = chunks.setdefault(key, {"rows": {}, "columns": {}, "cells": []})
             column = {**old_column, "period_class": period_class,
                       "fiscal_time_series_column_id": _id("column", (old_column["fiscal_year"], old_column["fiscal_quarter"], period_class))}
             cell["fiscal_time_series_column_id"] = column["fiscal_time_series_column_id"]
@@ -178,19 +236,29 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
             bundle["columns"][column["fiscal_time_series_column_id"]] = column
             bundle["rows"][cell["fiscal_time_series_row_id"]] = rows[cell["fiscal_time_series_row_id"]]
             bundle["cells"].append(cell)
+            materialized[key].add((cell["fiscal_time_series_row_id"], cell["fiscal_time_series_column_id"]))
+            if approved_additive(cell):
+                pair_groups = additive_by_pair.setdefault((table["ticker"], table["view"]), {})
+                pair_groups.setdefault((column["fiscal_year"], period_class, _scope(cell["value_lineage"])), []).append(
+                    (cell, column, rows[cell["fiscal_time_series_row_id"]])
+                )
+        for chunk_index, (key, bundle) in enumerate(chunks.items()):
+            chunk_files = {}
+            for name, records in (
+                ("columns", tuple(bundle["columns"].values())),
+                ("rows", tuple(bundle["rows"].values())),
+                ("cells", tuple(bundle["cells"])),
+            ):
+                path = chunk_root / f"{table_index:04d}-{chunk_index:02d}-{name}.parquet"
+                chunk_files[name] = {**_write_records(path, records), "path": path}
+            targets[key]["chunks"].append(chunk_files)
     derived = []
-    for ticker, view in sorted({(key[0], key[1]) for key in bundles}):
-        qtd = bundles.get((ticker, view, "QTD_3M"))
+    for ticker, view in sorted({(key[0], key[1]) for key in targets}):
+        qtd_key = (ticker, view, "QTD_3M")
+        qtd = targets.get(qtd_key)
         if qtd is None:
             continue
-        grouped = defaultdict(list)
-        for (company, selected_view, kind), bundle in bundles.items():
-            if company != ticker or selected_view != view or kind not in {"QTD_3M", "YTD_6M", "YTD_9M", "FY"}:
-                continue
-            for cell in bundle["cells"]:
-                if approved_additive(cell):
-                    column = bundle["columns"][cell["fiscal_time_series_column_id"]]
-                    grouped[(column["fiscal_year"], kind, _scope(cell["value_lineage"]))].append((cell, column, bundle))
+        grouped = additive_by_pair.get((ticker, view), {})
         for (year, kind, scope), choices in list(grouped.items()):
             quarter = {"YTD_6M": 2, "YTD_9M": 3, "FY": 4}.get(kind)
             if quarter is None:
@@ -201,14 +269,14 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
                 partners = [item for item in partners if item[1]["fiscal_quarter"] == 1]
             if len(choices) != 1 or len(partners) != 1:
                 continue
-            later, annual_column, source_bundle = choices[0]
+            later, annual_column, source_row = choices[0]
             earlier = partners[0][0]
             metric = derive_quarter(later, earlier, quarter=quarter)
             if metric is None:
                 continue
             row_id = later["fiscal_time_series_row_id"]
             column_id = _id("column", (year, quarter, "QTD_3M"))
-            if _has_materialized_cell(qtd["cells"], row_id, column_id):
+            if (row_id, column_id) in materialized[qtd_key]:
                 continue
             metric.update(cik=qtd["table"]["cik"], ticker=ticker, fiscal_year=year, view=view)
             derived.append(metric)
@@ -222,17 +290,27 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
                        "source_bindings": [deepcopy(later["binding"]), deepcopy(earlier["binding"])]}
             column = _column((year, quarter, "QTD_3M"), annual_column.get("fiscal_year_end_as_filed"),
                              _period_evidence(SimpleNamespace(values=[{**value, "value_status": "REPORTED"}])))
-            qtd["columns"].setdefault(column_id, column)
-            qtd["rows"].setdefault(row_id, source_bundle["rows"][row_id])
-            qtd["cells"] = [cell for cell in qtd["cells"] if not (cell["fiscal_time_series_row_id"] == row_id and cell["fiscal_time_series_column_id"] == column_id)]
-            qtd["cells"].append({"fiscal_time_series_cell_id": metric["derived_metric_id"], "fiscal_time_series_row_id": row_id,
+            qtd["extra_columns"].setdefault(column_id, column)
+            qtd["extra_rows"].setdefault(row_id, source_row)
+            qtd["extra_cells"].append({"fiscal_time_series_cell_id": metric["derived_metric_id"], "fiscal_time_series_row_id": row_id,
                                   "fiscal_time_series_column_id": column_id, "value_status": "DERIVED", "value_numeric": metric["value_numeric"],
                                   "value_text": None, "comparability_status": "COMPATIBLE_INPUTS", "comparability_reason": metric["basis_compatibility"],
                                   "definition": definition, "binding": binding, "value_lineage": value})
-    staging = Path(tempfile.mkdtemp(prefix=".panels.partial-", dir=output_root))
     tables = []
-    for key, bundle in sorted(bundles.items()):
-        table = {**bundle["table"], "files": {}}
+    for key, target in sorted(targets.items()):
+        table = {**target["table"], "files": {}}
+        bundle: dict[str, Any] = {"columns": {}, "rows": {}, "cells": []}
+        for chunk in target["chunks"]:
+            for column in _read_staged_records(chunk["columns"]["path"], chunk["columns"]):
+                bundle["columns"][column["fiscal_time_series_column_id"]] = column
+            for row in _read_staged_records(chunk["rows"]["path"], chunk["rows"]):
+                bundle["rows"].setdefault(row["fiscal_time_series_row_id"], row)
+            bundle["cells"].extend(_read_staged_records(chunk["cells"]["path"], chunk["cells"]))
+        for column_id, column in target["extra_columns"].items():
+            bundle["columns"].setdefault(column_id, column)
+        for row_id, row in target["extra_rows"].items():
+            bundle["rows"].setdefault(row_id, row)
+        bundle["cells"].extend(target["extra_cells"])
         # Recompute column boundaries from the corrected partition, not the old
         # FY/TTM mixture. Include derived durations as explicit source evidence.
         columns = []
@@ -249,10 +327,11 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
             table["files"][name] = {**_write_records(staging / relative, records), "path": str(relative)}
         tables.append(table)
         print(json.dumps({"stage": "QUARTER_PANEL", "ticker": key[0], "view": key[1], "period_class": key[2], "cells": len(bundle["cells"])}), flush=True)
+    shutil.rmtree(chunk_root)
     derived_info = _write_records(staging / "derived_quarter.parquet", tuple(derived))
     manifest = {**old.manifest, "version": HISTORY_VERSION, "tables": tables, "period_rule": PERIOD_RULE,
                 "operational_roots": {key: str(path.absolute()) for key, path in roots.items()},
-                "input_fingerprint": observed.identity["layer2_run_fingerprint"],
+                "input_fingerprint": input_fingerprint,
                 "derived_quarter": {**derived_info, "path": "derived_quarter.parquet"},
                 "quarterly_derivation_status": "APPROVED_STANDARD_ADDITIVE_CORE_CONNECTED",
                 "derivation_rule": QUARTER_RULE, "period_reclassification_counts": dict(changes),
