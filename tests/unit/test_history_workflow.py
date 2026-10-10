@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +11,31 @@ import pytest
 from sec_xbrl import history
 from sec_xbrl.analytics import FiscalTimeSeriesQuery
 from sec_xbrl.filing.contracts import FilingRef
+from sec_xbrl.longitudinal import MAPPING_VERSION, Layer1SnapshotInput, Layer2Run
+
+
+def test_history_run_uses_active_mapping_policy_in_its_fingerprint() -> None:
+    rules = history._history_layer2_rule_versions()
+    layer1 = Layer1SnapshotInput(
+        cik="0000320193",
+        accession="0000320193-26-000020",
+        form="10-Q",
+        filed_date="2026-05-01",
+        report_date="2026-03-28",
+        snapshot_id="0000320193/000032019326000020",
+        manifest_sha256="a" * 64,
+        parser_version="m2-layer1-v5",
+    )
+    current = Layer2Run("history-v4", "history-corpus", (layer1,), rules)
+    legacy = Layer2Run(
+        "history-v4",
+        "history-corpus",
+        (layer1,),
+        replace(rules, mapping_version="mapping-custom-network-v3"),
+    )
+
+    assert current.rules.mapping_version == MAPPING_VERSION == "l2-m2-company-canonical-v4"
+    assert current.fingerprint != legacy.fingerprint
 
 
 def test_report_window_and_as_of_are_independent() -> None:

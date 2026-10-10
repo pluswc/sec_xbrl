@@ -31,9 +31,21 @@ from sec_xbrl.filing.filing_index import ArelleFilingLoader, FilingIndexCache, F
 from sec_xbrl.filing.layer1_ingestion import Layer1Ingestor
 from sec_xbrl.filing.package_cache import AccessionPackageCache, SECArchiveClient
 from sec_xbrl.filing.trailing_corpus import select_trailing_fiscal_filings
+from sec_xbrl.longitudinal.canonical import MAPPING_VERSION
 from sec_xbrl.longitudinal.corpus_release import _load_declared_cohort_snapshot
+from sec_xbrl.longitudinal.materialization import Layer2RuleVersions
 
 HISTORY_VERSION = "company-history-v1"
+
+
+def _history_layer2_rule_versions() -> Layer2RuleVersions:
+    """Declare the active policies in every newly built history run."""
+    return Layer2RuleVersions(
+        "period-fiscal-boundaries-v2",
+        MAPPING_VERSION,
+        "recast-v1",
+        "selection-v1",
+    )
 
 
 def _write_json(path: Path, payload: Any) -> None:
@@ -242,7 +254,6 @@ def build_history(*, intake_manifest: Path, output_root: Path,
         ExplorationGraphPipeline,
         FilingRelationshipIndexPipeline,
         Layer2PublicationReader,
-        Layer2RuleVersions,
         ReportedObservationSelector,
         VersionedObservationPanelPipeline,
     )
@@ -270,7 +281,7 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     release = CohortReleaseAdapter().load(
         tuple(CohortSource(root, root.name, tuple(refs)) for root, refs in grouped.items()),
         cohort_id=run_id, ciks=tuple(company["cik"] for company in plan["companies"]), run_version=run_id,
-        rules=Layer2RuleVersions("period-fiscal-boundaries-v2", "mapping-custom-network-v3", "recast-v1", "selection-v1"),
+        rules=_history_layer2_rule_versions(),
     )
     planned = {(item["filing"]["cik"], item["filing"]["accession"]): item["filing"] for item in intake["filings"]}
     for snapshot in release.snapshots:

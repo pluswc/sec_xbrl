@@ -62,7 +62,11 @@ analysis, metric publication은 기존 파일을 덮지 않는 destination에 �
 대표값 선택을 독립적으로 재확인한다.
 새 mapping rule version은 `l2-m2-company-canonical-v4`, expanded annual core selector는
 `annual-core-primary-statement-v2`다. 기존 publication과 그 안의 v3 mapping은 변경하지
-않으며 새 publication lineage가 적용 rule version을 명시한다.
+않으며 새 publication lineage가 적용 rule version을 명시한다. 새 history build의
+`Layer2RuleVersions.mapping_version`도 canonical 모듈의 동일한 active version을 직접
+사용한다. 따라서 v3 history root를 v4 결과로 재사용하지 않고 새 root에서 다른 run
+fingerprint와 manifest rule metadata를 생성한다. period·recast·selection rule version은
+이번 correction으로 바꾸지 않는다.
 
 ## 2. 불변 입력과 새 run 경계
 
