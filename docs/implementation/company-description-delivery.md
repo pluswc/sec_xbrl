@@ -198,9 +198,20 @@ HTML selector는 명시적 id/class가 있는 한 요소만 허용하고 script/
 HTTPS URL, 확인시각과 유효한 권리 scope가 모두 필요하다. 나머지 dataset 회사는 URL과
 날짜를 꾸미지 않고 null metadata와 reason을 가진 `UNAVAILABLE`로 유지할 수 있다.
 
-작성자 검증은 network-free focused 18 PASS, screening 회귀 92 PASS, 전체 회귀
-1,373 PASS / 38 SKIP, Ruff와 browser JS syntax PASS다. actual R3를 읽기 전용으로 사용한
+초기 후보 작성자 검증은 network-free focused 18 PASS, screening 회귀 92 PASS, 전체
+회귀 1,373 PASS / 38 SKIP, Ruff와 browser JS syntax PASS였다. actual R3를 읽기 전용으로 사용한
 합성 helper 점검은 21사 중 1건 `SYNTHETIC_DESCRIPTION_FIXTURE`, 20건 explicit
 `UNAVAILABLE` publication과 pinned status를 확인했다. 이는 실제 회사 설명이나 제공자
 권리 승인 evidence가 아니다. 별도 독립 검증·lead 로컬 인수·사용자 화면 확인·remote
 push/PR/main merge는 모두 미수행이다.
+
+초기 source freeze `e98fbf116bd25ad87e880aea37e0dae9742e892c`는 독립 검증에서
+축약·대체 표기 numeric IP가 private-address guard를 우회한 점과 HTML 중복
+`id`/`class`가 last-wins로 선택된 점 때문에 **FAIL**로 반환됐다. 이 이력은 보존하며,
+후속 후보는 numeric alias를 DNS 없이 fail closed하고 selector 관련 중복 속성을
+추출 전에 거절한다. 후속 작성자 검증은 focused 35 PASS, 전체 관련 screening 회귀
+109 PASS, Ruff와 browser JS syntax PASS다. 그 외 product blob은 바뀌지 않아 초기
+전체 회귀 결과를 기준선으로 보존했고 전체 suite는 반복하지 않았다. 후속 후보의
+독립 검증 상태는 아직 `PENDING`이다. 독립 FAIL 보고서는
+`/tmp/company-description-independent/e98fbf-report.json`
+(SHA-256 `272026109925fa53463486919dfa06e08c36089a3ee0170be92ed32bb0079548`)에 있다.

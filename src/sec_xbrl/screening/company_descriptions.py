@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from html.parser import HTMLParser
 from pathlib import Path
+from socket import inet_aton
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
@@ -596,6 +597,13 @@ class _SelectedTextParser(HTMLParser):
     def __init__(self, selector: str) -> None:
         super().__init__(convert_charrefs=True)
         self.selector = _selector(selector)
+        selector_match = re.fullmatch(
+            r"([a-zA-Z][a-zA-Z0-9-]*)?(?:#([A-Za-z][\w-]*)|\.([A-Za-z][\w-]*))?",
+            self.selector,
+        )
+        if selector_match is None:  # pragma: no cover - _selector already validated it
+            raise ValueError("unsupported description selector")
+        self.selector_tag = (selector_match.group(1) or "").lower() or None
         self.stack: list[str] = []
         self.target_depth: int | None = None
         self.ignore_depth = 0
@@ -607,7 +615,16 @@ class _SelectedTextParser(HTMLParser):
         tag = tag.lower()
         self.stack.append(tag)
         depth = len(self.stack)
-        attr = {key: value or "" for key, value in attrs}
+        attr_names = [key.lower() for key, _value in attrs]
+        duplicate_selector_attributes = {
+            key for key in ("id", "class") if attr_names.count(key) > 1
+        }
+        potential_target = self.selector_tag is None or tag == self.selector_tag
+        if duplicate_selector_attributes and (
+            self.target_depth is not None or potential_target
+        ):
+            self.malformed_target = True
+        attr = {key.lower(): value or "" for key, value in attrs}
         if _matches_selector(tag, attr, self.selector):
             self.matches += 1
             if self.target_depth is None:
@@ -742,6 +759,12 @@ def _validate_host(value: Any) -> str:
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
+        try:
+            inet_aton(host)
+        except OSError:
+            pass
+        else:
+            raise ValueError("noncanonical numeric provider addresses are not allowed")
         if not re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?", host) or "." not in host:
             raise ValueError("invalid provider host")
     else:

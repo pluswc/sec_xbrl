@@ -16,6 +16,7 @@ from sec_xbrl.screening.company_descriptions import (
     CompanyDescriptionReader,
     FetchResult,
     _extract_selected_text,
+    _validate_url,
     publish_company_descriptions,
     review_company_description_plan,
 )
@@ -222,6 +223,53 @@ def test_selected_html_keeps_only_scoped_text_and_handles_void_tags() -> None:
             _extract_selected_text(html, broad)
 
 
+@pytest.mark.parametrize(
+    "host",
+    [
+        "127.1",
+        "127.0.1",
+        "127.0.0.1",
+        "0177.0.0.1",
+        "0x7f.0.0.1",
+        "0x7f000001",
+        "2130706433",
+        "192.168.1",
+        "0300.0250.0001.0001",
+        "0xc0a80101",
+        "3232235777",
+    ],
+)
+def test_provider_url_rejects_private_and_noncanonical_numeric_aliases(
+    host: str,
+) -> None:
+    with pytest.raises(ValueError, match="address"):
+        _validate_url(f"https://{host}/intro", [host])
+
+
+def test_provider_url_allows_public_canonical_ip_and_normal_dns() -> None:
+    assert _validate_url("https://8.8.8.8/intro", ["8.8.8.8"])
+    assert _validate_url("https://example.invalid/intro", ["example.invalid"])
+    assert _validate_url(
+        "https://2130706433.example/intro", ["2130706433.example"]
+    )
+
+
+@pytest.mark.parametrize(
+    "html",
+    [
+        '<section id="not-intro" id="intro">다른 회사 본문</section>',
+        '<section id="intro" id="not-intro">다른 회사 본문</section>',
+        '<section class="other" class="intro">다른 회사 본문</section>',
+        '<section class="intro" class="other">다른 회사 본문</section>',
+        '<section id="intro">정상 시작<div class="a" class="b">중첩</div></section>',
+    ],
+)
+def test_selected_html_rejects_duplicate_selector_attributes(html: str) -> None:
+    selector = "section.intro" if "class=\"intro\"" in html else "section#intro"
+    with pytest.raises(ValueError, match="malformed"):
+        _extract_selected_text(html, selector)
+
+
 def test_authorized_fetch_is_single_scoped_request_and_rejects_bad_response(
     screening_dataset: Path, tmp_path: Path
 ) -> None:
@@ -253,6 +301,12 @@ def test_authorized_fetch_is_single_scoped_request_and_rejects_bad_response(
             FetchResult(403, "text/html", b"", "https://profiles.example/company/one"),
             FetchResult(302, "text/html", b"", "https://profiles.example/other"),
             FetchResult(200, "text/html", b"<html>captcha</html>", "https://profiles.example/company/one"),
+            FetchResult(
+                200,
+                "text/html",
+                b'<section id="not-intro" id="intro">\xed\x95\x9c\xea\xb5\xad\xec\x96\xb4</section>',
+                "https://profiles.example/company/one",
+            ),
         )
     ):
         with pytest.raises(ValueError):

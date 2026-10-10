@@ -21,7 +21,10 @@ ticker, HTTPS profile URL, provider, `ko` locale, 확인·관찰 시각, rights 
 `PROVIDED_TEXT`는 `rights_scope=DISPLAY_PLAINTEXT`와 UTF-8 파일을, `AUTHORIZED_FETCH`는
 `rights_scope=FETCH_AND_DISPLAY_PLAINTEXT`와 명시적 `#id`, `.class`, `tag#id` 또는
 `tag.class` selector를 사용한다. `html`, `head`, `body`와 bare tag처럼 페이지 전체를
-가리킬 수 있는 selector는 거절한다. fetch 권한은 `APPROVED`이고 당일 유효해야 한다.
+가리킬 수 있는 selector, 관련 영역의 중복 `id`/`class` 속성은 거절한다. provider
+host는 정상 DNS 이름 또는 canonical public IP여야 하며 loopback/private/reserved IP와
+축약·hex·octal·단일 정수형 numeric alias는 network 전에 거절한다. fetch 권한은
+`APPROVED`이고 당일 유효해야 한다.
 
 ```bash
 PYTHONPATH=src /path/to/project/.venv/bin/python -m sec_xbrl.screening \
