@@ -170,6 +170,13 @@ reordered locator, later-row precedence를 회귀 테스트한다. 새 source가
 destination에서 전체 ordered logical record golden과 wall/RSS를 024c 실행과 비교하기 전에는
 성능 개선을 주장하거나 JNJ/CVX에 적용하지 않는다.
 
+성능 source `e5f4c9afdea732555c7d53737e5b81eda0688423`은 독립 source 검증을 통과했고,
+별도 CAT publication도 10개 table·30개 dataset·198개 derived record가 accepted baseline과
+schema, count, 순서, 디코딩 값과 물리 hash까지 모두 같았다. publisher wall은 707.912초,
+peak RSS는 15,187,056KB였고 comparator는 별도 프로세스에서 58.18초·4,175,784KB였다.
+이 결과는 기존 2026-10-08 CAT baseline 재현에 대한 동등성·자원 근거이며 50사나
+2026-10-10 cutoff 재무 수락을 뜻하지 않는다.
+
 두 번째 메모리·분기 보강 후보 `f111666f23fb9532269b7f182d1d7d5cf00ad042`는 독립 검증에서
 **FAIL**했다. 보고서 `/tmp/quarter-producer-f111/f111666-report.json`의 SHA-256은
 `43600dcaede5e215b58609010500b785b1e0fd529ff9f7c1479a361dfe3fbedf`다. typed PRE,
@@ -203,8 +210,17 @@ prepared output이 모두 적격할 때만 M8을 AVAILABLE로 게시하며, 원�
 지우거나 `False`로 바꾸지 않는다. 알려진 REPORTED 값의 comparison-only break·null basis
 보존 경계와 R1–R5 규칙은 바꾸지 않는다.
 
-수정 후보는 독립 source PASS 전까지 **REWORK_SOURCE_FROZEN_PENDING_VERIFICATION**이며,
-heavy CAT golden, JNJ retry, CVX build와 후속 50사 history 확대는 계속 보류한다.
+후속 `024c0f857df020ee5fca0a1d292f7224bc193228`은 위 보정을 포함해 독립 source 검증을
+통과했고, `e5f4c9a…`가 locator decode 성능 경계를 더했다. 다만 actual JNJ 22 filing
+재시도는 T1–T4 영속화 후 reported-panel 구성 전에 peak RSS 31,446,104KB에서 SIGKILL됐다.
+Raw 22/22 상태나 재무 공시 실패가 아니며, history·annual·quarter publication은 생성되지
+않았다. 원인은 T1–T4를 영속화한 뒤에도 전체 immutable Raw cohort를 reported-panel
+materialization과 함께 보유한 생명주기 경계다. 승인된 보정은 active fingerprint와 모든
+root 검증을 먼저 끝내고 snapshot count·fingerprint·작은 filing index를 캡처한 뒤, 사용이
+끝난 Raw cohort와 validation loop의 마지막 snapshot alias를 해제한다. reuse 경로도 모든
+manifest/root 검증 후 quarter publisher 호출 전에 같은 경계를 적용한다. record, 순서, ID,
+lineage, source, rule 또는 회계 의미는 바꾸지 않는다. 이 보정의 독립 source·golden gate 전에는
+JNJ를 재시도하거나 CVX·후속 50사 build를 시작하지 않는다.
 
 ## 2. 불변 입력과 새 run 경계
 

@@ -228,6 +228,15 @@ def _validate_snapshot_plan(snapshot: Any, record: dict[str, Any]) -> None:
         raise ValueError("snapshot filing metadata disagrees with requested history plan")
 
 
+def _validate_release_snapshot_plans(
+    release: Any, planned: dict[tuple[str, str], dict[str, Any]]
+) -> None:
+    """Validate every snapshot without retaining the final loop item in the caller."""
+    for snapshot in release.snapshots:
+        key = (snapshot.input.cik, snapshot.input.accession)
+        _validate_snapshot_plan(snapshot, planned[key])
+
+
 def _validate_intake(intake: dict[str, Any]) -> None:
     expected = {(company["cik"], row["accession"]) for company in intake["plan"]["companies"] for row in company["filings"]}
     actual = [(row["filing"]["cik"], row["filing"]["accession"]) for row in intake["filings"]]
@@ -272,20 +281,21 @@ def build_history(*, intake_manifest: Path, output_root: Path,
         rules=_history_layer2_rule_versions(),
     )
     planned = {(item["filing"]["cik"], item["filing"]["accession"]): item["filing"] for item in intake["filings"]}
-    for snapshot in release.snapshots:
-        _validate_snapshot_plan(snapshot, planned[(snapshot.input.cik, snapshot.input.accession)])
+    _validate_release_snapshot_plans(release, planned)
+    input_fingerprint = release.layer2_run.fingerprint
+    snapshot_count = len(release.snapshots)
     reader = Layer2PublicationReader()
     roots = {name: output_root / name / run_id for name in ("t1", "t2", "t3", "t4")}
     for root in (path for path in roots.values() if path.exists()):
         existing = reader.load(root)
-        if existing.identity["layer2_run_fingerprint"] != release.layer2_run.fingerprint:
+        if existing.identity["layer2_run_fingerprint"] != input_fingerprint:
             raise ValueError("existing operational publication uses different inputs or active rules")
     destination = output_root / "reported-panels"
     if destination.exists() and not roots_only:
         history_reader = HistoryPublicationReader(destination)
         if history_reader.manifest["plan"] != plan or tuple(history_reader.manifest["views"]) != views:
             raise ValueError("history publication scope differs; choose a new output root")
-        if history_reader.manifest.get("input_fingerprint") != release.layer2_run.fingerprint:
+        if history_reader.manifest.get("input_fingerprint") != input_fingerprint:
             raise ValueError("existing history publication uses different inputs or active rules")
         declared_roots = history_reader.manifest.get("operational_roots") or {}
         if set(declared_roots) != set(roots) or any(
@@ -299,10 +309,15 @@ def build_history(*, intake_manifest: Path, output_root: Path,
         consumer = output_root / "panels"
         if consumer.exists():
             consumer_reader = HistoryPublicationReader(consumer)
-            if consumer_reader.manifest.get("input_fingerprint") != release.layer2_run.fingerprint:
+            if consumer_reader.manifest.get("input_fingerprint") != input_fingerprint:
                 raise ValueError("existing quarter history uses different inputs or active rules")
             consumer_reader.verify_all()
+            del release
             return consumer
+        # The immutable Layer 2 roots and reported publication now carry every
+        # required input identity.  Do not retain the Raw cohort while the
+        # additive quarter publisher performs its own verified reads.
+        del release
         return publish_quarter_history(publication=destination, output_root=output_root, reuse_roots=True)
     # Existing verified roots are reused without rerunning their producers.
     if not roots["t1"].exists():
@@ -322,11 +337,17 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     graph = reader.load(roots["t3"])
     ledger_pub = reader.load(roots["t4"])
     for publication in (observations, relationships, graph, ledger_pub):
-        if publication.identity["layer2_run_fingerprint"] != release.layer2_run.fingerprint:
+        if publication.identity["layer2_run_fingerprint"] != input_fingerprint:
             raise ValueError("existing operational publication belongs to different raw inputs")
-    print(json.dumps({"stage": "OPERATIONAL_ROOTS_READY", "filings": len(release.snapshots)}), flush=True)
+    print(json.dumps({"stage": "OPERATIONAL_ROOTS_READY", "filings": snapshot_count}), flush=True)
     if roots_only:
         return output_root
+    filing_by_id = {str(row["filing_id"]): row for row in release.records("filing")}
+    # T1-T4 have been validated against the active run fingerprint, and the
+    # only remaining release data needed by reported panels is the small
+    # filing index above.  Releasing the cohort here avoids retaining every
+    # immutable Raw snapshot beside T1/T3 panel materialization.
+    del release
     periods: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
     comparative_counts: dict[str, int] = defaultdict(int)
     for row in observations.records("reported_period_observation"):
@@ -334,7 +355,6 @@ def build_history(*, intake_manifest: Path, output_root: Path,
             comparative_counts[str(row["cik"])] += 1
             continue
         periods[(row["cik"], row.get("fiscal_year"), row.get("fiscal_quarter"), row.get("period_class"))].append(row)
-    filing_by_id = {str(row["filing_id"]): row for row in release.records("filing")}
     builder = CompanyAnalysisPanelBuilder()
     selector = ReportedObservationSelector()
     output_root.mkdir(parents=True, exist_ok=True)
@@ -391,7 +411,7 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     manifest = {"version": HISTORY_VERSION, "plan": plan, "views": views, "tables": tables,
                 "source_intake": str(intake_manifest.absolute()),
                 "operational_roots": {key: str(path.absolute()) for key, path in roots.items()},
-                "input_fingerprint": release.layer2_run.fingerprint,
+                "input_fingerprint": input_fingerprint,
                 "comparative_scope": "CURRENT_FOCUS",
                 "comparative_observations_retained_in_t1": dict(comparative_counts),
                 "quarterly_derivation_status": "NOT_MATERIALIZED_REPORTED_SERIES_ONLY"}

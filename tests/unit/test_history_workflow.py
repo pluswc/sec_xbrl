@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import gc
 import json
+import weakref
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -182,6 +184,78 @@ def test_completed_history_reuse_accepts_exact_active_fingerprint(
         "HistoryPublicationReader",
         lambda root: SimpleNamespace(manifest=manifest, verify_all=lambda: None),
     )
+
+    assert history.build_history(intake_manifest=intake_path, output_root=output) == output / "panels"
+
+
+def test_completed_history_releases_raw_cohort_before_quarter_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sec_xbrl import longitudinal
+    from sec_xbrl.analytics import history_quarters
+
+    intake_path, run, plan = _history_reuse_fixture(tmp_path)
+    output = tmp_path / "history" / "AAPL"
+    roots = {name: output / name / "AAPL" for name in ("t1", "t2", "t3", "t4")}
+    for root in roots.values():
+        root.mkdir(parents=True)
+    (output / "reported-panels").mkdir()
+    filing = plan["companies"][0]["filings"][0]
+
+    class TrackedSnapshot:
+        def __init__(self) -> None:
+            self.input = SimpleNamespace(cik=filing["cik"], accession=filing["accession"])
+
+        def records(self, table: str) -> tuple[dict, ...]:
+            assert table == "filing"
+            return (filing,)
+
+    class TrackedRelease:
+        def __init__(self, snapshot: TrackedSnapshot) -> None:
+            self.layer2_run = run
+            self.snapshots = (snapshot,)
+
+    snapshot = TrackedSnapshot()
+    release = TrackedRelease(snapshot)
+    release_ref = weakref.ref(release)
+    snapshot_ref = weakref.ref(snapshot)
+    holder = {"release": release}
+    del release, snapshot
+
+    monkeypatch.setattr(
+        longitudinal,
+        "CohortReleaseAdapter",
+        lambda: SimpleNamespace(load=lambda *args, **kwargs: holder.pop("release")),
+    )
+    monkeypatch.setattr(
+        longitudinal,
+        "Layer2PublicationReader",
+        lambda: SimpleNamespace(
+            load=lambda root: SimpleNamespace(
+                identity={"layer2_run_fingerprint": run.fingerprint}
+            )
+        ),
+    )
+    manifest = {
+        "plan": plan,
+        "views": ["AS_FILED", "LATEST_REPORTED"],
+        "input_fingerprint": run.fingerprint,
+        "operational_roots": {name: str(root.resolve()) for name, root in roots.items()},
+    }
+    monkeypatch.setattr(
+        history,
+        "HistoryPublicationReader",
+        lambda root: SimpleNamespace(manifest=manifest, verify_all=lambda: None),
+    )
+
+    def publish(**kwargs):
+        gc.collect()
+        assert release_ref() is None
+        assert snapshot_ref() is None
+        assert kwargs["reuse_roots"] is True
+        return output / "panels"
+
+    monkeypatch.setattr(history_quarters, "publish_quarter_history", publish)
 
     assert history.build_history(intake_manifest=intake_path, output_root=output) == output / "panels"
 
