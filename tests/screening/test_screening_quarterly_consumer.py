@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 
 import pytest
 
@@ -59,3 +60,22 @@ def test_quarter_policy_is_additive_and_annual_revision_identity_is_unchanged() 
 def test_quarter_policy_rejects_incomplete_or_fiscal_label_inputs(policy: dict[str, object]) -> None:
     with pytest.raises(ValueError, match="calendar quarter-end"):
         _validate_period_policy(policy)
+
+from sec_xbrl.screening.quarterly import QuarterlyScreeningMetricReader
+
+
+def test_wire_v2_is_rejected_for_cross_record_source_contradictions() -> None:
+    root = Path(__file__).parents[1] / "fixtures" / "screening_quarterly_wire_v2"
+    with pytest.raises(ValueError, match="source|filing"):
+        QuarterlyScreeningMetricReader(
+            root,
+            manifest_sha256="fa743d5d24a228e7f4fd5c541127361f17046f3574184c4b2f17de72252143e3",
+        )
+
+
+def test_superseded_wire_fixture_rejects_noncanonical_ttm_namespace() -> None:
+    with pytest.raises(ValueError, match="prefixed"):
+        QuarterlyScreeningMetricReader(
+            "/tmp/universe50-quarterly-schema-v1",
+            manifest_sha256="ff57954804c9866f568903580e368021e0a3ad27f1e3e7ce76fddafa476825f5",
+        )

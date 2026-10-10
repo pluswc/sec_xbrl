@@ -1,0 +1,158 @@
+{
+  "fixture_kind": "SYNTHETIC_QUARTER_SCHEMA_FIXTURE_V2",
+  "records": [
+    {
+      "bucket_status": "NO_FILING_AS_OF_CUTOFF",
+      "calendar_quarter": 4,
+      "calendar_year": 2024,
+      "candidate_periods": [],
+      "cik": "0000000001",
+      "end_convention": null,
+      "fiscal_quarter": null,
+      "fiscal_year": null,
+      "inventory_id": "quarter-period:0000000001:2024Q4",
+      "period_end": null,
+      "period_start": null,
+      "reported_duration_days": null,
+      "ticker": "SYNTH1"
+    },
+    {
+      "bucket_status": "PERIOD_AVAILABLE",
+      "calendar_quarter": 1,
+      "calendar_year": 2025,
+      "candidate_periods": [
+        {
+          "duration_days": 90,
+          "fiscal_quarter": "Q1",
+          "fiscal_year": 2025,
+          "period_end": "2025-04-01",
+          "period_start": "2025-01-01"
+        }
+      ],
+      "cik": "0000000001",
+      "end_convention": "EXCLUSIVE",
+      "fiscal_quarter": "Q1",
+      "fiscal_year": 2025,
+      "inventory_id": "quarter-period:0000000001:2025Q1",
+      "period_end": "2025-04-01",
+      "period_start": "2025-01-01",
+      "reported_duration_days": 90,
+      "ticker": "SYNTH1"
+    },
+    {
+      "bucket_status": "PERIOD_AVAILABLE",
+      "calendar_quarter": 2,
+      "calendar_year": 2025,
+      "candidate_periods": [
+        {
+          "duration_days": 91,
+          "fiscal_quarter": "Q2",
+          "fiscal_year": 2025,
+          "period_end": "2025-07-01",
+          "period_start": "2025-04-01"
+        }
+      ],
+      "cik": "0000000001",
+      "end_convention": "EXCLUSIVE",
+      "fiscal_quarter": "Q2",
+      "fiscal_year": 2025,
+      "inventory_id": "quarter-period:0000000001:2025Q2",
+      "period_end": "2025-07-01",
+      "period_start": "2025-04-01",
+      "reported_duration_days": 91,
+      "ticker": "SYNTH1"
+    },
+    {
+      "bucket_status": "UNSUPPORTED_FISCAL_QUARTER_DURATION",
+      "calendar_quarter": 3,
+      "calendar_year": 2025,
+      "candidate_periods": [
+        {
+          "duration_days": 112,
+          "fiscal_quarter": "Q3",
+          "fiscal_year": 2025,
+          "period_end": "2025-10-01",
+          "period_start": "2025-06-11"
+        }
+      ],
+      "cik": "0000000001",
+      "end_convention": "EXCLUSIVE",
+      "fiscal_quarter": "Q3",
+      "fiscal_year": 2025,
+      "inventory_id": "quarter-period:0000000001:2025Q3",
+      "period_end": "2025-10-01",
+      "period_start": "2025-06-11",
+      "reported_duration_days": 112,
+      "ticker": "SYNTH1"
+    },
+    {
+      "bucket_status": "PERIOD_AVAILABLE",
+      "calendar_quarter": 4,
+      "calendar_year": 2025,
+      "candidate_periods": [
+        {
+          "duration_days": 92,
+          "fiscal_quarter": "Q4",
+          "fiscal_year": 2025,
+          "period_end": "2026-01-01",
+          "period_start": "2025-10-01"
+        }
+      ],
+      "cik": "0000000001",
+      "end_convention": "EXCLUSIVE",
+      "fiscal_quarter": "Q4",
+      "fiscal_year": 2025,
+      "inventory_id": "quarter-period:0000000001:2025Q4",
+      "period_end": "2026-01-01",
+      "period_start": "2025-10-01",
+      "reported_duration_days": 92,
+      "ticker": "SYNTH1"
+    },
+    {
+      "bucket_status": "NO_FILING_AS_OF_CUTOFF",
+      "calendar_quarter": 1,
+      "calendar_year": 2026,
+      "candidate_periods": [],
+      "cik": "0000000001",
+      "end_convention": null,
+      "fiscal_quarter": null,
+      "fiscal_year": null,
+      "inventory_id": "quarter-period:0000000001:2026Q1",
+      "period_end": null,
+      "period_start": null,
+      "reported_duration_days": null,
+      "ticker": "SYNTH1"
+    },
+    {
+      "bucket_status": "NO_FILING_AS_OF_CUTOFF",
+      "calendar_quarter": 2,
+      "calendar_year": 2026,
+      "candidate_periods": [],
+      "cik": "0000000001",
+      "end_convention": null,
+      "fiscal_quarter": null,
+      "fiscal_year": null,
+      "inventory_id": "quarter-period:0000000001:2026Q2",
+      "period_end": null,
+      "period_start": null,
+      "reported_duration_days": null,
+      "ticker": "SYNTH1"
+    },
+    {
+      "bucket_status": "NO_FILING_AS_OF_CUTOFF",
+      "calendar_quarter": 3,
+      "calendar_year": 2026,
+      "candidate_periods": [],
+      "cik": "0000000001",
+      "end_convention": null,
+      "fiscal_quarter": null,
+      "fiscal_year": null,
+      "inventory_id": "quarter-period:0000000001:2026Q3",
+      "period_end": null,
+      "period_start": null,
+      "reported_duration_days": null,
+      "ticker": "SYNTH1"
+    }
+  ],
+  "schema_version": "quarter-period-inventory-v1"
+}

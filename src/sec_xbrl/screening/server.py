@@ -103,6 +103,20 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
                 self._json(service.metric_availability(query["dataset_id"], cik=query.get("cik")))
             elif parsed.path == "/api/metric-catalog":
                 self._json(service.metric_catalog(query["dataset_id"]))
+            elif parsed.path == "/api/quarter-metric-catalog":
+                self._json(service.quarter_metric_catalog(query["dataset_id"]))
+            elif parsed.path == "/api/quarter-periods":
+                self._json(service.quarter_periods(query["dataset_id"], cik=query.get("cik")))
+            elif parsed.path == "/api/quarter-series":
+                self._json(service.quarter_series(
+                    query["dataset_id"], cik=query["cik"], metric_id=query["metric_id"],
+                    limit=int(query.get("limit", 8)),
+                ))
+            elif parsed.path == "/api/quarter-comparison":
+                self._json(service.quarter_comparison(
+                    query["dataset_id"], ciks=query["ciks"].split(","), metric_id=query["metric_id"],
+                    calendar_year=int(query["calendar_year"]), calendar_quarter=int(query["calendar_quarter"]),
+                ))
             elif parsed.path == "/api/explorer":
                 self._json(service.company_explorer(
                     query["dataset_id"], fiscal_year=_optional_int(query.get("fiscal_year")),

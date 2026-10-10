@@ -21,6 +21,7 @@ from sec_xbrl.screening.common import (
 from sec_xbrl.screening.company_descriptions import CompanyDescriptionReader
 from sec_xbrl.screening.dataset import ScreeningDatasetReader
 from sec_xbrl.screening.dataset_v2 import ScreeningDatasetV2Reader, open_screening_dataset
+from sec_xbrl.screening.dataset_v3 import ScreeningDatasetV3Reader
 from sec_xbrl.screening.explorer import ScreeningExplorer, public_copy
 from sec_xbrl.screening.store import ScreeningStore
 
@@ -64,7 +65,7 @@ class ScreeningService:
             if reader.manifest["dataset_id"] != dataset_id:
                 raise ValueError("dataset catalog ID differs from publication")
             self.datasets[dataset_id] = reader
-            if isinstance(reader, ScreeningDatasetV2Reader):
+            if isinstance(reader, (ScreeningDatasetV2Reader, ScreeningDatasetV3Reader)):
                 self.explorers[dataset_id] = ScreeningExplorer(reader)
         if company_descriptions is not None:
             bound = self.datasets.get(company_descriptions.dataset_id)
@@ -139,6 +140,41 @@ class ScreeningService:
                 }
             )
         return result
+
+    def quarter_metric_catalog(self, dataset_id: str) -> list[dict[str, Any]]:
+        reader = self._quarter_dataset(dataset_id)
+        result = []
+        for definition in reader.quarter_definitions:
+            rows = [row for row in reader.quarter_observations if row["metric_id"] == definition["metric_id"]]
+            result.append({**json.loads(canonical_json(definition)), "label": definition["label_ko"], "period_class": definition["observation_basis"], "coverage": {"companies_available": len({row["cik"] for row in rows if row["availability_status"] == "AVAILABLE"}), "companies_total": len(reader.companies), "periods_available": sum(row["availability_status"] == "AVAILABLE" for row in rows)}})
+        return result
+
+    def quarter_periods(self, dataset_id: str, *, cik: str | None = None) -> dict[str, Any]:
+        reader = self._quarter_dataset(dataset_id)
+        if cik is not None:
+            cik = require_cik(cik)
+        rows = [row for row in reader.quarter_period_inventory if cik is None or row["cik"] == cik]
+        return {"spine": json.loads(canonical_json(reader.quarterly.manifest["global_quarter_spine"])), "rows": json.loads(canonical_json(rows))}
+
+    def quarter_series(self, dataset_id: str, *, cik: str, metric_id: str, limit: int = 8) -> dict[str, Any]:
+        reader = self._quarter_dataset(dataset_id); cik = require_cik(cik); metric_id = require_string(metric_id, "metric_id")
+        if type(limit) is not int or not 1 <= limit <= 8: raise ValueError("quarter series limit must be one to eight")
+        rows = [row for row in reader.quarter_observations if row["cik"] == cik and row["metric_id"] == metric_id]
+        if not rows: raise ValueError("quarter series is not prepared")
+        rows.sort(key=lambda row: (row["calendar_year"], row["calendar_quarter"]))
+        return {"metric": next(row for row in reader.quarter_definitions if row["metric_id"] == metric_id), "observations": json.loads(canonical_json(rows[-limit:]))}
+
+    def quarter_comparison(self, dataset_id: str, *, ciks: list[str], metric_id: str, calendar_year: int, calendar_quarter: int) -> dict[str, Any]:
+        reader = self._quarter_dataset(dataset_id)
+        if len(ciks) < 2 or len(ciks) > 4 or len(set(ciks)) != len(ciks): raise ValueError("quarter comparison requires two to four unique companies")
+        rows=[]
+        for raw in ciks:
+            cik=require_cik(raw); company=reader.company(cik); matches=[row for row in reader.quarter_observations if row["cik"]==cik and row["metric_id"]==metric_id and row["calendar_year"]==calendar_year and row["calendar_quarter"]==calendar_quarter]
+            if len(matches)!=1: raise ValueError("quarter comparison cell is not unique")
+            rows.append({"company":company,"observation":json.loads(canonical_json(matches[0]))})
+        signatures={(r["observation"]["definition_version"],r["observation"]["unit"],r["observation"]["selection_as_of_date"]) for r in rows}
+        if len(signatures)!=1: raise ValueError("quarter comparison scope is incompatible")
+        return {"calendar_year":calendar_year,"calendar_quarter":calendar_quarter,"metric_id":metric_id,"rows":rows}
 
     def company_explorer(
         self,
@@ -558,6 +594,12 @@ class ScreeningService:
         except KeyError as exc:
             raise ValueError("company explorer requires a v2 screening dataset") from exc
 
+    def _quarter_dataset(self, dataset_id: str) -> ScreeningDatasetV3Reader:
+        reader = self._dataset(dataset_id)
+        if not isinstance(reader, ScreeningDatasetV3Reader):
+            raise TypeError("quarterly analysis requires a v3 screening dataset")
+        return reader
+
     def _validate_revision(
         self, content: dict[str, Any], *, reader: ScreeningDatasetReader | ScreeningDatasetV2Reader | None = None
     ) -> None:
@@ -579,10 +621,11 @@ class ScreeningService:
                 predicate.get("definition_version"), "metric definition version"
             )
             if reader is not None:
-                supports = [row for row in reader.metric_support if row["metric_id"] == metric_id]
+                quarterly = content.get("period_policy", {}).get("mode") == "FIXED_CALENDAR_QUARTER_END"
+                supports = [row for row in (getattr(reader, "quarter_support", []) if quarterly else reader.metric_support) if row["metric_id"] == metric_id]
                 if not supports:
                     raise ValueError("unknown metric_id")
-                if not any(row["execution_supported"] for row in supports):
+                if not any(row.get("execution_supported", row.get("available_bucket_count", 0) > 0) for row in supports):
                     reason = sorted({row.get("reason") for row in supports})
                     raise ValueError(f"metric is unavailable for execution: {reason}")
                 if definition_version not in {
@@ -664,18 +707,20 @@ def _find_observation(
     *,
     definition_version: str | None = None,
 ) -> dict[str, Any] | None:
-    rows = [
-        row for row in reader.observations
-        if row["cik"] == cik and row["metric_id"] == metric_id
-    ]
+    quarterly = policy["mode"] == "FIXED_CALENDAR_QUARTER_END"
+    source_rows = getattr(reader, "quarter_observations", []) if quarterly else reader.observations
+    rows = [row for row in source_rows if row["cik"] == cik and row["metric_id"] == metric_id]
     if definition_version is not None:
         rows = [
             row
             for row in rows
-            if row.get("metric_definition_version") == definition_version
+            if row.get("metric_definition_version", row.get("definition_version")) == definition_version
         ]
     if policy["mode"] == "FIXED_FISCAL_YEAR":
         rows = [row for row in rows if row["fiscal_year"] == policy["fiscal_year"]]
+    elif quarterly:
+        rows = [row for row in rows if row["calendar_year"] == policy["calendar_year"] and row["calendar_quarter"] == policy["calendar_quarter"]]
+        rows = [{**row, "quality_blocking": False, "trace": row.get("source_lineage")} for row in rows]
     else:
         rows.sort(key=lambda row: row["fiscal_year"], reverse=True)
         offset = policy.get("offset", 0)

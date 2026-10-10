@@ -331,6 +331,10 @@ def open_screening_dataset(root: Path | str) -> ScreeningDatasetReader | Screeni
     manifest = read_json(regular_file(root_path / MANIFEST, "screening dataset manifest"))
     if manifest.get("schema_version") == VERSION:
         return ScreeningDatasetV2Reader(root_path)
+    if manifest.get("schema_version") == "screening-dataset-v3":
+        from sec_xbrl.screening.dataset_v3 import ScreeningDatasetV3Reader
+
+        return ScreeningDatasetV3Reader(root_path)
     return ScreeningDatasetReader(root_path)
 
 
