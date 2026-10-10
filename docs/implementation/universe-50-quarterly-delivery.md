@@ -168,6 +168,29 @@ pages를 새 raw root에 content-addressed 저장한다. 그 캐시를 offline F
 selected 10-K/10-Q/amendment 수, 5 baseline 충족 여부, 8 bucket input coverage와 hold 이유.
 package download, Arelle parse, history/metric build는 이 pilot 단계에서 하지 않는다.
 
+### 6.1 최초 operational discovery 결과
+
+같은 날 0.5초 request interval의 기존 `SECSubmissionsClient`와
+`CompanySubmissionsCollector`로 5사 root·historical submissions snapshot 14개를 새 raw
+root에 저장한 뒤 network-free `discover_history(..., recent_fiscal_years=5)`를 실행했다.
+결과는
+`data/processed/universe_runs/20261010_universe50_quarterly/pilot_discovery/pilot_discovery_summary.json`
+에 있으며 SHA-256은
+`d75b672c18c2664149169fd2d36861d1cf73d8481f0e37fa7d9500f6370e4b58`다.
+
+- 5/5 configured CIK, ticker, SEC name이 root submissions와 일치했고 SIC는 각각
+  TXN 3674, HD 5211, JNJ 2834, CVX 2911, NEE 4911로 관찰됐다. security type의 최종
+  eligibility는 여전히 `PENDING_SECURITY_TYPE_VALIDATION`이며 NEE root가 common ticker와
+  여러 preferred ticker를 함께 선언한다는 사실을 보존했다.
+- 회사별 정확히 5개 10-K baseline, 전체 25개 baseline과 111개 selected filing을
+  계획했다. form 합계는 10-K 25, 10-Q 85, CVX 10-Q/A 1이다.
+- `2024Q4`–`2026Q2`에는 5사 모두 해당 calendar bucket의 input filing이 있었다.
+  cutoff까지 `2026Q3` input filing은 HD에만 있었고 TXN·JNJ·CVX·NEE는
+  `NO_FILING_AS_OF_CUTOFF`다. 이것은 값 누락이나 분석 실패가 아니라 현재 discovery
+  availability이며 후속 filing으로 소급 대체하지 않는다.
+- package download와 Arelle parse/build는 0건이다. 이 결과는 filing plan 검증이며
+  financial metric readiness나 5사 최종 eligibility를 뜻하지 않는다.
+
 ## 7. 재사용 API와 확인된 interface gap
 
 기존 `sec_xbrl.collection_operations`의 public 경계는 다음과 같다.
@@ -200,7 +223,7 @@ package download, Arelle parse, history/metric build는 이 pilot 단계에서 �
 | 단계 | 산출물 | gate |
 | --- | --- | --- |
 | P0 계약·identity | 이 문서, cached/live source observation, 50 target/hold snapshot | 50 slot 모두 eligible/hold/excluded reason; XOM succession 미해결 시 처리 보류 |
-| P1 5사 discovery | immutable submissions snapshots, per-company plan, filing·bucket coverage 보고 | future filing 0, amendment 보존, 5 baseline/partial-history가 사실대로 기록, parse 0 |
+| P1 5사 discovery | immutable submissions snapshots, per-company plan, filing·bucket coverage 보고. 최초 실행은 14 snapshot·111 filing·25 baseline·1 amendment, parse 0 | future filing 0, amendment 보존, 5 baseline/partial-history가 사실대로 기록. 결과 독립 검증은 미수행 |
 | P2 현재 21 M0 | source diagnosis, 승인된 scoped repair, 새 publication과 독립 검증 | unresolved critical systemic blocker 0; valid missing은 유지 |
 | P3 50사 Raw/history | cache-first intake, 회사별 atomic snapshot과 persisted panel | company failure 격리, full plan/attempt/status, failed Raw를 missing으로 게시하지 않음 |
 | P4 quarter producer | reported/YTD/derived/instant 분리 publication과 coverage | 8 bucket 상태 50사 모두 존재, derivation exact lineage, unsupported는 unavailable |
