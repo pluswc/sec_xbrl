@@ -76,12 +76,32 @@ def test_wire_v2_is_rejected_for_cross_record_source_contradictions() -> None:
         )
 
 
-def test_superseded_wire_fixture_rejects_noncanonical_ttm_namespace() -> None:
-    with pytest.raises(ValueError, match="prefixed"):
-        QuarterlyScreeningMetricReader(
-            "/tmp/universe50-quarterly-schema-v1",
-            manifest_sha256="ff57954804c9866f568903580e368021e0a3ad27f1e3e7ce76fddafa476825f5",
-        )
+def test_quarter_wire_rejects_noncanonical_ttm_namespace(tmp_path: Path) -> None:
+    import hashlib
+    import shutil
+
+    source = Path(__file__).parents[1] / "fixtures" / "screening_quarterly_wire_v5"
+    root = tmp_path / "noncanonical-ttm"
+    shutil.copytree(source, root)
+    payload_path = root / "quarter_metric_definitions.json"
+    payload = json.loads(payload_path.read_text())
+    definition = next(row for row in payload["records"] if row["observation_basis"] == "TTM")
+    definition["metric_id"] = "quarter_ttm_revenue"
+    data = (json.dumps(payload, indent=2) + "\n").encode()
+    payload_path.write_bytes(data)
+    manifest_path = root / "quarterly_screening_metric_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["files"][payload_path.name].update(
+        sha256=hashlib.sha256(data).hexdigest(),
+        size=len(data),
+        record_count=len(payload["records"]),
+    )
+    manifest_data = (json.dumps(manifest, indent=2) + "\n").encode()
+    manifest_path.write_bytes(manifest_data)
+    manifest_sha = hashlib.sha256(manifest_data).hexdigest()
+    (root / "MANIFEST.sha256").write_text(f"{manifest_sha}  {manifest_path.name}\n")
+    with pytest.raises(ValueError, match="definitions are not unique and prefixed"):
+        QuarterlyScreeningMetricReader(root, manifest_sha256=manifest_sha)
 
 
 def test_authoritative_quarter_wire_v5_is_verified() -> None:
