@@ -10,10 +10,12 @@ from sec_xbrl.analytics.history_quarters import (
     _has_materialized_cell,
     _merge_staged_rows,
     _period_attestation_index,
+    _read_staged_record_at,
     _read_staged_records,
+    _resolve_additive_locator,
     derive_quarter,
 )
-from sec_xbrl.history import _write_records
+from sec_xbrl.history import _sha256_file, _write_records
 from sec_xbrl.periods.logic import PeriodClassifier
 
 
@@ -104,6 +106,120 @@ def test_staged_chunk_round_trip_checks_hash_and_count(tmp_path: Path) -> None:
     corrupted = path.read_bytes() + b"corrupt"
     path.write_bytes(corrupted)
     with pytest.raises(ValueError, match="integrity mismatch"):
+        _read_staged_records(path, info)
+
+
+def test_selected_staged_cell_slice_preserves_complete_ordered_payload(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "cells.parquet"
+    records = tuple(
+        {
+            "id": f"cell-{index}",
+            "value_lineage": {
+                "source": f"fact-{index}",
+                "nested": {"network": ["가😀" * 10_000, {"index": index}]},
+            },
+            "candidate_lineage": [
+                {"source_id": f"source-{index}", "evidence": ["PRE", "CAL"]}
+            ],
+        }
+        for index in range(3)
+    )
+    info = _write_records(path, records)
+    for index in (0, 1, 2):
+        assert _read_staged_record_at(path, info, index) == records[index]
+
+
+def test_selected_staged_cell_slice_rejects_bad_hash_count_schema_and_index(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "cells.parquet"
+    records = ({"id": "cell", "value_lineage": {"source": "fact"}},)
+    info = _write_records(path, records)
+    with pytest.raises(ValueError, match="integrity mismatch"):
+        _read_staged_record_at(path, {**info, "sha256": "0" * 64}, 0)
+    with pytest.raises(ValueError, match="count mismatch"):
+        _read_staged_record_at(path, {**info, "count": 2}, 0)
+    with pytest.raises(ValueError, match="schema mismatch"):
+        _read_staged_record_at(
+            path, {**info, "json_fields": [*info["json_fields"], "missing"]}, 0
+        )
+    with pytest.raises(ValueError, match="locator is invalid"):
+        _read_staged_record_at(path, info, 1)
+
+
+def test_selected_staged_cell_locator_rejects_reordered_identity(
+    tmp_path: Path,
+) -> None:
+    columns_path = tmp_path / "columns.parquet"
+    rows_path = tmp_path / "rows.parquet"
+    cells_path = tmp_path / "cells.parquet"
+    columns = (
+        {"fiscal_time_series_column_id": "column-1", "fiscal_quarter": 1},
+        {"fiscal_time_series_column_id": "column-2", "fiscal_quarter": 2},
+    )
+    rows = (
+        {"fiscal_time_series_row_id": "row-1"},
+        {"fiscal_time_series_row_id": "row-2"},
+    )
+    cells = []
+    for index, (column, row) in enumerate(zip(columns, rows), start=1):
+        cell = _cell("YTD_6M", str(index * 10), "2025-07-01")
+        cell.update(
+            fiscal_time_series_column_id=column["fiscal_time_series_column_id"],
+            fiscal_time_series_row_id=row["fiscal_time_series_row_id"],
+        )
+        cells.append(cell)
+    chunks = {
+        "columns": {**_write_records(columns_path, columns), "path": columns_path},
+        "rows": {**_write_records(rows_path, rows), "path": rows_path},
+        "cells": {**_write_records(cells_path, tuple(cells)), "path": cells_path},
+    }
+    selected, column, row = _resolve_additive_locator(
+        {
+            "chunks": chunks,
+            "cell_index": 1,
+            "column_id": "column-2",
+            "row_id": "row-2",
+        }
+    )
+    assert selected == cells[1]
+    assert column == columns[1]
+    assert row == rows[1]
+    with pytest.raises(ValueError, match="locator changed"):
+        _resolve_additive_locator(
+            {
+                "chunks": chunks,
+                "cell_index": 1,
+                "column_id": "column-1",
+                "row_id": "row-1",
+            }
+        )
+
+
+def test_unused_malformed_json_is_still_rejected_by_complete_final_read(
+    tmp_path: Path,
+) -> None:
+    import polars as pl
+
+    path = tmp_path / "cells.parquet"
+    pl.DataFrame(
+        [
+            {"id": "selected", "value_lineage": '{"source":"fact-1"}'},
+            {"id": "unused", "value_lineage": "{malformed"},
+        ]
+    ).write_parquet(path)
+    info = {
+        "count": 2,
+        "json_fields": ["value_lineage"],
+        "sha256": _sha256_file(path),
+    }
+    assert _read_staged_record_at(path, info, 0) == {
+        "id": "selected",
+        "value_lineage": {"source": "fact-1"},
+    }
+    with pytest.raises(__import__("json").JSONDecodeError):
         _read_staged_records(path, info)
 
 

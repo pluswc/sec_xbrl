@@ -108,20 +108,63 @@ def _read_staged_records(path: Path, info: dict[str, Any]) -> tuple[dict[str, An
     """Read one producer-owned chunk with the same hash/count checks as history."""
     import polars as pl
 
-    if path.is_symlink() or _sha256_file(path) != info["sha256"]:
-        raise ValueError("quarter history staging chunk integrity mismatch")
+    json_fields = _attest_staged_chunk(path, info)
     rows = pl.read_parquet(path).to_dicts()
-    if len(rows) != info["count"]:
-        raise ValueError("quarter history staging chunk count mismatch")
     return tuple(
         {
             key: json.loads(value)
-            if key in info["json_fields"] and value is not None
+            if key in json_fields and value is not None
             else value
             for key, value in row.items()
         }
         for row in rows
     )
+
+
+def _attest_staged_chunk(path: Path, info: dict[str, Any]) -> frozenset[str]:
+    """Verify the complete immutable chunk before decoding any selected record."""
+    import polars as pl
+
+    if path.is_symlink() or not path.is_file() or _sha256_file(path) != info["sha256"]:
+        raise ValueError("quarter history staging chunk integrity mismatch")
+    frame = pl.scan_parquet(path)
+    schema = frame.collect_schema()
+    count = frame.select(pl.len()).collect(engine="streaming").item()
+    if count != info["count"]:
+        raise ValueError("quarter history staging chunk count mismatch")
+    declared = info.get("json_fields")
+    if (
+        not isinstance(declared, list)
+        or not all(isinstance(field, str) for field in declared)
+        or not set(declared).issubset(schema.names())
+    ):
+        raise ValueError("quarter history staging chunk schema mismatch")
+    return frozenset(declared)
+
+
+def _read_staged_record_at(
+    path: Path, info: dict[str, Any], index: int
+) -> dict[str, Any]:
+    """Decode one ordered record after full-file integrity and schema attestation."""
+    import polars as pl
+
+    json_fields = _attest_staged_chunk(path, info)
+    if type(index) is not int or index < 0 or index >= info["count"]:
+        raise ValueError("quarter additive cell locator is invalid")
+    rows = (
+        pl.scan_parquet(path)
+        .slice(index, 1)
+        .collect(engine="streaming")
+        .to_dicts()
+    )
+    if len(rows) != 1:
+        raise ValueError("quarter additive cell locator changed")
+    return {
+        key: json.loads(value)
+        if key in json_fields and value is not None
+        else value
+        for key, value in rows[0].items()
+    }
 
 
 def _merge_staged_rows(
@@ -137,11 +180,10 @@ def _resolve_additive_locator(
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Resolve one unique additive candidate from verified producer chunks."""
     chunks = locator["chunks"]
-    cells = _read_staged_records(chunks["cells"]["path"], chunks["cells"])
     index = locator["cell_index"]
-    if type(index) is not int or index < 0 or index >= len(cells):
-        raise ValueError("quarter additive cell locator is invalid")
-    cell = cells[index]
+    cell = _read_staged_record_at(
+        chunks["cells"]["path"], chunks["cells"], index
+    )
     if (
         cell.get("fiscal_time_series_column_id") != locator["column_id"]
         or cell.get("fiscal_time_series_row_id") != locator["row_id"]

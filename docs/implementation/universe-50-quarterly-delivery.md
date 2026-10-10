@@ -159,6 +159,17 @@ precedence, 모든 row/cell/candidate/trace/source/network lineage, schema/count
 그대로 유지하며 period·mapping·recast·selection·회계 규칙을 바꾸거나 payload를 줄이지
 않는다. 이 source는 focused/golden 검증과 독립 source gate 전에는 JNJ/CVX build에 쓰지 않는다.
 
+024c actual CAT benchmark에서 10개 table chunk 작성 뒤 additive locator 해석 시간이 길게
+측정돼, 동등성 보존 성능 슬라이스를 추가 승인했다. 각 locator는 staged cell 파일 전체의
+symlink·SHA-256·row count·현재 schema와 `json_fields`를 먼저 검증한 뒤 ordered
+`cell_index` 한 행만 디코딩한다. 선택된 한 행의 definition, binding, value lineage,
+candidate·Raw·network evidence는 완전하게 유지한다. 작은 columns·rows 조회와 마지막 전체
+cell boundary 검증·streaming concatenate는 그대로 두므로 사용되지 않은 malformed record도
+최종 pass에서 실패한다. first/middle/last와 큰 Unicode·중첩 payload, bad hash/count/schema/index,
+reordered locator, later-row precedence를 회귀 테스트한다. 새 source가 독립 PASS한 뒤 별도 CAT
+destination에서 전체 ordered logical record golden과 wall/RSS를 024c 실행과 비교하기 전에는
+성능 개선을 주장하거나 JNJ/CVX에 적용하지 않는다.
+
 두 번째 메모리·분기 보강 후보 `f111666f23fb9532269b7f182d1d7d5cf00ad042`는 독립 검증에서
 **FAIL**했다. 보고서 `/tmp/quarter-producer-f111/f111666-report.json`의 SHA-256은
 `43600dcaede5e215b58609010500b785b1e0fd529ff9f7c1479a361dfe3fbedf`다. typed PRE,
