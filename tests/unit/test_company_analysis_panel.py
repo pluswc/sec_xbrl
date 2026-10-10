@@ -25,6 +25,8 @@ ROOT = "node:total"
 AXIS = "node:product-axis"
 MEMBER = "node:data-center"
 DETAIL_NODE = "node:detail"
+STATEMENT_ROOT = "node:statement-root"
+REVENUE_CONCEPT = "node:revenue-concept"
 
 
 def _graph(tmp_path, *, snapshot_id: str = "snap:q3"):
@@ -52,6 +54,24 @@ def _graph(tmp_path, *, snapshot_id: str = "snap:q3"):
             "filed_date": "2023-11-21",
             "context_id": f"ctx:{TOTAL}",
             "unit_id": "unit:usd",
+            "raw_qname": "us-gaap:Revenues",
+        },
+        {
+            "cik": CIK,
+            "analysis_exploration_node_id": STATEMENT_ROOT,
+            "node_kind": "CONCEPT",
+            "origin": "STANDARD_CONCEPT",
+            "raw_id": "concept:statement-root",
+            "source_filing_id": FILING,
+            "raw_qname": "us-gaap:StatementOfIncomeAbstract",
+        },
+        {
+            "cik": CIK,
+            "analysis_exploration_node_id": REVENUE_CONCEPT,
+            "node_kind": "CONCEPT",
+            "origin": "STANDARD_CONCEPT",
+            "raw_id": "concept:revenue",
+            "source_filing_id": FILING,
             "raw_qname": "us-gaap:Revenues",
         },
         {
@@ -97,6 +117,20 @@ def _graph(tmp_path, *, snapshot_id: str = "snap:q3"):
             "to_node_id": AXIS,
             "scope_kind": "TOTAL_FACT_AXIS_LENS",
             "order": None,
+        },
+        {
+            "cik": CIK,
+            "analysis_exploration_edge_id": "edge:primary-is",
+            "edge_kind": "STATEMENT_COMPONENT",
+            "from_node_id": STATEMENT_ROOT,
+            "to_node_id": REVENUE_CONCEPT,
+            "scope_kind": None,
+            "source_network_type": "PRE",
+            "source_relationship_edge_id": "rel:primary-is",
+            "source_filing_id": FILING,
+            "role_definition": "Consolidated Statements of Income",
+            "role_uri": "http://example.com/role/primary-income",
+            "order": "1",
         },
         {
             "cik": CIK,
@@ -206,6 +240,23 @@ def test_panel_separates_statement_and_custom_dimension_detail_with_full_lineage
     assert detail["unit_numerator_measures"] == ("iso4217:USD",)
     assert detail["raw_concept_taxonomy_family"] == "us-gaap"
     assert len(panel.bindings[1]["relationship_navigation"]) == 3
+    assert panel.bindings[0]["primary_statement_evidence"] == [
+        {
+            "statement_types": ("IS",),
+            "cik": CIK,
+            "analysis_exploration_edge_id": "edge:primary-is",
+            "edge_kind": "STATEMENT_COMPONENT",
+            "from_node_id": STATEMENT_ROOT,
+            "to_node_id": REVENUE_CONCEPT,
+            "scope_kind": None,
+            "source_network_type": "PRE",
+            "source_relationship_edge_id": "rel:primary-is",
+            "source_filing_id": FILING,
+            "role_definition": "Consolidated Statements of Income",
+            "role_uri": "http://example.com/role/primary-income",
+            "order": "1",
+        }
+    ]
     assert (
         panel.definitions[1]["parent_analysis_line_id"] == panel.definitions[0]["analysis_line_id"]
     )
@@ -267,6 +318,14 @@ def test_cached_graph_indexes_are_defensive_and_refresh_for_new_publication(tmp_
             "exploration": graph, "cik": CIK, "fiscal_year": 2024, "fiscal_quarter": 3,
             "period_class": "QTD_3M", "view": "LATEST_REPORTED", "as_of_date": "2023-11-21"}
     first = builder.build(**args)
+    nodes, facts, _placement = builder._graph_indexes(graph)
+    raw_root = next(
+        row
+        for row in graph.datasets[builder._graph_reader.node_dataset]
+        if row["analysis_exploration_node_id"] == ROOT
+    )
+    assert nodes[ROOT] is raw_root
+    assert facts[(FILING, TOTAL)] is raw_root
     expected = deepcopy(first)
     first.bindings[1]["relationship_navigation"][0]["mutated"] = True
     first.values[0]["value_numeric"] = "changed"

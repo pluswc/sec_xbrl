@@ -237,6 +237,59 @@ def _validate_release_snapshot_plans(
         _validate_snapshot_plan(snapshot, planned[key])
 
 
+def _validate_existing_operational_roots(
+    reader: Any, roots: dict[str, Path], input_fingerprint: str
+) -> None:
+    """Validate reusable roots without retaining the final loaded publication."""
+    for root in (path for path in roots.values() if path.exists()):
+        existing = reader.load(root)
+        if existing.identity["layer2_run_fingerprint"] != input_fingerprint:
+            raise ValueError("existing operational publication uses different inputs or active rules")
+
+
+def _validate_active_publications(
+    publications: tuple[Any, ...], input_fingerprint: str
+) -> None:
+    """Attest every active T1-T4 root before callers release dead inputs."""
+    for publication in publications:
+        if publication.identity["layer2_run_fingerprint"] != input_fingerprint:
+            raise ValueError("existing operational publication belongs to different raw inputs")
+
+
+def _partition_current_observations(
+    observations: Any,
+) -> tuple[dict[tuple[Any, ...], list[dict[str, Any]]], dict[str, int]]:
+    """Copy the exact CURRENT_FOCUS partition, then permit T1 to be released."""
+    if not observations.is_reader_attested:
+        raise ValueError("reported observations must be reader-attested")
+    dataset = "reported_period_observation"
+    if dataset not in observations.datasets:
+        raise ValueError("T1 publication has no reported observations")
+    periods: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+    comparative_counts: dict[str, int] = defaultdict(int)
+    for source in observations.datasets[dataset]:
+        row = dict(source)
+        if row.get("comparative_type") != "CURRENT_FOCUS":
+            comparative_counts[str(row["cik"])] += 1
+            continue
+        key = (
+            row["cik"],
+            row.get("fiscal_year"),
+            row.get("fiscal_quarter"),
+            row.get("period_class"),
+        )
+        periods[key].append(row)
+    return periods, dict(comparative_counts)
+
+
+def _company_ledgers(ledger_publication: Any, ciks: tuple[str, ...]) -> dict[str, tuple[dict[str, Any], ...]]:
+    """Copy the small per-company ledgers before releasing the full T4 publication."""
+    from sec_xbrl.longitudinal import AccessionVersionLedgerReader
+
+    reader = AccessionVersionLedgerReader()
+    return {cik: reader.get_company(ledger_publication, cik=cik) for cik in ciks}
+
+
 def _validate_intake(intake: dict[str, Any]) -> None:
     expected = {(company["cik"], row["accession"]) for company in intake["plan"]["companies"] for row in company["filings"]}
     actual = [(row["filing"]["cik"], row["filing"]["accession"]) for row in intake["filings"]]
@@ -256,7 +309,6 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     )
     from sec_xbrl.longitudinal import (
         AccessionVersionLedgerPipeline,
-        AccessionVersionLedgerReader,
         CohortReleaseAdapter,
         CohortSnapshotReference,
         CohortSource,
@@ -286,10 +338,7 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     snapshot_count = len(release.snapshots)
     reader = Layer2PublicationReader()
     roots = {name: output_root / name / run_id for name in ("t1", "t2", "t3", "t4")}
-    for root in (path for path in roots.values() if path.exists()):
-        existing = reader.load(root)
-        if existing.identity["layer2_run_fingerprint"] != input_fingerprint:
-            raise ValueError("existing operational publication uses different inputs or active rules")
+    _validate_existing_operational_roots(reader, roots, input_fingerprint)
     destination = output_root / "reported-panels"
     if destination.exists() and not roots_only:
         history_reader = HistoryPublicationReader(destination)
@@ -336,9 +385,12 @@ def build_history(*, intake_manifest: Path, output_root: Path,
         AccessionVersionLedgerPipeline().publish(release, output_root=output_root / "t4")
     graph = reader.load(roots["t3"])
     ledger_pub = reader.load(roots["t4"])
-    for publication in (observations, relationships, graph, ledger_pub):
-        if publication.identity["layer2_run_fingerprint"] != input_fingerprint:
-            raise ValueError("existing operational publication belongs to different raw inputs")
+    _validate_active_publications(
+        (observations, relationships, graph, ledger_pub), input_fingerprint
+    )
+    # T2 was needed to construct or validate T3.  T5 traverses the verified T3
+    # publication and does not read T2 again.
+    del relationships
     print(json.dumps({"stage": "OPERATIONAL_ROOTS_READY", "filings": snapshot_count}), flush=True)
     if roots_only:
         return output_root
@@ -348,13 +400,11 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     # filing index above.  Releasing the cohort here avoids retaining every
     # immutable Raw snapshot beside T1/T3 panel materialization.
     del release
-    periods: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
-    comparative_counts: dict[str, int] = defaultdict(int)
-    for row in observations.records("reported_period_observation"):
-        if row.get("comparative_type") != "CURRENT_FOCUS":
-            comparative_counts[str(row["cik"])] += 1
-            continue
-        periods[(row["cik"], row.get("fiscal_year"), row.get("fiscal_quarter"), row.get("period_class"))].append(row)
+    periods, comparative_counts = _partition_current_observations(observations)
+    del observations
+    ciks = tuple(str(company["cik"]) for company in plan["companies"])
+    ledgers_by_cik = _company_ledgers(ledger_pub, ciks)
+    del ledger_pub
     builder = CompanyAnalysisPanelBuilder()
     selector = ReportedObservationSelector()
     output_root.mkdir(parents=True, exist_ok=True)
@@ -363,7 +413,7 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     for company in plan["companies"]:
         cik, ticker = company["cik"], company["ticker"]
         coverage_keys = _filing_coverage_keys(tuple(filing_by_id.values()), cik)
-        ledger = AccessionVersionLedgerReader().get_company(ledger_pub, cik=cik)
+        ledger = ledgers_by_cik[cik]
         keys = sorted((key for key in periods if key[0] == cik and key[1] is not None), key=repr)
         for view in views:
             for period_class in sorted({key[3] for key in keys}):

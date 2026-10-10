@@ -6,7 +6,7 @@ import weakref
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 
 import pytest
 
@@ -258,6 +258,121 @@ def test_completed_history_releases_raw_cohort_before_quarter_publication(
     monkeypatch.setattr(history_quarters, "publish_quarter_history", publish)
 
     assert history.build_history(intake_manifest=intake_path, output_root=output) == output / "panels"
+
+
+def test_operational_preflight_does_not_retain_last_partial_root(
+    tmp_path: Path,
+) -> None:
+    references: list[weakref.ReferenceType] = []
+
+    class Publication:
+        def __init__(self) -> None:
+            self.identity = {"layer2_run_fingerprint": "active"}
+
+    class Reader:
+        @staticmethod
+        def load(_root: Path) -> Publication:
+            publication = Publication()
+            references.append(weakref.ref(publication))
+            return publication
+
+    roots = {name: tmp_path / name for name in ("t1", "t2", "t3")}
+    for root in roots.values():
+        root.mkdir()
+    history._validate_existing_operational_roots(Reader(), roots, "active")
+    gc.collect()
+    assert references and all(reference() is None for reference in references)
+
+
+def test_active_root_validation_does_not_retain_loop_alias() -> None:
+    references: list[weakref.ReferenceType] = []
+
+    class Publication:
+        def __init__(self) -> None:
+            self.identity = {"layer2_run_fingerprint": "active"}
+
+    def validate() -> None:
+        publications = tuple(Publication() for _ in range(4))
+        references.extend(weakref.ref(publication) for publication in publications)
+        history._validate_active_publications(publications, "active")
+
+    validate()
+    gc.collect()
+    assert all(reference() is None for reference in references)
+
+
+def test_observation_and_ledger_inputs_release_after_complete_small_copies() -> None:
+    class Publication:
+        is_reader_attested = True
+
+        def __init__(self, datasets: dict, ciks: tuple[str, ...]) -> None:
+            self.datasets = MappingProxyType(
+                {
+                    name: tuple(MappingProxyType(dict(row)) for row in rows)
+                    for name, rows in datasets.items()
+                }
+            )
+            self.input_ciks = ciks
+
+        def records(self, dataset: str) -> tuple[dict, ...]:
+            return tuple(dict(row) for row in self.datasets[dataset])
+
+    observations = Publication(
+        {
+            "reported_period_observation": (
+                {
+                    "cik": "1",
+                    "fiscal_year": 2025,
+                    "fiscal_quarter": None,
+                    "period_class": "FY",
+                    "comparative_type": "CURRENT_FOCUS",
+                    "evidence": {"sources": ["fact-current"]},
+                },
+                {
+                    "cik": "1",
+                    "fiscal_year": 2024,
+                    "fiscal_quarter": None,
+                    "period_class": "FY",
+                    "comparative_type": "PRIOR_COMPARATIVE",
+                },
+                {
+                    "cik": "2",
+                    "fiscal_year": 2025,
+                    "fiscal_quarter": 1,
+                    "period_class": "QTD_3M",
+                    "comparative_type": "CURRENT_FOCUS",
+                },
+            )
+        },
+        ("1", "2"),
+    )
+    observation_reference = weakref.ref(observations)
+    periods, comparative_counts = history._partition_current_observations(observations)
+    del observations
+    gc.collect()
+    assert observation_reference() is None
+    assert comparative_counts == {"1": 1}
+    assert set(periods) == {("1", 2025, None, "FY"), ("2", 2025, 1, "QTD_3M")}
+    assert periods[("1", 2025, None, "FY")][0]["evidence"] == {
+        "sources": ["fact-current"]
+    }
+
+    ledger_publication = Publication(
+        {
+            "accession_version_ledger": (
+                {"cik": "1", "filed_date": "2025-01-01", "accession": "a"},
+                {"cik": "2", "filed_date": "2025-01-02", "accession": "b"},
+            )
+        },
+        ("1", "2"),
+    )
+    ledger_reference = weakref.ref(ledger_publication)
+    ledgers = history._company_ledgers(ledger_publication, ("1", "2"))
+    del ledger_publication
+    gc.collect()
+    assert ledger_reference() is None
+    assert [row["accession"] for row in ledgers["1"]] == ["a"]
+    assert [row["accession"] for row in ledgers["2"]] == ["b"]
 
 
 def test_report_window_and_as_of_are_independent() -> None:

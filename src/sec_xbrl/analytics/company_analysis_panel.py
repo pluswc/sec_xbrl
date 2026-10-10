@@ -42,17 +42,20 @@ class CompanyAnalysisPanelBuilder:
     def __init__(self) -> None:
         self._graph_reader = ExplorationGraphReader()
         self._indexed_graph: VerifiedLayer2Publication | None = None
-        self._indexes: tuple[dict[str, Any], dict[Any, Any], dict[Any, Any]] | None = None
+        self._indexes: tuple[
+            dict[str, Mapping[str, Any]],
+            dict[tuple[str, str], Mapping[str, Any]],
+            dict[tuple[str, str], list[dict[str, Any]]],
+        ] | None = None
 
     def _graph_indexes(self, exploration: VerifiedLayer2Publication):
         if self._indexed_graph is exploration:
             return self._indexes
-        nodes = {str(row["analysis_exploration_node_id"]): dict(row)
-                 for row in exploration.records(ExplorationGraphReader.node_dataset)}
+        nodes, _outgoing, edges = self._graph_reader._indexes(exploration)
         facts = {(str(row.get("source_filing_id")), str(row.get("source_fact_id"))): row
                  for row in nodes.values() if row.get("node_kind") == "FACT"}
         placement: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        for edge in exploration.records(ExplorationGraphReader.edge_dataset):
+        for edge in edges:
             if edge.get("source_network_type") != "PRE":
                 continue
             kinds = tuple(kind for kind in ("IS", "BS", "CF", "EQ") if _qualifying_statement_role(edge, kind))

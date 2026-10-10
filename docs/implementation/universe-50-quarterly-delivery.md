@@ -222,6 +222,28 @@ manifest/root 검증 후 quarter publisher 호출 전에 같은 경계를 적용
 lineage, source, rule 또는 회계 의미는 바꾸지 않는다. 이 보정의 독립 source·golden gate 전에는
 JNJ를 재시도하거나 CVX·후속 50사 build를 시작하지 않는다.
 
+dead Raw retention 보정 `35e8f416cb55fc131e194439c333a40dfafbd590`은 독립 source 검증을
+통과했다. 새 CAT 전체 reported+quarter 실행도 61개 자체 file pin, schema/count와 전체
+ordered logical record를 검증해 독립 PASS했으며 보고서
+`/tmp/cat-full-35e8-independent/cat-full-35e8-report.json`의 SHA-256은
+`998b8406f7d8b2b61cf6c046bfa7829191d12e32dcf036935de11a8ce59544d5`다. 그러나 같은
+source의 JNJ fresh 실행은 T1–T4 뒤 첫 reported panel 전에 peak RSS 31,473,380KB에서 다시
+SIGKILL됐다. 실패 sidecar SHA-256은
+`01cb2478a43588ae96c963212383e9bac46509cdcbab3f51014c2fe8a31b8ee4`이고, read-only 원인
+진단 SHA-256은 `aa3340ae5c05374aaf55d4dc8f3e3db8f363d0b7099f127ece0c38496838bf09`다.
+이는 Raw 22/22 또는 공시 품질 실패가 아니다.
+
+후속 승인 범위는 T3를 읽는 두 소비자가 각각 전체 graph row를 복사하던 중복과 이미 검증을
+마친 T1/T2/T4 publication 수명을 줄이는 정확 동등 보정이다. `ExplorationGraphReader`의
+private index는 reader-attested read-only row를 빌리고, T5 builder는 같은 node/edge index와
+Fact pointer map을 재사용한다. 공개 `records()` 계약과 traverse/root 반환값은 계속 완전히
+분리된 plain dict/list/tuple이며 중첩값을 바꿔도 publication은 변하지 않는다. 관계·관측·ledger는
+각각 T3 identity 검증, 완전한 CURRENT_FOCUS partition과 비교 관측 count, 모든 회사 ledger
+복사가 끝난 뒤에만 해제한다. 마지막 validation loop alias와 partial-root preflight alias도 같은
+검증 뒤 해제한다. 경로 순서, per-path cycle 종료, targetRole, PRE/CAL/DEF 방향, 모든 candidate와
+typed primary PRE evidence는 그대로 유지한다. 이 보정은 **IMPLEMENTED_AWAITING_INDEPENDENT_SOURCE_GATE**이며,
+독립 source PASS와 새 전체 CAT golden 전에는 JNJ를 다시 실행하지 않는다.
+
 ## 2. 불변 입력과 새 run 경계
 
 재실행 가능한 새 run identity는 `universe-50-quarterly-20261010`으로 제안한다.

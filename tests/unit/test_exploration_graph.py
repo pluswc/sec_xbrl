@@ -81,6 +81,12 @@ def test_t3_keeps_independent_lenses_and_network_evidence(tmp_path: Path) -> Non
     statement = [row for row in graph_edges if row["edge_kind"] == "STATEMENT_COMPONENT"]
     assert {row["source_network_type"] for row in statement} == {"PRE", "CAL"}
     assert all(row["role_uri"] == "http://example.com/role/income" for row in statement)
+    assert any(
+        row["source_network_type"] == "CAL"
+        and row["from_node_id"] != row["to_node_id"]
+        and row["target_role_uri"] == "http://example.com/role/detail"
+        for row in statement
+    )
     assert any(row["edge_kind"] == "MEMBER_HIERARCHY" and row["source_network_type"] == "DEF" for row in graph_edges)
     assert result.node_count and result.edge_count
 
@@ -105,3 +111,146 @@ def test_reader_keeps_alternative_paths_but_stops_a_cycle(tmp_path: Path) -> Non
     )
     assert len(rows) == 3  # root + two alternative A→B paths; B→A is cycle-stopped.
     assert [row["node"]["analysis_exploration_node_id"] for row in rows].count(node_b) == 2
+
+
+def test_reader_borrows_attested_rows_but_returns_nested_isolated_values(tmp_path: Path) -> None:
+    release = _release()
+    cik = "0000320193"
+    published = OperationalLayer2Publisher(tmp_path / "graph").publish(
+        release.layer2_run,
+        {
+            "analysis_exploration_node": (
+                {
+                    "cik": cik,
+                    "analysis_exploration_node_id": "node:a",
+                    "node_kind": "CONCEPT",
+                    "origin": "STANDARD_CONCEPT",
+                    "raw_id": "a",
+                    "raw_qname": "us-gaap:A",
+                    "nested_evidence": {"items": ["immutable"]},
+                },
+                {
+                    "cik": cik,
+                    "analysis_exploration_node_id": "node:b",
+                    "node_kind": "CONCEPT",
+                    "origin": "STANDARD_CONCEPT",
+                    "raw_id": "b",
+                    "raw_qname": "us-gaap:B",
+                },
+                {
+                    "cik": cik,
+                    "analysis_exploration_node_id": "node:fact",
+                    "node_kind": "FACT",
+                    "origin": "STANDARD_CONCEPT",
+                    "raw_id": "fact:one",
+                    "raw_qname": "us-gaap:Revenues",
+                    "source_fact_id": "fact:one",
+                    "source_filing_id": "filing:one",
+                    "accession": "0000320193-25-000001",
+                    "filed_date": "2025-05-01",
+                    "context_id": "qtd",
+                    "fiscal_year": 2025,
+                    "fiscal_quarter": 1,
+                    "period_class": "QTD_3M",
+                    "nested_evidence": {"items": ["fact-immutable"]},
+                },
+            ),
+            "analysis_exploration_edge": (
+                {
+                    "cik": cik,
+                    "analysis_exploration_edge_id": "edge:a-b",
+                    "edge_kind": "STATEMENT_COMPONENT",
+                    "source_network_type": "PRE",
+                    "from_node_id": "node:a",
+                    "to_node_id": "node:b",
+                    "nested_evidence": {"roles": ["IS"]},
+                },
+            ),
+        },
+    )
+    publication = Layer2PublicationReader().load(published.run_root)
+    reader = ExplorationGraphReader()
+    nodes, outgoing, edges = reader._indexes(publication)
+
+    source_node = next(
+        row
+        for row in publication.datasets[reader.node_dataset]
+        if row["analysis_exploration_node_id"] == "node:a"
+    )
+    assert nodes["node:a"] is source_node
+    assert edges is publication.datasets[reader.edge_dataset]
+    assert outgoing["node:a"][0] is edges[0]
+
+    traversed = reader.traverse(publication, root_node_ids=("node:a",))
+    traversed[0]["node"]["nested_evidence"]["items"].append("changed")
+    traversed[1]["incoming_edge"]["nested_evidence"]["roles"].append("CF")
+    assert publication.datasets[reader.node_dataset][0]["nested_evidence"] == {
+        "items": ["immutable"]
+    }
+    assert publication.datasets[reader.edge_dataset][0]["nested_evidence"] == {
+        "roles": ["IS"]
+    }
+    assert reader.traverse(publication, root_node_ids=("node:a",))[0]["node"][
+        "nested_evidence"
+    ] == {"items": ["immutable"]}
+    roots = reader.roots_for_fact(
+        publication,
+        cik=cik,
+        fiscal_year=2025,
+        fiscal_quarter=1,
+        raw_concept_qname="us-gaap:Revenues",
+    )
+    roots[0]["nested_evidence"]["items"].append("changed")
+    assert nodes["node:fact"]["nested_evidence"] == {"items": ["fact-immutable"]}
+
+
+def test_reader_refreshes_borrowed_index_and_keeps_every_diamond_path(tmp_path: Path) -> None:
+    release = _release()
+    cik = "0000320193"
+
+    def graph(root: Path, suffix: str):
+        nodes = tuple(
+            {
+                "cik": cik,
+                "analysis_exploration_node_id": f"node:{name}:{suffix}",
+                "node_kind": "CONCEPT",
+                "origin": "STANDARD_CONCEPT",
+                "raw_id": name,
+                "raw_qname": f"us-gaap:{name.upper()}",
+            }
+            for name in ("a", "b", "c", "d")
+        )
+        edges = tuple(
+            {
+                "cik": cik,
+                "analysis_exploration_edge_id": f"edge:{left}-{right}:{suffix}",
+                "edge_kind": "STATEMENT_COMPONENT",
+                "source_network_type": "PRE",
+                "from_node_id": f"node:{left}:{suffix}",
+                "to_node_id": f"node:{right}:{suffix}",
+            }
+            for left, right in (("a", "b"), ("a", "c"), ("b", "d"), ("c", "d"), ("d", "a"))
+        )
+        result = OperationalLayer2Publisher(root).publish(
+            release.layer2_run,
+            {"analysis_exploration_node": nodes, "analysis_exploration_edge": edges},
+        )
+        return Layer2PublicationReader().load(result.run_root)
+
+    first = graph(tmp_path / "first", "one")
+    second = graph(tmp_path / "second", "two")
+    reader = ExplorationGraphReader()
+    paths = reader.traverse(first, root_node_ids=("node:a:one",))
+    assert [row["path_node_ids"] for row in paths] == [
+        ("node:a:one",),
+        ("node:a:one", "node:b:one"),
+        ("node:a:one", "node:c:one"),
+        ("node:a:one", "node:b:one", "node:d:one"),
+        ("node:a:one", "node:c:one", "node:d:one"),
+    ]
+    first_node = reader._nodes["node:a:one"]
+    reader.traverse(second, root_node_ids=("node:a:two",))
+    assert reader._indexed_publication is second
+    assert "node:a:one" not in reader._nodes
+    assert reader._nodes["node:a:two"] is second.datasets[reader.node_dataset][0]
+    assert first_node is first.datasets[reader.node_dataset][0]
