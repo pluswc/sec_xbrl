@@ -653,11 +653,30 @@ class QuarterlyScreeningMetricReader:
             Decimal(source["value"]),
             canonical_json({field: source.get(field) for field in intrinsic_fields}),
         )
-        origin = canonical_json({field: source.get(field) for field in origin_fields})
-        identities = (
-            ("source", source["cik"], source["source_id"]),
-            ("fact", source["cik"], source["source_filing_id"], source["source_fact_id"], origin),
-        )
+        # Stable IDs qualify the fact; optional filenames remain checked metadata.
+        # A fact ID resolves within an immutable snapshot regardless of display paths.
+        snapshot = source.get("source_snapshot_id")
+        source_file_id = source.get("source_file_id")
+        if snapshot is not None:
+            require_string(snapshot, "quarterly raw snapshot identity")
+            fact_identity = ("snapshot-fact", source["cik"], snapshot, source["source_fact_id"])
+        elif source_file_id is not None:
+            require_string(source_file_id, "quarterly raw source file identity")
+            fact_identity = (
+                "file-fact",
+                source["cik"],
+                source["source_filing_id"],
+                source_file_id,
+                source["source_fact_id"],
+            )
+        else:
+            fact_identity = (
+                "filing-fact",
+                source["cik"],
+                source["source_filing_id"],
+                source["source_fact_id"],
+            )
+        identities = (("source", source["cik"], source["source_id"]), fact_identity)
         for identity in identities:
             previous = self._raw_identity_records.setdefault(identity, intrinsic)
             if previous != intrinsic:

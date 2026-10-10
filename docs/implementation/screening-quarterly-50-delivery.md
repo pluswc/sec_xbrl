@@ -357,3 +357,40 @@ fact/source ID와 선택 ID를 명시했다. 권위 있는 v5 fixture는 그대�
 fresh checkout의 필수 입력이 아니다. source 변경은 quarterly validator에 한정된다.
 이 기록은 자체 검증이며 새 동결 SHA의 독립 재검증·리드 인수, actual 재무자료
 인수·native rollout·원격 작업 완료를 뜻하지 않는다.
+
+### 4aabf54 독립 FAIL 후 Raw origin identity 우선순위 교정
+
+`4aabf543abefda75ec4e03a1a77365f0fe6d1778`의 독립 검증은 G1과 원래 G2 모순을
+통과했지만, 같은 snapshot/file/filing/fact ID에서 선택적 `source_file` 이름만
+바꾸거나 생략하면 다른 identity로 분리되는 잔여 G2를 발견했다. 독립 보고서
+SHA-256은 `8509a2ba38c8593061dea971bdf75c95988c0f8f2d42879052073f4a08682a19`다.
+리드는 해당 qualifier 우회만 같은 단일 작성자에게 반환했다.
+
+이 절은 앞 절의 origin tuple 설명을 다음 안정된 ID 우선순위로 정정한다.
+
+1. `source_snapshot_id`가 있으면 `(CIK, snapshot ID, source_fact_id)`를 쓴다.
+   같은 immutable snapshot의 fact는 다른 파일명·file ID·filing metadata로
+   새 identity가 되지 않는다.
+2. snapshot ID가 없고 `source_file_id`가 있으면
+   `(CIK, source_filing_id, source_file_id, source_fact_id)`를 쓴다.
+3. 둘 다 없으면 `(CIK, source_filing_id, source_fact_id)`를 쓴다.
+
+선택적 `source_file` 경로는 identity 구성 요소가 아니며 기존 intrinsic origin
+metadata 일치 검사에 남는다. `(CIK, source_id)` alias 검사와 prepared observation
+ID의 완전한 내용 일치도 유지한다. 실제로 다른 snapshot/file/fact 출처를 합치거나
+같은 Raw 값의 Decimal 표현·분석 view 차이를 금지하지 않는다. snapshot 자체가
+바뀐 경우의 해석은 이번 잔여 FAIL 또는 추가 정책 변경 범위가 아니다.
+
+자체 집중 검사와 세션 wire 접근 차단 검사는 각각 **280 passed / 0 skipped**이며
+새 identity 우선순위 회귀 17개를 포함한다. generic 139개와 기존 quarterly
+consumer/source 141개가 모두 통과했다. 독립 원본의 파일명 변경·누락 음성 2개는
+거부됐고 Decimal/view 재사용·구별되는 실제 origin 양성 2개는 수용됐다. 원본
+스크립트의 changed-snapshot-only 사례는 리드가 이번 FAIL 근거에서 제외했으며,
+기존 수용 결과와 스크립트의 과거 expected 값은 증거에서 숨기거나 바꾸지 않았다.
+이전 G1/G2 원본 11개 probe도 모두 기대 결과와 일치했다. Ruff check/format check와
+`git diff --check`가 통과했다. 증거는 `/tmp/quarter-consumer-origin`이며 테스트는
+추적 fixture로 재현하므로 이 세션 경로가 필요하지 않다.
+
+이 좁은 교정에서는 전체 screening/UI 374개를 재실행했다고 주장하지 않는다.
+그 결과는 이전 `4aabf54`의 자체 검증 기록이다. UI·producer·단위·재무 계산 정책과
+불변 v5에는 변경이 없다. 새 동결 SHA의 독립 재검증과 로컬 인수는 별도로 대기한다.

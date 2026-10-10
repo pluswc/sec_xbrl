@@ -794,3 +794,87 @@ def test_candidate_evidence_does_not_register_an_elected_raw_identity(tmp_path: 
     candidate["value"] = "42"
     row["source_lineage"]["candidate_evidence"] = [candidate]
     QuarterlyScreeningMetricReader(_publish(tmp_path, docs))
+
+
+def _same_origin_prepared_pair(docs):
+    row, _ = _target(docs)
+    item = row["source_lineage"]["derivation_inputs"][0]
+    original = next(
+        r
+        for r in docs["quarter_metric_observations.json"]["records"]
+        if r["observation_id"] == item["observation_id"]
+    )
+    origin = {
+        "source_snapshot_id": "same-immutable-snapshot",
+        "source_file_id": "same-file-A",
+        "source_file": "same-file-A.htm",
+    }
+    for prepared in (original, item):
+        prepared["source_lineage"].update(origin)
+    item["observation_id"] += ":another-prepared-id"
+    item["source_lineage"]["source_id"] += ":another-source-alias"
+    item["source_lineage"]["selected_source_ids"] = [item["source_lineage"]["source_id"]]
+    return original, item
+
+
+@pytest.mark.parametrize("qualification", ["snapshot", "file", "filing"])
+@pytest.mark.parametrize("filename_change", ["changed", "omitted"])
+@pytest.mark.parametrize("amount", ["42", "-5000000"])
+def test_optional_filename_cannot_partition_stable_raw_fact_identity(
+    tmp_path: Path, qualification, filename_change, amount
+):
+    docs = _documents("margin")
+    original, item = _same_origin_prepared_pair(docs)
+    for prepared in (original, item):
+        source = prepared["source_lineage"]
+        if qualification != "snapshot":
+            source.pop("source_snapshot_id")
+        if qualification == "filing":
+            source.pop("source_file_id")
+    _coherent_input_field(item, "value", amount)
+    if filename_change == "changed":
+        item["source_lineage"]["source_file"] = "another-display-path.htm"
+    else:
+        item["source_lineage"].pop("source_file")
+    with pytest.raises(ValueError, match="raw source identity has contradictory content"):
+        QuarterlyScreeningMetricReader(_publish(tmp_path, docs))
+
+
+@pytest.mark.parametrize("field", ["source_file_id", "source_filing_id"])
+def test_snapshot_fact_identity_takes_precedence_over_other_origin_fields(tmp_path: Path, field):
+    docs = _documents("margin")
+    _, item = _same_origin_prepared_pair(docs)
+    _coherent_input_field(item, "value", "42")
+    item["source_lineage"][field] = "another-origin-id"
+    with pytest.raises(ValueError, match="raw source identity has contradictory content"):
+        QuarterlyScreeningMetricReader(_publish(tmp_path, docs))
+
+
+@pytest.mark.parametrize("distinct_origin", ["snapshot", "fact"])
+def test_actual_distinct_snapshot_or_fact_is_not_collapsed_by_filename(
+    tmp_path: Path, distinct_origin
+):
+    docs = _documents("margin")
+    _, item = _same_origin_prepared_pair(docs)
+    _coherent_input_field(item, "value", "42")
+    source = item["source_lineage"]
+    if distinct_origin == "snapshot":
+        source.update(
+            source_snapshot_id="another-immutable-snapshot",
+            source_file_id="another-file-B",
+            source_file="another-file-B.htm",
+        )
+    else:
+        source["source_fact_id"] += ":another-real-fact"
+    QuarterlyScreeningMetricReader(_publish(tmp_path, docs))
+
+
+def test_identical_snapshot_fact_reuse_preserves_decimal_and_analytical_view_variants(
+    tmp_path: Path,
+):
+    docs = _documents("margin")
+    original, item = _same_origin_prepared_pair(docs)
+    _coherent_input_field(original, "selection_view", "AS_FILED")
+    _coherent_input_field(item, "value", "-5000000.00")
+    item["quality_reasons"] = ["SYNTHETIC_NONBLOCKING_METADATA"]
+    QuarterlyScreeningMetricReader(_publish(tmp_path, docs))
