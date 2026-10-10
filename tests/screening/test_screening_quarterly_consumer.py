@@ -79,3 +79,19 @@ def test_superseded_wire_fixture_rejects_noncanonical_ttm_namespace() -> None:
             "/tmp/universe50-quarterly-schema-v1",
             manifest_sha256="ff57954804c9866f568903580e368021e0a3ad27f1e3e7ce76fddafa476825f5",
         )
+
+
+def test_authoritative_quarter_wire_v3_is_verified() -> None:
+    root = Path(__file__).parents[1] / "fixtures" / "screening_quarterly_wire_v3"
+    reader = QuarterlyScreeningMetricReader(
+        root,
+        manifest_sha256="cad20d8a96bc83a0d509157c7cadc8e2dcf95f734e8a3237ad8b16583b27ae5f",
+    )
+    status = reader.verify_all()
+    assert status["observations"] == 64
+    assert status["period_inventory"] == 16
+    assert {row["metric_id"] for row in reader.definitions} == {
+        "quarter_revenue", "quarter_cfo", "quarter_gross_profit", "ttm_revenue"
+    }
+    march_end = next(row for row in reader.observations if row["cik"] == "0000000001" and row["metric_id"] == "quarter_revenue" and (row["calendar_year"], row["calendar_quarter"]) == (2025, 1))
+    assert march_end["period_end"] == "2025-04-01"
