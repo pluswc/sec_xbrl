@@ -40,19 +40,26 @@ SHA-256은 `50a473931920f1ef8d6b5a21e5ac7a4ee7aea367bf336d78bc7f143cb71b8e56`다
 2. **typed primary-statement 우선 선택.** exact company, source filing, actual period, USD,
    full dimension scope를 먼저 맞춘 후보 중 revenue·operating income·net income·gross
    profit은 primary IS, CFO는 primary CF, assets는 primary BS evidence가 있는 후보만
-   대표값 자격을 갖는다. 자격 후보가 하나면 그 existing reported fact를 선택하되 모든
-   후보와 채택·탈락 evidence를 lineage에 남긴다.
+   대표값 자격을 갖는다. panel이 선언한 CIK, selection view, as-of와 실제 start/end 또는
+   instant까지 모든 후보를 먼저 검증한다. 후보 하나만 맞아 보여도 다른 후보의 filing,
+   기간, unit 또는 dimension scope가 불완전·불일치하면 우선 선택하지 않는다. 자격 후보가
+   하나면 그 existing reported fact를 선택하되 모든 후보와 채택·탈락 evidence를 lineage에
+   남긴다.
 3. **revenue-only reported total.** typed primary revenue 후보가 여러 개이면, 같은 primary
    IS role의 CAL에서 `us-gaap:Revenues`가 competing revenue child와 다른 reported component의
    parent이고 모든 edge weight가 `+1`, measurement scope가 같으며 reported parent 금액과
    child 합계가 exact Decimal 또는 기존 CAL tolerance로 일치할 때만 이미 보고된 parent
-   fact를 선택한다. WMT FY2025의 `680985000000 = 674538000000 + 6447000000`이 positive
+   fact를 선택한다. competing revenue child 외에 같은 role·scope의 별도 reported component가
+   최소 하나 더 있어야 한다. 합계는 ambient Decimal context와 무관한 정수 계수 정렬로
+   정확히 계산한다. WMT FY2025의 `680985000000 = 674538000000 + 6447000000`이 positive
    control이다. 합계를 새로 만들지 않고, 이 규칙을 net income·cost·custom concept·label·
    order·issuer 예외로 일반화하지 않는다.
 4. **reason과 candidate lineage 보존.** 해결되지 않은 경우 source
    `MULTIPLE_CANDIDATES`와 전체 후보/evidence가 analysis에서 metric publication까지
-   유지돼야 한다. 이를 `INPUT_NOT_REPORTED`, missing unit 또는 period 오류로 바꾸지 않는다.
-   COST cost 항목 두 cell은 별도 evidence가 없으므로 계속 hold이며 core 수락을 위해
+   유지돼야 한다. 실제로 안전한 복수 후보가 경쟁할 때만 `MULTIPLE_CANDIDATES`를 쓰며,
+   단일 부적격 후보는 `MAPPING_REVIEW_REQUIRED` 같은 원래 eligibility reason을 유지한다.
+   이를 `INPUT_NOT_REPORTED`, missing unit 또는 period 오류로 바꾸지 않는다.
+   CAT FY2024·FY2025 cost 항목 두 cell은 별도 evidence가 없으므로 계속 hold이며 core 수락을 위해
    강제로 채우지 않는다.
 
 필수 regression은 historical AAPL FY2022 revenue·gross-profit continuity, COST·TSLA의
@@ -66,7 +73,16 @@ analysis, metric publication은 기존 파일을 덮지 않는 destination에 �
 `Layer2RuleVersions.mapping_version`도 canonical 모듈의 동일한 active version을 직접
 사용한다. 따라서 v3 history root를 v4 결과로 재사용하지 않고 새 root에서 다른 run
 fingerprint와 manifest rule metadata를 생성한다. period·recast·selection rule version은
-이번 correction으로 바꾸지 않는다.
+이번 correction으로 바꾸지 않는다. completed history와 일부 T1–T4만 있는 partial root도
+active input/rule fingerprint를 모든 write 전에 확인하며, 불일치하면 기존 파일을 바꾸지
+않고 새 destination을 요구한다.
+
+첫 source 후보 `c1d808f3b386deffb6d4b705b7d099d7fc784370`은 위 scope 선검증,
+CAL 구성·정밀도, 단일 부적격 reason, completed/partial history 재사용 경계가 부족해 독립
+검증에서 **FAIL**했다. 보고서 SHA-256은
+`4df4d59100175f110250a19499edc1678db495239f560fe2b82b8c05478ea7ce`다. 그 코드로 먼저
+생성된 WMT·AMD·AAPL과 중단된 MSFT 출력은 `NOT_ACCEPTED_CANDIDATE`이며 후속 수락 결과로
+재사용하지 않는다.
 
 ## 2. 불변 입력과 새 run 경계
 

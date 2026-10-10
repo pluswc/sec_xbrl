@@ -38,6 +38,154 @@ def test_history_run_uses_active_mapping_policy_in_its_fingerprint() -> None:
     assert current.fingerprint != legacy.fingerprint
 
 
+def _history_reuse_fixture(tmp_path: Path) -> tuple[Path, Layer2Run, dict]:
+    filing = {
+        "cik": "0000320193",
+        "accession": "0000320193-26-000020",
+        "form": "10-Q",
+        "filed_date": "2026-05-01",
+        "report_date": "2026-03-28",
+    }
+    plan = {
+        "companies": [{"ticker": "AAPL", "cik": filing["cik"], "filings": [filing]}]
+    }
+    intake = {
+        "complete": True,
+        "plan": plan,
+        "filings": [
+            {
+                "ticker": "AAPL",
+                "filing": filing,
+                "source_run": str(tmp_path / "source"),
+                "status": "REUSED",
+            }
+        ],
+    }
+    intake_path = tmp_path / "intake.json"
+    history._write_json(intake_path, intake)
+    layer1 = Layer1SnapshotInput(
+        cik=filing["cik"],
+        accession=filing["accession"],
+        form=filing["form"],
+        filed_date=filing["filed_date"],
+        report_date=filing["report_date"],
+        snapshot_id="0000320193/000032019326000020",
+        manifest_sha256="a" * 64,
+    )
+    run = Layer2Run("AAPL", "AAPL", (layer1,), history._history_layer2_rule_versions())
+    return intake_path, run, plan
+
+
+def test_completed_history_reuse_rejects_old_mapping_before_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sec_xbrl import longitudinal
+
+    intake_path, run, plan = _history_reuse_fixture(tmp_path)
+    output = tmp_path / "history" / "AAPL"
+    (output / "reported-panels").mkdir(parents=True)
+    old_fingerprint = replace(
+        run, rules=replace(run.rules, mapping_version="mapping-custom-network-v3")
+    ).fingerprint
+    fake_release = SimpleNamespace(layer2_run=run, snapshots=())
+    monkeypatch.setattr(
+        longitudinal,
+        "CohortReleaseAdapter",
+        lambda: SimpleNamespace(load=lambda *args, **kwargs: fake_release),
+    )
+    monkeypatch.setattr(
+        history,
+        "HistoryPublicationReader",
+        lambda root: SimpleNamespace(
+            manifest={
+                "plan": plan,
+                "views": ["AS_FILED", "LATEST_REPORTED"],
+                "input_fingerprint": old_fingerprint,
+            },
+            verify_all=lambda: None,
+        ),
+    )
+    before = sorted(path.relative_to(output) for path in output.rglob("*"))
+
+    with pytest.raises(ValueError, match="different inputs or active rules"):
+        history.build_history(intake_manifest=intake_path, output_root=output)
+
+    assert sorted(path.relative_to(output) for path in output.rglob("*")) == before
+
+
+def test_partial_history_reuse_rejects_old_mapping_before_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sec_xbrl import longitudinal
+
+    intake_path, run, _plan = _history_reuse_fixture(tmp_path)
+    output = tmp_path / "history" / "AAPL"
+    (output / "t1" / "AAPL").mkdir(parents=True)
+    fake_release = SimpleNamespace(layer2_run=run, snapshots=())
+    monkeypatch.setattr(
+        longitudinal,
+        "CohortReleaseAdapter",
+        lambda: SimpleNamespace(load=lambda *args, **kwargs: fake_release),
+    )
+    monkeypatch.setattr(
+        longitudinal,
+        "Layer2PublicationReader",
+        lambda: SimpleNamespace(
+            load=lambda root: SimpleNamespace(
+                identity={"layer2_run_fingerprint": "legacy-fingerprint"}
+            )
+        ),
+    )
+    before = sorted(path.relative_to(output) for path in output.rglob("*"))
+
+    with pytest.raises(ValueError, match="different inputs or active rules"):
+        history.build_history(intake_manifest=intake_path, output_root=output)
+
+    assert sorted(path.relative_to(output) for path in output.rglob("*")) == before
+
+
+def test_completed_history_reuse_accepts_exact_active_fingerprint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sec_xbrl import longitudinal
+
+    intake_path, run, plan = _history_reuse_fixture(tmp_path)
+    output = tmp_path / "history" / "AAPL"
+    roots = {name: output / name / "AAPL" for name in ("t1", "t2", "t3", "t4")}
+    for root in roots.values():
+        root.mkdir(parents=True)
+    (output / "reported-panels").mkdir()
+    (output / "panels").mkdir()
+    fake_release = SimpleNamespace(layer2_run=run, snapshots=())
+    monkeypatch.setattr(
+        longitudinal,
+        "CohortReleaseAdapter",
+        lambda: SimpleNamespace(load=lambda *args, **kwargs: fake_release),
+    )
+    monkeypatch.setattr(
+        longitudinal,
+        "Layer2PublicationReader",
+        lambda: SimpleNamespace(
+            load=lambda root: SimpleNamespace(
+                identity={"layer2_run_fingerprint": run.fingerprint}
+            )
+        ),
+    )
+    manifest = {
+        "plan": plan,
+        "views": ["AS_FILED", "LATEST_REPORTED"],
+        "input_fingerprint": run.fingerprint,
+        "operational_roots": {name: str(root.resolve()) for name, root in roots.items()},
+    }
+    monkeypatch.setattr(
+        history,
+        "HistoryPublicationReader",
+        lambda root: SimpleNamespace(manifest=manifest, verify_all=lambda: None),
+    )
+
+    assert history.build_history(intake_manifest=intake_path, output_root=output) == output / "panels"
+
+
 def test_report_window_and_as_of_are_independent() -> None:
     original = FilingRef("0000000001", "0000000001-24-000001", "10-Q", date(2024, 5, 1), date(2024, 3, 31))
     amendment = FilingRef("0000000001", "0000000001-24-000002", "10-Q/A", date(2024, 6, 1), date(2024, 3, 31))

@@ -4,6 +4,7 @@ import copy
 import inspect
 import json
 import subprocess
+from decimal import localcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -96,7 +97,11 @@ def _core_candidate_fixture(
         "cell_id": name,
         "node_id": f"node-{name}",
         "column_id": "fy-2025",
+        "cik": "0000000001",
         "ticker": "TEST",
+        "period_class": "FY",
+        "selection_view": "LATEST_REPORTED",
+        "as_of": "2026-10-08",
         "status": "REPORTED",
         "value": value,
         "unit": ['["iso4217:USD"]', "[]"],
@@ -104,6 +109,7 @@ def _core_candidate_fixture(
         "start": "2024-01-01",
         "end": "2025-01-01",
         "source_fact_id": f"fact-{name}",
+        "source_filing_ids": ["filing"],
         "primary_statement_evidence": [
             {
                 "statement_types": ["IS"],
@@ -127,6 +133,7 @@ def _core_candidate_fixture(
             "raw_concept_taxonomy_family": "us-gaap",
             "mapping_review_required": False,
             "source_filing_id": "filing",
+            "source_snapshot_id": "l1:0000000001:000000000126000001:fixture",
             "selected_source_fact_id": f"fact-{name}",
             "primary_statement_evidence": copy.deepcopy(
                 cell["primary_statement_evidence"]
@@ -158,6 +165,16 @@ def _select_fixture(
         trace_by_cell=traces,
         relationships=relationships or [],
         source_index=source_index,
+        expected_scope={
+            "cik": "0000000001",
+            "ticker": "TEST",
+            "column_id": "fy-2025",
+            "period_class": "FY",
+            "selection_view": "LATEST_REPORTED",
+            "as_of": "2026-10-08",
+            "start": "2024-01-01",
+            "end": "2025-01-01",
+        },
     )
 
 
@@ -257,12 +274,107 @@ def test_reported_revenue_total_fails_closed_for_weight_role_scope_and_footing()
             extra_sources=sources,
         )
         assert selected is None
-        assert reason == "MULTIPLE_CANDIDATES"
+        assert reason is not None
         assert evidence is None
 
     selected, reason, _candidates, evidence = _select_fixture(
         [parent, revenue], row_id="operating_income", relationships=base, extra_sources=[other]
     )
+    assert selected is None and reason == "MULTIPLE_CANDIDATES" and evidence is None
+
+
+def test_expanded_annual_core_validates_all_candidate_scope_before_priority() -> None:
+    note = _core_candidate_fixture("note", "us-gaap:Revenues", "100", primary=False)
+    statement = _core_candidate_fixture(
+        "statement",
+        "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+        "100",
+        primary=True,
+    )
+    mutations = (
+        lambda row: row[0].update(start="2020-01-01", end="2021-01-01"),
+        lambda row: (
+            row[0].update(source_filing_ids=["other-filing"]),
+            row[2]["value_lineage"].update(source_filing_id="other-filing"),
+        ),
+        lambda row: row[0].update(start=None),
+    )
+    for mutate in mutations:
+        changed = copy.deepcopy(note)
+        mutate(changed)
+        selected, reason, candidates, evidence = _select_fixture(
+            [changed, copy.deepcopy(statement)]
+        )
+        assert selected is None
+        assert reason in {
+            "PERIOD_SCOPE_MISMATCH",
+            "PERIOD_SCOPE_INCOMPLETE",
+            "CANDIDATE_SCOPE_CONFLICT",
+        }
+        assert len(candidates) == 2
+        assert evidence is None
+
+
+def test_expanded_annual_core_preserves_single_candidate_eligibility_reason() -> None:
+    held = _core_candidate_fixture(
+        "held",
+        "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+        "100",
+        primary=True,
+    )
+    held[1]["mapping_review_required"] = True
+    held[2]["value_lineage"]["mapping_review_required"] = True
+
+    selected, reason, candidates, evidence = _select_fixture([held])
+
+    assert selected is None
+    assert reason == "MAPPING_REVIEW_REQUIRED"
+    assert candidates[0]["candidate_status"] == "MAPPING_REVIEW_REQUIRED"
+    assert evidence is None
+
+
+def test_reported_revenue_total_requires_component_and_exact_ambient_free_footing() -> None:
+    parent = _core_candidate_fixture("total", "us-gaap:Revenues", "110", primary=True)
+    revenue = _core_candidate_fixture(
+        "contract",
+        "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+        "100",
+        primary=True,
+    )
+    other = _core_candidate_fixture("other", "us-gaap:OtherIncome", "10.04", primary=True)
+    one_child = [{
+        "network_type": "CAL",
+        "filing_id": "filing",
+        "role_uri": "role:is",
+        "from_raw_concept_id": "concept-total",
+        "to_raw_concept_id": "concept-contract",
+        "weight": "1",
+        "relationship_id": "cal-contract",
+    }]
+    selected, reason, _candidates, evidence = _select_fixture(
+        copy.deepcopy([parent, revenue]), relationships=one_child
+    )
+    assert selected is None and reason == "MULTIPLE_CANDIDATES" and evidence is None
+
+    two_children = [
+        *one_child,
+        {
+            "network_type": "CAL",
+            "filing_id": "filing",
+            "role_uri": "role:is",
+            "from_raw_concept_id": "concept-total",
+            "to_raw_concept_id": "concept-other",
+            "weight": "1",
+            "relationship_id": "cal-other",
+        },
+    ]
+    with localcontext() as context:
+        context.prec = 3
+        selected, reason, _candidates, evidence = _select_fixture(
+            copy.deepcopy([parent, revenue]),
+            relationships=two_children,
+            extra_sources=[other],
+        )
     assert selected is None and reason == "MULTIPLE_CANDIDATES" and evidence is None
 
 

@@ -262,18 +262,6 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     intake = json.loads(intake_manifest.read_text())
     _validate_intake(intake)
     plan = intake["plan"]
-    destination = output_root / "reported-panels"
-    if destination.exists() and not roots_only:
-        reader = HistoryPublicationReader(destination)
-        if reader.manifest["plan"] != plan or tuple(reader.manifest["views"]) != views:
-            raise ValueError("history publication scope differs; choose a new output root")
-        reader.verify_all()
-        from sec_xbrl.analytics.history_quarters import publish_quarter_history
-        consumer = output_root / "panels"
-        if consumer.exists():
-            HistoryPublicationReader(consumer).verify_all()
-            return consumer
-        return publish_quarter_history(publication=destination, output_root=output_root, reuse_roots=True)
     grouped: dict[Path, list[Any]] = defaultdict(list)
     for item in intake["filings"]:
         grouped[Path(item["source_run"])].append(CohortSnapshotReference(item["filing"]["cik"], item["filing"]["accession"]))
@@ -288,6 +276,34 @@ def build_history(*, intake_manifest: Path, output_root: Path,
         _validate_snapshot_plan(snapshot, planned[(snapshot.input.cik, snapshot.input.accession)])
     reader = Layer2PublicationReader()
     roots = {name: output_root / name / run_id for name in ("t1", "t2", "t3", "t4")}
+    for root in (path for path in roots.values() if path.exists()):
+        existing = reader.load(root)
+        if existing.identity["layer2_run_fingerprint"] != release.layer2_run.fingerprint:
+            raise ValueError("existing operational publication uses different inputs or active rules")
+    destination = output_root / "reported-panels"
+    if destination.exists() and not roots_only:
+        history_reader = HistoryPublicationReader(destination)
+        if history_reader.manifest["plan"] != plan or tuple(history_reader.manifest["views"]) != views:
+            raise ValueError("history publication scope differs; choose a new output root")
+        if history_reader.manifest.get("input_fingerprint") != release.layer2_run.fingerprint:
+            raise ValueError("existing history publication uses different inputs or active rules")
+        declared_roots = history_reader.manifest.get("operational_roots") or {}
+        if set(declared_roots) != set(roots) or any(
+            not roots[name].is_dir()
+            or Path(declared_roots[name]).resolve() != roots[name].resolve()
+            for name in roots
+        ):
+            raise ValueError("existing history publication has incomplete operational roots")
+        history_reader.verify_all()
+        from sec_xbrl.analytics.history_quarters import publish_quarter_history
+        consumer = output_root / "panels"
+        if consumer.exists():
+            consumer_reader = HistoryPublicationReader(consumer)
+            if consumer_reader.manifest.get("input_fingerprint") != release.layer2_run.fingerprint:
+                raise ValueError("existing quarter history uses different inputs or active rules")
+            consumer_reader.verify_all()
+            return consumer
+        return publish_quarter_history(publication=destination, output_root=output_root, reuse_roots=True)
     # Existing verified roots are reused without rerunning their producers.
     if not roots["t1"].exists():
         print(json.dumps({"stage": "BUILD_T1"}), flush=True)

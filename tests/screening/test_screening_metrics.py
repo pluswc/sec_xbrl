@@ -312,6 +312,24 @@ def test_unresolved_core_candidates_preserve_source_reason_and_lineage_in_metric
     assert "UNIT_NOT_USD" not in observation["diagnostic_reasons"]
     assert "PERIOD_MISMATCH" not in observation["diagnostic_reasons"]
 
+    held = copy.deepcopy(cell)
+    held["reason"] = held["source_reason"] = "MAPPING_REVIEW_REQUIRED"
+    held["candidate_lineage"] = [
+        {**copy.deepcopy(candidates[0]), "candidate_status": "MAPPING_REVIEW_REQUIRED"}
+    ]
+    held_observation = _reported_observation(
+        ticker="TEST",
+        cik="0000000001",
+        definition=DEFINITION_BY_ID["revenue"],
+        financial_as_of="2026-10-08",
+        cell=held,
+        trace=None,
+        source_snapshot_id="snapshot",
+    )
+    assert held_observation["unavailable_reason"] == "MAPPING_REVIEW_REQUIRED"
+    assert held_observation["source_fact_ids"] == ["fact-a"]
+    assert held_observation["candidate_lineage"] == held["candidate_lineage"]
+
 
 def test_revenue_yoy_accepts_53_week_duration_and_ignores_ambient_precision() -> None:
     qname = "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"

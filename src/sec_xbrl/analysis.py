@@ -725,8 +725,19 @@ def _core_candidate(
         or []
     )
     node = nodes.get(str(cell.get("node_id"))) or {}
+    source_snapshot_id = lineage.get("source_snapshot_id")
+    snapshot_cik = None
+    if isinstance(source_snapshot_id, str) and source_snapshot_id.startswith("l1:"):
+        parts = source_snapshot_id.split(":", 3)
+        snapshot_cik = parts[1] if len(parts) == 4 else None
+    evidence_ciks = {
+        str(row.get("cik"))
+        for row in evidence
+        if isinstance(row, dict) and row.get("cik")
+    }
     return {
         **copy.deepcopy(cell),
+        "cik": snapshot_cik or (next(iter(evidence_ciks)) if len(evidence_ciks) == 1 else None),
         "raw_concept_id": lineage.get("raw_concept_id"),
         "raw_concept_qname": lineage.get("raw_concept_qname") or node.get("concept"),
         "raw_concept_is_standard": lineage.get("raw_concept_is_standard"),
@@ -770,14 +781,69 @@ def _primary_statement_roles(candidate: dict[str, Any], statement_type: str) -> 
 
 def _core_scope(candidate: dict[str, Any]) -> tuple[Any, ...]:
     return (
+        candidate.get("cik"),
         candidate.get("ticker"),
         candidate.get("column_id"),
         candidate.get("source_filing_id"),
         candidate.get("start"),
         candidate.get("end"),
+        candidate.get("period_class"),
+        candidate.get("selection_view"),
+        candidate.get("as_of"),
         json.dumps(candidate.get("unit"), sort_keys=True, separators=(",", ":")),
         json.dumps(candidate.get("dimensions") or [], sort_keys=True, separators=(",", ":")),
     )
+
+
+def _candidate_scope_status(
+    candidate: dict[str, Any], expected_scope: dict[str, Any]
+) -> str:
+    required = ("cik", "ticker", "column_id", "period_class", "selection_view", "as_of")
+    if any(not candidate.get(key) for key in required):
+        return "CANDIDATE_SCOPE_INCOMPLETE"
+    if any(candidate.get(key) != expected_scope.get(key) for key in required):
+        return "CANDIDATE_SCOPE_MISMATCH"
+    filing_id = candidate.get("source_filing_id")
+    if not isinstance(filing_id, str) or not filing_id:
+        return "SOURCE_FILING_SCOPE_INCOMPLETE"
+    if candidate.get("source_filing_ids") != [filing_id]:
+        return "SOURCE_FILING_SCOPE_INCOMPLETE"
+    if candidate.get("dimensions") != []:
+        return "DIMENSION_MISMATCH"
+    if not _core_is_usd(candidate):
+        return "UNIT_NOT_USD"
+    start, end = candidate.get("start"), candidate.get("end")
+    if candidate.get("period_class") == "INSTANT":
+        if start is not None or not isinstance(end, str):
+            return "PERIOD_SCOPE_INCOMPLETE"
+    else:
+        if not isinstance(start, str) or not isinstance(end, str):
+            return "PERIOD_SCOPE_INCOMPLETE"
+        try:
+            if date.fromisoformat(start) >= date.fromisoformat(end):
+                return "PERIOD_SCOPE_INVALID"
+        except ValueError:
+            return "PERIOD_SCOPE_INVALID"
+    if start != expected_scope.get("start") or end != expected_scope.get("end"):
+        return "PERIOD_SCOPE_MISMATCH"
+    return "CANDIDATE_SCOPE_VALID"
+
+
+def _candidate_set_scope_status(
+    candidates: list[dict[str, Any]], expected_scope: dict[str, Any]
+) -> str | None:
+    statuses = []
+    for candidate in candidates:
+        status = _candidate_scope_status(candidate, expected_scope)
+        candidate["scope_status"] = status
+        statuses.append(status)
+    invalid = [status for status in statuses if status != "CANDIDATE_SCOPE_VALID"]
+    if invalid:
+        return invalid[0] if len(set(invalid)) == 1 else "CANDIDATE_SCOPE_INCOMPATIBLE"
+    scopes = {_core_scope(candidate) for candidate in candidates}
+    if len(scopes) > 1:
+        return "CANDIDATE_SCOPE_CONFLICT"
+    return None
 
 
 def _eligible_primary_candidate(
@@ -841,7 +907,7 @@ def _reported_revenue_total(
                 and row.get("role_uri") == role_uri
                 and row.get("from_raw_concept_id") == parent_raw_id
             ]
-            if not edges:
+            if len(edges) < 2:
                 continue
             try:
                 if any(Decimal(str(row.get("weight"))) != Decimal(1) for row in edges):
@@ -849,6 +915,9 @@ def _reported_revenue_total(
             except (InvalidOperation, TypeError, ValueError):
                 continue
             if not any(row.get("to_raw_concept_id") in competing_raw_ids for row in edges):
+                continue
+            child_raw_ids = {row.get("to_raw_concept_id") for row in edges}
+            if len(child_raw_ids) < 2 or not (child_raw_ids - competing_raw_ids):
                 continue
             children: list[dict[str, Any]] = []
             valid = True
@@ -863,6 +932,7 @@ def _reported_revenue_total(
                         _core_scope(child) == _core_scope(parent)
                         and child.get("status") == "REPORTED"
                         and child.get("source_fact_id")
+                        and role_uri in _primary_statement_roles(child, "IS")
                     ):
                         scoped.append(child)
                 unique = {
@@ -881,7 +951,8 @@ def _reported_revenue_total(
                 continue
             if not parent_value.is_finite() or any(not value.is_finite() for value in child_values):
                 continue
-            if parent_value != sum(child_values, Decimal(0)):
+            child_sum = _exact_decimal_sum(child_values)
+            if parent_value != child_sum:
                 continue
             return parent, {
                 "method": "REPORTED_REVENUE_CAL_TOTAL",
@@ -890,9 +961,34 @@ def _reported_revenue_total(
                 "parent_source_fact_id": parent.get("source_fact_id"),
                 "child_source_fact_ids": [row.get("source_fact_id") for row in children],
                 "reported_parent_value": str(parent_value),
-                "reported_child_sum": str(sum(child_values, Decimal(0))),
+                "reported_child_sum": str(child_sum),
             }
     return None, None
+
+
+def _exact_decimal_sum(values: list[Decimal]) -> Decimal:
+    """Sum finite decimals as aligned integer coefficients, independent of context."""
+    if not values:
+        return Decimal(0)
+    if any(not value.is_finite() for value in values):
+        raise ValueError("exact decimal sum requires finite inputs")
+    exponent = min(int(value.as_tuple().exponent) for value in values)
+    total = 0
+    for value in values:
+        sign, digits, value_exponent = value.as_tuple()
+        coefficient = int("".join(str(digit) for digit in digits) or "0")
+        if sign:
+            coefficient = -coefficient
+        total += coefficient * (10 ** (int(value_exponent) - exponent))
+    if total == 0:
+        return Decimal(0)
+    return Decimal(
+        (
+            1 if total < 0 else 0,
+            tuple(int(character) for character in str(abs(total))),
+            exponent,
+        )
+    )
 
 
 def _select_expanded_annual_core(
@@ -903,6 +999,7 @@ def _select_expanded_annual_core(
     trace_by_cell: dict[str, dict[str, Any]],
     relationships: list[dict[str, Any]],
     source_index: dict[tuple[Any, Any], list[tuple[str, dict, list]]],
+    expected_scope: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, str | None, list[dict[str, Any]], dict[str, Any] | None]:
     """Resolve only the approved expanded-annual primary-statement rules."""
     unique = {
@@ -913,10 +1010,30 @@ def _select_expanded_annual_core(
         _core_candidate(row, nodes=nodes, trace_by_cell=trace_by_cell)
         for row in unique.values()
     ]
+    if expected_scope is None and candidates:
+        first = candidates[0]
+        expected_scope = {
+            key: first.get(key)
+            for key in (
+                "cik",
+                "ticker",
+                "column_id",
+                "period_class",
+                "selection_view",
+                "as_of",
+                "start",
+                "end",
+            )
+        }
+    expected_scope = expected_scope or {}
     statement_type = _CORE_PRIMARY_STATEMENT_TYPE.get(str(spec.get("row_id")))
     if statement_type is None:
         chosen = next(iter(unique.values())) if len(unique) == 1 else None
         return chosen, None if chosen else ("MULTIPLE_CANDIDATES" if matches else "REQUIRED_ITEM_NOT_IN_PREPARED_DATA"), candidates, None
+
+    scope_reason = _candidate_set_scope_status(candidates, expected_scope)
+    if scope_reason is not None:
+        return None, scope_reason, candidates, None
 
     eligible: list[dict[str, Any]] = []
     for candidate in candidates:
@@ -942,7 +1059,14 @@ def _select_expanded_annual_core(
         if parent is not None:
             chosen = next(row for row in unique.values() if row.get("cell_id") == parent.get("cell_id"))
             return chosen, None, candidates, evidence
-    return None, "MULTIPLE_CANDIDATES" if candidates else "REQUIRED_ITEM_NOT_IN_PREPARED_DATA", candidates, None
+    if len(eligible) > 1:
+        reason = "MULTIPLE_CANDIDATES"
+    elif candidates:
+        statuses = {str(candidate["candidate_status"]) for candidate in candidates}
+        reason = next(iter(statuses)) if len(statuses) == 1 else "NO_ELIGIBLE_PRIMARY_CANDIDATE"
+    else:
+        reason = "REQUIRED_ITEM_NOT_IN_PREPARED_DATA"
+    return None, reason, candidates, None
 
 
 def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str, ...],
@@ -1138,6 +1262,18 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
                                 trace_by_cell=trace_by_cell,
                                 relationships=relationships,
                                 source_index=source_index,
+                                expected_scope={
+                                    "cik": panels[spec["period_class"]].scope.get("cik"),
+                                    "ticker": ticker,
+                                    "column_id": column["fiscal_time_series_column_id"],
+                                    "period_class": spec["period_class"],
+                                    "selection_view": view,
+                                    "as_of": info["as_of"],
+                                    "start": column.get("actual_start_date"),
+                                    "end": column.get("actual_instant_date")
+                                    if spec["period_class"] == "INSTANT"
+                                    else column.get("actual_end_date"),
+                                },
                             )
                         )
                     else:
