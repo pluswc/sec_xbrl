@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from sec_xbrl.metrics.screening import publish_screening_metrics
-from sec_xbrl.screening.common import read_json
+from sec_xbrl.screening.common import read_json, sha256_file
+from sec_xbrl.screening.company_descriptions import MANIFEST as DESCRIPTION_MANIFEST
+from sec_xbrl.screening.company_descriptions import (
+    CompanyDescriptionReader,
+    publish_company_descriptions,
+    review_company_description_plan,
+)
 from sec_xbrl.screening.dataset import publish_screening_dataset
 from sec_xbrl.screening.dataset_v2 import (
     open_screening_dataset,
@@ -31,6 +37,19 @@ def _parser() -> argparse.ArgumentParser:
     prepare_v2 = commands.add_parser("prepare-v2", help="publish a screening dataset v2")
     prepare_v2.add_argument("--config", type=Path, required=True)
     prepare_v2.add_argument("--destination", type=Path, required=True)
+    descriptions = commands.add_parser(
+        "descriptions-prepare", help="publish governed Korean company-description text"
+    )
+    descriptions.add_argument("--plan", type=Path, required=True)
+    descriptions.add_argument("--dataset", type=Path, required=True)
+    descriptions.add_argument("--destination", type=Path)
+    descriptions.add_argument("--dry-run", action="store_true")
+    description_status = commands.add_parser(
+        "descriptions-status", help="verify a pinned company-description publication"
+    )
+    description_status.add_argument("--publication", type=Path, required=True)
+    description_status.add_argument("--manifest-sha256", required=True)
+    description_status.add_argument("--dataset", type=Path, required=True)
     status = commands.add_parser("status", help="verify a screening dataset")
     status.add_argument("--dataset", type=Path, required=True)
     server = commands.add_parser("serve", help="start the loopback dashboard")
@@ -39,6 +58,8 @@ def _parser() -> argparse.ArgumentParser:
     server.add_argument("--exports", type=Path, required=True)
     server.add_argument("--host", default="127.0.0.1")
     server.add_argument("--port", type=int, default=8765)
+    server.add_argument("--descriptions", type=Path)
+    server.add_argument("--descriptions-manifest-sha256")
     backup = commands.add_parser("backup", help="create a consistent journal backup")
     backup.add_argument("--store", type=Path, required=True)
     backup.add_argument("--destination", type=Path, required=True)
@@ -61,9 +82,33 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "prepare-v2":
         result = publish_screening_dataset_v2(args.config, args.destination)
         _print({"publication_id": result.publication_id, "root": str(result.root)})
+    elif args.command == "descriptions-prepare":
+        if args.dry_run:
+            result = review_company_description_plan(args.plan, args.dataset)
+            _print(result)
+            return 2 if result["blocked_count"] else 0
+        if args.destination is None:
+            raise ValueError("descriptions-prepare requires --destination unless --dry-run")
+        result = publish_company_descriptions(args.plan, args.dataset, args.destination)
+        _print({
+            "publication_id": result.publication_id,
+            "root": str(result.root),
+            "manifest_sha256": result.manifest_sha256,
+        })
+    elif args.command == "descriptions-status":
+        dataset = open_screening_dataset(args.dataset)
+        reader = CompanyDescriptionReader(
+            args.publication, args.manifest_sha256, dataset
+        )
+        _print(reader.verify_all())
     elif args.command == "serve":
         catalog = _catalog(args.catalog)
-        service = ScreeningService(catalog, ScreeningStore(args.store))
+        descriptions = _serve_descriptions(args, catalog)
+        service = ScreeningService(
+            catalog,
+            ScreeningStore(args.store),
+            company_descriptions=descriptions,
+        )
         serve(service, export_root=args.exports, host=args.host, port=args.port)
     elif args.command == "backup":
         _print({"backup": str(backup_store(args.store, args.destination))})
@@ -87,6 +132,28 @@ def _catalog(path: Path) -> dict[str, Path]:
             raise ValueError("duplicate screening catalog dataset ID")
         result[row["dataset_id"]] = Path(row["root"])
     return result
+
+
+def _serve_descriptions(
+    args: argparse.Namespace, catalog: dict[str, Path]
+) -> CompanyDescriptionReader | None:
+    if (args.descriptions is None) != (args.descriptions_manifest_sha256 is None):
+        raise ValueError("serve requires both description publication and manifest SHA-256")
+    if args.descriptions is None:
+        return None
+    manifest_path = args.descriptions / DESCRIPTION_MANIFEST
+    if sha256_file(manifest_path) != args.descriptions_manifest_sha256:
+        raise ValueError("company-description manifest differs from pinned digest")
+    manifest = read_json(manifest_path, "company-description manifest")
+    dataset_id = manifest.get("dataset_id")
+    if dataset_id not in catalog:
+        raise ValueError("company-description dataset is absent from the screening catalog")
+    dataset = open_screening_dataset(catalog[dataset_id])
+    return CompanyDescriptionReader(
+        args.descriptions,
+        args.descriptions_manifest_sha256,
+        dataset,
+    )
 
 
 def _print(value: Any) -> None:

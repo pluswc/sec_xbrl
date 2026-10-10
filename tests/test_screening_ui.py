@@ -145,3 +145,18 @@ def test_filtered_metric_guide_cannot_replace_complete_explorer_catalog() -> Non
     metric = JS[JS.index("function explorerMetric"):JS.index("function updateExplorerSort")]
     assert "S.explorerCatalog?.metrics.find" in metric
     assert 'label:id,unit_kind:"MONEY"' not in metric
+
+
+def test_company_description_is_optional_plaintext_and_keyboard_accessible() -> None:
+    assert 'id="profile-description"' in HTML
+    render = JS[JS.index("function renderCompanyDescription"):JS.index("function renderProfile()")]
+    assert "copy.textContent=d.text" in render
+    assert "innerHTML" not in render
+    assert 'd.status!=="AVAILABLE"' in render
+    assert 'd.content_fixture_kind==="SYNTHETIC_DESCRIPTION_FIXTURE"' in render
+    assert 'u.protocol==="https:"' in render
+    assert 'a.rel="noopener noreferrer"' in render
+    assert "fetch(" not in render and "api(" not in render
+    assert "#company-profile a[href]" in JS
+    assert ".company-description{" in CSS
+    assert ".description-meta a:focus-visible" in CSS

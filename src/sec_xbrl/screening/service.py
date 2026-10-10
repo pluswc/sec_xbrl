@@ -18,6 +18,7 @@ from sec_xbrl.screening.common import (
     safe_new_destination,
     sha256_file,
 )
+from sec_xbrl.screening.company_descriptions import CompanyDescriptionReader
 from sec_xbrl.screening.dataset import ScreeningDatasetReader
 from sec_xbrl.screening.dataset_v2 import ScreeningDatasetV2Reader, open_screening_dataset
 from sec_xbrl.screening.explorer import ScreeningExplorer, public_copy
@@ -50,6 +51,8 @@ class ScreeningService:
         self,
         datasets: dict[str, Path | str],
         store: ScreeningStore | Path | str,
+        *,
+        company_descriptions: CompanyDescriptionReader | None = None,
     ) -> None:
         if not isinstance(datasets, dict) or not datasets:
             raise ValueError("at least one screening dataset is required")
@@ -63,15 +66,23 @@ class ScreeningService:
             self.datasets[dataset_id] = reader
             if isinstance(reader, ScreeningDatasetV2Reader):
                 self.explorers[dataset_id] = ScreeningExplorer(reader)
+        if company_descriptions is not None:
+            bound = self.datasets.get(company_descriptions.dataset_id)
+            if bound is None or bound.publication_id != company_descriptions.dataset.publication_id:
+                raise ValueError("company descriptions differ from the screening catalog")
+        self.company_descriptions = company_descriptions
         self.store = store if isinstance(store, ScreeningStore) else ScreeningStore(store)
 
     def status(self) -> dict[str, Any]:
-        return {
+        status = {
             "engine_version": ENGINE_VERSION,
             "datasets": [reader.verify_all() for reader in self.datasets.values()],
             "screens": len(self.store.list_screens()),
             "runs": len(self.store.list_runs()),
         }
+        if self.company_descriptions is not None:
+            status["company_descriptions"] = self.company_descriptions.verify_all()
+        return status
 
     def metric_availability(self, dataset_id: str, *, cik: str | None = None) -> list[dict[str, Any]]:
         reader = self._dataset(dataset_id)
@@ -169,12 +180,24 @@ class ScreeningService:
         self, dataset_id: str, *, cik: str, fiscal_year: int | None = None
     ) -> dict[str, Any]:
         """Return a run-independent company profile over prepared observations."""
-        return public_copy(
+        result = public_copy(
             self._explorer(dataset_id).company_profile(
                 cik=cik,
                 fiscal_year=fiscal_year,
             )
         )
+        if self.company_descriptions is not None and self.company_descriptions.dataset_id == dataset_id:
+            row = self.company_descriptions.company(cik)
+            result["company_description"] = {
+                key: row.get(key)
+                for key in (
+                    "status", "text", "locale", "provider_name", "profile_url",
+                    "checked_at", "observed_at", "publication_id", "temporal_scope", "reason",
+                    "content_fixture_kind",
+                )
+            }
+            result["company_description"]["publication_id"] = self.company_descriptions.publication_id
+        return result
 
     def company_comparison(
         self,

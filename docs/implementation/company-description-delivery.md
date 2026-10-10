@@ -5,8 +5,9 @@
 기준일은 **2026-10-10 KST**다. 사용자는 한국어 회사 소개 기능을 추가하고
 Investing.com을 우선 기준으로 진행하려는 제품 의도를 승인했다. 다만 콘텐츠
 복제·편집·번역·요약·파생물 작성·자동 접근의 이용 방식과 권리 근거는 확정하지
-않았다. 따라서 이 계약은 **PROPOSED**, 보호된 Investing.com 본문의 취득·게시는
-**RIGHTS_DECISION_PENDING / BLOCKED**다.
+않았다. 초기 설계는 **PROPOSED**였고, section 6의 최소 수직 기능은 현재
+**SOURCE_IMPLEMENTED / PENDING_INDEPENDENT_VERIFICATION**이다. 보호된 Investing.com 본문의 실제 취득·게시와
+actual 21사 enablement는 계속 **RIGHTS_DECISION_PENDING / BLOCKED**다.
 
 2026-10-10 검토한 [Investing.com 이용약관 PDF](https://cdn.investing.com/about-us/terms_and_conditions.pdf)의
 section 10(a)는 개인적 이용 범위를, 10(b)는 콘텐츠 복제·편집·파생 이용에 대한
@@ -20,7 +21,9 @@ release gate다.
 webmaster widget 안내가 있다는 사실만으로 회사 설명용 widget이나 본문 재사용 권한이
 있다고 보지 않는다. 현재 회사 설명 widget은 확인되지 않았다.
 
-현재 사용자에게 제시된 선택지는 다음 세 가지이며 아직 답이 확정되지 않았다.
+초기 검토에서 제시된 선택지는 다음 세 가지였다. 이후 사용자는 비상업적 개인 투자
+목적의 crawler/연결 기반 plain-text 흐름을 선택했지만, 그 목적 진술은 제공자의 명시적
+접근·재표시 권리 근거를 대신하지 않는다.
 
 1. **LINK_ONLY** — 회사별 Investing.com 프로필로 이동하는 검토된 링크만 제공
 2. **LICENSED_SUMMARY** — 사용자가 이미 가진 재사용 허가나 별도로 확보한 서면
@@ -61,7 +64,7 @@ manifest가 선언한 별도 파일로 둘 수 있다.
 | 파일·record | 필수 내용 |
 | --- | --- |
 | `company_description_manifest.json` | schema/publication ID, 생성 시각, 입력 company-master ID·hash, config hash, mode, record 수, records SHA-256과 선언 파일 |
-| `company_description_records.json` | CIK, optional security ID·ticker, provider ID/name, canonical URL, `checked_at`, link/status evidence, locale, summary 또는 null, rights basis ID·적용 기간·허용 변형, content hash |
+| `company_description_records.json` | CIK·ticker, provider ID/name, canonical URL, `checked_at`·`observed_at`, locale, plain text 또는 null, rights reference·scope·유효기간, content/input hash, status·reason |
 
 `checked_at`은 사람이 해당 URL과 issuer/security identity를 확인한 시각이지 자동
 수집 시각이 아니다. provider 이름과 URL만으로 본문 사용권을 추정하지 않는다.
@@ -130,9 +133,9 @@ manifest SHA-256을 고정하며, reader는 그 digest와 file-set을 함께 검
 
 ## 5. 향후 구현·검증 gate
 
-이번 문서 작성 범위는 구현이 아니다. 사용자가 세 mode 중 하나를 선택하면 그
-route는 이 계약 범위에서 승인되며, lead가 입력 schema·허용 파일·화면 범위·
-provider link 목록과 독립 검증을 구체화한다. 향후 수락 조건은 다음과 같다.
+이 section은 초기 제안의 향후 gate를 보존한다. section 6의 수직 기능 승인이 구현
+범위를 구체화했으며, 실제 provider 본문·actual 21사 publication·운영 enablement에는
+아래 release gate가 계속 적용된다.
 
 - 21/21 CIK가 정확히 한 상태(`LINK_AVAILABLE`, `LINK_UNAVAILABLE`,
   `IDENTITY_HOLD`, `SUMMARY_AVAILABLE`, `RIGHTS_BLOCKED`)를 가지며 silent omission 0
@@ -148,3 +151,56 @@ provider link 목록과 독립 검증을 구체화한다. 향후 수락 조건�
 provider live 페이지의 수동 확인은 별도 evidence로 기록하고 unit test의 전제나
 checkout 재현 요건으로 만들지 않는다. 독립 PASS, 로컬 인수, 사용자 직접 확인,
 push/PR/main merge는 각각 별도 상태로 남긴다.
+
+## 6. 2026-10-10 구현 승인 추가
+
+사용자는 비상업적 개인 투자 용도로 crawler 또는 연결을 통해 **텍스트만** 가져와
+회사 소개를 구성해 달라고 요청했다. 이는 collector/importer, 불변 publication,
+선택적 profile 표시의 최소 수직 슬라이스 구현을 승인한다. 비상업적 목적만으로
+Investing.com 약관의 자동 추출·재사용 제한이 해소되지는 않는다. 따라서 실제
+Investing.com 본문 수집과 actual 21사 publication·live enablement는 계속
+`RIGHTS_DECISION_PENDING`이다.
+
+이번 구현은 권리 상태를 network I/O 전에 검사하는 generic collector, 명시적 한국어
+plain-text supplied input, 권리가 허용할 때만 실행되는 단발 HTTP fetch, offline
+synthetic fixture로 한정한다. anti-bot·paywall·CAPTCHA 우회, proxy, 비공개 API,
+자동 retry와 runtime/profile-open fetch는 허용하지 않는다. 기존 financial R3와
+journal은 변경하지 않으며 실제 provider 콘텐츠를 fixture에 넣지 않는다.
+
+lead의 같은 날 일반 `urllib` 연결성 점검은
+`https://kr.investing.com/equities/apple-computer-inc-company-profile`에서 HTTP 403을
+받았다. 응답 본문은 읽거나 보관하지 않았고 재시도하지 않았다. 이는 실제 콘텐츠
+취득 성공이나 권리 근거가 아니라 접근 제한 evidence다.
+
+구현 publication은 manifest와 records 두 파일만 소비 시 권위로 삼는다. 원본 plan과
+supplied text/HTML 경로는 생산 시 검증·lineage에만 쓰고 runtime에서 다시 읽지 않는다.
+자연스러운 권리 만료는 재무 service를 중단시키지 않고 projection에서 본문과 링크를
+숨긴다. 현재 URL·확인시각이 없는 dataset 회사는 fake metadata 대신 명시적
+`UNAVAILABLE` reason을 가진다. 실행 방법은 [회사 소개 사용 안내](../usage/company-descriptions.md)에
+기록한다.
+
+## 7. 소스 구현 결과와 남은 gate
+
+새 `sec_xbrl.screening.company_descriptions` 모듈은 다음 공개 경계를 구현한다.
+
+- `review_company_description_plan(plan_path, dataset_root)` — network·destination write 없이
+  권리·회사 membership·입력 파일을 사전 점검한다.
+- `publish_company_descriptions(plan_path, dataset_root, destination)` — supplied plain text 또는
+  명시적으로 허가된 단발 HTTP 응답에서 선택 영역만 읽어 새 두 파일 publication을 만든다.
+- `CompanyDescriptionReader(root, expected_manifest_sha256, dataset)` — 외부 고정 SHA,
+  embedded normalized plan, 파일 hash, dataset publication과 정확한 회사 identity를 검증한다.
+- CLI `descriptions-prepare`, `descriptions-status`와 optional `serve --descriptions
+  --descriptions-manifest-sha256`를 제공한다. 옵션이 없으면 기존 service/profile 응답은
+  설명 field를 추가하지 않는다.
+
+HTML selector는 명시적 id/class가 있는 한 요소만 허용하고 script/style과 선택 영역 밖
+문구를 버린다. publication에는 raw HTML을 저장하지 않는다. `AVAILABLE`은 한국어 본문,
+HTTPS URL, 확인시각과 유효한 권리 scope가 모두 필요하다. 나머지 dataset 회사는 URL과
+날짜를 꾸미지 않고 null metadata와 reason을 가진 `UNAVAILABLE`로 유지할 수 있다.
+
+작성자 검증은 network-free focused 18 PASS, screening 회귀 92 PASS, 전체 회귀
+1,373 PASS / 38 SKIP, Ruff와 browser JS syntax PASS다. actual R3를 읽기 전용으로 사용한
+합성 helper 점검은 21사 중 1건 `SYNTHETIC_DESCRIPTION_FIXTURE`, 20건 explicit
+`UNAVAILABLE` publication과 pinned status를 확인했다. 이는 실제 회사 설명이나 제공자
+권리 승인 evidence가 아니다. 별도 독립 검증·lead 로컬 인수·사용자 화면 확인·remote
+push/PR/main merge는 모두 미수행이다.
