@@ -277,7 +277,7 @@ def test_quarter_source_results_die_before_next_load_and_final_verification(tmp_
     monkeypatch.setattr(history.HistoryPublicationReader, "load", load)
     monkeypatch.setattr(history.HistoryPublicationReader, "verify_all", verify)
     quarters.publish_quarter_history(publication=source, output_root=tmp_path / "out", operational_root=kwargs["operational_root"])
-    assert len(refs) == 2
+    assert len(refs) == 0  # Quarter production must never invoke eager load.
 
 
 @pytest.mark.parametrize("fault", ["status", "generation", "view", "plan", "report", "roots", "source_child"])

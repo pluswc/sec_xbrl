@@ -166,3 +166,11 @@ source `2027e21…`의 실제 recovery는 reported copy 이후 CLI module/contex
 분리로 NOT_READY 오류가 발생했다. 실패 root·기존 증거를 보존하고
 [CLI capability-owner 수리](../implementation/company-history-workflow.md#2026-10-13-cli-capability-owner-repair-after-actual-source-2027-failure)를 적용한다.
 새 독립 검증 전 실제 재시도는 하지 않는다.
+
+
+2026-10-14 후속: `5cd2438…` actual JNJ recovery는 16 GiB guard의
+**RESOURCE_STOP / NOT_READY**로 봉인됐으며 blind retry는 중단됐다. lead 승인
+bounded-quarter-production은 private disk spool로 전체 record/candidate/order를
+보존하는 비회계 storage 수리다. 구현·writer 검사와 새 독립 source 검증·실제 OPS
+실행 승인은 별도 상태다. [날짜별 후속 상태](../implementation/universe50-local-status-20261014.md#2026-10-14-후속--actual-5cd-resource-stop와-bounded-quarter-수리)와
+[bounded quarter 계약](../implementation/company-history-workflow.md#2026-10-14-bounded-quarter-production-after-actual-source-5cd-resource-stop)을 따른다.

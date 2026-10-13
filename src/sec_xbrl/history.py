@@ -15,7 +15,7 @@ import stat
 import tempfile
 import uuid
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, replace
 from datetime import date
@@ -643,7 +643,7 @@ class _StagedRecordWrite:
 
 
 def _stage_records(
-    path: Path, records: tuple[dict[str, Any], ...]
+    path: Path, records: Sequence[dict[str, Any]]
 ) -> _StagedRecordWrite:
     import polars as pl
 

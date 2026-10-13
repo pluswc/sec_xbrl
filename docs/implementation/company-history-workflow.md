@@ -450,3 +450,90 @@ golden now also launches a fresh `python -m` subprocess and compares all declare
 records against the imported API and fresh build, retaining the intended parent
 locator differences only. A new freeze and independent re-audit are required
 before OPS may use a new actual destination.
+
+
+### 2026-10-14 bounded quarter production after actual source 5cd resource stop
+
+The lead approved a nonaccounting storage/lifetime repair after the guarded
+actual `5cd2438…` recovery exceeded its 16 GiB process-tree RSS stop. The sealed
+run reached 16,886,848 KiB at 971.578 seconds; wrapper exit 70 and child SIGTERM
+are observed. The log and GNU time report are empty, so there is no GNU maximum
+or traced allocation stack. The reported copy has 37 files, while the quarter
+partial has only `.chunks` and zero files. Source control flow and the late RSS
+rise strongly implicate first-table eager ingestion/repartition before its first
+staged write. This is a resource failure, not a proven accounting/data mismatch
+or confirmed kernel OOM. Original inputs, all failed roots, reports and prior
+source decisions remain immutable; no retry or cap increase is authorized here.
+
+The approved implementation uses a newly and exclusively created private
+`.panels.partial-*/.chunks/quarter-spill.sqlite`. Existing public T1 validation
+still runs in full. Its selected attestation fields are then copied to a disk
+index and its verified object released. Quarter production uses the existing
+full-field 32-record history iterator rather than public eager `load()`.
+Complete reported cells, row/column metadata, materialized-cell keys, every
+additive candidate reference, derived metrics/cells and period boundaries are
+spooled. No source record, candidate, flag or evidence field is sampled or
+projected away. Only the already-existing T1 attestation projection is retained.
+
+Private SQLite BLOB keys avoid SQL affinity/collation policy; canonical typed
+keys preserve string/null/numeric distinctions and Python equal numeric keys.
+Updates keep the first insertion ordinal. Source metadata for candidate resolution
+remains scoped to its original source table; later target metadata overwrites do
+not rebind earlier candidates. Duplicate candidates remain duplicate ambiguity,
+including equal-value records. Unavailable/direct cells still suppress gap filling.
+Derived extra rows/columns retain `setdefault` behavior. Derivation candidate
+filtering and payload construction use the existing formulas, IDs, scope tests,
+period rules and source bindings. `approved_additive` and `derive_quarter` are
+unchanged; the public Layer2 validator, parser and policy registry are unchanged.
+
+Replayable disk sequences feed the existing global JSON-field/schema inference
+and bounded encoder, including late nested-field promotion and exact large-integer
+representation. Final cells now use the bounded writer's 32-row groups. Therefore
+new consumer Parquet hashes may differ from the old producer despite identical
+ordered physical scalar/JSON values, schema, decoded values and provenance.
+Reported source bytes and original generation identity remain unchanged. This
+is a physical storage change only; manifests contain the new files' own hashes.
+There is no API/CLI argument, source parent locator or recovery receipt change.
+
+The spool is not a new public artifact or interchange format. Its non-executable
+private codec preserves scalar/container types, with temporal/Decimal fallback.
+It is never opened from an input-provided locator. Its file and ancestor identity
+are checked before mutation; changed ownership aborts without removing foreign
+files. Recovery retains spools, journals and encoded chunks on success/failure,
+with corresponding extra disk cost, under the existing trusted exclusive parent
+boundary. Normal publication keeps its prior success cleanup. Connections close
+on all exits; default readers remain denied until the existing validated COMPLETE
+gate. No recursive recovery cleanup or unscoped producer bypass is introduced.
+
+`QUARTER_SPILL_BEGIN`, `QUARTER_SPILL_FLUSH` (every 32 source cells) and
+`QUARTER_SPILL_END` log table identity, processed count and process maximum RSS
+(on the supported Linux execution host), never cell values. Existing external
+resource guards remain authoritative. The design bounds live record payloads,
+not arbitrary total memory: initial eager T1 validation, native Parquet
+pages/dictionaries, one indivisible large record (including a column's complete
+boundary evidence), fiscal-column ordering keys and small staging descriptors
+remain explicit limits. No constant-memory or actual-JNJ readiness claim follows
+from the small-fixture tests.
+
+Acceptance requires the relevant prior 253 unit controls plus spool ordering,
+complete nested evidence, duplicate ambiguity, typed scalar/global schema,
+ownership and NOT_READY failure controls; guarded offline cached two-filing API
+and fresh `python -m` recovery; and an old `a36ea059…` producer oracle comparing
+all 8 tables/25 files/4,686 panel records/42 derived records, complete ordered
+physical values, schemas and decoded provenance. Only intended parent locators
+may be normalized; physical Parquet SHA equality is not required for the new
+row groups. Tests use 2 GiB per-process hard address-space limits and sampled
+2 GiB process-group RSS/300-second stops, Polars 2 and BLAS/OMP/Rayon 1 threads.
+Address-space and sampled RSS limits are distinct, not a cgroup RSS guarantee.
+
+Reproduction: run the seven existing unit modules `test_history_recovery`,
+`test_history_workflow`, `test_history_quarters`, `test_c3_quarterly_policy`,
+`test_core_quarterly_coverage`, `test_quarterly_analysis_pivot`,
+`test_quarterly_derived_metrics`, plus `test_history_quarter_spill`, with pytest.
+Run `tests/integration/test_history_quarters_cached.py` only with the declared
+existing offline two-filing NVDA fixture under the guard. The old oracle reads
+the prior producer source from commit `a36ea05919672cb1eb44470bacfb23c4ac6f3e0b`
+and runs it against that newly generated small reported fixture, never actual
+JNJ. Use fresh temporary destinations. Run Ruff and `git diff --check`.
+Writer results and the next frozen SHA are separate from independent source
+verification, lead acceptance, and any newly authorized actual OPS execution.

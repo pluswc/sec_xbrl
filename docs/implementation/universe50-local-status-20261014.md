@@ -119,3 +119,47 @@ main merge가 아니다. 보호된 user journal SHA-256
 
 이 문서를 작성한 runtime은 정확한 model identifier를 노출하지 않았다. 기본 모델
 배정을 실제 실행 모델의 증거로 사용하지 않으며, 별도 독립 검증 역할을 유지한다.
+
+
+## 2026-10-14 후속 — actual 5cd resource stop와 bounded quarter 수리
+
+위의 actual 결과 미확인 상태는 후속 실행 증거로 갱신한다. `5cd2438…` 실제
+recovery는 971.578초에 sampled process-tree RSS 16,886,848 KiB로 16 GiB
+운영 stop을 넘었다. wrapper 70 / child SIGTERM이며 COMPLETE와 consumer panels는
+없다. reported component 37 files / 965,106,797 bytes와 NOT_READY root를 보존한다.
+quarter partial은 `.chunks` directory만 있고 0 files다. `017` log/GNU time은
+0 bytes라 정확한 stack·GNU peak·kernel OOM을 주장하지 않는다. source control flow와
+RSS는 첫 source table eager load/repartition 부근을 강하게 가리키지만 traced 원인은
+아니다. 데이터/회계 불일치 판정도 아니다.
+
+봉인 report `jnj_recovery_5cd2438_resource_stop.json` SHA-256은
+`4f4dd9d97907772da2ee2714edc8f7c67c12d2d890856cce4033c7746095fd60`,
+postflight는 `58a5e35ae66dd3cedb0292452170b4ee2fd89098617cb2d076d4c82439b4feff`다.
+모두 기존 resumption evidence 경로의 불변 과거 증거이며 수정하지 않는다.
+
+lead는 단일 source writer에게 complete generic bounded-quarter-production을
+**APPROVED**했다. accepted docs descendant `5f332215…`로 local fast-forward한 뒤
+private disk-backed record/index, bounded whole-field iteration, exact ordered
+candidate/derivation assembly, flush telemetry를 구현한다. 구현 상태는
+**IMPLEMENTED / writer validation**, 별도 source **INDEPENDENT VERIFICATION PENDING**,
+실제 결과 **NOT_READY / NO RETRY**다. 회계·Raw·public T1 validation·기간/window·
+source parent·KDP membership 결정은 불변이다. 저장/수명 수리의 상세와 재현 기준은
+[회사 history workflow의 bounded quarter 계약](company-history-workflow.md#2026-10-14-bounded-quarter-production-after-actual-source-5cd-resource-stop)에 있다.
+
+새 독립 source PASS와 lead의 별도 실제 실행 GO 전 actual recovery, CVX,
+financial/consumer/metric rollout, cap 인상은 하지 않는다. exact-50 Raw 로컬 수락은
+계속 유효하되 History/financial 준비 완료와 구분한다. main·journal·기존 data·증거·
+실행 config를 바꾸지 않으며 remote/PR/merge/scheduler 실행은 없다.
+
+
+이번 bounded-quarter 후보의 writer 검사(2026-10-14): 기존 253 controls를 포함한
+264 unit PASS(14.48초), cached NVDA 2 filings의 API+fresh CLI PASS(36.73초),
+old `a36ea059…` oracle 8 tables/25 files/4,686 ordered panel records/42 derived
+PASS(4.39초), Ruff와 diff check PASS다. 각 sampled process-group peak는
+276,439,040 / 391,143,424 / 224,862,208 bytes이며 각각 2 GiB hard AS + sampled
+RSS/300초 guard 아래 실행했다. 이는 합성/작은 캐시 fixture 결과이고 JNJ actual
+메모리 수락 증거가 아니다. 원본 source generation reported bytes는 그대로이고,
+consumer Parquet는 32-row group 때문에 physical hash가 달라도 전체 ordered raw
+scalar/JSON·schema·decoded values가 oracle과 동일해야 한다. `_sequence`, `_scope`,
+`approved_additive`, `derive_quarter`는 `5cd2438…`와 AST 동일성을 확인했다.
+새 freeze의 별도 독립 검증과 lead 판단은 아직 대기한다.

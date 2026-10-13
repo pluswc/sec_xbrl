@@ -10,12 +10,15 @@ import argparse
 import gc
 import hashlib
 import json
+import marshal
 import re
 import shutil
+import sqlite3
 import tempfile
 from collections import defaultdict
+from collections.abc import MutableMapping, Sequence
 from copy import deepcopy
-from datetime import date
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,6 +35,7 @@ from sec_xbrl.history import (
     HistoryPublicationReader,
     _check_history_storage,
     _finalize_staged_records,
+    _history_dataset_path,
     _iter_history_records,
     _rename_history_directory,
     _retain_history_artifacts,
@@ -109,6 +113,340 @@ def _period_attestation_index(observed: Any) -> dict[tuple[str, str], dict[str, 
         }
         for row in observed.records("reported_period_observation")
     }
+
+
+def _spill_pack(value):
+    try:
+        return b"M" + marshal.dumps(value)
+    except ValueError:
+        # Parquet can also return temporal/Decimal scalars. Tagged fallback
+        # preserves these types without executable deserialization or str casts.
+        def encode(item):
+            if isinstance(item, dict):
+                return ("dict", [(encode(k), encode(v)) for k, v in item.items()])
+            if isinstance(item, (list, tuple)):
+                return (type(item).__name__, [encode(v) for v in item])
+            if isinstance(item, datetime):
+                return ("datetime", (item.isoformat(), item.fold))
+            if isinstance(item, (date, time, Decimal)):
+                return (type(item).__name__, str(item))
+            if isinstance(item, timedelta):
+                return ("timedelta", (item.days, item.seconds, item.microseconds))
+            return ("scalar", item)
+        return b"T" + marshal.dumps(encode(value))
+
+
+def _spill_unpack(payload):
+    if payload[:1] == b"M":
+        return marshal.loads(payload[1:])
+    if payload[:1] != b"T":
+        raise ValueError("invalid private quarter spill record")
+    def decode(item):
+        kind, value = item
+        if kind == "dict":
+            return {decode(k): decode(v) for k, v in value}
+        if kind in {"list", "tuple"}:
+            values = [decode(v) for v in value]
+            return values if kind == "list" else tuple(values)
+        if kind == "datetime":
+            return datetime.fromisoformat(value[0]).replace(fold=value[1])
+        if kind == "timedelta":
+            return timedelta(days=value[0], seconds=value[1], microseconds=value[2])
+        if kind in {"date", "time", "Decimal"}:
+            return {"date": date.fromisoformat, "time": time.fromisoformat, "Decimal": Decimal}[kind](value)
+        if kind == "scalar":
+            return value
+        raise ValueError("invalid private quarter spill scalar")
+    return decode(marshal.loads(payload[1:]))
+
+
+class _QuarterSpill:
+    """Private, run-owned typed records; never opens an input-supplied database.
+
+    BLOB keys avoid SQLite affinity/collation changing Python keys. marshal is
+    non-executable and preserves int/float/bool/bytes/tuple/list distinctions;
+    this is an ephemeral implementation format, not a publication contract.
+    """
+
+    def __init__(self, directory: Path):
+        _check_history_storage(directory)
+        self.path = directory / "quarter-spill.sqlite"
+        # Exclusive creation inside the owned staging root, with no reuse.
+        with self.path.open("xb"):
+            pass
+        self.bindings = {path: (path.stat().st_dev, path.stat().st_ino)
+                         for path in (self.path, directory, *directory.parents)}
+        self.db = sqlite3.connect(self.path)
+        self.db.execute("PRAGMA cache_size=-2048")
+        self.db.execute("PRAGMA journal_mode=PERSIST")
+        self.db.execute("PRAGMA temp_store=FILE")
+        self.db.execute("PRAGMA mmap_size=0")
+        self.db.execute("CREATE TABLE records (ordinal INTEGER PRIMARY KEY, bucket INTEGER, key BLOB, original_key BLOB, value BLOB, UNIQUE(bucket,key))")
+        self.db.execute("CREATE INDEX bucket_order ON records(bucket,ordinal)")
+        self.next_bucket = 0
+
+    def mapping(self):
+        self.next_bucket += 1
+        return _SpillMap(self, self.next_bucket)
+
+    def sequence(self):
+        return _SpillSequence(self.mapping())
+
+    def check(self):
+        _check_history_storage(self.path.parent)
+        for path, expected in self.bindings.items():
+            try:
+                actual = path.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise ValueError("quarter spill ownership changed; artifacts preserved") from exc
+            if path.is_symlink() or (actual.st_dev, actual.st_ino) != expected:
+                raise ValueError("quarter spill ownership changed; artifacts preserved")
+
+    def checkpoint(self):
+        self.check()
+        self.db.commit()
+
+    def close(self):
+        self.db.close()
+
+    def resolve(self, locator):
+        cell = _SpillMap(self, locator["cells"])[locator["cell_key"]]
+        column = locator["reclassified_column"]
+        _SpillMap(self, locator["columns"])[locator["column_id"]]
+        row = _SpillMap(self, locator["rows"])[locator["row_id"]]
+        if (cell["fiscal_time_series_column_id"] != column["fiscal_time_series_column_id"]
+            or cell["fiscal_time_series_row_id"] != locator["row_id"]
+            or not approved_additive(cell)):
+            raise ValueError("quarter additive spill locator changed")
+        return cell, column, row
+
+
+class _SpillMap(MutableMapping):
+    def __init__(self, spill, bucket):
+        self.spill, self.bucket = spill, bucket
+
+    @staticmethod
+    def _key(key):
+        # Canonicalize marshal's intern/reference flags before using bytes as
+        # a SQL key. Equal keys must not depend on Python string interning.
+        def typed(value):
+            if isinstance(value, tuple):
+                return ["tuple", [typed(item) for item in value]]
+            if isinstance(value, (bool, int)) or (isinstance(value, float) and value.is_integer()):
+                return ["int", int(value)]
+            if value is None or type(value) in (str, float):
+                return [type(value).__name__, value]
+            raise TypeError("unsupported private quarter index key")
+        return json.dumps(typed(key), ensure_ascii=True, separators=(",", ":")).encode()
+
+    def __getitem__(self, key):
+        row = self.spill.db.execute("SELECT value FROM records WHERE bucket=? AND key=?", (self.bucket, self._key(key))).fetchone()
+        if row is None:
+            raise KeyError(key)
+        return _spill_unpack(row[0])[1]
+
+    def __setitem__(self, key, value):
+        # UPDATE preserves the first ordinal; INSERT OR REPLACE would not.
+        self.spill.check()
+        self.spill.db.execute("INSERT INTO records(bucket,key,original_key,value) VALUES(?,?,?,?) ON CONFLICT(bucket,key) DO UPDATE SET value=excluded.value", (self.bucket, self._key(key), _spill_pack(key), _spill_pack((key, value))))
+
+    def __delitem__(self, key):
+        self.spill.check()
+        if not self.spill.db.execute("DELETE FROM records WHERE bucket=? AND key=?", (self.bucket, self._key(key))).rowcount:
+            raise KeyError(key)
+
+    def __iter__(self):
+        for row in self.spill.db.execute("SELECT original_key FROM records WHERE bucket=? ORDER BY ordinal", (self.bucket,)):
+            yield _spill_unpack(row[0])
+
+    def __len__(self):
+        return self.spill.db.execute("SELECT count(*) FROM records WHERE bucket=?", (self.bucket,)).fetchone()[0]
+
+    def values(self):
+        for row in self.spill.db.execute("SELECT value FROM records WHERE bucket=? ORDER BY ordinal", (self.bucket,)):
+            yield _spill_unpack(row[0])[1]
+
+    def records(self):
+        return _SpillSequence(self)
+
+
+class _SpillSequence(Sequence):
+    def __init__(self, mapping):
+        self.mapping = mapping
+        self.length = len(mapping)
+
+    def __len__(self):
+        return self.length
+
+    def __iter__(self):
+        return self.mapping.values()
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            start, stop, step = index.indices(len(self))
+            if step != 1:
+                raise ValueError("spill slices require ordered contiguous records")
+            return tuple(_spill_unpack(row[0])[1] for row in self.mapping.spill.db.execute("SELECT value FROM records WHERE bucket=? ORDER BY ordinal LIMIT ? OFFSET ?", (self.mapping.bucket, max(0, stop-start), start)))
+        if index < 0:
+            index += len(self)
+        if index < 0 or index >= len(self):
+            raise IndexError(index)
+        row = self.mapping.spill.db.execute("SELECT value FROM records WHERE bucket=? ORDER BY ordinal LIMIT 1 OFFSET ?", (self.mapping.bucket, index)).fetchone()
+        if row is None:
+            raise IndexError(index)
+        return _spill_unpack(row[0])[1]
+
+    def append(self, value):
+        self.mapping[self.length] = value
+        self.length += 1
+
+
+class _SpillGroups:
+    def __init__(self, spill):
+        self.spill, self.index = spill, spill.mapping()
+
+    def get(self, key, default=None):
+        bucket = self.index.get(key)
+        return default if bucket is None else _SpillSequence(_SpillMap(self.spill, bucket))
+
+    def setdefault(self, key, default=None):
+        result = self.get(key)
+        if result is None:
+            result = self.spill.sequence()
+            self.index[key] = result.mapping.bucket
+        return result
+
+    def items(self):
+        for key in self.index:
+            yield key, self.get(key)
+
+
+def _quarter_progress(stage, table, count):
+    import resource
+
+    print(json.dumps({"stage": stage, "ticker": table["ticker"],
+                      "view": table["view"], "period_class": table["period_class"],
+                      "records": count, "process_maxrss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}), flush=True)
+
+
+def _spill_reported_table(old, table, publication, by_fact, targets, materialized, changes, spill, additive):
+    """Reclassify one fully decoded cell at a time; retain only disk references."""
+    source = {}
+    for name in ("columns", "rows"):
+        source[name] = spill.mapping()
+        for record in _iter_history_records(_history_dataset_path(old.root, table["files"][name]), table["files"][name]):
+            source[name][record[f"fiscal_time_series_{name[:-1]}_id"]] = record
+    record = None
+    columns, rows = source["columns"], source["rows"]
+    info = table["files"]["cells"]
+    count = 0
+    _quarter_progress("QUARTER_SPILL_BEGIN", table, count)
+    for original in _iter_history_records(_history_dataset_path(old.root, info), info):
+        cell = deepcopy(dict(original))
+        value = cell.get("value_lineage")
+        old_column = columns[cell["fiscal_time_series_column_id"]]
+        period_class = table["period_class"]
+        if value is not None and value.get("selected_source_fact_id"):
+            source = by_fact.get((value["source_filing_id"], value["selected_source_fact_id"]))
+            if source is None or source["comparative_type"] != "CURRENT_FOCUS":
+                raise ValueError("selected cell is not attested by corrected current-focus T1")
+            for name in ("value_numeric", "value_text", "context_start_date", "context_end_date", "context_instant_date",
+                         "context_id", "unit_id", "raw_concept_id", "raw_concept_qname", "raw_concept_namespace_uri",
+                         "company_canonical_concept_id", "filed_date", "source_snapshot_id", "accession"):
+                if source.get(name) != value.get(name):
+                    raise ValueError("selected cell differs from corrected T1 source")
+            for name in ("unit_numerator_measures", "unit_denominator_measures", "canonical_dimension_signature"):
+                if json.dumps(_sequence(source.get(name)), sort_keys=True) != json.dumps(_sequence(value.get(name)), sort_keys=True):
+                    raise ValueError("selected cell measurement scope differs from corrected T1")
+            if value.get("selection_view") != table["view"] or value.get("selection_as_of_date") != old.manifest["plan"]["as_of_date"]:
+                raise ValueError("selected cell view/as-of disagrees with publication")
+            period_class = source["period_class"]
+            if period_class != table["period_class"]:
+                changes[f"{table['period_class']}->{period_class}"] += 1
+            value.update(period_class=period_class, classification_rule_version=source["classification_rule_version"],
+                         period_classification_reason=source.get("period_classification_reason"))
+            if cell.get("candidate_lineage"):
+                cell["prior_publication_candidate_lineage"] = cell.pop("candidate_lineage")
+                cell["prior_candidate_publication"] = str(publication.absolute())
+        key = (table["ticker"], table["view"], period_class)
+        if key not in targets:
+            targets[key] = {"table": {**table, "period_class": period_class,
+                "scope": {**table["scope"], "period_class": period_class}},
+                "columns": spill.mapping(), "rows": spill.mapping(), "cells": spill.sequence(),
+                "extra_columns": spill.mapping(), "extra_rows": spill.mapping(), "extra_cells": spill.sequence()}
+            materialized[key] = spill.mapping()
+        target = targets[key]
+        column = {**old_column, "period_class": period_class,
+                  "fiscal_time_series_column_id": _id("column", (old_column["fiscal_year"], old_column["fiscal_quarter"], period_class))}
+        cell["fiscal_time_series_column_id"] = column["fiscal_time_series_column_id"]
+        cell["fiscal_time_series_cell_id"] = _id("reclassified-cell", cell.get("fiscal_time_series_cell_id"), PERIOD_RULE)
+        target["columns"][column["fiscal_time_series_column_id"]] = column
+        target["rows"][cell["fiscal_time_series_row_id"]] = rows[cell["fiscal_time_series_row_id"]]
+        cell_key = len(target["cells"])
+        target["cells"].append(cell)
+        materialized[key][(cell["fiscal_time_series_row_id"], cell["fiscal_time_series_column_id"])] = True
+        if approved_additive(cell):
+            pair_key = (key[0], key[1])
+            if pair_key not in additive:
+                additive[pair_key] = _SpillGroups(spill)
+            pair = additive[pair_key]
+            pair.setdefault((column["fiscal_year"], key[2], _scope(cell["value_lineage"]))).append({
+                "cells": target["cells"].mapping.bucket, "cell_key": cell_key,
+                # Source-table metadata, not later target overwrites, attests this candidate.
+                "columns": columns.bucket, "rows": rows.bucket,
+                "column_id": old_column["fiscal_time_series_column_id"],
+                "row_id": cell["fiscal_time_series_row_id"],
+                "reclassified_column": column})
+        count += 1
+        if count % 32 == 0:
+            spill.checkpoint()
+            _quarter_progress("QUARTER_SPILL_FLUSH", table, count)
+    spill.checkpoint()
+    _quarter_progress("QUARTER_SPILL_END", table, count)
+
+
+def _assemble_spilled_table(target, staging, spill):
+    table = {**target["table"], "files": {}}
+    for key, column in target["extra_columns"].items():
+        target["columns"].setdefault(key, column)
+    for key, row in target["extra_rows"].items():
+        target["rows"].setdefault(key, row)
+    for cell in target["extra_cells"]:
+        target["cells"].append(cell)
+    boundaries = _SpillGroups(spill)
+    unique = spill.mapping()
+    for cell in target["cells"]:
+        lineage = cell.get("value_lineage")
+        if isinstance(lineage, dict):
+            column_id = cell["fiscal_time_series_column_id"]
+            boundary = tuple(lineage.get(name) for name in ("context_start_date", "context_end_date", "context_instant_date"))
+            if (column_id, boundary) not in unique:
+                unique[column_id, boundary] = True
+                boundaries.setdefault(column_id).append(boundary)
+    # Sort only fiscal keys/IDs. One complete boundary-bearing column is an
+    # indivisible output record; never retain all such records at once.
+    order = sorted(((column["fiscal_year"], column["fiscal_quarter"] is None, column["fiscal_quarter"] or 0, table["period_class"]), key) for key, column in target["columns"].items())
+    columns = spill.sequence()
+    previous = None
+    for _, column_id in order:
+        column = target["columns"][column_id]
+        values = [{"context_start_date": start, "context_end_date": end,
+                   "context_instant_date": instant, "value_status": "REPORTED"}
+                  for start, end, instant in sorted(boundaries.get(column_id, ()), key=lambda item: tuple(value or "" for value in item))]
+        rebuilt = _column((column["fiscal_year"], column["fiscal_quarter"], table["period_class"]), column.get("fiscal_year_end_as_filed"), _period_evidence(SimpleNamespace(values=values)))
+        annotated = _annotate_comparability((rebuilt,) if previous is None else (previous, rebuilt))[-1]
+        columns.append(annotated)
+        if rebuilt["column_status"] == "AVAILABLE":
+            previous = rebuilt
+    payloads = {"columns": columns, "rows": target["rows"].records(), "cells": target["cells"]}
+    previous = rebuilt = annotated = None
+    cell = row = column = lineage = values = None
+    spill.checkpoint()
+    for name, records in payloads.items():
+        relative = Path(table["cik"]) / table["view"] / table["period_class"] / f"{name}.parquet"
+        plan = _stage_records(staging / relative, records)
+        table["files"][name] = {**_finalize_staged_records(plan), "path": str(relative)}
+    return table
 
 
 def _read_staged_records(path: Path, info: dict[str, Any]) -> tuple[dict[str, Any], ...]:
@@ -402,31 +740,32 @@ def _stage_quarter_bundle(bundle, *, key, table_index, chunk_index, chunk_root,
             plan.cleanup()
 
 
-def _derive_quarter_targets(targets, additive_by_pair, materialized):
+def _derive_quarter_targets(targets, additive_by_pair, materialized, spill=None):
     """Keep candidate source aliases within the derivation phase."""
-    derived = []
+    derived = [] if spill is None else spill.sequence()
+    resolve = _resolve_additive_locator if spill is None else spill.resolve
     for ticker, view in sorted({(key[0], key[1]) for key in targets}):
         qtd_key = (ticker, view, "QTD_3M")
         qtd = targets.get(qtd_key)
         if qtd is None:
             continue
         grouped = additive_by_pair.get((ticker, view), {})
-        for (year, kind, scope), choices in list(grouped.items()):
+        for (year, kind, scope), choices in grouped.items():
             quarter = {"YTD_6M": 2, "YTD_9M": 3, "FY": 4}.get(kind)
             if quarter is None:
                 continue
             previous = {2: "QTD_3M", 3: "YTD_6M", 4: "YTD_9M"}[quarter]
             partners = grouped.get((year, previous, scope), [])
             if quarter == 2:
-                partners = [
-                    item
-                    for item in partners
-                    if _resolve_additive_locator(item)[1]["fiscal_quarter"] == 1
-                ]
+                filtered = [] if spill is None else spill.sequence()
+                for item in partners:
+                    if resolve(item)[1]["fiscal_quarter"] == 1:
+                        filtered.append(item)
+                partners = filtered
             if len(choices) != 1 or len(partners) != 1:
                 continue
-            later, annual_column, source_row = _resolve_additive_locator(choices[0])
-            earlier = _resolve_additive_locator(partners[0])[0]
+            later, annual_column, source_row = resolve(choices[0])
+            earlier = resolve(partners[0])[0]
             metric = derive_quarter(later, earlier, quarter=quarter)
             if metric is None:
                 continue
@@ -575,74 +914,64 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
     input_fingerprint = observed.identity["layer2_run_fingerprint"]
     if (reuse_roots or operational_root is not None) and input_fingerprint != old.manifest["input_fingerprint"]:
         raise ValueError("reused period publications do not match reported panels")
-    by_fact = _period_attestation_index(observed)
-    del observed
-
     _check_history_storage()
     staging = Path(tempfile.mkdtemp(prefix=".panels.partial-", dir=output_root))
     chunk_root = staging / ".chunks"
     chunk_root.mkdir()
-    targets: dict[tuple[str, str, str], dict[str, Any]] = {}
-    additive_by_pair: dict[
-        tuple[str, str],
-        dict[tuple[int, str, str], list[dict[str, Any]]],
-    ] = {}
-    materialized: dict[tuple[str, str, str], set[tuple[str, str]]] = defaultdict(set)
-    changes = defaultdict(int)
-    for table_index, table in enumerate(old.manifest["tables"]):
-        chunks = _repartition_reported_table(
-            old, table, publication, by_fact, targets, materialized, changes
-        )
-        for chunk_index, key in enumerate(tuple(chunks)):
-            _stage_quarter_bundle(
-                chunks.pop(key), key=key, table_index=table_index,
-                chunk_index=chunk_index, chunk_root=chunk_root,
-                targets=targets, additive_by_pair=additive_by_pair,
+    spill = _QuarterSpill(chunk_root)
+    try:
+        by_fact = spill.mapping()
+        for row in observed.records("reported_period_observation"):
+            by_fact[row["source_filing_id"], row["source_fact_id"]] = {field: row.get(field) for field in _PERIOD_ATTESTATION_FIELDS}
+        row = None
+        del observed
+        gc.collect()
+        targets, additive_by_pair, materialized = {}, {}, {}
+        changes = defaultdict(int)
+        for table in old.manifest["tables"]:
+            _spill_reported_table(old, table, publication, by_fact, targets, materialized, changes, spill, additive_by_pair)
+        derived = _derive_quarter_targets(targets, additive_by_pair, materialized, spill)
+        spill.checkpoint()
+        tables = []
+        for target_index, (key, target) in enumerate(sorted(targets.items())):
+            table = _assemble_spilled_table(target, staging, spill)
+            tables.append(table)
+            print(
+                json.dumps(
+                    {
+                        "stage": "QUARTER_PANEL",
+                        "ticker": key[0],
+                        "view": key[1],
+                        "period_class": key[2],
+                        "cells": table["files"]["cells"]["count"],
+                    }
+                ),
+                flush=True,
             )
-        del chunks
-    del by_fact
-    gc.collect()
-    derived = _derive_quarter_targets(targets, additive_by_pair, materialized)
-    del additive_by_pair, materialized
-    gc.collect()
-    tables = []
-    for target_index, (key, target) in enumerate(sorted(targets.items())):
-        table = _assemble_quarter_table(
-            target, target_index=target_index, staging=staging, chunk_root=chunk_root
-        )
-        tables.append(table)
-        print(
-            json.dumps(
-                {
-                    "stage": "QUARTER_PANEL",
-                    "ticker": key[0],
-                    "view": key[1],
-                    "period_class": key[2],
-                    "cells": table["files"]["cells"]["count"],
-                }
-            ),
-            flush=True,
-        )
-    _check_history_storage()
-    if not _retain_history_artifacts():
-        shutil.rmtree(chunk_root)
-    derived_info = _write_records(staging / "derived_quarter.parquet", tuple(derived))
-    manifest = {**old.manifest, "version": HISTORY_VERSION, "tables": tables, "period_rule": PERIOD_RULE,
-                "operational_roots": {key: str(path.absolute()) for key, path in roots.items()},
-                "input_fingerprint": input_fingerprint,
-                "derived_quarter": {**derived_info, "path": "derived_quarter.parquet"},
-                "quarterly_derivation_status": "APPROVED_STANDARD_ADDITIVE_CORE_CONNECTED",
-                "derivation_rule": QUARTER_RULE, "period_reclassification_counts": dict(changes),
-                "supersedes_publication": str(publication.absolute()),
-                "source_manifest_sha256": hashlib.sha256((publication / "history_manifest.json").read_bytes()).hexdigest()}
-    _write_json(staging / "history_manifest.json", manifest)
-    del targets, derived
-    gc.collect()
-    verified = HistoryPublicationReader(staging, allow_staging=True, _recovery_access=_recovery_access)
-    verified.verify_all()
-    _check_history_storage()
-    _rename_history_directory(staging, destination)
-    return destination
+        _check_history_storage()
+        derived_info = _finalize_staged_records(_stage_records(staging / "derived_quarter.parquet", derived))
+        spill.close()
+        if not _retain_history_artifacts():
+            shutil.rmtree(chunk_root)
+        manifest = {**old.manifest, "version": HISTORY_VERSION, "tables": tables, "period_rule": PERIOD_RULE,
+                    "operational_roots": {key: str(path.absolute()) for key, path in roots.items()},
+                    "input_fingerprint": input_fingerprint,
+                    "derived_quarter": {**derived_info, "path": "derived_quarter.parquet"},
+                    "quarterly_derivation_status": "APPROVED_STANDARD_ADDITIVE_CORE_CONNECTED",
+                    "derivation_rule": QUARTER_RULE, "period_reclassification_counts": dict(changes),
+                    "supersedes_publication": str(publication.absolute()),
+                    "source_manifest_sha256": hashlib.sha256((publication / "history_manifest.json").read_bytes()).hexdigest()}
+        _write_json(staging / "history_manifest.json", manifest)
+        del targets, derived
+        gc.collect()
+        verified = HistoryPublicationReader(staging, allow_staging=True, _recovery_access=_recovery_access)
+        verified.verify_all()
+        _check_history_storage()
+        _rename_history_directory(staging, destination)
+        return destination
+    finally:
+        spill.close()
+
 
 
 def main() -> None:
