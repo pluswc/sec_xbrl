@@ -319,6 +319,10 @@ def publish_screening_metrics(
             cells=cells,
             traces=traces,
         )
+        input_years, display_years = _company_year_windows(
+            company,
+            client.manifest["companies"][ticker]["years"],
+        )
         relative = f"source_snapshots/{cik}/{snapshot['snapshot_id']}.json"
         source_snapshots.append((relative, snapshot))
         reported = _reported_observations(
@@ -326,22 +330,23 @@ def publish_screening_metrics(
             cik=cik,
             financial_as_of=config["financial_as_of"],
             snapshot=snapshot,
-            years=client.manifest["companies"][ticker]["years"],
+            years=input_years,
         )
         derived = _derived_observations(ticker=ticker, cik=cik, reported=reported)
-        observations.extend((*reported, *derived))
-        sources.append(
-            {
-                "ticker": ticker,
-                "cik": cik,
-                "root": str(analysis_root),
-                "manifest_sha256": manifest_sha,
-                "publication_id": client.manifest["publication_id"],
-                "source_snapshot": relative,
-                "source_snapshot_sha256": digest_value(snapshot),
-                "declared_files": _declared_analysis_files(client.manifest),
-            }
-        )
+        observations.extend(_display_observations(reported, derived, display_years))
+        source = {
+            "ticker": ticker,
+            "cik": cik,
+            "root": str(analysis_root),
+            "manifest_sha256": manifest_sha,
+            "publication_id": client.manifest["publication_id"],
+            "source_snapshot": relative,
+            "source_snapshot_sha256": digest_value(snapshot),
+            "declared_files": _declared_analysis_files(client.manifest),
+        }
+        if "input_years" in company:
+            source.update(input_years=input_years, display_years=display_years)
+        sources.append(source)
 
     _assert_unique(observations, ("metric_observation_id",), "metric observation ID")
     _assert_unique(
@@ -542,11 +547,15 @@ class ScreeningMetricReader:
 
     def _verify_sources(self) -> None:
         source_by_cik = {row["cik"]: row for row in self.manifest.get("sources", [])}
+        config_by_cik = {
+            row["cik"]: row for row in self.manifest["config"]["companies"]
+        }
         if set(source_by_cik) != set(self.manifest.get("configured_ciks", [])):
             raise ValueError("screening metric source membership changed")
         recomputed: list[dict[str, Any]] = []
         for cik in self.manifest["configured_ciks"]:
             source = source_by_cik[cik]
+            company = config_by_cik[cik]
             root = real_directory(Path(source["root"]), "screening metric analysis source")
             manifest_path = regular_file(root / "analysis_manifest.json", "screening metric analysis manifest")
             if sha256_file(manifest_path) != source.get("manifest_sha256"):
@@ -578,14 +587,25 @@ class ScreeningMetricReader:
             )
             if snapshot != packaged or digest_value(snapshot) != source.get("source_snapshot_sha256"):
                 raise ValueError("screening metric source snapshot differs from prepared parent")
+            _validate_source_year_windows(company, source)
+            input_years, display_years = _company_year_windows(
+                company,
+                client.manifest["companies"][ticker]["years"],
+            )
             reported = _reported_observations(
                 ticker=ticker,
                 cik=cik,
                 financial_as_of=self.manifest["financial_as_of"],
                 snapshot=snapshot,
-                years=client.manifest["companies"][ticker]["years"],
+                years=input_years,
             )
-            recomputed.extend((*reported, *_derived_observations(ticker=ticker, cik=cik, reported=reported)))
+            recomputed.extend(
+                _display_observations(
+                    reported,
+                    _derived_observations(ticker=ticker, cik=cik, reported=reported),
+                    display_years,
+                )
+            )
         if recomputed != self.observations:
             raise ValueError("screening metric observations differ from governed prepared inputs")
         expected_support = _support_rows(self.manifest["config"]["companies"], recomputed)
@@ -609,14 +629,23 @@ def _validate_config(value: Any) -> dict[str, Any]:
         )
         if len(manifest_sha) != 64 or any(char not in "0123456789abcdef" for char in manifest_sha):
             raise ValueError("analysis manifest hash must be lowercase SHA-256")
-        normalized.append(
-            {
-                "ticker": require_ticker(row.get("ticker"), f"companies[{index}].ticker"),
-                "cik": require_cik(row.get("cik"), f"companies[{index}].cik"),
-                "analysis_root": require_string(row.get("analysis_root"), f"companies[{index}].analysis_root"),
-                "analysis_manifest_sha256": manifest_sha,
-            }
-        )
+        normalized_company = {
+            "ticker": require_ticker(row.get("ticker"), f"companies[{index}].ticker"),
+            "cik": require_cik(row.get("cik"), f"companies[{index}].cik"),
+            "analysis_root": require_string(row.get("analysis_root"), f"companies[{index}].analysis_root"),
+            "analysis_manifest_sha256": manifest_sha,
+        }
+        has_input_years = "input_years" in row
+        has_display_years = "display_years" in row
+        if has_input_years != has_display_years:
+            raise ValueError("input_years and display_years must be declared together")
+        if has_input_years:
+            input_years = _validate_year_list(row["input_years"], f"companies[{index}].input_years", maximum=5)
+            display_years = _validate_year_list(row["display_years"], f"companies[{index}].display_years", maximum=4)
+            if display_years != input_years[-len(display_years):]:
+                raise ValueError("display_years must be the latest ordered subset of input_years")
+            normalized_company.update(input_years=input_years, display_years=display_years)
+        normalized.append(normalized_company)
     _assert_unique(normalized, ("ticker",), "configured metric ticker")
     _assert_unique(normalized, ("cik",), "configured metric CIK")
     financial_as_of = require_string(value.get("financial_as_of"), "financial_as_of")
@@ -637,6 +666,58 @@ def _validate_config(value: Any) -> dict[str, Any]:
         "source_dataset_manifest_sha256": source_manifest_sha,
         "companies": normalized,
     }
+
+
+def _validate_year_list(value: Any, field: str, *, maximum: int) -> list[int]:
+    if (
+        not isinstance(value, list)
+        or not value
+        or len(value) > maximum
+        or any(type(year) is not int for year in value)
+        or value != sorted(set(value))
+    ):
+        raise ValueError(f"{field} must be ordered unique integer fiscal years")
+    return list(value)
+
+
+def _company_year_windows(
+    company: dict[str, Any], prepared_years: Iterable[int]
+) -> tuple[list[int], list[int]]:
+    prepared = list(prepared_years)
+    if "input_years" not in company:
+        return prepared, prepared
+    input_years = list(company["input_years"])
+    display_years = list(company["display_years"])
+    if prepared != input_years:
+        raise ValueError(f"{company['ticker']}: prepared years differ from configured input_years")
+    return input_years, display_years
+
+
+def _validate_source_year_windows(
+    company: dict[str, Any], source: dict[str, Any]
+) -> None:
+    configured = "input_years" in company
+    declared = "input_years" in source or "display_years" in source
+    if configured != declared:
+        raise ValueError("screening metric source year window declaration changed")
+    if configured and (
+        source.get("input_years") != company["input_years"]
+        or source.get("display_years") != company["display_years"]
+    ):
+        raise ValueError("screening metric source year windows changed")
+
+
+def _display_observations(
+    reported: Iterable[dict[str, Any]],
+    derived: Iterable[dict[str, Any]],
+    display_years: Iterable[int],
+) -> list[dict[str, Any]]:
+    allowed = set(display_years)
+    return [
+        row
+        for row in (*reported, *derived)
+        if row["fiscal_year"] in allowed
+    ]
 
 
 def _require_sha256(value: Any, field: str) -> str:

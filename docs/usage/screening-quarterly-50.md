@@ -79,3 +79,22 @@ as-of를 검증한다. 누락된 식별자나 서로 다른 범위를 가진 AVA
 fiscal 좌표로 판단하며, 8개 표시 bucket 밖의 YoY 입력은 상세 계보에만 남는다.
 입력 누락이나 부적격 상태를 화면에서 계산으로 보완하지 않는다. null basis가
 허용된 단순 산술 결과도 recast 검증 완료나 회계적 동등성을 뜻하지 않는다.
+
+## 연간 입력·표시 기간
+
+연간 metric config의 회사 항목은 선택적으로 `input_years`와 `display_years`를 함께
+선언할 수 있다. 50사 확장 계약의 일반적인 형태는 계산 입력 5개 FY와 그중 최신
+4개 FY 표시다. 가장 오래된 입력 FY는 첫 표시 FY의 YoY 같은 승인된 공식에만
+사용되며 별도의 다섯 번째 표시 연도로 발행되지 않는다. 짧은 공시 이력 회사는
+승인된 실제 준비 기간과 같은 더 짧은 두 목록을 사용한다.
+
+두 목록은 오름차순의 중복 없는 정수 FY여야 하고, `display_years`는
+`input_years` 목록 끝의 최신 suffix여야 한다. 준비된 analysis manifest의 연도 목록은
+`input_years`와 정확히 같아야 한다. metric source와 config의 기간 선언이 다르거나
+한 목록만 있으면 reader는 발행물을 거부한다. 두 필드가 모두 없는 기존 config는
+준비된 모든 연도를 입력과 표시로 사용하는 이전 동작을 유지한다. dataset v2와
+v3는 이 검증을 통과한 annual metric publication을 그대로 연다.
+
+이 호환성은 발행물 형식과 검증 경계만 다룬다. 실제 first-five 및 50사 annual·quarter
+publication은 아직 `NOT_READY`이며, 검증된 immutable 입력과 별도 독립 인수 전에는
+운영 catalog에 등록하지 않는다.

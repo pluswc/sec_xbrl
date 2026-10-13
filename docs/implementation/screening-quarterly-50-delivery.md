@@ -394,3 +394,29 @@ consumer/source 141개가 모두 통과했다. 독립 원본의 파일명 변경
 이 좁은 교정에서는 전체 screening/UI 374개를 재실행했다고 주장하지 않는다.
 그 결과는 이전 `4aabf54`의 자체 검증 기록이다. UI·producer·단위·재무 계산 정책과
 불변 v5에는 변경이 없다. 새 동결 SHA의 독립 재검증과 로컬 인수는 별도로 대기한다.
+
+### 2026-10-13 annual input/display window 소비자 호환성
+
+독립 LIGHT 검토는 consumer의 metric config 정규화가 producer가 승인한 회사별
+`input_years`/`display_years`를 버려 정상적인 5 FY 입력·4 FY 표시 발행물을
+`ScreeningMetricReader.verify_all()`에서 거부함을 확인했다. dataset v2와 v3도 이
+reader를 경유하므로 같은 문제가 이어졌다. 근거 보고서의 SHA-256은
+`54ec783d0a667926bd36262b9603de9e4c3be96c9b3354791f448d3c609dff0e`, config
+normalization probe의 SHA-256은
+`1fc18b60158dd68ee7e9d929b0f455a3e5f1db7fc370a5a0fb4fae35d2d84d90`이다.
+
+승인된 호환 범위는 producer에서 이미 인수된 annual window 동작을 기존
+`metrics/screening.py`에만 맞추는 것이다. 회사별 두 필드는 함께 있을 때만
+보존한다. 입력은 최대 5개, 표시는 최대 4개의 오름차순 중복 없는 정수 FY이며,
+표시는 입력의 최신 suffix다. prepared analysis 연도는 입력과 정확히 일치해야
+한다. 모든 입력으로 기존 governed 공식을 재계산한 뒤 표시 FY만 발행하며 source
+manifest에도 같은 두 목록을 보존한다. reader의 offline recomputation은 config,
+source, prepared membership과 결과를 같은 규칙으로 검증한다. 필드가 없는 legacy
+발행은 prepared 연도 전체를 입력·표시로 사용하고 기존 manifest shape을 유지한다.
+
+dataset v2/v3, 분기 의미, 지표 정의·ID, formula, 기본 기간, UI 계산에는 변경이
+없다. 합성 테스트는 windowed metric publication의 v2/v3 prepare 및 재개방,
+legacy 전체 연도, 오래된 predecessor의 계산 전용 사용, 비정상 목록·source drift·
+prepared 기간 축소 거부를 확인한다. 이는 local 구현 후보 상태이며 동결 SHA의
+독립 검증과 lead 인수는 대기다. actual first-five/50 재무 payload는 읽거나
+발행하지 않았고 두 범위 모두 `NOT_READY`다. 원격 push·PR·main 병합도 미수행이다.
