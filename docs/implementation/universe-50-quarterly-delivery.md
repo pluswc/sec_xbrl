@@ -371,6 +371,36 @@ PEP의 custom `xbrli:timeItemType` Fact 네 개는 transform 없는 month-name t
 강제 변환하지 않고 계속 fail-closed 처리한다. 따라서 metadata 다섯 회사의 기술 보정이
 PEP 또는 50사 전체 Raw·financial readiness를 뜻하지 않는다.
 
+### 2026-10-13 로컬 상태 통합과 JNJ 증거 정정
+
+현재 상태와 남은 gate의 규범적 요약은
+[50 issuer 로컬 상태 기록](universe50-local-status-20261013.md)에 둔다. Raw는 원래
+`1d3a068…` v5와 다섯 회사의 targeted v6를 합쳐 1,098개 중 1,097개가 성공했다.
+이 수에는 PEP의 성공한 22개도 포함된다. PEP를 제외한 complete 49사의 history input은
+1,075개이며 10-K 245개, 10-Q 822개, 10-K/A 5개, 10-Q/A 3개다. 다섯 회사
+110개는 새 v6 100개와 immutable v5 reuse 10개다. 이 Raw artifact와 input metadata만
+독립 PASS·좁은 lead acceptance를 받았고 financial readiness는 아니다.
+
+PEP의 한 accession과 네 custom time Fact는 사용자 정책 결정 대기다. coercion, Fact나
+filing 삭제, incomplete PEP 수락, 자동 issuer 교체는 승인되지 않았다. KDP도 대체
+후보일 뿐 승인된 replacement가 아니다.
+
+JNJ attempt 3에 관한 위 진단 문구는 후속 light inquiry로 다음처럼 제한한다. retained
+3,065 chunk·8,160 row는 isolated merge component의 완전한 입력이지만, old writer에
+staging-complete나 merge-entry marker가 없었다. 따라서 그것이 원래 intended result의
+전부였거나 SIGKILL 지점이 final merge였다는 주장은 **UNPROVEN**이다. `65fc25d…`는
+retained 8,160 row에만 유효하다. 현재 AE 실행 log의 AS_FILED/LATEST_REPORTED QTD
+8,765 `PANEL_WRITTEN`은 각 table의 staging/finalization 완료 marker지만, 전체 JNJ
+manifest/hash, public-reader 검증과 old prefix audit가 끝나기 전에는 HistoryREADY가
+아니다. 실행 중 checkpoint의 phase를 최종 상태로 고정하지 않는다.
+
+Producer `ae856af…`와 consumer `39b8146…`의 독립 판정은 source-only다. consumer의
+후속 HTTP 5/5 PASS는 이전 unchanged 377 PASS의 gap closure이며 새 382-test 전체
+재실행이 아니다. CAT actual full golden은 2026-10-08 baseline benchmark이고
+2026-10-10 actual-50 수락을 대신하지 않는다. JNJ full artifact/prefix audit, CVX,
+first-five financial identity·annual v2·quarter v3 exact-five, complete 49/pending 50,
+native U1–U8과 local rollout은 순서대로 별도 gate를 유지한다.
+
 ## 2. 불변 입력과 새 run 경계
 
 재실행 가능한 새 run identity는 `universe-50-quarterly-20261010`으로 제안한다.
