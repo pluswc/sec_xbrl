@@ -183,3 +183,64 @@ PASS는 다음 단계 실행이나 수락을 자동 승인하지 않는다.
 | source87 serializer replay | `work/universe50_quarterly_20261010/resumption_20261013/independent_source87_actual_replay/report.json` | `aa29d060a20c99b7951843c5f1379c738ab956c669fdbbf25ec8999985c3a1e2` |
 | retained-chunk isolated merge | `work/universe50_quarterly_20261010/resumption_20261013/jnj_merge_diagnostic/report.json` | `65fc25d346c4eb2873c84ce69e0dd65f70df2b20c5e44ec1ef6290a0ee7e1813` |
 | JNJ count/boundary correction | `work/universe50_quarterly_20261010/resumption_20261013/independent_first5_financial/v2/jnj_qtd_count_inquiry.json` | `98fc7dde269ceedc6eebf9288c06ed4652f263ec8d436f91b6cb2f04c8350ac9` |
+
+## 2026-10-13 후속 기술 수리 — bounded verification / complete-stage recovery
+
+위 실행 중 상태의 후속 정정: JNJ attempt 4는 22개 공시에서 reported 12 panel /
+36 file / 965,078,742 byte를 기록한 뒤 staged manifest 검증 단계에서 SIGKILL 137로
+실패했다. 실행 시간 1:45:46, max RSS 31,017,632 KiB이며 HistoryREADY나
+FINANCIAL_READY가 아니다. 파일 hash 확인은 전체 decoded integrity를 대신하지
+않는다. 이전 실패 기록과 partial bytes는 보존한다.
+
+반복된 실제 메모리 실패를 근거로 lead는 이번 제한된 구현 역할을 Astra로
+상향하고 별도의 Astra 독립 검증 역할을 유지했다. 대상은 history reader의 전체
+무결성 검증 메모리, build/quarter 저장 단계의 객체 수명, 독립적으로 complete
+attestation을 받은 reported stage의 새 root 복구뿐이다. parser/Raw/회계/기간/
+파생 계산/스크리닝/UI 정책 변경, main·원격·OPS·journal 변경은 승인하지 않았다.
+
+[회사 history 계약](company-history-workflow.md#complete-reported-stage-recovery-2026-10-13-technical-exception)에
+예외 경계와 public API/CLI, 외부 pinned attestation, exact inventory/schema/log 및
+Raw/T1–T4 검증, 원본 바이트 보존·새 transaction cleanup 규칙을 기록한다.
+JNJ의 12/36은 해당 실행 inventory이고 범용 코드의 ticker/기간 hard-code가 아니다.
+PEP 정책 hold와 incomplete Raw/chunk는 이 예외로 복구할 수 없다.
+
+현재 상태는 **IMPLEMENTED / 자체 검증 PASS / 독립 source 검증·actual recovery·
+local acceptance 미수행**이다. 두 공시 cached golden은 lead가 명시적으로 승인한
+별도 2 GiB process-group RSS guard·300초 timeout·Polars 2-thread 조건으로 수행했다.
+실제 component audit의 8 GiB reservation과 합산한 제한된 병행 예외이며 임의의
+추가 cached/실자료 실행 승인이 아니다. frozen source의 독립 PASS와
+actual complete-stage attestation 및 lead GO 이전에 attempt 5/CVX를 실행하거나
+49/50 financial 완료를 선언하지 않는다.
+
+
+### 수리 후보 자체 검증 (독립 인수와 구분)
+
+- 관련 unit 149 passed: history workflow/recovery/quarter 및 기존 quarter policy,
+  coverage, pivot, derived tests. 새로운 검사는 전체 JSON late failure, hash/count
+  우선순위, symlink/unsafe path, exact report/prefix/scope gate, 실패 cleanup,
+  원본 immutable bytes와 graph/period/ledger/source-result의 weakref 수명을 포함한다.
+- 정확히 NVDA cached 2 filings의 기존 integration을 확장: fresh build와 public
+  recovery의 전체 typed record/order/derived records 및 Raw/T1–T4 fingerprint,
+  실제 source parent, reported manifest/payload bytes, recovery receipt가 일치했다.
+  **1 passed / 14.93초**, 외부 guard 전체 15.12초, 50 ms sampling process-group peak
+  **373,391,360 bytes**, 2 GiB/300초 cutoff 미도달. 테스트용 증거는 `CACHED_TEST`로
+  표시하며 actual JNJ의 독립 attestation을 대신하지 않는다.
+- 같은 작은 cached output에 이전 `a36ea059…` history eager reader와 quarter
+  producer를 oracle로 적용: **8 tables / 25 files / 4,686 panel records / 42 derived
+  records PASS**. 전체 physical schemas, encoded/decoded ordered values, table
+  metadata와 파일 hashes가 일치했다. 4.48초, guard peak **228,536,320 bytes**.
+- Ruff와 `git diff --check` PASS. 전체 1,315개 이상 suite 재실행이나 실제 JNJ
+  recovery는 이 결과에 포함하지 않는다. 최초 cached 비교의 실패는 테스트가
+  null parent locator까지 path로 바꾼 assertion 오류였고, non-null 실제 parent만
+  새 경로로 대조하도록 고친 후 통과했다. 제품 값 정규화나 회계 변경은 없었다.
+
+재현 unit 명령은 `PYTHONPATH=src python -m pytest -q` 뒤에
+`tests/unit/test_history_recovery.py`, `test_history_workflow.py`,
+`test_history_quarters.py`, `test_c3_quarterly_policy.py`,
+`test_core_quarterly_coverage.py`, `test_quarterly_analysis_pivot.py`,
+`test_quarterly_derived_metrics.py`를 모두 `tests/unit/` 경로로 지정한다.
+작은 cached gate는 `tests/integration/test_history_quarters_cached.py`만 대상으로
+동일 resource guard 아래 실행한다. 이 테스트는 명시된 기존 offline 2공시가
+없으면 skip하며 네트워크 fixture를 만들지 않는다. 이전 source oracle은 위
+`a36ea059…` 두 모듈을 별도 임시 module로 로드하고 같은 reported publication과
+original operational root를 입력해 새 임시 output을 비교했다.

@@ -10,9 +10,11 @@ import gc
 import hashlib
 import json
 import os
+import shutil
 import tempfile
 import uuid
 from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass, replace
 from datetime import date
 from pathlib import Path
@@ -263,6 +265,7 @@ def _validate_existing_operational_roots(
         existing = reader.load(root)
         if existing.identity["layer2_run_fingerprint"] != input_fingerprint:
             raise ValueError("existing operational publication uses different inputs or active rules")
+        del existing
 
 
 def _validate_active_publications(
@@ -381,6 +384,8 @@ def build_history(*, intake_manifest: Path, output_root: Path,
             for name in roots
         ):
             raise ValueError("existing history publication has incomplete operational roots")
+        del release
+        gc.collect()
         history_reader.verify_all()
         from sec_xbrl.analytics.history_quarters import publish_quarter_history
         consumer = output_root / "panels"
@@ -389,12 +394,10 @@ def build_history(*, intake_manifest: Path, output_root: Path,
             if consumer_reader.manifest.get("input_fingerprint") != input_fingerprint:
                 raise ValueError("existing quarter history uses different inputs or active rules")
             consumer_reader.verify_all()
-            del release
             return consumer
         # The immutable Layer 2 roots and reported publication now carry every
         # required input identity.  Do not retain the Raw cohort while the
         # additive quarter publisher performs its own verified reads.
-        del release
         return publish_quarter_history(publication=destination, output_root=output_root, reuse_roots=True)
     # Existing verified roots are reused without rerunning their producers.
     if not roots["t1"].exists():
@@ -524,6 +527,9 @@ def build_history(*, intake_manifest: Path, output_root: Path,
                 "comparative_observations_retained_in_t1": dict(comparative_counts),
                 "quarterly_derivation_status": "NOT_MATERIALIZED_REPORTED_SERIES_ONLY"}
     _write_json(staging / "history_manifest.json", manifest)
+    # Storage validation and the quarter producer need none of the build graph.
+    del graph, periods, ledgers_by_cik, ledger, filing_by_id, builder, selector
+    gc.collect()
     # Audit the complete persisted output before its atomic publication.
     HistoryPublicationReader(staging, allow_staging=True).verify_all()
     staging.rename(destination)
@@ -794,6 +800,58 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _reject_symlink_components(path: Path) -> None:
+    """Reject symlinks at every level, including publication ancestors."""
+    for component in (path, *path.parents):
+        if component.is_symlink():
+            raise ValueError("symlink history path is not consumable")
+
+
+def _history_dataset_path(root: Path, info: dict[str, Any]) -> Path:
+    relative = Path(info["path"])
+    if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+        raise ValueError("unsafe history dataset path")
+    path = root / relative
+    _reject_symlink_components(path)
+    if not path.is_file() or _sha256_file(path) != info["sha256"]:
+        raise ValueError("history dataset integrity mismatch")
+    return path
+
+
+def _iter_history_records(path: Path, info: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """Decode every field in order, with at most 32 encoded rows per scan.
+
+    Hash attestation belongs to the caller. A fresh nonparallel, low-memory
+    scan for each slice avoids a background iterator prefetching later groups.
+    The producer writes 32-row groups; native memory still includes the current
+    Parquet page/dictionary and an indivisible large row. This is a row bound,
+    not a promise that arbitrary external Parquet pages have bounded bytes.
+    """
+    import polars as pl
+
+    frame = pl.scan_parquet(path, parallel="none", low_memory=True, rechunk=False)
+    schema = frame.collect_schema()
+    count = frame.select(pl.len()).collect(engine="streaming").item()
+    if type(info["count"]) is not int or count != info["count"]:
+        raise ValueError("history dataset row count mismatch")
+    declared = info.get("json_fields")
+    if (not isinstance(declared, list)
+        or not all(isinstance(field, str) for field in declared)
+        or len(set(declared)) != len(declared)
+        or any(field not in schema or schema[field] not in (pl.String, pl.Null)
+               for field in declared)):
+        raise ValueError("history dataset JSON schema mismatch")
+    for start in range(0, count, _RECORD_WRITE_BATCH_SIZE):
+        batch = frame.slice(start, _RECORD_WRITE_BATCH_SIZE).collect(engine="streaming")
+        if batch.schema != schema or batch.height != min(_RECORD_WRITE_BATCH_SIZE, count-start):
+            raise ValueError("history dataset batch schema/count mismatch")
+        # iter_rows avoids a second list containing the entire encoded batch.
+        for row in batch.iter_rows(named=True, buffer_size=1):
+            yield {key: json.loads(value) if key in declared and value is not None else value
+                   for key, value in row.items()}
+        del batch
+
+
 def open_history_publication(root: Path):
     """Common persisted-data reader, including reviewed disclosure publications."""
     if (root / "review_manifest.json").exists():
@@ -809,18 +867,14 @@ class HistoryPublicationReader:
         self.root = Path(root)
         if self.root.is_symlink() or (".partial-" in self.root.name and not allow_staging):
             raise ValueError("partial or symlink history publication is not consumable")
+        _reject_symlink_components(self.root / "history_manifest.json")
         self.manifest = json.loads((self.root / "history_manifest.json").read_text())
         if self.manifest.get("version") != HISTORY_VERSION:
             raise ValueError("unsupported history publication version")
 
     def _records(self, info: dict[str, Any]) -> tuple[dict[str, Any], ...]:
         import polars as pl
-        relative = Path(info["path"])
-        if relative.is_absolute() or ".." in relative.parts:
-            raise ValueError("unsafe history dataset path")
-        path = self.root / relative
-        if path.is_symlink() or _sha256_file(path) != info["sha256"]:
-            raise ValueError("history dataset integrity mismatch")
+        path = _history_dataset_path(self.root, info)
         records = pl.read_parquet(path).to_dicts()
         if len(records) != info["count"]:
             raise ValueError("history dataset row count mismatch")
@@ -830,9 +884,12 @@ class HistoryPublicationReader:
     def verify_all(self) -> None:
         for table in self.manifest["tables"]:
             for info in table["files"].values():
-                self._records(info)
+                for _record in _iter_history_records(_history_dataset_path(self.root, info), info):
+                    pass
         if self.manifest.get("derived_quarter"):
-            self._records(self.manifest["derived_quarter"])
+            info = self.manifest["derived_quarter"]
+            for _record in _iter_history_records(_history_dataset_path(self.root, info), info):
+                pass
 
     def load(self, *, ticker: str, period_class: str = "QTD_3M", view: str = "LATEST_REPORTED"):
         from sec_xbrl.analytics import FiscalTimeSeriesResult
@@ -842,6 +899,267 @@ class HistoryPublicationReader:
             raise ValueError("requested ticker/period class/view is not published")
         table = matches[0]
         return FiscalTimeSeriesResult(**{name: self._records(table["files"][name]) for name in ("columns", "rows", "cells")}, scope=table["scope"])
+
+
+def _validate_recovery_sources(intake, operational_root, expected_fingerprint, expected_roots):
+    """Use the existing Raw adapter and public T1-T4 readers, without rebuilding."""
+    from sec_xbrl.longitudinal import (
+        CohortReleaseAdapter,
+        CohortSnapshotReference,
+        CohortSource,
+        Layer2PublicationReader,
+    )
+    grouped = defaultdict(list)
+    for item in intake["filings"]:
+        grouped[Path(item["source_run"])].append(
+            CohortSnapshotReference(item["filing"]["cik"], item["filing"]["accession"])
+        )
+    release = CohortReleaseAdapter().load(
+        tuple(CohortSource(root, root.name, tuple(refs)) for root, refs in grouped.items()),
+        cohort_id=operational_root.name,
+        ciks=tuple(company["cik"] for company in intake["plan"]["companies"]),
+        run_version=operational_root.name, rules=_history_layer2_rule_versions(),
+    )
+    _validate_release_snapshot_plans(release, {
+        (item["filing"]["cik"], item["filing"]["accession"]): item["filing"]
+        for item in intake["filings"]
+    })
+    if release.layer2_run.fingerprint != expected_fingerprint:
+        raise ValueError("recovery Raw inputs or active rules differ")
+    del release
+    gc.collect()
+    if set(expected_roots) != {"t1", "t2", "t3", "t4"}:
+        raise ValueError("recovery requires all four independently pinned operational roots")
+    roots = {}
+    for name in ("t1", "t2", "t3", "t4"):
+        root = operational_root / name / operational_root.name
+        manifest = root / Layer2PublicationReader.manifest_name
+        _reject_symlink_components(manifest)
+        if _sha256_file(manifest) != expected_roots[name]:
+            raise ValueError("recovery operational manifest hash mismatch")
+        existing = Layer2PublicationReader().load(root)
+        if existing.identity["layer2_run_fingerprint"] != expected_fingerprint:
+            raise ValueError("recovery operational input fingerprint mismatch")
+        roots[name] = str(root.absolute())
+        del existing
+    gc.collect()
+    return roots
+
+
+def _validate_recovery_inventory(reader, expected_tables):
+    import polars as pl
+
+    if not isinstance(expected_tables, list) or not expected_tables:
+        raise ValueError("recovery requires an independently pinned complete table inventory")
+    expected_manifest_tables = []
+    paths = {"history_manifest.json"}
+    identities = set()
+    for table in expected_tables:
+        identity = (table["cik"], table["ticker"], table["view"], table["period_class"])
+        if identity in identities or set(table["files"]) != {"columns", "rows", "cells"}:
+            raise ValueError("recovery table inventory is incomplete or duplicated")
+        identities.add(identity)
+        files = {}
+        for name, info in table["files"].items():
+            relative = str(Path(table["cik"]) / table["view"] / table["period_class"] / f"{name}.parquet")
+            if info["path"] != relative or relative in paths:
+                raise ValueError("recovery dataset inventory path mismatch")
+            paths.add(relative)
+            path = _history_dataset_path(reader.root, info)
+            schema = [[key, str(dtype)] for key, dtype in pl.read_parquet_schema(path).items()]
+            if schema != info["schema"]:
+                raise ValueError("recovery physical schema mismatch")
+            files[name] = {key: value for key, value in info.items() if key != "schema"}
+        expected_manifest_tables.append({**table, "files": files})
+    if reader.manifest["tables"] != expected_manifest_tables:
+        raise ValueError("recovery manifest differs from expected table inventory")
+    expected_dirs = {str(parent) for item in paths for parent in Path(item).parents if str(parent) != "."}
+    actual_files, actual_dirs = set(), set()
+    for path in reader.root.rglob("*"):
+        _reject_symlink_components(path)
+        relative = str(path.relative_to(reader.root))
+        if path.is_file():
+            actual_files.add(relative)
+        elif path.is_dir():
+            actual_dirs.add(relative)
+        else:
+            raise ValueError("recovery unexpected filesystem entry")
+    if actual_files != paths or actual_dirs != expected_dirs:
+        raise ValueError("recovery unexpected or missing staged files/directories")
+    return paths
+
+
+def _validate_recovery_report(proof: dict[str, Any]) -> None:
+    """Require pinned full component evidence, never a byte-only integrity report."""
+    report = json.loads(Path(proof["verification_report"]["path"]).read_text())
+    required_flags = (
+        "all_reported_files_fully_decoded", "all_ordered_records_hashed",
+        "all_json_fields_decoded", "all_physical_hashes_verified", "all_schema_counts_verified",
+    )
+    if (report.get("schema_version") != "independent-staged-reported-component-audit-v1"
+        or report.get("verdict") != "PASS_STAGED_REPORTED_COMPONENT_ONLY"
+        or report.get("verification_level") != "FULL_STAGED_REPORTED_PASS"
+        or report.get("fixture_kind") not in {"ACTUAL", "CACHED_TEST", "SYNTHETIC_TEST"}
+        or report.get("history_ready") is not False
+        or any(report.get("full_verification", {}).get(key) is not True for key in required_flags)):
+        raise ValueError("recovery report does not attest full staged-reported verification")
+    if (report.get("source_generation_sha") != proof["generation_source_identity"]
+        or report.get("stage_manifest", {}).get("sha256") != proof["staged_manifest_sha256"]
+        or report.get("source_intake", {}).get("sha256") != proof["intake_sha256"]
+        or report.get("input_fingerprint") != proof["input_fingerprint"]):
+        raise ValueError("recovery report source identity mismatch")
+    expected = [table["files"][name] for table in proof["tables"]
+                for name in ("columns", "rows", "cells")]
+    counts = report.get("counts", {})
+    if (type(counts.get("tables")) is not int or counts["tables"] != len(proof["tables"])
+        or type(counts.get("stage_files")) is not int or counts["stage_files"] != len(expected)):
+        raise ValueError("recovery report incomplete inventory counts")
+    verified = report.get("verified_files")
+    if not isinstance(verified, list) or len(verified) != len(expected):
+        raise ValueError("recovery report incomplete full-record inventory")
+    for actual, info in zip(verified, expected, strict=True):
+        digest = actual.get("ordered_full_record_sha256")
+        if (not isinstance(digest, str) or len(digest) != 64
+            or any(c not in "0123456789abcdef" for c in digest)
+            or {k: v for k, v in actual.items() if k != "ordered_full_record_sha256"} != info):
+            raise ValueError("recovery report ordered-record inventory mismatch")
+    prefixes = proof.get("required_prefixes")
+    checks = report.get("prefix_checks")
+    if not isinstance(prefixes, list) or not isinstance(checks, list) or len(prefixes) != len(checks):
+        raise ValueError("recovery report incomplete required prefix verification")
+    by_path = {info["path"]: info for info in expected}
+    for prefix, check in zip(prefixes, checks, strict=True):
+        digest = prefix.get("expected_sha256")
+        if (prefix.get("path") not in by_path or type(prefix.get("count")) is not int
+            or not 0 < prefix["count"] <= by_path[prefix["path"]]["count"]
+            or not isinstance(digest, str) or len(digest) != 64
+            or any(c not in "0123456789abcdef" for c in digest)
+            or check != {**prefix, "actual_sha256": digest, "status": "PASS"}):
+            raise ValueError("recovery report required prefix mismatch")
+
+
+def recover_reported_history(
+    *, staged_publication: Path, output_root: Path, intake_manifest: Path,
+    operational_root: Path, attestation: Path, expected_attestation_sha256: str,
+) -> Path:
+    """Copy an independently attested complete stage into a new transaction.
+
+    The caller pins an external attestation SHA; the stage cannot authorize
+    itself. Original failed bytes and generation identity remain immutable.
+    See company-history-workflow.md for the v1 attestation contract.
+    """
+    from sec_xbrl.analytics.history_quarters import publish_quarter_history
+
+    for path in (staged_publication, output_root, intake_manifest, operational_root, attestation):
+        _reject_symlink_components(path)
+    if output_root.exists():
+        raise ValueError("recovery requires a new immutable output root")
+    if any(output_root.resolve().is_relative_to(root.resolve())
+           for root in (staged_publication, operational_root)):
+        raise ValueError("recovery output cannot modify an immutable source root")
+    if _sha256_file(attestation) != expected_attestation_sha256:
+        raise ValueError("recovery attestation hash mismatch")
+    proof = json.loads(attestation.read_text())
+    if proof.get("version") != "reported-stage-recovery-v1" or proof.get("status") != "PASS":
+        raise ValueError("recovery requires an independent complete-stage PASS")
+    # These identities identify two separate executions. Neither rewrites the
+    # generation source or parser identity recorded by the immutable inputs.
+    for key in ("generation_source_identity", "recovery_source_identity"):
+        value = proof.get(key)
+        if not isinstance(value, str) or len(value) != 40 or any(c not in "0123456789abcdef" for c in value):
+            raise ValueError("recovery requires pinned generation and recovery source identities")
+    for key in ("verification_report", "source_execution_log"):
+        evidence = proof[key]
+        path = Path(evidence["path"])
+        _reject_symlink_components(path)
+        if _sha256_file(path) != evidence["sha256"]:
+            raise ValueError("recovery independent evidence hash mismatch")
+    _validate_recovery_report(proof)
+    manifest_path = staged_publication / "history_manifest.json"
+    _reject_symlink_components(manifest_path)
+    if _sha256_file(manifest_path) != proof["staged_manifest_sha256"]:
+        raise ValueError("recovery staged manifest hash mismatch")
+    if _sha256_file(intake_manifest) != proof["intake_sha256"]:
+        raise ValueError("recovery source intake hash mismatch")
+    intake = json.loads(intake_manifest.read_text())
+    _validate_intake(intake)
+    reader = HistoryPublicationReader(staged_publication, allow_staging=True)
+    manifest = reader.manifest
+    if (manifest.get("derived_quarter") is not None
+        or manifest.get("quarterly_derivation_status") != "NOT_MATERIALIZED_REPORTED_SERIES_ONLY"
+        or manifest["plan"] != proof["plan"] or intake["plan"] != proof["plan"]
+        or manifest["views"] != proof["views"]
+        or manifest["input_fingerprint"] != proof["input_fingerprint"]
+        or Path(manifest["source_intake"]).absolute() != intake_manifest.absolute()):
+        raise ValueError("recovery source plan/views/intake/identity mismatch")
+    views = proof["views"]
+    companies = proof["plan"]["companies"]
+    if (not views or len(set(views)) != len(views)
+        or set(views) - {"AS_FILED", "LATEST_REPORTED"}
+        or not proof["plan"].get("as_of_date") or not companies):
+        raise ValueError("recovery expected plan or views are invalid")
+    expected_pairs = {(c["cik"], c["ticker"], view) for c in companies for view in views}
+    actual_pairs = {(t["cik"], t["ticker"], t["view"]) for t in proof["tables"]}
+    if expected_pairs != actual_pairs:
+        raise ValueError("recovery company/view inventory mismatch")
+    paths = _validate_recovery_inventory(reader, proof["tables"])
+    expected_logs = [
+        {"stage": "PANEL_WRITTEN", "ticker": t["ticker"], "view": t["view"],
+         "period_class": t["period_class"], "rows": t["files"]["rows"]["count"],
+         "cells": t["files"]["cells"]["count"]}
+        for t in proof["tables"]
+    ]
+    logs = []
+    with Path(proof["source_execution_log"]["path"]).open() as stream:
+        for line in stream:
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(record, dict) and record.get("stage") == "PANEL_WRITTEN":
+                logs.append(record)
+    if logs != expected_logs:
+        raise ValueError("recovery ordered completed-panel log inventory mismatch")
+    reader.verify_all()
+    roots = _validate_recovery_sources(
+        intake, operational_root, proof["input_fingerprint"], proof["operational_manifest_sha256"]
+    )
+    if manifest.get("operational_roots") != roots:
+        raise ValueError("recovery operational roots differ from original generation")
+    output_root.mkdir(parents=True, exist_ok=False)
+    try:
+        staging = Path(tempfile.mkdtemp(prefix=".panels.partial-", dir=output_root))
+        for relative in sorted(paths):
+            source, destination = staged_publication / relative, staging / relative
+            _reject_symlink_components(source)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+        copied = HistoryPublicationReader(staging, allow_staging=True)
+        if _sha256_file(staging / "history_manifest.json") != proof["staged_manifest_sha256"]:
+            raise ValueError("recovery copied manifest hash mismatch")
+        _validate_recovery_inventory(copied, proof["tables"])
+        copied.verify_all()
+        reported = output_root / "reported-panels"
+        staging.rename(reported)
+        result = publish_quarter_history(
+            publication=reported, output_root=output_root, operational_root=operational_root
+        )
+        _write_json(output_root / "reported_recovery_receipt.json", {
+            "version": "reported-stage-recovery-v1", "status": "COMPLETE",
+            "attestation": str(attestation.absolute()),
+            "attestation_sha256": expected_attestation_sha256,
+            "generation_source_identity": proof["generation_source_identity"],
+            "recovery_source_identity": proof["recovery_source_identity"],
+            "source_stage": str(staged_publication.absolute()),
+            "source_manifest_sha256": proof["staged_manifest_sha256"],
+            "source_intake_sha256": proof["intake_sha256"],
+            "reported_publication": str(reported.absolute()),
+            "consumer_publication": str(result.absolute()),
+        })
+        return result
+    except BaseException:
+        shutil.rmtree(output_root)
+        raise
 
 
 def main() -> None:
@@ -877,6 +1195,13 @@ def main() -> None:
     repair = commands.add_parser("repair-coverage")
     repair.add_argument("--publication", type=Path, required=True)
     repair.add_argument("--destination", type=Path, required=True)
+    recovery = commands.add_parser("recover-reported")
+    recovery.add_argument("--staged-publication", type=Path, required=True)
+    recovery.add_argument("--output-root", type=Path, required=True)
+    recovery.add_argument("--intake-manifest", type=Path, required=True)
+    recovery.add_argument("--operational-root", type=Path, required=True)
+    recovery.add_argument("--attestation", type=Path, required=True)
+    recovery.add_argument("--expected-attestation-sha256", required=True)
     args = parser.parse_args()
     if args.command == "discover":
         result = discover_history(workspace=args.workspace, tickers=tuple(args.tickers), as_of=args.as_of,
@@ -890,6 +1215,12 @@ def main() -> None:
         if not json.loads(result.read_text())["complete"]:
             print(result)
             raise SystemExit(1)
+    elif args.command == "recover-reported":
+        result = recover_reported_history(
+            staged_publication=args.staged_publication, output_root=args.output_root,
+            intake_manifest=args.intake_manifest, operational_root=args.operational_root,
+            attestation=args.attestation, expected_attestation_sha256=args.expected_attestation_sha256,
+        )
     elif args.command == "build":
         result = build_history(intake_manifest=args.intake_manifest, output_root=args.output_root, views=tuple(args.views))
     elif args.command == "repair-coverage":

@@ -116,3 +116,150 @@ and raw stores are never overwritten.
 The implementation must be independently verified on a frozen revision before
 release. Operational run results are reported separately with actual filing,
 company, period and row counts; a code commit alone is not execution evidence.
+
+## Complete reported-stage recovery (2026-10-13 technical exception)
+
+`recover_reported_history` / `recover-reported` is a producer recovery boundary,
+not a reader permission to consume failed partial publications. It is limited
+to a **complete reported-only stage independently verified in full**. Failed
+Raw intake, missing chunks, incomplete tables, and policy-held filings remain
+ineligible. The lead authorized this narrow exception after repeated actual
+JNJ memory failures, including a verifier-only failure after all reported
+files were written. The implementation role was explicitly escalated to Astra;
+a separate Astra must independently verify the frozen candidate. This records
+a role decision, not a measured model speed/cost/quality claim.
+
+The public Python signature is:
+
+```python
+recover_reported_history(
+    *, staged_publication: Path, output_root: Path, intake_manifest: Path,
+    operational_root: Path, attestation: Path, expected_attestation_sha256: str,
+) -> Path
+```
+
+The caller supplies an **external independently pinned attestation file and its
+expected SHA-256**. Do not generate the expected attestation solely by reading
+the stage being recovered. The independent verifier must compare the complete
+source execution inventory, decode every field of every declared record,
+compare ordered execution logs and applicable authenticated prefix evidence,
+and attest all original intake/Raw/T1–T4 identities before issuing `PASS`.
+The attestation JSON has these required fields:
+
+- `version`: `reported-stage-recovery-v1`; `status`: `PASS`.
+- `generation_source_identity`, `recovery_source_identity`: distinct execution
+  identities expressed as full 40-character Git SHAs. They may be equal if the
+  same source produced and recovered a future run; neither changes parser
+  identities in Raw or operational publications.
+- `staged_manifest_sha256`, `intake_sha256`, `input_fingerprint`.
+- `plan`: exact original plan, including companies/CIKs/filing inventory and
+  `as_of_date`; `views`: exact ordered original views.
+- `tables`: exact ordered original table declarations, including identity,
+  scope and all three `columns`/`rows`/`cells` file declarations. Each file
+  includes its original `path`, `sha256`, `count`, `json_fields`, plus `schema`
+  as ordered `[column_name, str(polars_dtype)]` pairs. All expected paths must
+  be `CIK/view/period_class/name.parquet`. No inferred missing tables are allowed.
+- `operational_manifest_sha256`: independently pinned `t1`, `t2`, `t3`, `t4`
+  manifest digests at the **original** operational root.
+- `verification_report`, `source_execution_log`: each contains a `path` and
+  `sha256`. The log's ordered `PANEL_WRITTEN` JSON records must exactly agree
+  with table identities and row/cell counts. Other log lines may be non-JSON.
+  The report must also satisfy the full component contract below; byte-only,
+  metadata-only, unbound or incomplete reports cannot authorize recovery.
+- `required_prefixes`: ordered list of `{path, count, expected_sha256}` for
+  externally authenticated prefix controls; use `[]` only when the independent
+  execution contract requires no prefix comparison.
+
+The independently pinned verification report must contain:
+
+- `schema_version`: `independent-staged-reported-component-audit-v1`;
+  `verdict`: `PASS_STAGED_REPORTED_COMPONENT_ONLY`;
+  `verification_level`: `FULL_STAGED_REPORTED_PASS`; `history_ready`: `false`.
+- `fixture_kind`: `ACTUAL`, `CACHED_TEST` or `SYNTHETIC_TEST`, explicitly
+  distinguishing real component evidence from test fixture assertions.
+- `source_generation_sha`, `stage_manifest.sha256`, `source_intake.sha256`,
+  `input_fingerprint`, matching the pinned attestation exactly.
+- `counts.tables`, `counts.stage_files`, matching the complete expected inventory.
+- `full_verification`, with all five booleans true:
+  `all_reported_files_fully_decoded`, `all_ordered_records_hashed`,
+  `all_json_fields_decoded`, `all_physical_hashes_verified`,
+  `all_schema_counts_verified`.
+- `verified_files`, in manifest table order then `columns`, `rows`, `cells`
+  order: each exact attested file declaration (including physical schema),
+  plus `ordered_full_record_sha256` from the independent complete-record audit.
+  The report binds that digest to the exact file SHA/schema/count. Recovery
+  independently rehashes the bytes and decodes every JSON record; it does not
+  reinterpret the independent auditor's digest encoding. The actual component
+  auditor hashes ordered typed raw records (including exact encoded JSON text)
+  and separately validates all nested JSON. Test reports label their fixtures
+  and hash the complete ordered decoded fixture records.
+- `prefix_checks`: exactly one result per `required_prefixes` entry, preserving
+  its fields and adding `actual_sha256` equal to `expected_sha256` and
+  `status: PASS`. Missing, incomplete or mismatched prefix controls fail closed.
+
+These checks prevent accidentally using a byte-only report in place of full
+component evidence. Independence and the expected attestation hash remain an
+external workflow trust boundary; the program cannot determine who authored a
+report. An unbound draft is not executable recovery authorization.
+
+For the failed JNJ execution, completeness means 12 tables and 36 payload files.
+These numbers are an execution-specific expected inventory, not hard-coded
+company or period policy. Other complete executions require their independently
+established exact inventory.
+
+Use the frozen, independently accepted source revision on `PYTHONPATH`:
+
+```bash
+python -m sec_xbrl.history recover-reported \
+  --staged-publication /absolute/original/.panels.partial-complete \
+  --output-root /absolute/new-recovery-run \
+  --intake-manifest /absolute/original/history_intake.json \
+  --operational-root /absolute/original-operational-run \
+  --attestation /absolute/independent/attestation.json \
+  --expected-attestation-sha256 EXTERNALLY_PINNED_ATTESTATION_SHA256
+```
+
+The program verifies the complete stage inventory and file hashes, physical
+schemas, counts and all declared JSON fields; validates the complete selected
+Raw release using the existing adapter and each T1–T4 root with the public
+reader; then copies the original manifest and payload bytes into a **new**
+staging root. It repeats full copied-stage checks, atomically publishes
+`reported-panels`, and invokes the existing quarter producer with the exact
+original `operational_root`. The source failed stage is never renamed,
+promoted, relabeled or modified. An output inside an immutable source root is
+rejected. Existing output roots are rejected.
+
+The returned path is the new `panels` publication. A sibling
+`reported_recovery_receipt.json` records the pinned attestation, original stage
+manifest/intake hashes, original generation source, recovery source and output
+paths. It does not alter the original reported manifest bytes. The quarter
+manifest's `supersedes_publication` identifies the new reported parent while
+its `source_manifest_sha256` still identifies the unchanged original manifest.
+Caught failures remove only the newly created output root, including any
+reported/quarter manifests. An uncatchable process kill may leave a new partial
+transaction; it conveys no completion and cannot be reused as a public reader
+input. The old failure evidence and source stage remain available unchanged.
+
+### Memory and verification limits
+
+`HistoryPublicationReader.load` and `_records` keep their eager tuple/scalar
+contract. `verify_all` returns `None`, reads every declared reported and derived
+file, and fully JSON-decodes every declared field in every record. File hash
+failure precedes row-count failure, which precedes JSON-schema/decode failure.
+All path components, including ancestors and the manifest, reject symlinks.
+Unknown/duplicated/non-string JSON field declarations fail closed.
+
+Verification uses fresh nonparallel, low-memory Polars scans of 32-row slices,
+with exact slice count and physical schema checks. It does not use background
+batch prefetch, sampling or field projection. Producer files use 32-row groups.
+The bound applies to retained encoded rows; a single large nested record and
+native Parquet page/dictionary buffers can exceed it. It is **not a universal
+byte/RSS cap for arbitrary Parquet files**. Actual resource-gated verification
+is still required before accepting a large execution.
+
+Build-only graph/period/ledger owners are released before verification and
+quarter production. Quarter source-result, partition, candidate and assembly
+lifetimes are scoped separately. Encoded staging owns all fields before native
+merges, and boundary reconstruction iterates full decoded cell batches.
+Accounting rules, values, dimensions, IDs, candidate provenance and ordering
+remain governed by the existing producer contracts.
