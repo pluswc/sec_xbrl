@@ -397,9 +397,19 @@ manifest/hash, public-reader 검증과 old prefix audit가 끝나기 전에는 H
 Producer `ae856af…`와 consumer `39b8146…`의 독립 판정은 source-only다. consumer의
 후속 HTTP 5/5 PASS는 이전 unchanged 377 PASS의 gap closure이며 새 382-test 전체
 재실행이 아니다. CAT actual full golden은 2026-10-08 baseline benchmark이고
-2026-10-10 actual-50 수락을 대신하지 않는다. JNJ full artifact/prefix audit, CVX,
-first-five financial identity·annual v2·quarter v3 exact-five, complete 49/pending 50,
-native U1–U8과 local rollout은 순서대로 별도 gate를 유지한다.
+2026-10-10 actual-50 수락을 대신하지 않는다. JNJ full artifact/prefix audit와 CVX 뒤,
+governed completion READY, cached metadata와 exact five annual analysis input으로
+exact five membership의 `screening-dataset-v1` identity를 만들고 identity SHA·annual
+analysis SHA 5개·`input_years=5`·`display_years=4`로 producer `screening-metrics-v1`
+annual metric publication을 만든다. exact
+identity와 annual metric SHA는 `screening-dataset-v2`의 parent다. 별도로 exact five
+QUARTERLY analysis와 정확한 annual metric publication root/manifest SHA를 parent로
+`quarterly-screening-metric-manifest-v1` 네 payload와 17×8을 검증한다. 이 annual
+parent는 dataset wrapper나 UI가 아니다. consumer `prepare-v3`는 수락된 annual
+`screening-dataset-v2`와 quarter metric manifest의 exact membership과 parent pin을
+결합해 `screening-dataset-v3`를 만든다.
+그 뒤 complete 49/pending 50, native U1–U8과 local rollout은 순서대로 별도 gate를
+유지한다.
 
 ## 2. 불변 입력과 새 run 경계
 

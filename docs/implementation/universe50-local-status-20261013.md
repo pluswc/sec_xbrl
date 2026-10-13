@@ -146,8 +146,19 @@ HistoryREADY를 선언하지 않는다.
    bounded worker로 비교하고, 전체 8,765 row를 별도로 검증한다. prefix가 다르면
    동등성 주장을 중지하고 첫 차이의 provenance를 조사한다.
 3. CVX fresh history와 public-reader gate를 통과한다.
-4. exact five membership과 immutable parent hash를 가진 first-five financial identity
-   v1을 확정하고 producer annual metrics v2와 quarter v3를 함께 검증한다.
+4. governed completion READY, cached metadata와 2026-10-10 cutoff의 exact five annual
+   analysis input으로 exact five membership의 `screening-dataset-v1` identity를 만들고
+   다음 public chain을 순서대로 검증한다.
+   - identity manifest SHA와 annual analysis manifest SHA 5개, `input_years=5`,
+     `display_years=4`로 producer `screening-metrics-v1` annual metric publication을
+     만들고 governed source를 검증한다.
+   - exact identity와 annual metric manifest SHA로 `screening-dataset-v2`를 만든다.
+   - exact five QUARTERLY analysis manifest SHA와 annual metric publication의 정확한
+     root/manifest SHA를 parent로 `quarterly-screening-metric-manifest-v1` 네 payload를
+     만들고 17×8을 검증한다. 이 parent는 annual dataset wrapper나 UI가 아니다.
+   - consumer `prepare-v3`가 수락된 annual `screening-dataset-v2`와 quarter metric
+     manifest의 exact membership과 parent pin을 결합해 `screening-dataset-v3`를
+     만드는지 검증한다.
 5. complete 49사로 확대한다. PEP 정책 결정과 complete input이 생기기 전까지
    pending 50번째 회사를 성공으로 포함하지 않는다.
 6. actual financial artifact가 통과한 뒤 native U1–U8을 검증한다.
