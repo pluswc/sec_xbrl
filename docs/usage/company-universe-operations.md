@@ -478,3 +478,17 @@ golden comparison. Do not use it to resume JNJ, begin CVX, or declare the
 first-five or 50-company financial cohort ready until those gates are recorded
 in the delivery contract. The failed JNJ staging output remains failure
 evidence and is not a reusable publication.
+
+The next bounded writer infers declared JSON columns with string/null schema
+placeholders and does not serialize candidate or graph-path detail during that
+pass. Final encoding uses both a 32-row limit and an 8 MiB string-input budget;
+an indivisible row larger than the byte budget is written alone. Parquet chunk
+and final row groups are also limited to 32 rows. These are memory boundaries,
+not filters: every nested value is encoded once in the final pass and retained.
+
+Immutable Raw collection may proceed independently under the dated RAW_ONLY
+approval and the frozen Raw v5/M0 source. Run one company process at a time
+with the declared child guard and request budget. `RAW_COMPLETE` does not mean
+history or financial readiness and does not authorize JNJ history, analysis,
+quarter publication, consumer publication, or 50-company rollout while their
+gates remain blocked.

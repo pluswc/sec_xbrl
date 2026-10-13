@@ -285,6 +285,45 @@ legacy whole-frame과 같은 표현을 갖는다. 한 table의 마지막 로그�
 완료된 result도 다음 period build 전에 해제한다. 이 후속 source 역시 새 독립 검증 전에는
 JNJ/CVX 또는 확대 실행에 사용할 수 없다.
 
+`fa2995637dc19eecf62c4c1d37e405bfc573c5d7`의 독립 actual CAT 전체 golden은
+reported/quarter 61개와 operational 25개 파일의 전체 schema·순서·logical value를
+비교해 **PASS**했다. 보고서
+`work/universe50_quarterly_20261010/resumption_20261013/independent_cat_actual_v2/report.json`
+SHA-256은 `8388f521668a8a2986ad7ce87d7ad28696cb63b543cae6255bbc41fbb392b93d`다.
+그러나 같은 source의 JNJ fresh attempt는 21:06.70, peak RSS 31,391,968KiB에서 다시
+SIGKILL됐다. QTD columns 22개와 rows 7,287개는 완성됐지만 cells와 cells temporary chunk
+directory는 없었다. 실패 보고서
+`work/universe50_quarterly_20261010/resumption_20261013/jnj_attempt2_failure.json`의
+SHA-256은 `35bd4c2a2e9249b654c75d637bb472052357c89fbcefc909f73aa646ccc9a794`,
+읽기 전용 진단 `jnj_attempt2_readonly_diagnosis.json`은
+`15121122b599bd7065894d4fec2e49768ab521f6795e141cb1cb5ab2865f6f0c`다. 이 증거와
+partial output을 수정·재사용하지 않는다.
+
+진단은 first schema pass가 256-row nested payload를 `json.dumps`하고 Polars frame으로
+만드는 동안 종료됐음을 확인했다. 승인된 다음 exact-equivalent 보정은 table-global JSON
+field의 non-null 값은 빈 String, null은 null placeholder만 사용해 schema를 추론하고 이
+단계에서 candidate·path payload를 직렬화하지 않는다. 원래 scalar type의 global promotion은
+그대로 확정한다. 최종 pass만 전체 payload를 기존 `sort_keys=True, default=str`로 직렬화하며,
+batch는 최대 32 row와 encoded/native string 8MiB를 함께 적용하고 한 row 자체가 8MiB를
+넘을 때만 보존을 위해 one-row 예외를 허용한다. chunk와 최종 sink의 row group도 32로
+제한한다. 모든 row/value/candidate/path와 공개 schema·reader 의미, invalid/cyclic failure
+class는 유지한다. 이 source는 다시 **IMPLEMENTED_AWAITING_INDEPENDENT_SOURCE_GATE**이며
+새 source/CAT/JNJ gate 전에는 history·financial publication을 재개하지 않는다.
+
+### 2026-10-13 RAW_ONLY 독립 진행 경계
+
+리드는 원래 first5-before-scale 순서 안에서 immutable Raw 수집만 독립적으로 진행하도록
+승인했다. Raw producer와 M0 source는 검증된 `1d3a068…`/Raw v5 경계를 바꾸지 않고,
+pilot 111 accession의 유효성 근거를 재사용한다. 회사별 child guard 8GiB, 회사 process 한
+개, Polars thread 2 이하와 전체 SEC HTTP 2 requests/s 이하를 지키는 별도 운영 writer가
+수행한다. 이 진행은 history serializer나 consumer source를 사용하지 않는다.
+
+`RAW_COMPLETE` 또는 Raw 수집 진행은 `HISTORY_READY`, `FINANCIAL_READY`, first5 acceptance,
+50사 readiness나 downstream publication 승인을 뜻하지 않는다. JNJ history, financial
+analysis, quarter publication, consumer 통합 및 전체 rollout은 새 source 독립 gate와
+first5 financial gate 전까지 계속 중지한다. 이 sequencing 조정은 XBRL·기간·mapping·회계
+의미를 바꾸지 않는다.
+
 ## 2. 불변 입력과 새 run 경계
 
 재실행 가능한 새 run identity는 `universe-50-quarterly-20261010`으로 제안한다.

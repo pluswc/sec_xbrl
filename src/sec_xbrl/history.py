@@ -36,7 +36,8 @@ from sec_xbrl.longitudinal.corpus_release import _load_declared_cohort_snapshot
 from sec_xbrl.longitudinal.materialization import Layer2RuleVersions
 
 HISTORY_VERSION = "company-history-v1"
-_RECORD_WRITE_BATCH_SIZE = 256
+_RECORD_WRITE_BATCH_SIZE = 32
+_RECORD_WRITE_BATCH_BYTES = 8 * 1024 * 1024
 
 
 def _history_layer2_rule_versions() -> Layer2RuleVersions:
@@ -589,7 +590,7 @@ def _write_records(path: Path, records: tuple[dict[str, Any], ...]) -> dict[str,
             batch = records[start : start + _RECORD_WRITE_BATCH_SIZE]
             schemas.append(
                 pl.from_dicts(
-                    _encode_record_batch(batch, json_fields),
+                    _schema_record_batch(batch, json_fields),
                     infer_schema_length=None,
                 ).schema
             )
@@ -601,35 +602,97 @@ def _write_records(path: Path, records: tuple[dict[str, Any], ...]) -> dict[str,
             prefix=f".{path.name}.chunks-", dir=path.parent
         ) as chunk_directory:
             chunk_paths = []
-            for start in range(0, len(records), _RECORD_WRITE_BATCH_SIZE):
-                batch = records[start : start + _RECORD_WRITE_BATCH_SIZE]
+            for encoded_batch, _encoded_bytes in _iter_encoded_record_batches(
+                records, json_fields
+            ):
                 chunk_path = Path(chunk_directory) / f"{len(chunk_paths):08d}.parquet"
                 pl.from_dicts(
-                    _encode_record_batch(batch, json_fields),
+                    encoded_batch,
                     schema=global_schema,
                     infer_schema_length=None,
-                ).write_parquet(chunk_path)
+                ).write_parquet(
+                    chunk_path, row_group_size=_RECORD_WRITE_BATCH_SIZE
+                )
                 chunk_paths.append(chunk_path)
             pl.concat(
                 [pl.scan_parquet(chunk_path) for chunk_path in chunk_paths],
                 how="vertical",
-            ).sink_parquet(path, maintain_order=True)
+            ).sink_parquet(
+                path,
+                maintain_order=True,
+                row_group_size=_RECORD_WRITE_BATCH_SIZE,
+            )
     return {"count": len(records), "json_fields": json_fields, "sha256": _sha256_file(path)}
 
 
-def _encode_record_batch(
+def _schema_record_batch(
     batch: tuple[dict[str, Any], ...], json_fields: list[str]
 ) -> list[dict[str, Any]]:
-    """Encode one bounded batch using the table-global JSON field decision."""
+    """Represent types without serializing nested payloads or retaining text."""
     return [
         {
+            key: _schema_value(key, value, json_fields)
+            for key, value in row.items()
+        }
+        for row in batch
+    ]
+
+
+def _schema_value(key: str, value: Any, json_fields: list[str]) -> Any:
+    if value is None:
+        return None
+    if key in json_fields or isinstance(value, str):
+        return ""
+    if isinstance(value, bytes):
+        return b""
+    if isinstance(value, bytearray):
+        return bytearray()
+    return value
+
+
+def _iter_encoded_record_batches(
+    records: tuple[dict[str, Any], ...], json_fields: list[str]
+):
+    """Yield bounded encoded batches; one indivisible row may exceed the cap."""
+    batch: list[dict[str, Any]] = []
+    batch_bytes = 0
+    for row in records:
+        encoded = {
             key: json.dumps(value, sort_keys=True, default=str)
             if key in json_fields and value is not None
             else value
             for key, value in row.items()
         }
-        for row in batch
-    ]
+        encoded_bytes = _encoded_record_size(encoded, json_fields)
+        if batch and (
+            len(batch) >= _RECORD_WRITE_BATCH_SIZE
+            or batch_bytes + encoded_bytes > _RECORD_WRITE_BATCH_BYTES
+        ):
+            yield batch, batch_bytes
+            batch, batch_bytes = [], 0
+        batch.append(encoded)
+        batch_bytes += encoded_bytes
+        if batch_bytes >= _RECORD_WRITE_BATCH_BYTES:
+            yield batch, batch_bytes
+            batch, batch_bytes = [], 0
+    if batch:
+        yield batch, batch_bytes
+
+
+def _encoded_record_size(
+    encoded: dict[str, Any], json_fields: list[str]
+) -> int:
+    """Bound encoded/native string input without allocating a second byte copy."""
+    total = 0
+    for key, value in encoded.items():
+        if isinstance(value, str):
+            # json.dumps uses ensure_ascii=True by default, so JSON field
+            # character count is its exact encoded byte count.  Four bytes per
+            # character is a conservative bound for other Unicode strings.
+            total += len(value) if key in json_fields else 4 * len(value)
+        elif isinstance(value, (bytes, bytearray)):
+            total += len(value)
+    return total
 
 
 def _sha256_file(path: Path) -> str:

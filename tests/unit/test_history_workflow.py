@@ -562,6 +562,96 @@ def test_bounded_record_writer_matches_legacy_empty_and_all_null(
         ).to_dicts()
 
 
+def test_schema_inference_never_serializes_nested_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cycle: list[object] = []
+    cycle.append(cycle)
+
+    def reject_json_encoding(*args, **kwargs):
+        raise AssertionError("schema inference must not JSON encode payloads")
+
+    monkeypatch.setattr(history.json, "dumps", reject_json_encoding)
+    batch = history._schema_record_batch(
+        (
+            {
+                "candidate_lineage": cycle,
+                "scalar_text": "large text" * 1_000,
+                "amount": Decimal("1.20"),
+                "missing": None,
+            },
+        ),
+        ["candidate_lineage"],
+    )
+
+    assert batch == [
+        {
+            "candidate_lineage": "",
+            "scalar_text": "",
+            "amount": Decimal("1.20"),
+            "missing": None,
+        }
+    ]
+
+
+def test_final_encoding_bounds_rows_and_bytes_with_single_row_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(history, "_RECORD_WRITE_BATCH_SIZE", 3)
+    monkeypatch.setattr(history, "_RECORD_WRITE_BATCH_BYTES", 140)
+    records = (
+        {"id": "one", "nested": {"payload": "a" * 30}},
+        {"id": "two", "nested": {"payload": "b" * 30}},
+        {"id": "oversized", "nested": {"payload": "c" * 150}},
+        {"id": "four", "nested": {"payload": "d" * 30}},
+    )
+
+    batches = list(history._iter_encoded_record_batches(records, ["nested"]))
+
+    assert [len(batch) for batch, _size in batches] == [2, 1, 1]
+    assert all(
+        size <= history._RECORD_WRITE_BATCH_BYTES or len(batch) == 1
+        for batch, size in batches
+    )
+    assert max(len(batch) for batch, _size in batches) <= 3
+    assert [row["id"] for batch, _size in batches for row in batch] == [
+        "one",
+        "two",
+        "oversized",
+        "four",
+    ]
+
+
+def test_cyclic_json_payload_keeps_legacy_failure_class_and_no_output(
+    tmp_path: Path,
+) -> None:
+    cycle: list[object] = []
+    cycle.append(cycle)
+    path = tmp_path / "cyclic.parquet"
+
+    with pytest.raises(ValueError, match="Circular reference detected"):
+        history._write_records(path, ({"nested": cycle},))
+
+    assert not path.exists()
+    assert not list(tmp_path.glob(".cyclic.parquet.chunks-*"))
+
+
+@pytest.mark.parametrize("invalid", ({1, 2}, object()))
+def test_invalid_scalar_keeps_legacy_parquet_failure_class(
+    tmp_path: Path, invalid: object
+) -> None:
+    import polars as pl
+
+    legacy_path = tmp_path / "legacy-invalid.parquet"
+    bounded_path = tmp_path / "bounded-invalid.parquet"
+    with pytest.raises(pl.exceptions.ComputeError) as legacy_error:
+        pl.from_dicts(({"invalid": invalid},), infer_schema_length=None).write_parquet(
+            legacy_path
+        )
+    with pytest.raises(type(legacy_error.value)):
+        history._write_records(bounded_path, ({"invalid": invalid},))
+
+
 def test_fiscal_time_series_inputs_release_before_serialization() -> None:
     class PanelInput:
         pass
