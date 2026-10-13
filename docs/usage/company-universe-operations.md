@@ -462,13 +462,16 @@ completed; a fresh one-company process verified and adopted that artifact
 without changing it.
 
 The 2026-10-13 reported-history repair also writes each public Parquet dataset
-through bounded ordered encoding. It determines table-wide JSON fields first,
-encodes at most one bounded batch at a time, and streams reconciled chunk
-schemas into the final file. This preserves late columns, row order, nested
+through bounded ordered encoding. It determines table-wide JSON fields and the
+global scalar schema first while retaining only bounded local schemas, then
+encodes at most one original-value batch at a time and streams the chunks into
+the final file. This preserves late columns, scalar-to-string representations,
+row order, nested
 candidate and graph-path lineage, and the existing reader result while avoiding
 a second full encoded row list and full eager frame. Source fiscal panels are
 released as soon as the independent fiscal-series result exists, before the
-first dataset is serialized.
+first dataset is serialized, and the completed result is released after its
+last metadata/log use before the next period build.
 
 This repair is awaiting independent source verification and a fresh CAT full
 golden comparison. Do not use it to resume JNJ, begin CVX, or declare the

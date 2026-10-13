@@ -475,6 +475,9 @@ def build_history(*, intake_manifest: Path, output_root: Path,
                 tables.append(table)
                 print(json.dumps({"stage": "PANEL_WRITTEN", "ticker": ticker, "view": view,
                                   "period_class": period_class, "rows": len(result.rows), "cells": len(result.cells)}), flush=True)
+                # Only persisted file metadata and the small scope remain in
+                # tables.  Release this result before the next period build.
+                del result
     manifest = {"version": HISTORY_VERSION, "plan": plan, "views": views, "tables": tables,
                 "source_intake": str(intake_manifest.absolute()),
                 "operational_roots": {key: str(path.absolute()) for key, path in roots.items()},
@@ -575,32 +578,58 @@ def _write_records(path: Path, records: tuple[dict[str, Any], ...]) -> dict[str,
         pl.DataFrame().write_parquet(path)
     else:
         # json_fields is table-global: if a later row makes a field nested,
-        # earlier scalar values in that field must also be JSON encoded.  Write
-        # bounded encoded chunks, then let Polars reconcile their full schemas
-        # and stream them in original order into the one public Parquet file.
+        # earlier scalar values in that field must also be JSON encoded.  Infer
+        # bounded local schemas, resolve their global super-schema without
+        # retaining values, then encode each original batch directly against
+        # that global schema.  This prevents an early int/float or bool/int
+        # batch from losing its original representation before a late string
+        # promotes the complete column to String.
+        schemas = []
+        for start in range(0, len(records), _RECORD_WRITE_BATCH_SIZE):
+            batch = records[start : start + _RECORD_WRITE_BATCH_SIZE]
+            schemas.append(
+                pl.from_dicts(
+                    _encode_record_batch(batch, json_fields),
+                    infer_schema_length=None,
+                ).schema
+            )
+        global_schema = pl.concat(
+            [pl.DataFrame(schema=schema).lazy() for schema in schemas],
+            how="diagonal_relaxed",
+        ).collect_schema()
         with tempfile.TemporaryDirectory(
             prefix=f".{path.name}.chunks-", dir=path.parent
         ) as chunk_directory:
             chunk_paths = []
             for start in range(0, len(records), _RECORD_WRITE_BATCH_SIZE):
                 batch = records[start : start + _RECORD_WRITE_BATCH_SIZE]
-                encoded = [
-                    {
-                        key: json.dumps(value, sort_keys=True, default=str)
-                        if key in json_fields and value is not None
-                        else value
-                        for key, value in row.items()
-                    }
-                    for row in batch
-                ]
                 chunk_path = Path(chunk_directory) / f"{len(chunk_paths):08d}.parquet"
-                pl.from_dicts(encoded, infer_schema_length=None).write_parquet(chunk_path)
+                pl.from_dicts(
+                    _encode_record_batch(batch, json_fields),
+                    schema=global_schema,
+                    infer_schema_length=None,
+                ).write_parquet(chunk_path)
                 chunk_paths.append(chunk_path)
             pl.concat(
                 [pl.scan_parquet(chunk_path) for chunk_path in chunk_paths],
-                how="diagonal_relaxed",
+                how="vertical",
             ).sink_parquet(path, maintain_order=True)
     return {"count": len(records), "json_fields": json_fields, "sha256": _sha256_file(path)}
+
+
+def _encode_record_batch(
+    batch: tuple[dict[str, Any], ...], json_fields: list[str]
+) -> list[dict[str, Any]]:
+    """Encode one bounded batch using the table-global JSON field decision."""
+    return [
+        {
+            key: json.dumps(value, sort_keys=True, default=str)
+            if key in json_fields and value is not None
+            else value
+            for key, value in row.items()
+        }
+        for row in batch
+    ]
 
 
 def _sha256_file(path: Path) -> str:

@@ -489,7 +489,7 @@ def test_bounded_record_writer_matches_legacy_global_schema_and_order(
     assert info["json_fields"] == legacy_json_fields == ["json_mixed"]
     assert bounded_frame.schema == legacy_frame.schema
     assert bounded_frame.to_dicts() == legacy_frame.to_dicts()
-    assert len(observed_batch_sizes) == 2
+    assert len(observed_batch_sizes) == 4
     assert max(observed_batch_sizes) == history._RECORD_WRITE_BATCH_SIZE
     decoded = tuple(
         {
@@ -506,6 +506,34 @@ def test_bounded_record_writer_matches_legacy_global_schema_and_order(
         "candidate_lineage"
     ][0]["paths"] == [["root", "child"], ["root", "other"]]
     assert decoded[-1]["json_mixed"] == [True, None, "3.40"]
+
+
+@pytest.mark.parametrize(
+    ("leading", "expected"),
+    (
+        ((1, 1.5), ("1", "1.5")),
+        ((True, 2), ("true", "2")),
+        ((2**53 + 1, 1.5), ("9007199254740993", "1.5")),
+    ),
+)
+def test_bounded_record_writer_uses_global_schema_before_scalar_coercion(
+    tmp_path: Path, leading: tuple[object, object], expected: tuple[str, str]
+) -> None:
+    import polars as pl
+
+    records = (
+        ({"x": leading[0]}, {"x": leading[1]})
+        + ({"x": None},) * (history._RECORD_WRITE_BATCH_SIZE - 2)
+        + ({"x": "late"},)
+    )
+    legacy = pl.from_dicts(records, infer_schema_length=None)
+    path = tmp_path / "bounded-scalar-promotion.parquet"
+    history._write_records(path, records)
+    bounded = pl.read_parquet(path)
+
+    assert bounded.schema == legacy.schema
+    assert bounded.to_dicts() == legacy.to_dicts()
+    assert tuple(row["x"] for row in bounded.head(2).to_dicts()) == expected
 
 
 def test_bounded_record_writer_matches_legacy_empty_and_all_null(

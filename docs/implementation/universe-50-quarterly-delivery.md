@@ -270,6 +270,21 @@ focused unit/integration와 Ruff를 구현자가 통과시킨 frozen SHA를 별�
 통과해도 first5 actual financial gate와 CVX, 나머지 50사 및 actual quarter gate는 각각
 별도 상태로 남는다.
 
+첫 구현 후보 `ad790f6fcb2b1fc96e7101b1b5ca88ecdadd00e9`는 독립 검증에서
+**FAIL**했다. 보고서
+`work/universe50_quarterly_20261010/resumption_20261013/independent_source/report.json`의
+SHA-256은 `393727b073e942efb4e54464ed0ff0b9c9eca4c7fd3b2a7eada8433821d3834c`다.
+앞 chunk가 int+float 또는 bool+int를 먼저 local coercion하고 뒤 chunk의 문자열이 global
+String을 결정하면, 기존 whole-frame의 `"1"`·`"true"` 대신 `"1.0"`·`"1"`을 만들 수
+있고 큰 정수도 float 정밀도를 잃을 수 있었다. 이 실패 후보와 보고서는 덮어쓰지 않는다.
+
+후속 보정은 모든 bounded chunk의 schema만 먼저 수집해 value를 보유하지 않는 global
+super-schema를 확정한다. 그 뒤 원본 scalar를 각 bounded batch에서 그 schema로 직접
+coercion하므로 late String, bool/int, int/float, Decimal, Int128와 null/missing field가
+legacy whole-frame과 같은 표현을 갖는다. 한 table의 마지막 로그와 metadata를 만든 뒤
+완료된 result도 다음 period build 전에 해제한다. 이 후속 source 역시 새 독립 검증 전에는
+JNJ/CVX 또는 확대 실행에 사용할 수 없다.
+
 ## 2. 불변 입력과 새 run 경계
 
 재실행 가능한 새 run identity는 `universe-50-quarterly-20261010`으로 제안한다.
