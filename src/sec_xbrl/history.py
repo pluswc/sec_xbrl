@@ -6,11 +6,11 @@ SEC identity is supplied only through SEC_USER_AGENT at runtime.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import gc
 import hashlib
 import json
 import os
-import shutil
 import stat
 import tempfile
 import uuid
@@ -63,9 +63,15 @@ def _write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".partial")
     _check_history_storage(temporary)
-    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
-    _check_history_storage()
-    temporary.replace(path)
+    data = json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n"
+    if _retain_history_artifacts():
+        with temporary.open("x", encoding="utf-8") as stream:
+            stream.write(data)
+        _check_history_storage(path)
+        os.link(temporary, path, follow_symlinks=False)
+    else:
+        temporary.write_text(data, encoding="utf-8")
+        temporary.replace(path)
 
 
 def _ref_record(ref: FilingRef) -> dict[str, Any]:
@@ -862,6 +868,7 @@ def _iter_history_records(path: Path, info: dict[str, Any]) -> Iterator[dict[str
 
 def open_history_publication(root: Path):
     """Common persisted-data reader, including reviewed disclosure publications."""
+    _check_recovery_access(root)
     if (root / "review_manifest.json").exists():
         from sec_xbrl.longitudinal.disclosure_review import ReviewedPublicationReader
         return ReviewedPublicationReader(root)
@@ -871,8 +878,10 @@ def open_history_publication(root: Path):
 class HistoryPublicationReader:
     """Reload persisted fiscal tables only: no SEC, Arelle, selection or build."""
 
-    def __init__(self, root: Path, *, allow_staging: bool = False) -> None:
+    def __init__(self, root: Path, *, allow_staging: bool = False, _recovery_access: Any = None) -> None:
         self.root = Path(root)
+        self._recovery_access = _recovery_access
+        _check_recovery_access(self.root, _recovery_access)
         if self.root.is_symlink() or (".partial-" in self.root.name and not allow_staging):
             raise ValueError("partial or symlink history publication is not consumable")
         _reject_symlink_components(self.root / "history_manifest.json")
@@ -882,6 +891,7 @@ class HistoryPublicationReader:
 
     def _records(self, info: dict[str, Any]) -> tuple[dict[str, Any], ...]:
         import polars as pl
+        _check_recovery_access(self.root, getattr(self, "_recovery_access", None))
         path = _history_dataset_path(self.root, info)
         records = pl.read_parquet(path).to_dicts()
         if len(records) != info["count"]:
@@ -890,6 +900,7 @@ class HistoryPublicationReader:
                       for key, value in row.items()} for row in records)
 
     def verify_all(self) -> None:
+        _check_recovery_access(self.root, getattr(self, "_recovery_access", None))
         for table in self.manifest["tables"]:
             for info in table["files"].values():
                 for _record in _iter_history_records(_history_dataset_path(self.root, info), info):
@@ -995,16 +1006,21 @@ class _RecoveryPins:
 
 
 class _RecoveryOutput:
-    """Exclusive output reservation; cleanup is anchored to the owned inode."""
+    """Retained transaction under an explicitly trusted exclusive parent."""
 
     def __init__(self, root: Path) -> None:
         self.root = root.absolute()
+        self.bindings: dict[Path, tuple[int, int]] = {}
+        self.marker_pins = _RecoveryPins()
         self.parents = _RecoveryPins()
         self.parents.directory(self.root.parent)
         self.parent_fd = _open_recovery_path(self.root.parent, os.O_RDONLY | os.O_DIRECTORY)
         self.fd = -1
         try:
             self.parents.check()
+            parent_stat = os.fstat(self.parent_fd)
+            if parent_stat.st_uid != os.geteuid() or parent_stat.st_mode & 0o022:
+                raise ValueError("recovery requires a user-owned non-shared trusted parent")
             # mkdir is the exclusive reservation; an earlier exists() check
             # never confers cleanup ownership over a concurrent creator.
             os.mkdir(self.root.name, mode=0o700, dir_fd=self.parent_fd)
@@ -1012,6 +1028,8 @@ class _RecoveryOutput:
                               dir_fd=self.parent_fd)
             value = os.fstat(self.fd)
             self.identity = (value.st_dev, value.st_ino)
+            if os.listdir(self.fd):
+                raise ValueError("recovery initial root is not empty; ownership unproven")
             self.check()
         except BaseException:
             self.close()
@@ -1023,6 +1041,19 @@ class _RecoveryOutput:
             value = os.stat(self.root.name, dir_fd=self.parent_fd, follow_symlinks=False)
             if not stat.S_ISDIR(value.st_mode) or (value.st_dev, value.st_ino) != self.identity:
                 raise ValueError("recovery output ownership changed; transaction left untouched")
+            self.marker_pins.check()
+            for path, identity in self.bindings.items():
+                child = path.lstat()
+                if not stat.S_ISDIR(child.st_mode) or (child.st_dev, child.st_ino) != identity:
+                    raise ValueError("recovery descendant identity changed")
+            # First capture relies on the declared sole-writer parent contract.
+            # Later exchanges cannot silently become a new directory binding.
+            for path in self.root.rglob("*"):
+                child = path.lstat()
+                if stat.S_ISLNK(child.st_mode):
+                    raise ValueError("recovery output symlink is unsafe")
+                if stat.S_ISDIR(child.st_mode):
+                    self.bindings.setdefault(path, (child.st_dev, child.st_ino))
         except (OSError, ValueError) as exc:
             raise ValueError("recovery output ownership changed; transaction left untouched") from exc
 
@@ -1052,21 +1083,52 @@ class _RecoveryOutput:
             stream.write(data)
         self.check()
 
-    def cleanup(self) -> None:
+    def rename(self, source: Path, destination: Path) -> None:
         self.check()
-        # Use the held directory, never rmtree(the possibly exchanged root).
-        # shutil's fd-based implementation also protects descendant traversal.
-        if not shutil.rmtree.avoids_symlink_attacks:
-            raise ValueError("safe recovery rollback requires fd-based rmtree")
-        for name in os.listdir(self.fd):
-            self.check()
-            value = os.stat(name, dir_fd=self.fd, follow_symlinks=False)
-            if stat.S_ISDIR(value.st_mode):
-                shutil.rmtree(name, dir_fd=self.fd)
-            else:
-                os.unlink(name, dir_fd=self.fd)
+        if destination.exists():
+            raise ValueError("recovery refuses an existing destination")
+        source = source.absolute()
+        destination = destination.absolute()
+        source_relative = source.relative_to(self.root)
+        destination_relative = destination.relative_to(self.root)
+        bindings = {path: identity for path, identity in self.bindings.items()
+                    if path == source or path.is_relative_to(source)}
+        # Linux RENAME_NOREPLACE avoids deleting even an empty directory
+        # inserted at the destination after the earlier existence check.
+        libc = ctypes.CDLL(None, use_errno=True)
+        rename = getattr(libc, "renameat2", None)
+        if rename is None:
+            raise ValueError("recovery requires Linux renameat2 RENAME_NOREPLACE")
+        rename.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+        rename.restype = ctypes.c_int
+        if rename(self.fd, os.fsencode(source_relative), self.fd, os.fsencode(destination_relative), 1):
+            error = ctypes.get_errno()
+            raise OSError(error, os.strerror(error), str(destination))
+        for path, identity in bindings.items():
+            del self.bindings[path]
+            self.bindings[destination / path.relative_to(source)] = identity
         self.check()
-        os.rmdir(self.root.name, dir_fd=self.parent_fd)
+
+    def mark_pending(self, metadata: dict[str, Any]) -> None:
+        self.transaction = {**metadata, "status": "NOT_READY", "token": uuid.uuid4().hex,
+                            "output_root": str(self.root), "root_identity": list(self.identity)}
+        data = (json.dumps(self.transaction, indent=2, sort_keys=True) + "\n").encode()
+        self.marker_sha256 = hashlib.sha256(data).hexdigest()
+        relative = Path(_RECOVERY_CONTROL_PREFIX + self.marker_sha256) / "transaction.json"
+        self.write(relative, data)
+        self.marker_pins.file(self.root / relative)
+        self.check()
+
+    def commit(self, receipt: dict[str, Any]) -> None:
+        self.check()
+        temporary = Path(f".receipt.partial-{uuid.uuid4().hex}")
+        data = (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode()
+        self.write(temporary, data)
+        self.check()
+        # Hard-link creation is atomic and refuses any existing final entry.
+        # Retain the temporary receipt as diagnostic evidence too.
+        os.link(temporary.name, "reported_recovery_receipt.json",
+                src_dir_fd=self.fd, dst_dir_fd=self.fd, follow_symlinks=False)
 
     def close(self) -> None:
         if self.fd >= 0:
@@ -1107,14 +1169,67 @@ def _check_history_storage(path: Path | None = None) -> None:
 
 
 def _cleanup_history_workspace(workspace: Any) -> None:
-    try:
-        _check_history_storage(Path(workspace.name))
-    except BaseException:
-        # Do not let TemporaryDirectory finalization later follow an exchanged
-        # path after the transaction has explicitly refused cleanup.
+    if _HISTORY_STORAGE_GUARD.get() is not None:
+        # Recovery never recursively deletes artifact trees, even on success.
         workspace._finalizer.detach()
-        raise
+        return
     workspace.cleanup()
+
+
+_RECOVERY_CONTROL_PREFIX = ".history-recovery-"
+_RECOVERY_OUTPUT: ContextVar[Any] = ContextVar("recovery_output", default=None)
+
+
+def _retain_history_artifacts() -> bool:
+    return _RECOVERY_OUTPUT.get() is not None
+
+
+def _rename_history_directory(source: Path, destination: Path) -> None:
+    output = _RECOVERY_OUTPUT.get()
+    if output is None:
+        source.rename(destination)
+    else:
+        _check_history_storage(source)
+        output.rename(source, destination)
+
+
+def _check_recovery_access(root: Path, capability: Any = None) -> None:
+    """A staging flag never overrides a recovery transaction's readiness gate."""
+    root = Path(root).absolute()
+    for parent in (root, *root.parents):
+        if not parent.is_dir():
+            continue
+        controls = list(parent.glob(_RECOVERY_CONTROL_PREFIX + "*"))
+        receipt_path = parent / "reported_recovery_receipt.json"
+        if not controls and not receipt_path.exists():
+            continue
+        if capability is not None and capability is _RECOVERY_OUTPUT.get() and parent == capability.root:
+            _check_history_storage(root)
+            return
+        try:
+            if len(controls) != 1 or controls[0].is_symlink():
+                raise ValueError("missing/ambiguous recovery transaction marker")
+            expected = controls[0].name.removeprefix(_RECOVERY_CONTROL_PREFIX)
+            marker = json.loads(_RecoveryPins().read(controls[0] / "transaction.json", expected, "transaction marker"))
+            with os.fdopen(_open_recovery_path(receipt_path), "rb") as stream:
+                receipt = json.loads(stream.read())
+            current = parent.stat()
+            if (marker["status"] != "NOT_READY" or receipt["status"] != "COMPLETE"
+                or marker["output_root"] != str(parent)
+                or marker["root_identity"] != [current.st_dev, current.st_ino]
+                or receipt["transaction_sha256"] != expected
+                or receipt["transaction_token"] != marker["token"]
+                or any(receipt[key] != marker[key] for key in (
+                    "attestation_sha256", "generation_source_identity", "recovery_source_identity",
+                    "source_manifest_sha256", "source_intake_sha256", "verification_report_sha256", "input_fingerprint"))):
+                raise ValueError("recovery receipt identity mismatch")
+            for name, key in (("reported-panels", "source_manifest_sha256"), ("panels", "consumer_manifest_sha256")):
+                _RecoveryPins().read(parent / name / "history_manifest.json", receipt[key], "committed manifest")
+            if receipt["reported_publication"] != str(parent / "reported-panels") or receipt["consumer_publication"] != str(parent / "panels"):
+                raise ValueError("recovery receipt publication mismatch")
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise ValueError("recovery transaction is NOT_READY or its completion gate is invalid") from exc
+
 
 
 def _validate_recovery_sources(intake, operational_root, expected_fingerprint, expected_roots, pins=None):
@@ -1265,6 +1380,7 @@ def _validate_recovery_report(proof: dict[str, Any], report: dict[str, Any] | No
 def recover_reported_history(
     *, staged_publication: Path, output_root: Path, intake_manifest: Path,
     operational_root: Path, attestation: Path, expected_attestation_sha256: str,
+    trusted_exclusive_parent: bool,
 ) -> Path:
     """Copy an independently attested complete stage into a new transaction.
 
@@ -1274,6 +1390,8 @@ def recover_reported_history(
     """
     from sec_xbrl.analytics.history_quarters import publish_quarter_history
 
+    if trusted_exclusive_parent is not True:
+        raise ValueError("recovery requires explicit trusted exclusive parent acknowledgment")
     for path in (staged_publication, output_root, intake_manifest, operational_root, attestation):
         _reject_symlink_components(path)
     if output_root.exists():
@@ -1353,6 +1471,18 @@ def recover_reported_history(
     pins.check()
     output = _RecoveryOutput(output_root)
     reported_pins = None
+    receipt = {
+        "version": "reported-stage-recovery-v1",
+        "attestation": str(attestation.absolute()),
+        "attestation_sha256": expected_attestation_sha256,
+        "generation_source_identity": proof["generation_source_identity"],
+        "recovery_source_identity": proof["recovery_source_identity"],
+        "source_stage": str(staged_publication.absolute()),
+        "source_manifest_sha256": proof["staged_manifest_sha256"],
+        "source_intake_sha256": proof["intake_sha256"],
+        "verification_report_sha256": proof["verification_report"]["sha256"],
+        "input_fingerprint": proof["input_fingerprint"],
+    }
 
     def guard(path: Path | None = None) -> None:
         output.check()
@@ -1363,9 +1493,13 @@ def recover_reported_history(
             _reject_symlink_components(path)
             if not path.absolute().is_relative_to(output.root):
                 raise ValueError("recovery writer path escapes its owned output")
+            if path.is_file():
+                raise ValueError("recovery refuses to overwrite an existing file")
 
     token = _HISTORY_STORAGE_GUARD.set(guard)
+    access_token = _RECOVERY_OUTPUT.set(output)
     try:
+        output.mark_pending(receipt)
         output.check()
         stage_name = f".panels.partial-{uuid.uuid4().hex}"
         os.mkdir(stage_name, mode=0o700, dir_fd=output.fd)
@@ -1380,7 +1514,7 @@ def recover_reported_history(
         copied_pins = _RecoveryPins()
         copied_pins.tree(staging)
         copied_bytes = copied_pins.read(staging / "history_manifest.json", proof["staged_manifest_sha256"], "copied manifest")
-        copied = HistoryPublicationReader(staging, allow_staging=True)
+        copied = HistoryPublicationReader(staging, allow_staging=True, _recovery_access=output)
         copied_pins.check()
         if copied.manifest != json.loads(copied_bytes):
             raise ValueError("recovery copied reader differs from pinned manifest bytes")
@@ -1390,36 +1524,46 @@ def recover_reported_history(
         reported = output_root / "reported-panels"
         output.check()
         pins.check()
-        os.rename(stage_name, "reported-panels", src_dir_fd=output.fd, dst_dir_fd=output.fd)
+        output.rename(staging, reported)
         output.check()
         reported_pins = _RecoveryPins()
         reported_pins.tree(reported)
         reported_pins.read(reported / "history_manifest.json", proof["staged_manifest_sha256"], "published manifest")
         guard()
         result = publish_quarter_history(
-            publication=reported, output_root=output_root, operational_root=operational_root
+            publication=reported, output_root=output_root, operational_root=operational_root,
+            _recovery_access=output,
         )
         guard()
-        receipt = {
-            "version": "reported-stage-recovery-v1", "status": "COMPLETE",
-            "attestation": str(attestation.absolute()),
-            "attestation_sha256": expected_attestation_sha256,
-            "generation_source_identity": proof["generation_source_identity"],
-            "recovery_source_identity": proof["recovery_source_identity"],
-            "source_stage": str(staged_publication.absolute()),
-            "source_manifest_sha256": proof["staged_manifest_sha256"],
-            "source_intake_sha256": proof["intake_sha256"],
-            "reported_publication": str(reported.absolute()),
-            "consumer_publication": str(result.absolute()),
-        }
-        output.write(Path("reported_recovery_receipt.json"),
-                     (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode())
+        if result.absolute() != output.root / "panels":
+            raise ValueError("recovery quarter publisher returned an unexpected path")
+        consumer_pins = _RecoveryPins()
+        consumer_pins.tree(result)
+        consumer = HistoryPublicationReader(result, _recovery_access=output)
+        consumer.verify_all()
+        if (any(consumer.manifest.get(key) != manifest.get(key) for key in
+                ("plan", "views", "source_intake", "input_fingerprint", "operational_roots"))
+            or consumer.manifest.get("source_manifest_sha256") != proof["staged_manifest_sha256"]
+            or consumer.manifest.get("supersedes_publication") != str(reported.absolute())
+            or consumer.manifest.get("quarterly_derivation_status") != "APPROVED_STANDARD_ADDITIVE_CORE_CONNECTED"
+            or not consumer.manifest.get("derived_quarter")):
+            raise ValueError("recovery consumer provenance or completion differs")
+        consumer_pins.check()
         guard()
+        receipt.update(status="COMPLETE", transaction_sha256=output.marker_sha256,
+                       transaction_token=output.transaction["token"],
+                       reported_publication=str(reported.absolute()), consumer_publication=str(result.absolute()),
+                       consumer_manifest_sha256=_sha256_file(result / "history_manifest.json"))
+        consumer_pins.check()
+        guard()
+        output.commit(receipt)
         return result
     except BaseException:
-        output.cleanup()
+        # Preserve all artifacts. Ownership uncertainty never authorizes deletion.
+        guard()
         raise
     finally:
+        _RECOVERY_OUTPUT.reset(access_token)
         _HISTORY_STORAGE_GUARD.reset(token)
         output.close()
 
@@ -1458,6 +1602,7 @@ def main() -> None:
     repair.add_argument("--publication", type=Path, required=True)
     repair.add_argument("--destination", type=Path, required=True)
     recovery = commands.add_parser("recover-reported")
+    recovery.add_argument("--trusted-exclusive-parent", action="store_true", required=True)
     recovery.add_argument("--staged-publication", type=Path, required=True)
     recovery.add_argument("--output-root", type=Path, required=True)
     recovery.add_argument("--intake-manifest", type=Path, required=True)
@@ -1479,6 +1624,7 @@ def main() -> None:
             raise SystemExit(1)
     elif args.command == "recover-reported":
         result = recover_reported_history(
+            trusted_exclusive_parent=args.trusted_exclusive_parent,
             staged_publication=args.staged_publication, output_root=args.output_root,
             intake_manifest=args.intake_manifest, operational_root=args.operational_root,
             attestation=args.attestation, expected_attestation_sha256=args.expected_attestation_sha256,

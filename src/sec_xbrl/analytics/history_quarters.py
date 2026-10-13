@@ -33,6 +33,8 @@ from sec_xbrl.history import (
     _check_history_storage,
     _finalize_staged_records,
     _iter_history_records,
+    _rename_history_directory,
+    _retain_history_artifacts,
     _sha256_file,
     _stage_records,
     _write_json,
@@ -555,9 +557,9 @@ def _assemble_quarter_table(target, *, target_index, staging, chunk_root):
 
 
 def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots: bool = False,
-                            operational_root: Path | None = None) -> Path:
+                            operational_root: Path | None = None, _recovery_access: Any = None) -> Path:
     """Upgrade reported period evidence and materialize governed quarter cells."""
-    old = HistoryPublicationReader(publication)
+    old = HistoryPublicationReader(publication, _recovery_access=_recovery_access)
     old.verify_all()
     destination = output_root / "panels"
     if destination.exists():
@@ -622,7 +624,8 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
             flush=True,
         )
     _check_history_storage()
-    shutil.rmtree(chunk_root)
+    if not _retain_history_artifacts():
+        shutil.rmtree(chunk_root)
     derived_info = _write_records(staging / "derived_quarter.parquet", tuple(derived))
     manifest = {**old.manifest, "version": HISTORY_VERSION, "tables": tables, "period_rule": PERIOD_RULE,
                 "operational_roots": {key: str(path.absolute()) for key, path in roots.items()},
@@ -635,10 +638,10 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
     _write_json(staging / "history_manifest.json", manifest)
     del targets, derived
     gc.collect()
-    verified = HistoryPublicationReader(staging, allow_staging=True)
+    verified = HistoryPublicationReader(staging, allow_staging=True, _recovery_access=_recovery_access)
     verified.verify_all()
     _check_history_storage()
-    staging.rename(destination)
+    _rename_history_directory(staging, destination)
     return destination
 
 

@@ -149,3 +149,9 @@ complete-stage recovery 수리와 모델 역할 상향은
 [날짜별 상태의 후속 기술 수리](../implementation/universe50-local-status-20261013.md#2026-10-13-후속-기술-수리--bounded-verification--complete-stage-recovery)에 기록한다.
 public 복구 계약은 [회사 history workflow](../implementation/company-history-workflow.md#complete-reported-stage-recovery-2026-10-13-technical-exception)에 있다.
 독립 검증·actual recovery·local acceptance·main merge는 별도 미완료 단계다.
+
+2026-10-13 recovery 추가 결정: source `65513173…`와 `b0aa40d…` 독립 검증은
+FAIL로 보존한다. lead는 trusted exclusive parent·NOT_READY reader gate와 실패
+artifact 보존을 승인했다. 재귀 rollback 삭제는 제거하며, 초기 빈 same-UID 교체를
+portable mkdir/open으로 방어한다고 주장하지 않는다. 상세 계약은
+[retention 결정](../implementation/company-history-workflow.md#2026-10-13-retention-and-not_ready-decision-after-source-b0aa-fail)에 있다.

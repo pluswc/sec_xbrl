@@ -110,6 +110,7 @@ def test_default_history_build_connects_reported_and_derived_consumer(tmp_path: 
     proof["verification_report"]["sha256"] = _sha256_file(report)
     _write_json(attestation, proof)
     recovered = recover_reported_history(
+        trusted_exclusive_parent=True,
         staged_publication=failed_stage, output_root=tmp_path / "recovered",
         intake_manifest=fixture, operational_root=output.parent,
         attestation=attestation, expected_attestation_sha256=_sha256_file(attestation),

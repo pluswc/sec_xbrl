@@ -287,3 +287,35 @@ rename 없음, SIGKILL 137과 위 max RSS이다. `verifier-only OOM`의 위치·
 - Ruff PASS. cached/oracle 이후 최종 source 조정은 output/source overlap의
   lexical `..` alias 정규화뿐이며 추가 unit 대조를 포함한 164개가 이후 통과했다.
   source 동결과 별도 독립 PASS 및 lead 승인 전에는 actual recovery를 실행하지 않는다.
+
+### 2026-10-13 source b0aa FAIL 이후 retention 결정
+
+`b0aa40d…`의 unit 164·cached·oracle PASS는 역사적 결과로 유지하지만 독립
+source 결과는 **FAIL**이다. 보고서 SHA
+`8a8b786795a83e8c3b67185b31f0013a7a9fb296aaab841c9a49f4db8a486947`를
+보존한다. 첫 mkdir/open 사이 교체와 descendant 교체 후 재귀 rollback이
+남은 P1이었다. lead는 nonaccounting technical exception으로 삭제 대신 실패
+artifact 보존, trusted exclusive parent 명시, immutable NOT_READY metadata와
+atomic COMPLETE receipt reader gate를 승인했다. 초기 빈 same-UID 교체는
+명시된 sole-writer 신뢰 경계 밖이며 보호 성공으로 계산하지 않는다. 회계·Raw·
+quarter math·원래 source/실패 증거는 그대로다. 실제 recovery는 아직 실행하지
+않았고 새 동결 source의 독립 검증·lead GO가 필요하다. 상세 규범 계약은
+[company history workflow](company-history-workflow.md#2026-10-13-retention-and-not_ready-decision-after-source-b0aa-fail)에 있다.
+
+후속 retention 후보의 writer 검증은 **193 unit PASS / 5.03초**이다. 기존
+164개에 29개 대조를 추가했으며, 이 중 초기 빈 same-UID 교체 사례는 보호를
+주장하지 않는 신뢰 경계 기록이다. 두 관찰 P1, capture 이후 빈/비어있지 않은
+root·descendant 교체, final consumer 파일이 존재하는 실패의 default reader
+거부, marker/receipt 누락·변조, 잘못된 consumer provenance, 기존 파일과
+atomic publication destination 보존을 확인했다.
+
+최종 cached 검증은 기존 offline NVDA 2공시만으로 **1 PASS / 15.87초**,
+guard 16.04초, sampled process-group RSS peak **376,909,824 bytes**이다.
+기존 `a36ea059…` eager/quarter oracle도 **8 tables / 25 files / 4,686 panel
+records / 42 derived records PASS**, 4.35초, peak **224,505,856 bytes**다.
+전 record/schema/order/provenance 비교가 유지됐다. Ruff와 diff check PASS.
+모두 10 ms sampled RSS 2 GiB 중단 threshold, 별도 hard per-process
+RLIMIT_AS 2 GiB, 300초 timeout, Polars 2 threads, BLAS/OMP/MKL/NUMEXPR 1,
+Python socket deny guard를 사용했다. sampled RSS를 hard RSS/cgroup 한도로
+주장하지 않는다. 실제 JNJ decode/recovery나 광범위 suite 재실행은 없었다.
+새 후보의 source 동결·독립 재검증·lead 승인 상태는 별도다.

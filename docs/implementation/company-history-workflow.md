@@ -137,6 +137,7 @@ The public Python signature is:
 recover_reported_history(
     *, staged_publication: Path, output_root: Path, intake_manifest: Path,
     operational_root: Path, attestation: Path, expected_attestation_sha256: str,
+    trusted_exclusive_parent: bool,
 ) -> Path
 ```
 
@@ -213,6 +214,7 @@ Use the frozen, independently accepted source revision on `PYTHONPATH`:
 
 ```bash
 python -m sec_xbrl.history recover-reported \
+  --trusted-exclusive-parent \
   --staged-publication /absolute/original/.panels.partial-complete \
   --output-root /absolute/new-recovery-run \
   --intake-manifest /absolute/original/history_intake.json \
@@ -237,13 +239,12 @@ manifest/intake hashes, original generation source, recovery source and output
 paths. It does not alter the original reported manifest bytes. The quarter
 manifest's `supersedes_publication` identifies the new reported parent while
 its `source_manifest_sha256` still identifies the unchanged original manifest.
-Caught failures remove only the newly created output root while its directory
-identity and ancestors remain owned. If the root or an ancestor was exchanged,
-recovery fails with an ownership diagnostic and leaves both the displaced
-transaction and replacement pathname untouched; it never searches for a moved
-root or deletes an unrelated replacement. An uncatchable process kill may leave a new partial
-transaction; it conveys no completion and cannot be reused as a public reader
-input. The old failure evidence and source stage remain available unchanged.
+Recovery failures preserve the new transaction and all workspaces/chunks. No
+recovery artifact tree is recursively deleted, even when ownership still appears
+unchanged. The default public history reader denies the entire recovery subtree
+until its validated COMPLETE receipt exists. Presence of `panels` or a consumer
+manifest alone is not completion. The old failure evidence and source stage
+remain unchanged. See the dated retention decision below.
 
 ### Memory and verification limits
 
@@ -273,8 +274,8 @@ remain governed by the existing producer contracts.
 ### Recovery trust and transaction repair after source 655 review
 
 The old `65513173…` candidate failed independent review for hash/read and
-rollback ownership races. The public API and attestation/report schema remain
-unchanged. Evidence JSON and the execution log are now read through no-follow
+rollback ownership races. The attestation/report schema remains unchanged. The later retention decision
+below adds an explicit trusted-parent API/CLI acknowledgment. Evidence JSON and the execution log are now read through no-follow
 handles once, hashed as immutable bytes, and parsed from those same bytes.
 Original reported manifest bytes are copied from that authenticated buffer.
 Pinned inode/size/mtime/ctime and ancestor identities reject later exchanges or
@@ -284,7 +285,8 @@ expected pins. No parser, schema, accounting or derivation policy changes.
 
 The destination's parent must already exist. Recovery exclusively creates the
 absent leaf via its held parent directory handle, retains its directory inode
-and handle, and checks ownership before writes, renames, receipts and rollback.
+and handle, and checks ownership before writes, renames and receipts. The later
+retention decision removes rollback deletion entirely.
 Copies use no-follow source descriptors, hash the actual bytes streamed to new
 exclusive destination files, and check source identity before and after copying.
 Copied and reported manifests are rebound to their authenticated bytes. Scoped
@@ -292,14 +294,79 @@ storage guards check source/output identity around quarter writing and final
 publication. They are inactive during ordinary history operations.
 
 Destination roots inside the failed stage, original operational root or any
-intake Raw source root are rejected. A concurrent creator of the requested
-output pathname never becomes recovery-owned. Cleanup traverses only the held
-owned output directory using fd-based removal and aborts on ownership changes.
-Moved roots are left for explicit inspection. This relies on Linux no-follow
-and directory-FD facilities; unsupported safe rollback facilities fail closed.
-No user files are searched for or removed to repair an exchanged pathname.
+intake Raw source root are rejected. An existing requested output is rejected.
+Moved roots are left for explicit inspection. Linux no-follow and directory-FD
+facilities are required. No files are searched for or removed to repair an
+exchanged pathname. The initial directory binding has the explicit trusted-parent
+boundary defined below; mkdir/open is not claimed to provide atomic ownership.
 
 The source and output locations remain subject to the operational immutable-input
 and single-writer contracts. Identity guards detect exchanges at the validation
 and mutation boundaries; they are not a filesystem lock or a guarantee against
 an adversarial process continuously modifying the same user's files.
+
+
+### 2026-10-13 retention and NOT_READY decision after source b0aa FAIL
+
+Independent `b0aa40d…` review found two remaining P1 ownership races: replacement
+between successful mkdir and first open, and a replaced child deleted by recursive
+rollback. Its FAIL report SHA is
+`8a8b786795a83e8c3b67185b31f0013a7a9fb296aaab841c9a49f4db8a486947`.
+Both prior FAIL reports and their artifacts remain immutable. The lead authorized
+this narrower nonaccounting technical change under the existing 50-company task;
+it changes failure retention/readiness only, not Raw, values, accounting, period,
+source selection, scope or financial release policy.
+
+The operator must pass `trusted_exclusive_parent=True` (CLI
+`--trusted-exclusive-parent`) and ensure exclusive sole-writer use of the existing
+parent during initial creation. The program requires that parent to be owned by
+the effective user and not group/world writable; a dedicated mode-0700 parent is
+recommended. This is an operator contract, not a new interactive permission flow.
+A nonempty replacement is rejected before any transaction writes. Root, ancestor
+and captured descendant identities are checked at storage boundaries thereafter.
+No existing destination files are overwritten. **An empty same-UID replacement
+between mkdir and the first identity capture is outside this supported trust
+boundary.** Portable mkdir/open cannot prove atomic creation ownership. Protection
+against such an adversarial same-user process requires separately isolated OS
+ownership and is not claimed by this implementation.
+
+Before any reported payload is copied, recovery creates a permanent
+`.history-recovery-<transaction SHA256>/transaction.json` control directory and
+immutable NOT_READY metadata. Its hash-named parent binds the exact bytes, root
+inode/path, token, source-generation/recovery identities, attestation/report hashes
+and input fingerprint. Missing or malformed metadata fails closed once that
+control directory exists. Recovery metadata is not to be removed or edited;
+removing every trace of recovery metadata to disguise the root as a legacy
+publication violates the immutable-output/sole-writer contract.
+
+All default `HistoryPublicationReader` and `open_history_publication` access to
+that root or descendants is denied until the COMPLETE gate validates. This also
+applies to `allow_staging=True`, existing reader `load`/`verify_all` calls, and
+consumer APIs using those public readers. It is an API boundary, not a restriction
+on arbitrary operating-system reads. Internal reported/quarter verification uses
+an explicit root-bound capability, valid only in the active recovery context;
+there is no unscoped staging bypass. Legacy non-recovery reads are unchanged.
+
+After full reported and quarter verification, expected consumer provenance and
+source/root/descendant checks, the program atomically creates
+`reported_recovery_receipt.json` with an exclusive hard link from a new immutable
+temporary receipt. An existing receipt is never replaced. The receipt binds the
+transaction token/hash, authenticated source/report identities and both manifest
+hashes. Default reads check those bindings. Reported manifest/payload bytes remain
+identical; quarter parent paths remain the intended final output paths.
+
+Failures retain all newly created artifacts with no COMPLETE gate. Even an already
+written final consumer manifest remains NOT_READY. Recovery disables recursive
+cleanup, including TemporaryDirectory finalizers and quarter `.chunks` deletion.
+Publication directory renames use Linux `renameat2(RENAME_NOREPLACE)`; absent
+support fails closed with retained artifacts. Recovery JSON publication also uses
+exclusive creation/linking rather than replacing existing files.
+Successful recovery also retains these diagnostic chunks plus temporary JSON and
+receipt files, increasing disk usage beyond the declared payload. Paths include
+`panels/.chunks`, nested `.<file>.chunks-*` and `.receipt.partial-*`; they are not
+extra declared tables. No automatic deletion or cleanup is authorized. Outside
+recovery, existing workspace cleanup behavior remains unchanged. The superseded
+acceptance condition “no failed output directory remains” is now “failed artifacts
+remain non-consumable, no COMPLETE is published, and no source/unrelated data is
+overwritten or deleted.” New source freeze, independent PASS and lead GO remain
+required before actual recovery.
