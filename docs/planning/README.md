@@ -141,8 +141,10 @@ SHA-256: `7e88f7c50e7d9cbacb4994e58bd8542c837cb17d98fe1fa2da4d0e57d65a8911`.
 읽을 필요 없이 이 등록부, U 로드맵과 실행 계약만으로 업무를 인계한다.
 `.omx/`, `.codex/`, `work/`에서 만든 후속 계획도 같은 원칙을 따른다.
 
-2026-10-13 추가 상태: JNJ attempt 4는 reported stage 기록 후 verifier-only OOM으로
-실패했다. 전체 완료 상태가 아니다. 제한된 bounded verification·객체 수명·독립
+2026-10-13 추가 상태: JNJ attempt 4는 reported 12 panel과 staged manifest가
+존재하고 rename이 없는 상태에서 SIGKILL 137로 실패했다. 검증 단계의 메모리
+실패라는 설명은 control-flow와 RSS에 근거한 강한 추론이며 traced stack이나
+확인된 kernel OOM 원인은 아니다. 전체 완료 상태가 아니다. 제한된 bounded verification·객체 수명·독립
 complete-stage recovery 수리와 모델 역할 상향은
 [날짜별 상태의 후속 기술 수리](../implementation/universe50-local-status-20261013.md#2026-10-13-후속-기술-수리--bounded-verification--complete-stage-recovery)에 기록한다.
 public 복구 계약은 [회사 history workflow](../implementation/company-history-workflow.md#complete-reported-stage-recovery-2026-10-13-technical-exception)에 있다.

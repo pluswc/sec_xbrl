@@ -11,10 +11,12 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import tempfile
 import uuid
 from collections import defaultdict
 from collections.abc import Iterator
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, replace
 from datetime import date
 from pathlib import Path
@@ -57,9 +59,12 @@ def _history_layer2_rule_versions() -> Layer2RuleVersions:
 
 
 def _write_json(path: Path, payload: Any) -> None:
+    _check_history_storage(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".partial")
+    _check_history_storage(temporary)
     temporary.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+    _check_history_storage()
     temporary.replace(path)
 
 
@@ -627,7 +632,7 @@ class _StagedRecordWrite:
 
     def cleanup(self) -> None:
         if self.workspace is not None:
-            self.workspace.cleanup()
+            _cleanup_history_workspace(self.workspace)
             self.workspace = None
 
 
@@ -636,6 +641,7 @@ def _stage_records(
 ) -> _StagedRecordWrite:
     import polars as pl
 
+    _check_history_storage(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     json_fields = sorted({key for row in records for key, value in row.items() if isinstance(value, (dict, list, tuple))})
     if not records:
@@ -670,6 +676,7 @@ def _stage_records(
             records, json_fields
         ):
             chunk_path = chunk_directory / f"{len(chunk_paths):08d}.parquet"
+            _check_history_storage(chunk_path)
             pl.from_dicts(
                 encoded_batch,
                 schema=global_schema,
@@ -679,7 +686,7 @@ def _stage_records(
             )
             chunk_paths.append(chunk_path)
     except BaseException:
-        workspace.cleanup()
+        _cleanup_history_workspace(workspace)
         raise
     return _StagedRecordWrite(
         path,
@@ -695,6 +702,7 @@ def _finalize_staged_records(staged: _StagedRecordWrite) -> dict[str, Any]:
     import polars as pl
 
     try:
+        _check_history_storage(staged.path)
         if not staged.chunk_paths:
             pl.DataFrame().write_parquet(staged.path)
         else:
@@ -901,7 +909,215 @@ class HistoryPublicationReader:
         return FiscalTimeSeriesResult(**{name: self._records(table["files"][name]) for name in ("columns", "rows", "cells")}, scope=table["scope"])
 
 
-def _validate_recovery_sources(intake, operational_root, expected_fingerprint, expected_roots):
+def _recovery_stat_identity(value: os.stat_result) -> tuple[int, ...]:
+    return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+
+
+def _open_recovery_path(path: Path, flags: int = os.O_RDONLY) -> int:
+    """Open through no-follow directory handles, never a symlink ancestor."""
+    path = path.absolute()
+    if ".." in path.parts:
+        raise ValueError("unsafe recovery path")
+    if path == Path(path.anchor):
+        return os.open(path.anchor, flags | os.O_NOFOLLOW)
+    fd = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in path.parts[1:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        return os.open(path.name, flags | os.O_NOFOLLOW, dir_fd=fd)
+    finally:
+        os.close(fd)
+
+
+class _RecoveryPins:
+    """Immutable evidence buffers plus identity guards for later public reads."""
+
+    def __init__(self) -> None:
+        self.files: dict[Path, tuple[int, ...]] = {}
+        self.directories: dict[Path, tuple[int, int]] = {}
+
+    def directory(self, path: Path) -> None:
+        for parent in (path.absolute(), *path.absolute().parents):
+            value = parent.lstat()
+            if not stat.S_ISDIR(value.st_mode):
+                raise ValueError("recovery source directory is unsafe")
+            identity = (value.st_dev, value.st_ino)
+            if parent in self.directories and self.directories[parent] != identity:
+                raise ValueError("recovery source directory identity changed")
+            self.directories[parent] = identity
+
+    def file(self, path: Path) -> None:
+        path = path.absolute()
+        self.directory(path.parent)
+        value = path.lstat()
+        if not stat.S_ISREG(value.st_mode):
+            raise ValueError("recovery source file is unsafe")
+        identity = _recovery_stat_identity(value)
+        if path in self.files and self.files[path] != identity:
+            raise ValueError("recovery source file identity/content changed")
+        self.files[path] = identity
+
+    def tree(self, root: Path) -> None:
+        self.directory(root)
+        for path in root.rglob("*"):
+            if path.is_dir() and not path.is_symlink():
+                self.directory(path)
+            else:
+                self.file(path)
+
+    def check(self) -> None:
+        try:
+            for path, identity in self.directories.items():
+                value = path.lstat()
+                if not stat.S_ISDIR(value.st_mode) or (value.st_dev, value.st_ino) != identity:
+                    raise ValueError("recovery source directory identity changed")
+            for path, identity in self.files.items():
+                value = path.lstat()
+                if not stat.S_ISREG(value.st_mode) or _recovery_stat_identity(value) != identity:
+                    raise ValueError("recovery source file identity/content changed")
+        except OSError as exc:
+            raise ValueError("recovery pinned source path disappeared") from exc
+
+    def read(self, path: Path, expected_sha256: str, label: str) -> bytes:
+        self.file(path)
+        with os.fdopen(_open_recovery_path(path), "rb") as stream:
+            if _recovery_stat_identity(os.fstat(stream.fileno())) != self.files[path.absolute()]:
+                raise ValueError("recovery source file exchanged before read")
+            data = stream.read()
+            if hashlib.sha256(data).hexdigest() != expected_sha256:
+                raise ValueError(f"recovery {label} hash mismatch")
+            if _recovery_stat_identity(os.fstat(stream.fileno())) != self.files[path.absolute()]:
+                raise ValueError("recovery source file changed during read")
+        self.check()
+        return data
+
+
+class _RecoveryOutput:
+    """Exclusive output reservation; cleanup is anchored to the owned inode."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root.absolute()
+        self.parents = _RecoveryPins()
+        self.parents.directory(self.root.parent)
+        self.parent_fd = _open_recovery_path(self.root.parent, os.O_RDONLY | os.O_DIRECTORY)
+        self.fd = -1
+        try:
+            self.parents.check()
+            # mkdir is the exclusive reservation; an earlier exists() check
+            # never confers cleanup ownership over a concurrent creator.
+            os.mkdir(self.root.name, mode=0o700, dir_fd=self.parent_fd)
+            self.fd = os.open(self.root.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                              dir_fd=self.parent_fd)
+            value = os.fstat(self.fd)
+            self.identity = (value.st_dev, value.st_ino)
+            self.check()
+        except BaseException:
+            self.close()
+            raise
+
+    def check(self) -> None:
+        try:
+            self.parents.check()
+            value = os.stat(self.root.name, dir_fd=self.parent_fd, follow_symlinks=False)
+            if not stat.S_ISDIR(value.st_mode) or (value.st_dev, value.st_ino) != self.identity:
+                raise ValueError("recovery output ownership changed; transaction left untouched")
+        except (OSError, ValueError) as exc:
+            raise ValueError("recovery output ownership changed; transaction left untouched") from exc
+
+    def create_file(self, relative: Path) -> int:
+        self.check()
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError("unsafe recovery output path")
+        fd = os.dup(self.fd)
+        try:
+            for name in relative.parts[:-1]:
+                self.check()
+                try:
+                    os.mkdir(name, mode=0o700, dir_fd=fd)
+                except FileExistsError:
+                    pass
+                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                os.close(fd)
+                fd = child
+            self.check()
+            return os.open(relative.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                           0o600, dir_fd=fd)
+        finally:
+            os.close(fd)
+
+    def write(self, relative: Path, data: bytes) -> None:
+        with os.fdopen(self.create_file(relative), "wb") as stream:
+            stream.write(data)
+        self.check()
+
+    def cleanup(self) -> None:
+        self.check()
+        # Use the held directory, never rmtree(the possibly exchanged root).
+        # shutil's fd-based implementation also protects descendant traversal.
+        if not shutil.rmtree.avoids_symlink_attacks:
+            raise ValueError("safe recovery rollback requires fd-based rmtree")
+        for name in os.listdir(self.fd):
+            self.check()
+            value = os.stat(name, dir_fd=self.fd, follow_symlinks=False)
+            if stat.S_ISDIR(value.st_mode):
+                shutil.rmtree(name, dir_fd=self.fd)
+            else:
+                os.unlink(name, dir_fd=self.fd)
+        self.check()
+        os.rmdir(self.root.name, dir_fd=self.parent_fd)
+
+    def close(self) -> None:
+        if self.fd >= 0:
+            os.close(self.fd)
+            self.fd = -1
+        os.close(self.parent_fd)
+
+
+def _copy_recovery_payload(source: Path, relative: Path, expected_sha256: str,
+                           pins: _RecoveryPins, output: _RecoveryOutput) -> None:
+    pins.check()
+    pins.file(source)
+    expected_identity = pins.files[source.absolute()]
+    with os.fdopen(_open_recovery_path(source), "rb") as incoming:
+        if _recovery_stat_identity(os.fstat(incoming.fileno())) != expected_identity:
+            raise ValueError("recovery payload identity changed before copy")
+        digest = hashlib.sha256()
+        with os.fdopen(output.create_file(relative), "wb") as outgoing:
+            for block in iter(lambda: incoming.read(1024 * 1024), b""):
+                output.check()
+                digest.update(block)
+                outgoing.write(block)
+        if digest.hexdigest() != expected_sha256:
+            raise ValueError("recovery copied payload hash mismatch")
+        if _recovery_stat_identity(os.fstat(incoming.fileno())) != expected_identity:
+            raise ValueError("recovery payload changed during copy")
+    pins.check()
+    output.check()
+
+
+_HISTORY_STORAGE_GUARD: ContextVar[Any] = ContextVar("history_storage_guard", default=None)
+
+
+def _check_history_storage(path: Path | None = None) -> None:
+    guard = _HISTORY_STORAGE_GUARD.get()
+    if guard is not None:
+        guard(path)
+
+
+def _cleanup_history_workspace(workspace: Any) -> None:
+    try:
+        _check_history_storage(Path(workspace.name))
+    except BaseException:
+        # Do not let TemporaryDirectory finalization later follow an exchanged
+        # path after the transaction has explicitly refused cleanup.
+        workspace._finalizer.detach()
+        raise
+    workspace.cleanup()
+
+
+def _validate_recovery_sources(intake, operational_root, expected_fingerprint, expected_roots, pins=None):
     """Use the existing Raw adapter and public T1-T4 readers, without rebuilding."""
     from sec_xbrl.longitudinal import (
         CohortReleaseAdapter,
@@ -909,8 +1125,11 @@ def _validate_recovery_sources(intake, operational_root, expected_fingerprint, e
         CohortSource,
         Layer2PublicationReader,
     )
+    pins = pins or _RecoveryPins()
     grouped = defaultdict(list)
     for item in intake["filings"]:
+        pins.tree(Path(item["source_run"]) / "snapshots" / item["filing"]["cik"]
+                  / item["filing"]["accession"].replace("-", ""))
         grouped[Path(item["source_run"])].append(
             CohortSnapshotReference(item["filing"]["cik"], item["filing"]["accession"])
         )
@@ -924,6 +1143,7 @@ def _validate_recovery_sources(intake, operational_root, expected_fingerprint, e
         (item["filing"]["cik"], item["filing"]["accession"]): item["filing"]
         for item in intake["filings"]
     })
+    pins.check()
     if release.layer2_run.fingerprint != expected_fingerprint:
         raise ValueError("recovery Raw inputs or active rules differ")
     del release
@@ -934,10 +1154,12 @@ def _validate_recovery_sources(intake, operational_root, expected_fingerprint, e
     for name in ("t1", "t2", "t3", "t4"):
         root = operational_root / name / operational_root.name
         manifest = root / Layer2PublicationReader.manifest_name
-        _reject_symlink_components(manifest)
-        if _sha256_file(manifest) != expected_roots[name]:
-            raise ValueError("recovery operational manifest hash mismatch")
+        pins.tree(root)
+        pins.read(manifest, expected_roots[name], "operational manifest")
         existing = Layer2PublicationReader().load(root)
+        pins.check()
+        if existing.identity.get("layer2_manifest_sha256") != expected_roots[name]:
+            raise ValueError("recovery operational reader manifest identity mismatch")
         if existing.identity["layer2_run_fingerprint"] != expected_fingerprint:
             raise ValueError("recovery operational input fingerprint mismatch")
         roots[name] = str(root.absolute())
@@ -989,9 +1211,11 @@ def _validate_recovery_inventory(reader, expected_tables):
     return paths
 
 
-def _validate_recovery_report(proof: dict[str, Any]) -> None:
+def _validate_recovery_report(proof: dict[str, Any], report: dict[str, Any] | None = None) -> None:
     """Require pinned full component evidence, never a byte-only integrity report."""
-    report = json.loads(Path(proof["verification_report"]["path"]).read_text())
+    if report is None:
+        evidence = proof["verification_report"]
+        report = json.loads(_RecoveryPins().read(Path(evidence["path"]), evidence["sha256"], "independent report"))
     required_flags = (
         "all_reported_files_fully_decoded", "all_ordered_records_hashed",
         "all_json_fields_decoded", "all_physical_hashes_verified", "all_schema_counts_verified",
@@ -1057,9 +1281,8 @@ def recover_reported_history(
     if any(output_root.resolve().is_relative_to(root.resolve())
            for root in (staged_publication, operational_root)):
         raise ValueError("recovery output cannot modify an immutable source root")
-    if _sha256_file(attestation) != expected_attestation_sha256:
-        raise ValueError("recovery attestation hash mismatch")
-    proof = json.loads(attestation.read_text())
+    pins = _RecoveryPins()
+    proof = json.loads(pins.read(attestation, expected_attestation_sha256, "attestation"))
     if proof.get("version") != "reported-stage-recovery-v1" or proof.get("status") != "PASS":
         raise ValueError("recovery requires an independent complete-stage PASS")
     # These identities identify two separate executions. Neither rewrites the
@@ -1068,23 +1291,25 @@ def recover_reported_history(
         value = proof.get(key)
         if not isinstance(value, str) or len(value) != 40 or any(c not in "0123456789abcdef" for c in value):
             raise ValueError("recovery requires pinned generation and recovery source identities")
+    evidence_bytes = {}
     for key in ("verification_report", "source_execution_log"):
         evidence = proof[key]
-        path = Path(evidence["path"])
-        _reject_symlink_components(path)
-        if _sha256_file(path) != evidence["sha256"]:
-            raise ValueError("recovery independent evidence hash mismatch")
-    _validate_recovery_report(proof)
+        evidence_bytes[key] = pins.read(Path(evidence["path"]), evidence["sha256"], "independent evidence")
+    _validate_recovery_report(proof, json.loads(evidence_bytes["verification_report"]))
     manifest_path = staged_publication / "history_manifest.json"
-    _reject_symlink_components(manifest_path)
-    if _sha256_file(manifest_path) != proof["staged_manifest_sha256"]:
-        raise ValueError("recovery staged manifest hash mismatch")
-    if _sha256_file(intake_manifest) != proof["intake_sha256"]:
-        raise ValueError("recovery source intake hash mismatch")
-    intake = json.loads(intake_manifest.read_text())
+    manifest_bytes = pins.read(manifest_path, proof["staged_manifest_sha256"], "staged manifest")
+    intake = json.loads(pins.read(intake_manifest, proof["intake_sha256"], "source intake"))
     _validate_intake(intake)
+    source_roots = [staged_publication, operational_root,
+                    *(Path(item["source_run"]) for item in intake["filings"])]
+    if any(output_root.resolve().is_relative_to(root.resolve()) for root in source_roots):
+        raise ValueError("recovery output cannot modify an immutable source root")
+    pins.tree(staged_publication)
     reader = HistoryPublicationReader(staged_publication, allow_staging=True)
-    manifest = reader.manifest
+    pins.check()
+    manifest = json.loads(manifest_bytes)
+    if reader.manifest != manifest:
+        raise ValueError("recovery stage reader differs from pinned manifest bytes")
     if (manifest.get("derived_quarter") is not None
         or manifest.get("quarterly_derivation_status") != "NOT_MATERIALIZED_REPORTED_SERIES_ONLY"
         or manifest["plan"] != proof["plan"] or intake["plan"] != proof["plan"]
@@ -1110,41 +1335,72 @@ def recover_reported_history(
         for t in proof["tables"]
     ]
     logs = []
-    with Path(proof["source_execution_log"]["path"]).open() as stream:
-        for line in stream:
-            try:
-                record = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(record, dict) and record.get("stage") == "PANEL_WRITTEN":
-                logs.append(record)
+    for line in evidence_bytes["source_execution_log"].splitlines():
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict) and record.get("stage") == "PANEL_WRITTEN":
+            logs.append(record)
     if logs != expected_logs:
         raise ValueError("recovery ordered completed-panel log inventory mismatch")
     reader.verify_all()
     roots = _validate_recovery_sources(
-        intake, operational_root, proof["input_fingerprint"], proof["operational_manifest_sha256"]
+        intake, operational_root, proof["input_fingerprint"], proof["operational_manifest_sha256"], pins
     )
     if manifest.get("operational_roots") != roots:
         raise ValueError("recovery operational roots differ from original generation")
-    output_root.mkdir(parents=True, exist_ok=False)
+    pins.check()
+    output = _RecoveryOutput(output_root)
+    reported_pins = None
+
+    def guard(path: Path | None = None) -> None:
+        output.check()
+        pins.check()
+        if reported_pins is not None:
+            reported_pins.check()
+        if path is not None:
+            _reject_symlink_components(path)
+            if not path.absolute().is_relative_to(output.root):
+                raise ValueError("recovery writer path escapes its owned output")
+
+    token = _HISTORY_STORAGE_GUARD.set(guard)
     try:
-        staging = Path(tempfile.mkdtemp(prefix=".panels.partial-", dir=output_root))
-        for relative in sorted(paths):
-            source, destination = staged_publication / relative, staging / relative
-            _reject_symlink_components(source)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, destination)
+        output.check()
+        stage_name = f".panels.partial-{uuid.uuid4().hex}"
+        os.mkdir(stage_name, mode=0o700, dir_fd=output.fd)
+        staging = output_root / stage_name
+        output.write(Path(stage_name) / "history_manifest.json", manifest_bytes)
+        payloads = {info["path"]: info for table in proof["tables"] for info in table["files"].values()}
+        for relative in sorted(paths - {"history_manifest.json"}):
+            _copy_recovery_payload(staged_publication / relative, Path(stage_name) / relative,
+                                   payloads[relative]["sha256"], pins, output)
+        pins.check()
+        output.check()
+        copied_pins = _RecoveryPins()
+        copied_pins.tree(staging)
+        copied_bytes = copied_pins.read(staging / "history_manifest.json", proof["staged_manifest_sha256"], "copied manifest")
         copied = HistoryPublicationReader(staging, allow_staging=True)
-        if _sha256_file(staging / "history_manifest.json") != proof["staged_manifest_sha256"]:
-            raise ValueError("recovery copied manifest hash mismatch")
+        copied_pins.check()
+        if copied.manifest != json.loads(copied_bytes):
+            raise ValueError("recovery copied reader differs from pinned manifest bytes")
         _validate_recovery_inventory(copied, proof["tables"])
         copied.verify_all()
+        copied_pins.check()
         reported = output_root / "reported-panels"
-        staging.rename(reported)
+        output.check()
+        pins.check()
+        os.rename(stage_name, "reported-panels", src_dir_fd=output.fd, dst_dir_fd=output.fd)
+        output.check()
+        reported_pins = _RecoveryPins()
+        reported_pins.tree(reported)
+        reported_pins.read(reported / "history_manifest.json", proof["staged_manifest_sha256"], "published manifest")
+        guard()
         result = publish_quarter_history(
             publication=reported, output_root=output_root, operational_root=operational_root
         )
-        _write_json(output_root / "reported_recovery_receipt.json", {
+        guard()
+        receipt = {
             "version": "reported-stage-recovery-v1", "status": "COMPLETE",
             "attestation": str(attestation.absolute()),
             "attestation_sha256": expected_attestation_sha256,
@@ -1155,11 +1411,17 @@ def recover_reported_history(
             "source_intake_sha256": proof["intake_sha256"],
             "reported_publication": str(reported.absolute()),
             "consumer_publication": str(result.absolute()),
-        })
+        }
+        output.write(Path("reported_recovery_receipt.json"),
+                     (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode())
+        guard()
         return result
     except BaseException:
-        shutil.rmtree(output_root)
+        output.cleanup()
         raise
+    finally:
+        _HISTORY_STORAGE_GUARD.reset(token)
+        output.close()
 
 
 def main() -> None:

@@ -213,7 +213,7 @@ def test_recovery_fails_closed_leaves_source_and_no_output(tmp_path, monkeypatch
     elif fault == "quarter":
         monkeypatch.setattr(quarters, "publish_quarter_history", lambda **_: (_ for _ in ()).throw(ValueError("quarter failed")))
     elif fault == "copy":
-        monkeypatch.setattr(history.shutil, "copyfile", lambda *_: (_ for _ in ()).throw(ValueError("copy failed")))
+        monkeypatch.setattr(history, "_copy_recovery_payload", lambda *_: (_ for _ in ()).throw(ValueError("copy failed")))
     if fault != "attestation":
         history._write_json(kwargs["attestation"], proof)
         kwargs["expected_attestation_sha256"] = history._sha256_file(kwargs["attestation"])
@@ -389,7 +389,7 @@ def test_recovery_sources_checks_all_roots_after_releasing_raw(tmp_path, monkeyp
             gc.collect()
             assert reference() is None
             calls.append(path.parent.name)
-            return SimpleNamespace(identity={"layer2_run_fingerprint": "fp"})
+            return SimpleNamespace(identity={"layer2_run_fingerprint": "fp", "layer2_manifest_sha256": hashes[path.parent.name]})
 
     monkeypatch.setattr(longitudinal, "CohortReleaseAdapter", lambda: SimpleNamespace(load=lambda *a, **kw: holder.pop()))
     monkeypatch.setattr(longitudinal, "Layer2PublicationReader", Reader)
@@ -442,8 +442,180 @@ def test_recovery_report_enforces_authenticated_prefix_digest(tmp_path, monkeypa
     report = json.loads(report_path.read_text())
     report["prefix_checks"] = [{**prefix, "actual_sha256": actual_digest, "status": "PASS"}]
     history._write_json(report_path, report)
+    proof["verification_report"]["sha256"] = history._sha256_file(report_path)
     if actual_digest == prefix["expected_sha256"]:
         history._validate_recovery_report(proof)
     else:
         with pytest.raises(ValueError, match="prefix mismatch"):
             history._validate_recovery_report(proof)
+
+
+@pytest.mark.parametrize("artifact", ["attestation", "verification_report", "source_execution_log", "intake", "manifest"])
+def test_recovery_rejects_evidence_replacement_during_hash(tmp_path, monkeypatch, artifact):
+    kwargs, proof = _recovery_fixture(tmp_path, monkeypatch)
+    path = {"attestation": kwargs["attestation"], "intake": kwargs["intake_manifest"],
+            "manifest": kwargs["staged_publication"] / "history_manifest.json"}.get(artifact)
+    if path is None:
+        path = Path(proof[artifact]["path"])
+    before = path.read_bytes()
+    real_hash = history.hashlib.sha256
+    exchanged = False
+
+    def hash_then_exchange(data=b""):
+        nonlocal exchanged
+        result = real_hash(data)
+        if data == before and not exchanged:
+            exchanged = True
+            replacement = path.with_name(path.name + ".exchange")
+            replacement.write_bytes(before + b" ")
+            replacement.replace(path)
+        return result
+
+    monkeypatch.setattr(history.hashlib, "sha256", hash_then_exchange)
+    with pytest.raises(ValueError, match="changed during read|identity/content changed"):
+        history.recover_reported_history(**kwargs)
+    assert exchanged
+    assert not kwargs["output_root"].exists()
+
+
+@pytest.mark.parametrize("succeed", [False, True])
+def test_recovery_never_cleans_or_receipts_replacement_directory(tmp_path, monkeypatch, succeed):
+    kwargs, _ = _recovery_fixture(tmp_path, monkeypatch)
+    unrelated = tmp_path / "preexisting-publication"
+    unrelated.mkdir()
+    marker = unrelated / "do-not-delete.txt"
+    marker.write_bytes(b"preexisting protected bytes")
+    moved = tmp_path / "original-owned-transaction"
+
+    def exchange(**_):
+        kwargs["output_root"].rename(moved)
+        unrelated.rename(kwargs["output_root"])
+        if succeed:
+            return kwargs["output_root"] / "panels"
+        raise ValueError("quarter failure after ownership exchange")
+
+    monkeypatch.setattr(quarters, "publish_quarter_history", exchange)
+    with pytest.raises(ValueError, match="ownership changed"):
+        history.recover_reported_history(**kwargs)
+    assert (kwargs["output_root"] / marker.name).read_bytes() == b"preexisting protected bytes"
+    assert sorted(p.name for p in kwargs["output_root"].iterdir()) == [marker.name]
+    assert (moved / "reported-panels" / "history_manifest.json").is_file()
+    assert not (moved / "reported_recovery_receipt.json").exists()
+
+
+def test_recovery_reservation_does_not_own_concurrent_creator(tmp_path, monkeypatch):
+    kwargs, _ = _recovery_fixture(tmp_path, monkeypatch)
+    original = history.os.mkdir
+    triggered = False
+
+    def mkdir(path, mode=0o777, *, dir_fd=None):
+        nonlocal triggered
+        if path == kwargs["output_root"].name and dir_fd is not None and not triggered:
+            triggered = True
+            original(path, mode, dir_fd=dir_fd)
+            (kwargs["output_root"] / "preexisting.txt").write_text("concurrent creator")
+        return original(path, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(history.os, "mkdir", mkdir)
+    with pytest.raises(FileExistsError):
+        history.recover_reported_history(**kwargs)
+    assert (kwargs["output_root"] / "preexisting.txt").read_text() == "concurrent creator"
+
+
+def test_recovery_rejects_source_payload_exchange_after_copy(tmp_path, monkeypatch):
+    kwargs, proof = _recovery_fixture(tmp_path, monkeypatch)
+    original = history._copy_recovery_payload
+    source_path = kwargs["staged_publication"] / proof["tables"][0]["files"]["cells"]["path"]
+
+    def copy_then_exchange(source, *args):
+        original(source, *args)
+        if source == source_path:
+            replacement = source.with_name("exchange.parquet")
+            replacement.write_bytes(source.read_bytes())
+            replacement.replace(source)
+
+    monkeypatch.setattr(history, "_copy_recovery_payload", copy_then_exchange)
+    with pytest.raises(ValueError, match="identity/content changed"):
+        history.recover_reported_history(**kwargs)
+    assert not kwargs["output_root"].exists()
+
+
+def test_recovery_output_cannot_alias_intake_source_root(tmp_path, monkeypatch):
+    kwargs, _ = _recovery_fixture(tmp_path, monkeypatch)
+    kwargs["output_root"] = tmp_path / "raw" / "new-output"
+    with pytest.raises(ValueError, match="immutable source root"):
+        history.recover_reported_history(**kwargs)
+    assert not kwargs["output_root"].exists()
+
+
+def test_recovery_ancestor_exchange_preserves_unrelated_tree(tmp_path, monkeypatch):
+    kwargs, _ = _recovery_fixture(tmp_path, monkeypatch)
+    parent = tmp_path / "output-parent"
+    parent.mkdir()
+    kwargs["output_root"] = parent / "recovered"
+    replacement = tmp_path / "unrelated-parent"
+    (replacement / "recovered").mkdir(parents=True)
+    (replacement / "recovered" / "keep.txt").write_text("keep")
+    moved = tmp_path / "moved-owned-parent"
+
+    def exchange(**_):
+        parent.rename(moved)
+        replacement.rename(parent)
+        raise ValueError("ancestor exchange")
+
+    monkeypatch.setattr(quarters, "publish_quarter_history", exchange)
+    with pytest.raises(ValueError, match="ownership changed"):
+        history.recover_reported_history(**kwargs)
+    assert (parent / "recovered" / "keep.txt").read_text() == "keep"
+    assert (moved / "recovered" / "reported-panels").is_dir()
+
+
+def test_recovery_rejects_normalized_raw_source_overlap(tmp_path, monkeypatch):
+    kwargs, proof = _recovery_fixture(tmp_path, monkeypatch)
+    (tmp_path / "alias-parent").mkdir()
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    intake = json.loads(kwargs["intake_manifest"].read_text())
+    intake["filings"][0]["source_run"] = str(tmp_path / "alias-parent" / ".." / "raw")
+    history._write_json(kwargs["intake_manifest"], intake)
+    proof["intake_sha256"] = history._sha256_file(kwargs["intake_manifest"])
+    report_path = Path(proof["verification_report"]["path"])
+    report = json.loads(report_path.read_text())
+    report["source_intake"]["sha256"] = proof["intake_sha256"]
+    history._write_json(report_path, report)
+    proof["verification_report"]["sha256"] = history._sha256_file(report_path)
+    history._write_json(kwargs["attestation"], proof)
+    kwargs["expected_attestation_sha256"] = history._sha256_file(kwargs["attestation"])
+    kwargs["output_root"] = raw / "new-output"
+    with pytest.raises(ValueError, match="immutable source root"):
+        history.recover_reported_history(**kwargs)
+    assert list(raw.iterdir()) == []
+
+
+@pytest.mark.parametrize("artifact", ["manifest", "dataset", "root"])
+def test_recovery_rejects_operational_source_exchange_inside_public_validator(tmp_path, monkeypatch, artifact):
+    from sec_xbrl import longitudinal
+
+    operational = tmp_path / "operational"
+    hashes = {}
+    for name in ("t1", "t2", "t3", "t4"):
+        root = operational / name / operational.name
+        history._write_json(root / "layer2_run_manifest.json", {"name": name})
+        (root / "dataset").write_bytes(b"original dataset bytes")
+        hashes[name] = history._sha256_file(root / "layer2_run_manifest.json")
+    monkeypatch.setattr(longitudinal, "CohortReleaseAdapter", lambda: SimpleNamespace(load=lambda *a, **kw: SimpleNamespace(layer2_run=SimpleNamespace(fingerprint="fp"), snapshots=())))
+
+    class Reader:
+        manifest_name = "layer2_run_manifest.json"
+        def load(self, path):
+            if artifact == "root":
+                path.rename(path.with_name("displaced"))
+                path.mkdir()
+            else:
+                source = path / (self.manifest_name if artifact == "manifest" else "dataset")
+                source.write_bytes(source.read_bytes() + b" ")
+            return SimpleNamespace(identity={"layer2_run_fingerprint": "fp", "layer2_manifest_sha256": hashes[path.parent.name]})
+
+    monkeypatch.setattr(longitudinal, "Layer2PublicationReader", Reader)
+    with pytest.raises(ValueError, match="changed"):
+        history._validate_recovery_sources({"filings": [], "plan": {"companies": []}}, operational, "fp", hashes)

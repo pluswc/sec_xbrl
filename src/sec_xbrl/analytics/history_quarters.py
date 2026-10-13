@@ -30,6 +30,7 @@ from sec_xbrl.analytics.fiscal_time_series import (
 from sec_xbrl.history import (
     HISTORY_VERSION,
     HistoryPublicationReader,
+    _check_history_storage,
     _finalize_staged_records,
     _iter_history_records,
     _sha256_file,
@@ -216,6 +217,7 @@ def _concatenate_staged_records(
     chunks: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Stream validated encoded chunks into one ordered Parquet dataset."""
+    _check_history_storage(destination)
     import polars as pl
 
     if not chunks:
@@ -560,6 +562,7 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
     destination = output_root / "panels"
     if destination.exists():
         raise ValueError("choose a new immutable quarterly publication destination")
+    _check_history_storage()
     output_root.mkdir(parents=True, exist_ok=True)
     intake_path = Path(old.manifest["source_intake"])
     if not reuse_roots and operational_root is None:
@@ -573,6 +576,7 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
     by_fact = _period_attestation_index(observed)
     del observed
 
+    _check_history_storage()
     staging = Path(tempfile.mkdtemp(prefix=".panels.partial-", dir=output_root))
     chunk_root = staging / ".chunks"
     chunk_root.mkdir()
@@ -617,6 +621,7 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
             ),
             flush=True,
         )
+    _check_history_storage()
     shutil.rmtree(chunk_root)
     derived_info = _write_records(staging / "derived_quarter.parquet", tuple(derived))
     manifest = {**old.manifest, "version": HISTORY_VERSION, "tables": tables, "period_rule": PERIOD_RULE,
@@ -632,6 +637,7 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
     gc.collect()
     verified = HistoryPublicationReader(staging, allow_staging=True)
     verified.verify_all()
+    _check_history_storage()
     staging.rename(destination)
     return destination
 

@@ -124,8 +124,10 @@ not a reader permission to consume failed partial publications. It is limited
 to a **complete reported-only stage independently verified in full**. Failed
 Raw intake, missing chunks, incomplete tables, and policy-held filings remain
 ineligible. The lead authorized this narrow exception after repeated actual
-JNJ memory failures, including a verifier-only failure after all reported
-files were written. The implementation role was explicitly escalated to Astra;
+JNJ high-memory failures. The latest observed failure left all 12 reported
+panels and a staged manifest, without the publication rename, and exited by
+SIGKILL 137 at about 29.58 GiB peak RSS. A verifier-phase memory failure is a
+strong control-flow inference, not a traced stack or confirmed kernel OOM diagnosis. The implementation role was explicitly escalated to Astra;
 a separate Astra must independently verify the frozen candidate. This records
 a role decision, not a measured model speed/cost/quality claim.
 
@@ -235,8 +237,11 @@ manifest/intake hashes, original generation source, recovery source and output
 paths. It does not alter the original reported manifest bytes. The quarter
 manifest's `supersedes_publication` identifies the new reported parent while
 its `source_manifest_sha256` still identifies the unchanged original manifest.
-Caught failures remove only the newly created output root, including any
-reported/quarter manifests. An uncatchable process kill may leave a new partial
+Caught failures remove only the newly created output root while its directory
+identity and ancestors remain owned. If the root or an ancestor was exchanged,
+recovery fails with an ownership diagnostic and leaves both the displaced
+transaction and replacement pathname untouched; it never searches for a moved
+root or deletes an unrelated replacement. An uncatchable process kill may leave a new partial
 transaction; it conveys no completion and cannot be reused as a public reader
 input. The old failure evidence and source stage remain available unchanged.
 
@@ -263,3 +268,38 @@ lifetimes are scoped separately. Encoded staging owns all fields before native
 merges, and boundary reconstruction iterates full decoded cell batches.
 Accounting rules, values, dimensions, IDs, candidate provenance and ordering
 remain governed by the existing producer contracts.
+
+
+### Recovery trust and transaction repair after source 655 review
+
+The old `65513173…` candidate failed independent review for hash/read and
+rollback ownership races. The public API and attestation/report schema remain
+unchanged. Evidence JSON and the execution log are now read through no-follow
+handles once, hashed as immutable bytes, and parsed from those same bytes.
+Original reported manifest bytes are copied from that authenticated buffer.
+Pinned inode/size/mtime/ctime and ancestor identities reject later exchanges or
+mutations before completion. Raw snapshot and T1–T4 trees are pinned around the
+existing public validators; returned operational manifest hashes must match the
+expected pins. No parser, schema, accounting or derivation policy changes.
+
+The destination's parent must already exist. Recovery exclusively creates the
+absent leaf via its held parent directory handle, retains its directory inode
+and handle, and checks ownership before writes, renames, receipts and rollback.
+Copies use no-follow source descriptors, hash the actual bytes streamed to new
+exclusive destination files, and check source identity before and after copying.
+Copied and reported manifests are rebound to their authenticated bytes. Scoped
+storage guards check source/output identity around quarter writing and final
+publication. They are inactive during ordinary history operations.
+
+Destination roots inside the failed stage, original operational root or any
+intake Raw source root are rejected. A concurrent creator of the requested
+output pathname never becomes recovery-owned. Cleanup traverses only the held
+owned output directory using fd-based removal and aborts on ownership changes.
+Moved roots are left for explicit inspection. This relies on Linux no-follow
+and directory-FD facilities; unsupported safe rollback facilities fail closed.
+No user files are searched for or removed to repair an exchanged pathname.
+
+The source and output locations remain subject to the operational immutable-input
+and single-writer contracts. Identity guards detect exchanges at the validation
+and mutation boundaries; they are not a filesystem lock or a guarantee against
+an adversarial process continuously modifying the same user's files.

@@ -187,8 +187,10 @@ PASS는 다음 단계 실행이나 수락을 자동 승인하지 않는다.
 ## 2026-10-13 후속 기술 수리 — bounded verification / complete-stage recovery
 
 위 실행 중 상태의 후속 정정: JNJ attempt 4는 22개 공시에서 reported 12 panel /
-36 file / 965,078,742 byte를 기록한 뒤 staged manifest 검증 단계에서 SIGKILL 137로
-실패했다. 실행 시간 1:45:46, max RSS 31,017,632 KiB이며 HistoryREADY나
+36 file / 965,078,742 byte와 staged manifest가 존재하고 rename은 없는 상태에서
+SIGKILL 137로 실패했다. 검증 단계의 메모리 실패라는 위치·원인 설명은 프로그램
+control-flow와 자원 기록에 근거한 강한 추론이며 traced stack 또는 kernel OOM
+확인 결과가 아니다. 실행 시간 1:45:46, max RSS 31,017,632 KiB(약 29.58 GiB)이며 HistoryREADY나
 FINANCIAL_READY가 아니다. 파일 hash 확인은 전체 decoded integrity를 대신하지
 않는다. 이전 실패 기록과 partial bytes는 보존한다.
 
@@ -244,3 +246,44 @@ actual complete-stage attestation 및 lead GO 이전에 attempt 5/CVX를 실행�
 없으면 skip하며 네트워크 fixture를 만들지 않는다. 이전 source oracle은 위
 `a36ea059…` 두 모듈을 별도 임시 module로 로드하고 같은 reported publication과
 original operational root를 입력해 새 임시 output을 비교했다.
+
+
+### 2026-10-13 독립 source 655 FAIL 이후 정정
+
+`65513173…` 독립 source 검증은 **FAIL**이다. 기존 149 unit·cached·oracle
+PASS는 유지하되, 외부 proof를 hash한 뒤 pathname으로 다시 읽는 경쟁 조건과
+새 output pathname만으로 rollback을 소유한다고 가정한 두 P1 결함이 발견됐다.
+실제 recovery는 승인·실행되지 않았다. 원래 독립 보고서
+`independent_source_6551317/report.json` SHA
+`ef0b69e83f5f177a859ddd730662b2fac81c8c68ca323a794934fe4f53c94274`를 보존한다.
+
+후속 수리는 인증한 단일 bytes buffer의 파싱, source file/directory identity
+pin, no-follow FD copy, exclusive output reservation과 inode 소유권 검증,
+소유권이 바뀐 root의 rollback 금지에 한정한다. output 또는 ancestor가 교체되면
+이동한 자체 transaction과 교체된 다른 root 모두 건드리지 않고 ownership 오류로
+중지한다. 새 후보는 다시 동결·독립 검증해야 한다. source generation AE와 actual
+reported component 증거는 이 source 수리로 재작성하거나 재계산하지 않는다.
+
+이 날짜의 상태 문구도 정정했다. 관찰값은 all 12 panels·staged manifest 존재,
+rename 없음, SIGKILL 137과 위 max RSS이다. `verifier-only OOM`의 위치·원인은
+강한 control-flow 추론이지 stack/kernel 진단이 아니었다. 과거 실패 보고서와
+증거 바이트는 변경하지 않았다.
+
+후속 writer 검증(독립 source 재검증 전):
+
+- 관련 unit **164 passed / 1.89초**: 기존 149개에 인증 bytes 교체, output/root
+  ancestor 교체, concurrent creator, payload 및 T1–T4 identity 변경, source-root
+  alias와 quarter 실패 cleanup의 15개 음성 대조를 추가했다.
+- 기존 offline NVDA 2공시만 사용하는 public fresh/recovery cached gate
+  **1 passed / 15.14초**, guard 전체 15.31초, sampled process-group peak
+  **376,655,872 bytes**. 이전 `a36ea059…` quarter/eager oracle도
+  **8 tables / 25 files / 4,686 panel records / 42 derived records PASS**,
+  전체 4.38초, peak **227,966,976 bytes**였다.
+- 각 process group에 10 ms 간격 sampled RSS 2 GiB 중단 threshold와 300초
+  timeout을 적용했다. 별도로 각 process에 hard `RLIMIT_AS=2 GiB`를 적용했으며,
+  이는 virtual address 한도이지 hard RSS/cgroup allocation 한도가 아니다.
+  `POLARS_MAX_THREADS=2`, BLAS/OMP/MKL/NUMEXPR threads 1, Python socket deny
+  hooks를 사용했다. 실제 JNJ 재실행이나 actual proof 재작성은 하지 않았다.
+- Ruff PASS. cached/oracle 이후 최종 source 조정은 output/source overlap의
+  lexical `..` alias 정규화뿐이며 추가 unit 대조를 포함한 164개가 이후 통과했다.
+  source 동결과 별도 독립 PASS 및 lead 승인 전에는 actual recovery를 실행하지 않는다.
