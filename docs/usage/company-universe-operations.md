@@ -486,6 +486,22 @@ an indivisible row larger than the byte budget is written alone. Parquet chunk
 and final row groups are also limited to 32 rows. These are memory boundaries,
 not filters: every nested value is encoded once in the final pass and retained.
 
+The later 2026-10-13 storage-phase repair separates bounded chunk staging from
+the native final merge. For each fiscal table it stages columns, rows, and
+cells first; the retained write plans contain only paths, schema, JSON-field
+names, and counts. It then releases the complete fiscal-series result before
+starting the first final merge and merges the three staged tables in declared
+order. A failure leaves the `.panels.partial-*` directory unpublished and does
+not create a complete history manifest. Operators must treat that directory as
+failure evidence, never as a resumable or consumable history publication.
+
+The isolated JNJ merge diagnostic established only the storage-phase resource
+boundary: 3,065 authenticated chunks and 8,160 rows merged with identical
+ordered typed values and schema at 1,312,128 KiB peak RSS. It did not validate
+the failed full history run. Actual JNJ and downstream financial work remain
+blocked until the new frozen source passes independent source, component, and
+lifecycle gates.
+
 Immutable Raw collection may proceed independently under the dated RAW_ONLY
 approval and the frozen Raw v5/M0 source. Run one company process at a time
 with the declared child guard and request budget. `RAW_COMPLETE` does not mean

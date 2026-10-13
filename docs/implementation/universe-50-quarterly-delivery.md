@@ -310,6 +310,27 @@ batch는 최대 32 row와 encoded/native string 8MiB를 함께 적용하고 한 
 class는 유지한다. 이 source는 다시 **IMPLEMENTED_AWAITING_INDEPENDENT_SOURCE_GATE**이며
 새 source/CAT/JNJ gate 전에는 history·financial publication을 재개하지 않는다.
 
+후속 JNJ attempt는 같은 보정 source에서도 전체 fiscal-series result와 graph가 살아 있는
+상태로 final native Parquet merge를 시작할 때 종료됐다. 격리된 exact merge 진단은 frozen
+3,065개 chunk·8,160개 row만 읽는 final merge를 2:29.66, peak RSS 1,312,128KiB로
+완료했고, chunk와 final file의 전체 ordered typed-value digest
+`cc163a3dded266b571dea918ad57174f1aa9694cdfa586df9987a170b3a7a466`와 schema가
+일치했다. 진단 보고서
+`work/universe50_quarterly_20261010/resumption_20261013/jnj_merge_diagnostic/report.json`
+SHA-256은 `65fc25d346c4eb2873c84ce69e0dd65f70df2b20c5e44ec1ef6290a0ee7e1813`다.
+이는 merge 식이나 데이터 양이 아니라 merge와 원본 result의 겹친 생명주기가 남은
+자원 경계임을 보이는 component evidence이며, 실패한 JNJ publication을 수락하지 않는다.
+
+승인된 storage-phase 보정은 columns·rows·cells를 기존 32-row/8MiB bounded encoder로
+먼저 임시 chunk에 stage하고, 각 write plan에는 count, JSON field, global schema와 경로만
+남긴다. 원본 fiscal-series result와 마지막 alias를 첫 final merge 전에 해제한 뒤 staged
+table을 순서대로 merge한다. public result 계약, row/schema/order/value/hash, candidate와
+모든 graph path, period·selection·mapping·회계 의미는 바꾸지 않는다. stage 또는 merge가
+실패하면 partial publication directory는 진단 가능한 상태로 남지만 complete manifest나
+published destination은 만들지 않는다. 이 보정도
+**IMPLEMENTED_AWAITING_INDEPENDENT_SOURCE_GATE**이며 독립 source/component/lifecycle gate
+전에는 JNJ나 다른 actual financial build를 재시도하지 않는다.
+
 ### 2026-10-13 RAW_ONLY 독립 진행 경계
 
 리드는 원래 first5-before-scale 순서 안에서 immutable Raw 수집만 독립적으로 진행하도록

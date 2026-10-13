@@ -6,13 +6,14 @@ SEC identity is supplied only through SEC_USER_AGENT at runtime.
 from __future__ import annotations
 
 import argparse
+import gc
 import hashlib
 import json
 import os
 import tempfile
 import uuid
 from collections import defaultdict
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -484,16 +485,37 @@ def build_history(*, intake_manifest: Path, output_root: Path,
                 relative = Path(cik) / view / period_class
                 table = {"ticker": ticker, "cik": cik, "view": view, "period_class": period_class,
                          "scope": result.scope, "files": {}}
-                for name in ("columns", "rows", "cells"):
-                    path = staging / relative / f"{name}.parquet"
-                    info = _write_records(path, getattr(result, name))
-                    table["files"][name] = {**info, "path": str(relative / path.name)}
+                counts = {
+                    name: len(getattr(result, name))
+                    for name in ("columns", "rows", "cells")
+                }
+                staged_files: dict[str, _StagedRecordWrite] = {}
+                try:
+                    for name in ("columns", "rows", "cells"):
+                        path = staging / relative / f"{name}.parquet"
+                        staged_files[name] = _stage_records(
+                            path, getattr(result, name)
+                        )
+                    # Each staged write plan owns only schema, counts, paths and
+                    # its TemporaryDirectory.  The source panels and selection
+                    # aliases were released above; now release the result before
+                    # any whole-table native merge.
+                    del result
+                    gc.collect()
+                    for name in ("columns", "rows", "cells"):
+                        staged = staged_files[name]
+                        info = _finalize_staged_records(staged)
+                        table["files"][name] = {
+                            **info,
+                            "path": str(relative / staged.path.name),
+                        }
+                finally:
+                    for staged in staged_files.values():
+                        staged.cleanup()
                 tables.append(table)
                 print(json.dumps({"stage": "PANEL_WRITTEN", "ticker": ticker, "view": view,
-                                  "period_class": period_class, "rows": len(result.rows), "cells": len(result.cells)}), flush=True)
-                # Only persisted file metadata and the small scope remain in
-                # tables.  Release this result before the next period build.
-                del result
+                                  "period_class": period_class, "rows": counts["rows"],
+                                  "cells": counts["cells"]}), flush=True)
     manifest = {"version": HISTORY_VERSION, "plan": plan, "views": views, "tables": tables,
                 "source_intake": str(intake_manifest.absolute()),
                 "operational_roots": {key: str(path.absolute()) for key, path in roots.items()},
@@ -586,58 +608,112 @@ def repair_history_coverage(*, publication: Path, destination: Path) -> Path:
     return destination
 
 
-def _write_records(path: Path, records: tuple[dict[str, Any], ...]) -> dict[str, Any]:
+@dataclass
+class _StagedRecordWrite:
+    """Small ownership plan for bounded chunks awaiting their final merge."""
+
+    path: Path
+    count: int
+    json_fields: tuple[str, ...]
+    schema: Any
+    chunk_paths: tuple[Path, ...]
+    workspace: Any | None
+
+    def cleanup(self) -> None:
+        if self.workspace is not None:
+            self.workspace.cleanup()
+            self.workspace = None
+
+
+def _stage_records(
+    path: Path, records: tuple[dict[str, Any], ...]
+) -> _StagedRecordWrite:
     import polars as pl
+
     path.parent.mkdir(parents=True, exist_ok=True)
     json_fields = sorted({key for row in records for key, value in row.items() if isinstance(value, (dict, list, tuple))})
     if not records:
-        pl.DataFrame().write_parquet(path)
-    else:
-        # json_fields is table-global: if a later row makes a field nested,
-        # earlier scalar values in that field must also be JSON encoded.  Infer
-        # bounded local schemas, resolve their global super-schema without
-        # retaining values, then encode each original batch directly against
-        # that global schema.  This prevents an early int/float or bool/int
-        # batch from losing its original representation before a late string
-        # promotes the complete column to String.
-        schemas = []
-        for start in range(0, len(records), _RECORD_WRITE_BATCH_SIZE):
-            batch = records[start : start + _RECORD_WRITE_BATCH_SIZE]
-            schemas.append(
-                pl.from_dicts(
-                    _schema_record_batch(batch, json_fields),
-                    infer_schema_length=None,
-                ).schema
+        return _StagedRecordWrite(path, 0, (), pl.Schema(), (), None)
+    # json_fields is table-global: if a later row makes a field nested,
+    # earlier scalar values in that field must also be JSON encoded.  Infer
+    # bounded local schemas, resolve their global super-schema without
+    # retaining values, then encode each original batch directly against
+    # that global schema.  This prevents an early int/float or bool/int
+    # batch from losing its original representation before a late string
+    # promotes the complete column to String.
+    schemas = []
+    for start in range(0, len(records), _RECORD_WRITE_BATCH_SIZE):
+        batch = records[start : start + _RECORD_WRITE_BATCH_SIZE]
+        schemas.append(
+            pl.from_dicts(
+                _schema_record_batch(batch, json_fields),
+                infer_schema_length=None,
+            ).schema
+        )
+    global_schema = pl.concat(
+        [pl.DataFrame(schema=schema).lazy() for schema in schemas],
+        how="diagonal_relaxed",
+    ).collect_schema()
+    workspace = tempfile.TemporaryDirectory(
+        prefix=f".{path.name}.chunks-", dir=path.parent
+    )
+    chunk_paths: list[Path] = []
+    try:
+        chunk_directory = Path(workspace.name)
+        for encoded_batch, _encoded_bytes in _iter_encoded_record_batches(
+            records, json_fields
+        ):
+            chunk_path = chunk_directory / f"{len(chunk_paths):08d}.parquet"
+            pl.from_dicts(
+                encoded_batch,
+                schema=global_schema,
+                infer_schema_length=None,
+            ).write_parquet(
+                chunk_path, row_group_size=_RECORD_WRITE_BATCH_SIZE
             )
-        global_schema = pl.concat(
-            [pl.DataFrame(schema=schema).lazy() for schema in schemas],
-            how="diagonal_relaxed",
-        ).collect_schema()
-        with tempfile.TemporaryDirectory(
-            prefix=f".{path.name}.chunks-", dir=path.parent
-        ) as chunk_directory:
-            chunk_paths = []
-            for encoded_batch, _encoded_bytes in _iter_encoded_record_batches(
-                records, json_fields
-            ):
-                chunk_path = Path(chunk_directory) / f"{len(chunk_paths):08d}.parquet"
-                pl.from_dicts(
-                    encoded_batch,
-                    schema=global_schema,
-                    infer_schema_length=None,
-                ).write_parquet(
-                    chunk_path, row_group_size=_RECORD_WRITE_BATCH_SIZE
-                )
-                chunk_paths.append(chunk_path)
+            chunk_paths.append(chunk_path)
+    except BaseException:
+        workspace.cleanup()
+        raise
+    return _StagedRecordWrite(
+        path,
+        len(records),
+        tuple(json_fields),
+        global_schema,
+        tuple(chunk_paths),
+        workspace,
+    )
+
+
+def _finalize_staged_records(staged: _StagedRecordWrite) -> dict[str, Any]:
+    import polars as pl
+
+    try:
+        if not staged.chunk_paths:
+            pl.DataFrame().write_parquet(staged.path)
+        else:
             pl.concat(
-                [pl.scan_parquet(chunk_path) for chunk_path in chunk_paths],
+                [pl.scan_parquet(chunk_path) for chunk_path in staged.chunk_paths],
                 how="vertical",
             ).sink_parquet(
-                path,
+                staged.path,
                 maintain_order=True,
                 row_group_size=_RECORD_WRITE_BATCH_SIZE,
             )
-    return {"count": len(records), "json_fields": json_fields, "sha256": _sha256_file(path)}
+        return {
+            "count": staged.count,
+            "json_fields": list(staged.json_fields),
+            "sha256": _sha256_file(staged.path),
+        }
+    finally:
+        staged.cleanup()
+
+
+def _write_records(path: Path, records: tuple[dict[str, Any], ...]) -> dict[str, Any]:
+    """Compatibility wrapper that stages, releases its input alias, then merges."""
+    staged = _stage_records(path, records)
+    del records
+    return _finalize_staged_records(staged)
 
 
 def _schema_record_batch(

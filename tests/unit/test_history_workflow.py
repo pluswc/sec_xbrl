@@ -622,6 +622,79 @@ def test_final_encoding_bounds_rows_and_bytes_with_single_row_exception(
     ]
 
 
+def test_staged_record_plans_release_results_before_first_native_merge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Result:
+        def __init__(self, period: int) -> None:
+            self.columns = ({"id": f"column-{period}"},)
+            self.rows = ({"id": f"row-{period}", "lineage": {"period": period}},)
+            self.cells = ({"id": f"cell-{period}", "paths": [["root", period]]},)
+
+    original_finalize = history._finalize_staged_records
+    references: list[weakref.ReferenceType[Result]] = []
+    finalized: list[Path] = []
+
+    def observed_finalize(staged):
+        gc.collect()
+        assert references and all(reference() is None for reference in references)
+        finalized.append(staged.path)
+        return original_finalize(staged)
+
+    monkeypatch.setattr(history, "_finalize_staged_records", observed_finalize)
+    for period in (1, 2):
+        result = Result(period)
+        references.append(weakref.ref(result))
+        plans = {
+            name: history._stage_records(
+                tmp_path / str(period) / f"{name}.parquet",
+                getattr(result, name),
+            )
+            for name in ("columns", "rows", "cells")
+        }
+        assert all(
+            plan.workspace is not None and Path(plan.workspace.name).is_dir()
+            for plan in plans.values()
+        )
+        assert all(not hasattr(plan, "records") for plan in plans.values())
+        del result
+        gc.collect()
+        assert all(reference() is None for reference in references)
+        try:
+            for name in ("columns", "rows", "cells"):
+                history._finalize_staged_records(plans[name])
+        finally:
+            for plan in plans.values():
+                plan.cleanup()
+
+    assert len(finalized) == 6
+
+
+def test_staged_finalize_failure_cleans_chunks_but_preserves_publication_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import polars as pl
+
+    publication_staging = tmp_path / ".panels.partial-test"
+    target = publication_staging / "rows.parquet"
+    plan = history._stage_records(target, ({"id": "row", "nested": {"x": 1}},))
+    chunk_directory = Path(plan.workspace.name)
+
+    class FailedMerge:
+        @staticmethod
+        def sink_parquet(*args, **kwargs):
+            raise pl.exceptions.ComputeError("synthetic final merge failure")
+
+    monkeypatch.setattr(pl, "concat", lambda *args, **kwargs: FailedMerge())
+    with pytest.raises(pl.exceptions.ComputeError, match="synthetic final merge failure"):
+        history._finalize_staged_records(plan)
+
+    assert publication_staging.is_dir()
+    assert not chunk_directory.exists()
+    assert plan.workspace is None
+    assert not (publication_staging / "history_manifest.json").exists()
+
+
 def test_cyclic_json_payload_keeps_legacy_failure_class_and_no_output(
     tmp_path: Path,
 ) -> None:
