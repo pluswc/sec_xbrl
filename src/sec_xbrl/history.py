@@ -991,13 +991,13 @@ class _RecoveryPins:
         except OSError as exc:
             raise ValueError("recovery pinned source path disappeared") from exc
 
-    def read(self, path: Path, expected_sha256: str, label: str) -> bytes:
+    def read(self, path: Path, expected_sha256: str | None, label: str) -> bytes:
         self.file(path)
         with os.fdopen(_open_recovery_path(path), "rb") as stream:
             if _recovery_stat_identity(os.fstat(stream.fileno())) != self.files[path.absolute()]:
                 raise ValueError("recovery source file exchanged before read")
             data = stream.read()
-            if hashlib.sha256(data).hexdigest() != expected_sha256:
+            if expected_sha256 is not None and hashlib.sha256(data).hexdigest() != expected_sha256:
                 raise ValueError(f"recovery {label} hash mismatch")
             if _recovery_stat_identity(os.fstat(stream.fileno())) != self.files[path.absolute()]:
                 raise ValueError("recovery source file changed during read")
@@ -1109,7 +1109,7 @@ class _RecoveryOutput:
             self.bindings[destination / path.relative_to(source)] = identity
         self.check()
 
-    def mark_pending(self, metadata: dict[str, Any]) -> None:
+    def mark_pending(self, metadata: dict[str, Any], attestation_bytes: bytes, report_bytes: bytes) -> None:
         self.transaction = {**metadata, "status": "NOT_READY", "token": uuid.uuid4().hex,
                             "output_root": str(self.root), "root_identity": list(self.identity)}
         data = (json.dumps(self.transaction, indent=2, sort_keys=True) + "\n").encode()
@@ -1117,6 +1117,10 @@ class _RecoveryOutput:
         relative = Path(_RECOVERY_CONTROL_PREFIX + self.marker_sha256) / "transaction.json"
         self.write(relative, data)
         self.marker_pins.file(self.root / relative)
+        for name, data in (("attestation.json", attestation_bytes), ("verification_report.json", report_bytes)):
+            artifact = relative.parent / name
+            self.write(artifact, data)
+            self.marker_pins.file(self.root / artifact)
         self.check()
 
     def commit(self, receipt: dict[str, Any]) -> None:
@@ -1124,6 +1128,9 @@ class _RecoveryOutput:
         temporary = Path(f".receipt.partial-{uuid.uuid4().hex}")
         data = (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode()
         self.write(temporary, data)
+        self.check()
+        _validate_recovery_gate(self.root, self.root / (_RECOVERY_CONTROL_PREFIX + self.marker_sha256),
+                                self.root / temporary)
         self.check()
         # Hard-link creation is atomic and refuses any existing final entry.
         # Retain the temporary receipt as diagnostic evidence too.
@@ -1193,40 +1200,175 @@ def _rename_history_directory(source: Path, destination: Path) -> None:
         output.rename(source, destination)
 
 
+def _recovery_json(data: bytes) -> dict[str, Any]:
+    """Reject ambiguous/non-standard trust JSON and parse the authenticated bytes."""
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate recovery JSON key")
+            result[key] = value
+        return result
+
+    def invalid(value):
+        raise ValueError(f"non-standard recovery JSON scalar: {value}")
+
+    result = json.loads(data, object_pairs_hook=unique, parse_constant=invalid)
+    if not isinstance(result, dict):
+        raise TypeError("recovery trust JSON must be an object")
+    return result
+
+
+def _validate_recovery_file_declaration(info: Any, expected_path: str) -> None:
+    if (not isinstance(info, dict) or set(info) != {"path", "count", "json_fields", "sha256"}
+        or type(info["path"]) is not str or info["path"] != expected_path
+        or type(info["count"]) is not int or info["count"] < 0
+        or type(info["sha256"]) is not str or len(info["sha256"]) != 64
+        or any(c not in "0123456789abcdef" for c in info["sha256"])
+        or type(info["json_fields"]) is not list
+        or any(type(k) is not str for k in info["json_fields"])
+        or len(set(info["json_fields"])) != len(info["json_fields"])):
+        raise ValueError("recovery consumer file declaration is invalid")
+
+
+def _validate_completed_recovery_consumer(reported, consumer, reported_root, consumer_root, source_hash):
+    """One producer/default-reader completion predicate, without eager records."""
+    import polars as pl
+
+    from sec_xbrl.analytics.history_quarters import PERIOD_RULE, QUARTER_RULE
+
+    if (reported.get("version") != HISTORY_VERSION or consumer.get("version") != HISTORY_VERSION
+        or reported.get("derived_quarter") is not None
+        or reported.get("quarterly_derivation_status") != "NOT_MATERIALIZED_REPORTED_SERIES_ONLY"
+        or any(consumer.get(key) != reported.get(key) for key in
+               ("plan", "views", "source_intake", "input_fingerprint", "operational_roots"))
+        or consumer.get("source_manifest_sha256") != source_hash
+        or consumer.get("supersedes_publication") != str(reported_root.absolute())
+        or consumer.get("quarterly_derivation_status") != "APPROVED_STANDARD_ADDITIVE_CORE_CONNECTED"
+        or consumer.get("period_rule") != PERIOD_RULE or consumer.get("derivation_rule") != QUARTER_RULE):
+        raise ValueError("recovery consumer provenance or completion differs")
+    changes = consumer.get("period_reclassification_counts")
+    if not isinstance(changes, dict) or any(type(v) is not int or v < 0 for v in changes.values()):
+        raise ValueError("recovery consumer classification evidence is invalid")
+    tables = consumer.get("tables")
+    if not isinstance(tables, list) or not tables:
+        raise ValueError("recovery consumer table inventory is incomplete")
+    identities = []
+    for table in tables:
+        identities.append((table["cik"], table["ticker"], table["view"], table["period_class"]))
+        if set(table["files"]) != {"columns", "rows", "cells"} or not isinstance(table["scope"], dict):
+            raise ValueError("recovery consumer table contract differs")
+        for name, info in table["files"].items():
+            _validate_recovery_file_declaration(info, str(Path(table["cik"]) / table["view"] / table["period_class"] / f"{name}.parquet"))
+    expected_pairs = {(t["cik"], t["ticker"], t["view"]) for t in reported["tables"]}
+    if len(set(identities)) != len(identities) or {i[:3] for i in identities} != expected_pairs:
+        raise ValueError("recovery consumer scope is incomplete or duplicated")
+    info = consumer.get("derived_quarter")
+    _validate_recovery_file_declaration(info, "derived_quarter.parquet")
+    path = _history_dataset_path(consumer_root, info)
+    frame = pl.scan_parquet(path, parallel="none", low_memory=True, rechunk=False)
+    schema = frame.collect_schema()
+    # Physical contract of the already-selected QUARTER_RULE producer. This
+    # validates persisted shape; it does not derive or reinterpret values.
+    derived_fields = (
+        "derived_metric_id", "derivation_rule_version", "formula", "fiscal_quarter", "value_numeric",
+        "context_start_date", "context_end_date", "period_class", "source_fact_ids", "source_filing_ids",
+        "source_accessions", "source_inputs", "source_type", "reported_or_derived", "semantic_review_state",
+        "policy_registry", "basis_compatibility", "cik", "ticker", "fiscal_year", "view",
+    )
+    if info["count"] == 0:
+        if len(schema) or info["json_fields"]:
+            raise ValueError("recovery empty derived-quarter schema differs")
+    elif (tuple(schema) != derived_fields
+          or info["json_fields"] != ["source_accessions", "source_fact_ids", "source_filing_ids", "source_inputs"]
+          or any(dtype not in ((pl.Int64, pl.Null) if field in {"fiscal_year", "fiscal_quarter"}
+                               else (pl.String, pl.Null)) for field, dtype in schema.items())):
+        raise ValueError("recovery governed derived-quarter physical schema differs")
+    if (frame.select(pl.len()).collect(engine="streaming").item() != info["count"]
+        or any(field not in schema or schema[field] not in (pl.String, pl.Null) for field in info["json_fields"])):
+        raise ValueError("recovery consumer derived-quarter schema/count differs")
+
+
+_RECOVERY_COMMON_FIELDS = frozenset({
+    "version", "attestation", "attestation_sha256", "generation_source_identity", "recovery_source_identity",
+    "source_stage", "source_manifest_sha256", "source_intake_sha256", "verification_report_sha256", "input_fingerprint",
+})
+
+
+def _validate_recovery_gate(parent, control, receipt_path):
+    pins = _RecoveryPins()
+    expected = control.name.removeprefix(_RECOVERY_CONTROL_PREFIX)
+    marker = _recovery_json(pins.read(control / "transaction.json", expected, "transaction marker"))
+    receipt = _recovery_json(pins.read(receipt_path, None, "completion receipt"))
+    if (set(marker) != _RECOVERY_COMMON_FIELDS | {"status", "token", "output_root", "root_identity"}
+        or set(receipt) != _RECOVERY_COMMON_FIELDS | {"status", "transaction_sha256", "transaction_token",
+            "reported_publication", "consumer_publication", "consumer_manifest_sha256"}
+        or any(type(marker[k]) is not str or not marker[k] or type(receipt[k]) is not str
+               or receipt[k] != marker[k] for k in _RECOVERY_COMMON_FIELDS)
+        or marker["version"] != "reported-stage-recovery-v1"
+        or marker["status"] != "NOT_READY" or receipt["status"] != "COMPLETE"):
+        raise ValueError("recovery receipt/transaction exact contract differs")
+    for key, length in (("attestation_sha256", 64), ("source_manifest_sha256", 64),
+                        ("source_intake_sha256", 64), ("verification_report_sha256", 64),
+                        ("generation_source_identity", 40), ("recovery_source_identity", 40)):
+        if len(marker[key]) != length or any(c not in "0123456789abcdef" for c in marker[key]):
+            raise ValueError("invalid recovery identity scalar")
+    if (type(marker["token"]) is not str or len(marker["token"]) != 32
+        or any(c not in "0123456789abcdef" for c in marker["token"])
+        or type(marker["root_identity"]) is not list or len(marker["root_identity"]) != 2
+        or any(type(v) is not int or v < 0 for v in marker["root_identity"])
+        or any(type(marker[k]) is not str or not Path(marker[k]).is_absolute() or ".." in Path(marker[k]).parts
+               for k in ("attestation", "source_stage", "output_root"))):
+        raise ValueError("invalid recovery token/root/locator scalar")
+    current = parent.stat()
+    if (marker["output_root"] != str(parent) or marker["root_identity"] != [current.st_dev, current.st_ino]
+        or receipt["transaction_sha256"] != expected or receipt["transaction_token"] != marker["token"]
+        or receipt["reported_publication"] != str(parent / "reported-panels")
+        or receipt["consumer_publication"] != str(parent / "panels")
+        or type(receipt["consumer_manifest_sha256"]) is not str or len(receipt["consumer_manifest_sha256"]) != 64
+        or any(c not in "0123456789abcdef" for c in receipt["consumer_manifest_sha256"])):
+        raise ValueError("recovery receipt identity/publication mismatch")
+    proof = _recovery_json(pins.read(control / "attestation.json", marker["attestation_sha256"], "attestation"))
+    report = _recovery_json(pins.read(control / "verification_report.json", marker["verification_report_sha256"], "full report"))
+    _validate_recovery_report(proof, report)
+    if (proof.get("version") != marker["version"] or proof.get("status") != "PASS"
+        or any(proof.get(k) != marker[k] for k in ("generation_source_identity", "recovery_source_identity", "input_fingerprint"))
+        or proof.get("staged_manifest_sha256") != marker["source_manifest_sha256"]
+        or proof.get("intake_sha256") != marker["source_intake_sha256"]
+        or proof["verification_report"]["sha256"] != marker["verification_report_sha256"]
+        or report["stage_manifest"].get("path", str(Path(marker["source_stage"]) / "history_manifest.json"))
+           != str(Path(marker["source_stage"]) / "history_manifest.json")):
+        raise ValueError("recovery gate full-report source binding differs")
+    reported = _recovery_json(pins.read(parent / "reported-panels" / "history_manifest.json", receipt["source_manifest_sha256"], "reported manifest"))
+    consumer = _recovery_json(pins.read(parent / "panels" / "history_manifest.json", receipt["consumer_manifest_sha256"], "consumer manifest"))
+    expected_tables = [{**table, "files": {name: {k: v for k, v in info.items() if k != "schema"}
+                       for name, info in table["files"].items()}} for table in proof["tables"]]
+    if (reported["tables"] != expected_tables
+        or any(reported.get(k) != proof[k] for k in ("plan", "views", "input_fingerprint"))
+        or reported["source_intake"] != report["source_intake"].get("path", reported["source_intake"])):
+        raise ValueError("recovery gate reported execution scope differs")
+    _validate_completed_recovery_consumer(reported, consumer, parent / "reported-panels", parent / "panels", receipt["source_manifest_sha256"])
+    pins.check()
+
+
 def _check_recovery_access(root: Path, capability: Any = None) -> None:
     """A staging flag never overrides a recovery transaction's readiness gate."""
     root = Path(root).absolute()
+    _reject_symlink_components(root)
     for parent in (root, *root.parents):
         if not parent.is_dir():
             continue
         controls = list(parent.glob(_RECOVERY_CONTROL_PREFIX + "*"))
         receipt_path = parent / "reported_recovery_receipt.json"
-        if not controls and not receipt_path.exists():
+        if not controls and not os.path.lexists(receipt_path) and not list(parent.glob(".receipt.partial-*")):
             continue
         if capability is not None and capability is _RECOVERY_OUTPUT.get() and parent == capability.root:
             _check_history_storage(root)
             return
         try:
-            if len(controls) != 1 or controls[0].is_symlink():
+            if len(controls) != 1 or controls[0].is_symlink() or not controls[0].is_dir():
                 raise ValueError("missing/ambiguous recovery transaction marker")
-            expected = controls[0].name.removeprefix(_RECOVERY_CONTROL_PREFIX)
-            marker = json.loads(_RecoveryPins().read(controls[0] / "transaction.json", expected, "transaction marker"))
-            with os.fdopen(_open_recovery_path(receipt_path), "rb") as stream:
-                receipt = json.loads(stream.read())
-            current = parent.stat()
-            if (marker["status"] != "NOT_READY" or receipt["status"] != "COMPLETE"
-                or marker["output_root"] != str(parent)
-                or marker["root_identity"] != [current.st_dev, current.st_ino]
-                or receipt["transaction_sha256"] != expected
-                or receipt["transaction_token"] != marker["token"]
-                or any(receipt[key] != marker[key] for key in (
-                    "attestation_sha256", "generation_source_identity", "recovery_source_identity",
-                    "source_manifest_sha256", "source_intake_sha256", "verification_report_sha256", "input_fingerprint"))):
-                raise ValueError("recovery receipt identity mismatch")
-            for name, key in (("reported-panels", "source_manifest_sha256"), ("panels", "consumer_manifest_sha256")):
-                _RecoveryPins().read(parent / name / "history_manifest.json", receipt[key], "committed manifest")
-            if receipt["reported_publication"] != str(parent / "reported-panels") or receipt["consumer_publication"] != str(parent / "panels"):
-                raise ValueError("recovery receipt publication mismatch")
+            _validate_recovery_gate(parent, controls[0], receipt_path)
         except (OSError, ValueError, KeyError, TypeError) as exc:
             raise ValueError("recovery transaction is NOT_READY or its completion gate is invalid") from exc
 
@@ -1400,7 +1542,8 @@ def recover_reported_history(
            for root in (staged_publication, operational_root)):
         raise ValueError("recovery output cannot modify an immutable source root")
     pins = _RecoveryPins()
-    proof = json.loads(pins.read(attestation, expected_attestation_sha256, "attestation"))
+    attestation_bytes = pins.read(attestation, expected_attestation_sha256, "attestation")
+    proof = _recovery_json(attestation_bytes)
     if proof.get("version") != "reported-stage-recovery-v1" or proof.get("status") != "PASS":
         raise ValueError("recovery requires an independent complete-stage PASS")
     # These identities identify two separate executions. Neither rewrites the
@@ -1413,7 +1556,7 @@ def recover_reported_history(
     for key in ("verification_report", "source_execution_log"):
         evidence = proof[key]
         evidence_bytes[key] = pins.read(Path(evidence["path"]), evidence["sha256"], "independent evidence")
-    _validate_recovery_report(proof, json.loads(evidence_bytes["verification_report"]))
+    _validate_recovery_report(proof, _recovery_json(evidence_bytes["verification_report"]))
     manifest_path = staged_publication / "history_manifest.json"
     manifest_bytes = pins.read(manifest_path, proof["staged_manifest_sha256"], "staged manifest")
     intake = json.loads(pins.read(intake_manifest, proof["intake_sha256"], "source intake"))
@@ -1499,7 +1642,7 @@ def recover_reported_history(
     token = _HISTORY_STORAGE_GUARD.set(guard)
     access_token = _RECOVERY_OUTPUT.set(output)
     try:
-        output.mark_pending(receipt)
+        output.mark_pending(receipt, attestation_bytes, evidence_bytes["verification_report"])
         output.check()
         stage_name = f".panels.partial-{uuid.uuid4().hex}"
         os.mkdir(stage_name, mode=0o700, dir_fd=output.fd)
@@ -1541,13 +1684,8 @@ def recover_reported_history(
         consumer_pins.tree(result)
         consumer = HistoryPublicationReader(result, _recovery_access=output)
         consumer.verify_all()
-        if (any(consumer.manifest.get(key) != manifest.get(key) for key in
-                ("plan", "views", "source_intake", "input_fingerprint", "operational_roots"))
-            or consumer.manifest.get("source_manifest_sha256") != proof["staged_manifest_sha256"]
-            or consumer.manifest.get("supersedes_publication") != str(reported.absolute())
-            or consumer.manifest.get("quarterly_derivation_status") != "APPROVED_STANDARD_ADDITIVE_CORE_CONNECTED"
-            or not consumer.manifest.get("derived_quarter")):
-            raise ValueError("recovery consumer provenance or completion differs")
+        _validate_completed_recovery_consumer(manifest, consumer.manifest, reported, result,
+                                              proof["staged_manifest_sha256"])
         consumer_pins.check()
         guard()
         receipt.update(status="COMPLETE", transaction_sha256=output.marker_sha256,

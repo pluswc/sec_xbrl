@@ -906,3 +906,216 @@ def test_recovery_atomic_directory_publication_never_replaces_empty_concurrent_d
     assert destination.stat().st_ino == foreign_inode[0]
     assert list(destination.iterdir()) == []
     assert not (kwargs["output_root"] / "reported_recovery_receipt.json").exists()
+
+
+
+def _assert_default_recovery_denied(result):
+    for factory in (history.HistoryPublicationReader, history.open_history_publication):
+        with pytest.raises(ValueError, match="NOT_READY|symlink"):
+            factory(result).verify_all()
+
+
+def test_default_gate_rejects_reported_only_copy_with_structurally_bound_fake_receipt(tmp_path, monkeypatch):
+    kwargs, _ = _recovery_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(quarters, "publish_quarter_history", lambda **_: (_ for _ in ()).throw(ValueError("stop before quarter")))
+    with pytest.raises(ValueError, match="stop before quarter"):
+        history.recover_reported_history(**kwargs)
+    root = kwargs["output_root"]
+    result = root / "panels"
+    shutil.copytree(root / "reported-panels", result)
+    control = next(root.glob(".history-recovery-*"))
+    marker = json.loads((control / "transaction.json").read_text())
+    receipt = {k: v for k, v in marker.items() if k not in {"output_root", "root_identity", "token"}}
+    receipt.update(status="COMPLETE", transaction_sha256=control.name.removeprefix(".history-recovery-"),
+                   transaction_token=marker["token"], reported_publication=str(root / "reported-panels"),
+                   consumer_publication=str(result), consumer_manifest_sha256=history._sha256_file(result / "history_manifest.json"))
+    (root / "reported_recovery_receipt.json").write_text(json.dumps(receipt))
+    _assert_default_recovery_denied(result)
+
+
+@pytest.mark.parametrize("identifier", ["receipt_symlink", "receipt_directory", "control_symlink", "control_file", "temporary_symlink", "temporary_directory"])
+def test_default_gate_never_treats_stale_identifiers_as_legacy(tmp_path, monkeypatch, identifier):
+    kwargs, _ = _recovery_fixture(tmp_path, monkeypatch)
+    result = history.recover_reported_history(**kwargs)
+    root = kwargs["output_root"]
+    next(root.glob(".history-recovery-*")).rename(tmp_path / "saved-control")
+    (root / "reported_recovery_receipt.json").unlink()
+    for temporary in root.glob(".receipt.partial-*"):
+        temporary.unlink()
+    names = {"receipt": "reported_recovery_receipt.json", "control": ".history-recovery-stale", "temporary": ".receipt.partial-stale"}
+    kind, entry = identifier.split("_")
+    path = root / names[kind]
+    if entry == "symlink":
+        path.symlink_to(tmp_path / "does-not-exist")
+    elif entry == "directory":
+        path.mkdir()
+    else:
+        path.write_text("stale identifier")
+    _assert_default_recovery_denied(result)
+
+
+@pytest.mark.parametrize("field", ["version", "attestation", "source_stage", "verification_report_sha256", "generation_source_identity", "recovery_source_identity", "input_fingerprint", "reported_publication", "consumer_publication", "missing", "extra", "duplicate"])
+def test_default_gate_rejects_receipt_contract_tamper(tmp_path, monkeypatch, field):
+    kwargs, _ = _recovery_fixture(tmp_path, monkeypatch)
+    result = history.recover_reported_history(**kwargs)
+    path = result.parent / "reported_recovery_receipt.json"
+    receipt = json.loads(path.read_text())
+    if field == "missing":
+        del receipt["attestation"]
+    elif field == "extra":
+        receipt["undeclared"] = True
+    elif field == "duplicate":
+        path.write_text('{"status":"COMPLETE",' + json.dumps(receipt)[1:])
+    else:
+        receipt[field] = "INVALID"
+    if field != "duplicate":
+        path.write_text(json.dumps(receipt))
+    _assert_default_recovery_denied(result)
+
+
+@pytest.mark.parametrize("scalar", [None, True, 1, 1.0, [], {}, float("nan")])
+def test_default_gate_rejects_receipt_hash_non_string_scalars(tmp_path, monkeypatch, scalar):
+    kwargs, _ = _recovery_fixture(tmp_path, monkeypatch)
+    result = history.recover_reported_history(**kwargs)
+    path = result.parent / "reported_recovery_receipt.json"
+    receipt = json.loads(path.read_text())
+    receipt["consumer_manifest_sha256"] = scalar
+    path.write_text(json.dumps(receipt))
+    _assert_default_recovery_denied(result)
+
+
+@pytest.mark.parametrize("fault", ["derived_absent", "derived_file_missing", "derived_count_bool", "derived_count_wrong", "derived_json_schema", "period_rule", "derivation_rule", "supersedes_publication", "source_manifest_sha256", "operational_roots", "tables", "period_reclassification_counts", "file_count_bool", "file_hash_scalar", "file_path", "file_json_fields"])
+def test_default_gate_validates_completed_consumer_after_manifest_hash_rebinding(tmp_path, monkeypatch, fault):
+    kwargs, _ = _recovery_fixture(tmp_path, monkeypatch)
+    result = history.recover_reported_history(**kwargs)
+    path = result / "history_manifest.json"
+    manifest = json.loads(path.read_text())
+    # A valid empty governed derived file is a success control, not absence.
+    assert manifest["derived_quarter"]["count"] == 0
+    history.HistoryPublicationReader(result).verify_all()
+    if fault == "derived_absent":
+        del manifest["derived_quarter"]
+    elif fault == "derived_file_missing":
+        (result / "derived_quarter.parquet").unlink()
+    elif fault == "derived_count_bool":
+        manifest["derived_quarter"]["count"] = False
+    elif fault == "derived_count_wrong":
+        manifest["derived_quarter"]["count"] = 1
+    elif fault == "derived_json_schema":
+        manifest["derived_quarter"]["json_fields"] = ["nonexistent"]
+    elif fault == "operational_roots":
+        manifest[fault] = {}
+    elif fault == "tables":
+        manifest[fault] = []
+    elif fault == "period_reclassification_counts":
+        manifest[fault] = {"changed": True}
+    elif fault.startswith("file_"):
+        info = manifest["tables"][0]["files"]["cells"]
+        key, value = {"file_count_bool": ("count", True), "file_hash_scalar": ("sha256", 1),
+                      "file_path": ("path", "../foreign.parquet"), "file_json_fields": ("json_fields", {})}[fault]
+        info[key] = value
+    else:
+        manifest[fault] = "wrong"
+    path.write_text(json.dumps(manifest))
+    receipt_path = result.parent / "reported_recovery_receipt.json"
+    receipt = json.loads(receipt_path.read_text())
+    receipt["consumer_manifest_sha256"] = history._sha256_file(path)
+    receipt_path.write_text(json.dumps(receipt))
+    _assert_default_recovery_denied(result)
+
+
+@pytest.mark.parametrize("artifact", ["attestation.json", "verification_report.json"])
+@pytest.mark.parametrize("fault", ["missing", "changed", "dangling", "directory"])
+def test_default_gate_requires_retained_authenticated_full_proof(tmp_path, monkeypatch, artifact, fault):
+    kwargs, _ = _recovery_fixture(tmp_path, monkeypatch)
+    result = history.recover_reported_history(**kwargs)
+    control = next(result.parent.glob(".history-recovery-*"))
+    path = control / artifact
+    if fault == "changed":
+        path.write_bytes(path.read_bytes() + b" ")
+    else:
+        path.unlink()
+        if fault == "dangling":
+            path.symlink_to(tmp_path / "missing")
+        elif fault == "directory":
+            path.mkdir()
+    _assert_default_recovery_denied(result)
+
+
+def test_default_gate_accepts_retained_full_proof_without_external_locator_reads(tmp_path, monkeypatch):
+    kwargs, proof = _recovery_fixture(tmp_path, monkeypatch)
+    result = history.recover_reported_history(**kwargs)
+    for path in (kwargs["attestation"], Path(proof["verification_report"]["path"])):
+        path.rename(path.with_suffix(".retained-original"))
+    reader = history.HistoryPublicationReader(result)
+    reader.verify_all()
+    assert reader.load(ticker="EXAMPLE", view="AS_FILED").cells
+
+
+def test_default_gate_rejects_float_root_identity_even_when_numerically_equal(tmp_path, monkeypatch):
+    kwargs, _ = _recovery_fixture(tmp_path, monkeypatch)
+    result = history.recover_reported_history(**kwargs)
+    control = next(result.parent.glob(".history-recovery-*"))
+    marker_path = control / "transaction.json"
+    marker = json.loads(marker_path.read_text())
+    marker["root_identity"] = [float(v) for v in marker["root_identity"]]
+    marker_path.write_text(json.dumps(marker))
+    digest = history._sha256_file(marker_path)
+    control.rename(control.with_name(".history-recovery-" + digest))
+    path = result.parent / "reported_recovery_receipt.json"
+    receipt = json.loads(path.read_text())
+    receipt["transaction_sha256"] = digest
+    path.write_text(json.dumps(receipt))
+    _assert_default_recovery_denied(result)
+
+
+@pytest.mark.parametrize("fault", ["byte_only", "wrong_generation", "wrong_stage", "wrong_fingerprint"])
+def test_default_gate_rechecks_full_report_after_all_local_hashes_are_rebound(tmp_path, monkeypatch, fault):
+    kwargs, _ = _recovery_fixture(tmp_path, monkeypatch)
+    result = history.recover_reported_history(**kwargs)
+    control = next(result.parent.glob(".history-recovery-*"))
+    report_path = control / "verification_report.json"
+    report = json.loads(report_path.read_text())
+    if fault == "byte_only":
+        report["verification_level"] = "METADATA_ONLY"
+    elif fault == "wrong_generation":
+        report["source_generation_sha"] = "f" * 40
+    elif fault == "wrong_stage":
+        report["stage_manifest"]["path"] = str(tmp_path / "wrong-stage" / "history_manifest.json")
+    else:
+        report["input_fingerprint"] = "wrong fingerprint"
+    report_path.write_text(json.dumps(report))
+    report_hash = history._sha256_file(report_path)
+    proof_path = control / "attestation.json"
+    proof = json.loads(proof_path.read_text())
+    proof["verification_report"]["sha256"] = report_hash
+    proof_path.write_text(json.dumps(proof))
+    marker_path = control / "transaction.json"
+    marker = json.loads(marker_path.read_text())
+    marker.update(verification_report_sha256=report_hash, attestation_sha256=history._sha256_file(proof_path))
+    marker_path.write_text(json.dumps(marker))
+    marker_hash = history._sha256_file(marker_path)
+    control.rename(control.with_name(".history-recovery-" + marker_hash))
+    receipt_path = result.parent / "reported_recovery_receipt.json"
+    receipt = json.loads(receipt_path.read_text())
+    receipt.update(transaction_sha256=marker_hash, verification_report_sha256=report_hash,
+                   attestation_sha256=marker["attestation_sha256"])
+    receipt_path.write_text(json.dumps(receipt))
+    _assert_default_recovery_denied(result)
+
+
+@pytest.mark.parametrize("count", [0, 1])
+def test_default_gate_rejects_non_governed_derived_schema_even_with_rebound_hashes(tmp_path, monkeypatch, count):
+    kwargs, _ = _recovery_fixture(tmp_path, monkeypatch)
+    result = history.recover_reported_history(**kwargs)
+    data_path = result / "derived_quarter.parquet"
+    pl.DataFrame({"arbitrary": list(range(count))}, schema={"arbitrary": pl.Int64}).write_parquet(data_path)
+    manifest_path = result / "history_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["derived_quarter"].update(count=count, sha256=history._sha256_file(data_path))
+    manifest_path.write_text(json.dumps(manifest))
+    receipt_path = result.parent / "reported_recovery_receipt.json"
+    receipt = json.loads(receipt_path.read_text())
+    receipt["consumer_manifest_sha256"] = history._sha256_file(manifest_path)
+    receipt_path.write_text(json.dumps(receipt))
+    _assert_default_recovery_denied(result)

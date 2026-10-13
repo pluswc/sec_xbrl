@@ -319,3 +319,33 @@ RLIMIT_AS 2 GiB, 300초 timeout, Polars 2 threads, BLAS/OMP/MKL/NUMEXPR 1,
 Python socket deny guard를 사용했다. sampled RSS를 hard RSS/cgroup 한도로
 주장하지 않는다. 실제 JNJ decode/recovery나 광범위 suite 재실행은 없었다.
 새 후보의 source 동결·독립 재검증·lead 승인 상태는 별도다.
+
+### 2026-10-13 source 721 FAIL 이후 default gate 수리
+
+`7218940…` 독립 source 결과는 **FAIL**이며 보고서 SHA는
+`9ad160be37b8c5d07aec2301625c570540ce39a095dfd2e16b08dbbaf0224a33`다.
+기존 193 unit/cached/oracle 통과는 이 FAIL을 대체하지 않는다. 삭제 관련 P1은
+해결됐지만 reported-only fake COMPLETE, dangling receipt의 legacy fallback,
+receipt version/locator 미검증이 남았다. lead 승인 범위에서 producer/default
+reader의 완료 predicate를 공유하고 immutable receipt 전체필드·retained full
+proof·lexists identifier를 검증한다. 기존 reported·Raw·회계·quarter math·
+원래 attestation/report bytes와 모든 이전 FAIL 증거는 변경하지 않는다.
+실제 recovery는 실행하지 않았고 새 동결 source의 별도 독립 PASS가 필요하다.
+
+후속 default-gate 후보의 최종 writer 검증은 **251 unit PASS / 15.59초**다.
+기존 193개에 58개 controls를 추가했다. reported-only fake COMPLETE, dangling
+receipt/control/temporary identifiers, immutable receipt key/type/locator 변경,
+consumer manifest hash를 다시 맞춘 뒤의 잘못된 parent/rule/derived schema,
+full report의 모든 local hash를 다시 맞춘 잘못된 PASS/source 증거를 거부했다.
+정상 zero-row derived consumer와 외부 proof 경로를 재개방하지 않는 retained
+proof reader는 성공 대조로 확인했다.
+
+기존 offline NVDA 2공시 cached fresh/recovered 비교는 **1 PASS / 15.95초**,
+guard 전체 16.11초, sampled process-group RSS peak **375,824,384 bytes**다.
+이전 `a36ea059…` eager/quarter oracle은 **8 tables / 25 files / 4,686 panel
+records / 42 derived records PASS**, 4.39초, peak **232,529,920 bytes**다.
+Ruff와 diff check PASS. 동일 10 ms sampled RSS 2 GiB threshold·별도 hard
+per-process RLIMIT_AS 2 GiB·300초 timeout·Polars 2 threads·BLAS/OMP/MKL/
+NUMEXPR 1·Python socket deny guard 아래 수행했다. RSS sampling을 hard
+RSS/cgroup 제한으로 주장하지 않는다. 실제 데이터 재검증/복구나 broad suite
+재실행은 없었고 새 source의 독립 검증과 lead GO가 남아 있다.

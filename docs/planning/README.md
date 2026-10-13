@@ -155,3 +155,8 @@ FAIL로 보존한다. lead는 trusted exclusive parent·NOT_READY reader gate와
 artifact 보존을 승인했다. 재귀 rollback 삭제는 제거하며, 초기 빈 same-UID 교체를
 portable mkdir/open으로 방어한다고 주장하지 않는다. 상세 계약은
 [retention 결정](../implementation/company-history-workflow.md#2026-10-13-retention-and-not_ready-decision-after-source-b0aa-fail)에 있다.
+
+source `7218940…`도 default COMPLETE gate의 독립 검증에서 FAIL했다.
+보고서와 데이터는 보존하고, reported-only 위장 거부·dangling identifier 판별·
+immutable receipt 전체 binding을 수리한다. 규범 계약은
+[complete-reader gate 수리](../implementation/company-history-workflow.md#2026-10-13-complete-reader-gate-repair-after-source-721-fail)에 있으며 새 독립 PASS 전 actual recovery는 미승인이다.
