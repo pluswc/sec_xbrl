@@ -36,6 +36,7 @@ from sec_xbrl.longitudinal.corpus_release import _load_declared_cohort_snapshot
 from sec_xbrl.longitudinal.materialization import Layer2RuleVersions
 
 HISTORY_VERSION = "company-history-v1"
+_RECORD_WRITE_BATCH_SIZE = 256
 
 
 def _history_layer2_rule_versions() -> Layer2RuleVersions:
@@ -290,6 +291,16 @@ def _company_ledgers(ledger_publication: Any, ciks: tuple[str, ...]) -> dict[str
     return {cik: reader.get_company(ledger_publication, cik=cik) for cik in ciks}
 
 
+def _build_fiscal_time_series(
+    builder: Any, inputs: list[Any], expected_periods: list[Any]
+) -> Any:
+    """Build an independent result, then release the source panels immediately."""
+    try:
+        return builder.build(inputs=inputs, expected_periods=expected_periods)
+    finally:
+        inputs.clear()
+
+
 def _validate_intake(intake: dict[str, Any]) -> None:
     expected = {(company["cik"], row["accession"]) for company in intake["plan"]["companies"] for row in company["filings"]}
     actual = [(row["filing"]["cik"], row["filing"]["accession"]) for row in intake["filings"]]
@@ -439,7 +450,13 @@ def build_history(*, intake_manifest: Path, output_root: Path,
                 expected = []
                 if period_class == "QTD_3M":
                     expected = _expected_quarters(coverage_keys)
-                result = FiscalTimeSeriesBuilder().build(inputs=inputs, expected_periods=expected)
+                result = _build_fiscal_time_series(
+                    FiscalTimeSeriesBuilder(), inputs, expected
+                )
+                # The result owns deep copies of every persisted definition,
+                # binding, value and candidate path.  Do not retain the source
+                # panels or the last selection aliases during serialization.
+                del inputs, selected, panel
                 annual_years = {key[1] for key in coverage_keys if key[3] == "FY"}
                 result = replace(result, columns=tuple(
                     {**column, "column_status": "UNAVAILABLE", "column_reason": "DERIVATION_NOT_MATERIALIZED",
@@ -554,10 +571,35 @@ def _write_records(path: Path, records: tuple[dict[str, Any], ...]) -> dict[str,
     import polars as pl
     path.parent.mkdir(parents=True, exist_ok=True)
     json_fields = sorted({key for row in records for key, value in row.items() if isinstance(value, (dict, list, tuple))})
-    encoded = [{key: json.dumps(value, sort_keys=True, default=str) if key in json_fields and value is not None else value
-                for key, value in row.items()} for row in records]
-    frame = pl.from_dicts(encoded, infer_schema_length=None) if encoded else pl.DataFrame()
-    frame.write_parquet(path)
+    if not records:
+        pl.DataFrame().write_parquet(path)
+    else:
+        # json_fields is table-global: if a later row makes a field nested,
+        # earlier scalar values in that field must also be JSON encoded.  Write
+        # bounded encoded chunks, then let Polars reconcile their full schemas
+        # and stream them in original order into the one public Parquet file.
+        with tempfile.TemporaryDirectory(
+            prefix=f".{path.name}.chunks-", dir=path.parent
+        ) as chunk_directory:
+            chunk_paths = []
+            for start in range(0, len(records), _RECORD_WRITE_BATCH_SIZE):
+                batch = records[start : start + _RECORD_WRITE_BATCH_SIZE]
+                encoded = [
+                    {
+                        key: json.dumps(value, sort_keys=True, default=str)
+                        if key in json_fields and value is not None
+                        else value
+                        for key, value in row.items()
+                    }
+                    for row in batch
+                ]
+                chunk_path = Path(chunk_directory) / f"{len(chunk_paths):08d}.parquet"
+                pl.from_dicts(encoded, infer_schema_length=None).write_parquet(chunk_path)
+                chunk_paths.append(chunk_path)
+            pl.concat(
+                [pl.scan_parquet(chunk_path) for chunk_path in chunk_paths],
+                how="diagonal_relaxed",
+            ).sink_parquet(path, maintain_order=True)
     return {"count": len(records), "json_fields": json_fields, "sha256": _sha256_file(path)}
 
 

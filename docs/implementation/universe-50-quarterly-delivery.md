@@ -244,6 +244,32 @@ Fact pointer map을 재사용한다. 공개 `records()` 계약과 traverse/root 
 typed primary PRE evidence는 그대로 유지한다. 이 보정은 **IMPLEMENTED_AWAITING_INDEPENDENT_SOURCE_GATE**이며,
 독립 source PASS와 새 전체 CAT golden 전에는 JNJ를 다시 실행하지 않는다.
 
+### 2026-10-13 reported-history 직렬화 보정
+
+2026-10-12 실행에서 `1d3a068feb74b43145df3abcb506b1285cdf6353`의 CAT 전체
+reported+quarter publication은 accepted baseline과 ordered logical record가 일치해 실제
+PASS했다. 같은 frozen source의 JNJ 22-filing 실행은 `AS_FILED/QTD_3M`의 columns 22개와
+rows 7,287개를 쓴 뒤 cells 파일을 만들기 전에 signal 9, peak RSS 31,807,836KiB로
+실패했다. 진단은
+`work/universe50_quarterly_20261010/resumption_20261012/jnj_memory_diagnosis.json`과
+같은 디렉터리의 `checkpoint.json`에 보존한다. JNJ Raw 22/22는 complete지만 history,
+annual, quarter publication은 완료되지 않았고 first5·50사 financial readiness도 수락되지
+않았다.
+
+사용자는 2026-10-13 이 실패에 필요한 exact-equivalent 기술 보정을 승인했다. 승인 범위는
+`FiscalTimeSeriesBuilder`가 독립 결과를 만든 직후 source panel input과 마지막
+selection/panel alias를 해제하고, `_write_records`의 전체 encoded list와 전체 Polars frame을
+bounded ordered encoder·Parquet sink로 바꾸는 것이다. JSON field 집합은 전체 table에서
+먼저 확정하고, late column과 scalar/list/dict/null/bool/Decimal 혼합을 포함해 기존
+full-materialization과 같은 global schema, row 순서, decoded 값, candidate와 모든 graph path를
+보존한다. 선택, 기간, mapping, traversal, candidate, 회계·재무 규칙은 바꾸지 않는다.
+
+이 구현은 **IMPLEMENTED_AWAITING_INDEPENDENT_SOURCE_GATE**다. mixed-schema legacy oracle,
+focused unit/integration와 Ruff를 구현자가 통과시킨 frozen SHA를 별도 읽기 전용 검증자가
+확인하고, 그 뒤 새 CAT 전체 golden을 통과하기 전에는 JNJ를 재실행하지 않는다. JNJ가
+통과해도 first5 actual financial gate와 CVX, 나머지 50사 및 actual quarter gate는 각각
+별도 상태로 남는다.
+
 ## 2. 불변 입력과 새 run 경계
 
 재실행 가능한 새 run identity는 `universe-50-quarterly-20261010`으로 제안한다.

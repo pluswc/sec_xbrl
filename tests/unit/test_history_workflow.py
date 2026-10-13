@@ -5,6 +5,7 @@ import json
 import weakref
 from dataclasses import replace
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
 
@@ -414,6 +415,146 @@ def test_parquet_publication_reload_retains_nested_lineage_and_detects_corruptio
     (tmp_path / "rows.parquet").write_bytes(b"invalid")
     with pytest.raises(ValueError, match="integrity"):
         reader.load(ticker="TEST")
+
+
+def test_bounded_record_writer_matches_legacy_global_schema_and_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import polars as pl
+
+    records = tuple(
+        {
+            "id": index,
+            "all_null": None,
+            "bool_value": index % 2 == 0,
+            "decimal_value": Decimal("1.20") if index == 0 else index,
+            **({"json_mixed": "null"} if index == 0 else {}),
+            **({"missing_early": "present"} if index == 1 else {}),
+            **(
+                {
+                    "json_mixed": {
+                        "candidate_lineage": [
+                            {
+                                "fact": "late",
+                                "paths": [["root", "child"], ["root", "other"]],
+                            }
+                        ]
+                    },
+                    "late_column": 2**100,
+                }
+                if index == history._RECORD_WRITE_BATCH_SIZE
+                else {}
+            ),
+            **(
+                {"json_mixed": [True, None, Decimal("3.40")]}
+                if index == history._RECORD_WRITE_BATCH_SIZE + 1
+                else {}
+            ),
+        }
+        for index in range(history._RECORD_WRITE_BATCH_SIZE + 2)
+    )
+    legacy_path = tmp_path / "legacy.parquet"
+    legacy_json_fields = sorted(
+        {
+            key
+            for row in records
+            for key, value in row.items()
+            if isinstance(value, (dict, list, tuple))
+        }
+    )
+    legacy_encoded = [
+        {
+            key: json.dumps(value, sort_keys=True, default=str)
+            if key in legacy_json_fields and value is not None
+            else value
+            for key, value in row.items()
+        }
+        for row in records
+    ]
+    pl.from_dicts(legacy_encoded, infer_schema_length=None).write_parquet(legacy_path)
+
+    original_from_dicts = pl.from_dicts
+    observed_batch_sizes: list[int] = []
+
+    def observed_from_dicts(rows, *args, **kwargs):
+        observed_batch_sizes.append(len(rows))
+        return original_from_dicts(rows, *args, **kwargs)
+
+    monkeypatch.setattr(pl, "from_dicts", observed_from_dicts)
+    bounded_path = tmp_path / "bounded.parquet"
+    info = history._write_records(bounded_path, records)
+    legacy_frame = pl.read_parquet(legacy_path)
+    bounded_frame = pl.read_parquet(bounded_path)
+
+    assert info["json_fields"] == legacy_json_fields == ["json_mixed"]
+    assert bounded_frame.schema == legacy_frame.schema
+    assert bounded_frame.to_dicts() == legacy_frame.to_dicts()
+    assert len(observed_batch_sizes) == 2
+    assert max(observed_batch_sizes) == history._RECORD_WRITE_BATCH_SIZE
+    decoded = tuple(
+        {
+            key: json.loads(value)
+            if key in info["json_fields"] and value is not None
+            else value
+            for key, value in row.items()
+        }
+        for row in bounded_frame.to_dicts()
+    )
+    assert decoded[0]["json_mixed"] == "null"
+    assert decoded[history._RECORD_WRITE_BATCH_SIZE]["late_column"] == 2**100
+    assert decoded[history._RECORD_WRITE_BATCH_SIZE]["json_mixed"][
+        "candidate_lineage"
+    ][0]["paths"] == [["root", "child"], ["root", "other"]]
+    assert decoded[-1]["json_mixed"] == [True, None, "3.40"]
+
+
+def test_bounded_record_writer_matches_legacy_empty_and_all_null(
+    tmp_path: Path,
+) -> None:
+    import polars as pl
+
+    for name, records in (
+        ("empty", ()),
+        ("all-null", ({"field": None}, {"field": None})),
+    ):
+        legacy_path = tmp_path / f"legacy-{name}.parquet"
+        bounded_path = tmp_path / f"bounded-{name}.parquet"
+        legacy_frame = (
+            pl.from_dicts(records, infer_schema_length=None)
+            if records
+            else pl.DataFrame()
+        )
+        legacy_frame.write_parquet(legacy_path)
+        history._write_records(bounded_path, records)
+        assert pl.read_parquet(bounded_path).schema == pl.read_parquet(
+            legacy_path
+        ).schema
+        assert pl.read_parquet(bounded_path).to_dicts() == pl.read_parquet(
+            legacy_path
+        ).to_dicts()
+
+
+def test_fiscal_time_series_inputs_release_before_serialization() -> None:
+    class PanelInput:
+        pass
+
+    class Builder:
+        @staticmethod
+        def build(*, inputs, expected_periods):
+            assert len(inputs) == 1
+            assert expected_periods == []
+            return SimpleNamespace(columns=(), rows=(), cells=(), scope={})
+
+    panel_input = PanelInput()
+    reference = weakref.ref(panel_input)
+    inputs = [panel_input]
+    del panel_input
+    result = history._build_fiscal_time_series(Builder(), inputs, [])
+    gc.collect()
+
+    assert inputs == []
+    assert reference() is None
+    assert result.cells == ()
 
 
 def test_intake_bootstrap_is_after_offline_failure_with_unique_paths_and_audit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
