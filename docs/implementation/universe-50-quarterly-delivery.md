@@ -324,6 +324,32 @@ analysis, quarter publication, consumer 통합 및 전체 rollout은 새 source 
 first5 financial gate 전까지 계속 중지한다. 이 sequencing 조정은 XBRL·기간·mapping·회계
 의미를 바꾸지 않는다.
 
+### 2026-10-13 Raw metadata transform 보정
+
+RAW_ONLY 진단은 50사 중 44사의 997개 accession을 성공으로 보존했고, 6사의 101개
+accession을 fail-closed 상태로 남겼다. 진단 보고서
+`work/universe50_quarterly_20261010/resumption_20261013/raw_failure_diagnosis_report.json`의
+SHA-256은 `de8cd158a19b22215162aacd189609c6be5eda5532a5844747bc63d7a3de1f6d`다.
+UNP의 Nebraska, DUK의 Indiana, ABBV·ABT의 Chicago Stock Exchange 표기와 LIN의
+SEC 2015 `countrynameen`·`edgarprovcountryen`은 SEC-staff 표준 metadata transform
+coverage 누락으로 분류됐다. 이 다섯 회사에 필요한 공통 표준 보정은 승인됐지만,
+ticker 예외, Fact 삭제, validation skip 또는 수동 값 치환은 승인되지 않았다.
+
+새 구현은 SEC-staff public-domain name/code 표 전체를 같은 2015 namespace에 등록하고
+새 snapshot parser identity를 `m2-layer1-v6`으로 올린다. Raw 물리 schema와 관계 parser,
+numeric duration·nil·기간·quarter·mapping·회계 정책은 그대로다. 997개 유효 v5 snapshot은
+재작성하거나 v6로 relabel하지 않는다. 새 cohort source-run reuse는 기존 전체 snapshot
+검증 뒤 정확히 v5 또는 v6만 허용하고 각 manifest의 실제 parser version과 hash를 보존한다.
+v1–v4 또는 알 수 없는 version은 이 새 cohort 경로에서 거부하며, 기존 historical archive
+조회 계약은 바꾸지 않는다. 이 보정은 **IMPLEMENTED_AWAITING_INDEPENDENT_SOURCE_GATE**이고,
+동결 source 독립 PASS 전에는 다섯 회사 actual retry를 실행하거나 Raw 50 readiness를
+선언하지 않는다.
+
+PEP의 custom `xbrli:timeItemType` Fact 네 개는 transform 없는 month-name text를 as-filed로
+담고 있어 별도 데이터 정책 판단이 필요하다. v6도 이를 text, time 또는 다른 type으로
+강제 변환하지 않고 계속 fail-closed 처리한다. 따라서 metadata 다섯 회사의 기술 보정이
+PEP 또는 50사 전체 Raw·financial readiness를 뜻하지 않는다.
+
 ## 2. 불변 입력과 새 run 경계
 
 재실행 가능한 새 run identity는 `universe-50-quarterly-20261010`으로 제안한다.

@@ -711,7 +711,7 @@ def test_intake_bootstrap_is_after_offline_failure_with_unique_paths_and_audit(t
     monkeypatch.setattr(history, "ArelleFilingLoader", Loader)
     monkeypatch.setattr(history, "Layer1Ingestor", Ingestor)
     monkeypatch.setattr(history, "FilingPackageResolver", lambda *args: SimpleNamespace(resolve=lambda *args: object()))
-    monkeypatch.setattr(history, "_load_declared_cohort_snapshot", lambda *args: SimpleNamespace(records=lambda name: (history._ref_record(ref),)))
+    monkeypatch.setattr(history, "_load_history_source_snapshot", lambda *args: SimpleNamespace(records=lambda name: (history._ref_record(ref),)))
     path = history.ingest_history(plan_path=plan_path, source_runs=(), output_run=output,
                                  package_cache=tmp_path / "packages", index_cache=tmp_path / "index",
                                  taxonomy_cache=tmp_path / "taxonomy", bootstrap_taxonomy=True)
@@ -728,6 +728,69 @@ def test_snapshot_metadata_must_match_plan() -> None:
     history._validate_snapshot_plan(snapshot, original)
     with pytest.raises(ValueError, match="metadata"):
         history._validate_snapshot_plan(snapshot, {**original, "filed_date": "2024-04-01"})
+
+
+@pytest.mark.parametrize("parser_version", ("m2-layer1-v5", "m2-layer1-v6"))
+def test_history_source_reuse_accepts_same_schema_v5_and_v6_without_relabelling(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    parser_version: str,
+) -> None:
+    snapshot = SimpleNamespace(input=SimpleNamespace(parser_version=parser_version))
+    seen: list[tuple[Path, str, str]] = []
+    monkeypatch.setattr(
+        history,
+        "_load_declared_cohort_snapshot",
+        lambda directory, cik, accession: seen.append((directory, cik, accession)) or snapshot,
+    )
+
+    actual = history._load_history_source_snapshot(
+        tmp_path / "snapshot",
+        "0000000001",
+        "0000000001-26-000001",
+    )
+
+    assert actual is snapshot
+    assert actual.input.parser_version == parser_version
+    assert seen == [
+        (tmp_path / "snapshot", "0000000001", "0000000001-26-000001")
+    ]
+
+
+@pytest.mark.parametrize(
+    "parser_version",
+    ("m2-layer1-v1", "m2-layer1-v2", "m2-layer1-v3", "m2-layer1-v4", "m2-layer1-v7", None),
+)
+def test_history_source_reuse_rejects_ineligible_parser_versions(
+    monkeypatch: pytest.MonkeyPatch,
+    parser_version: str | None,
+) -> None:
+    monkeypatch.setattr(
+        history,
+        "_load_declared_cohort_snapshot",
+        lambda *_: SimpleNamespace(input=SimpleNamespace(parser_version=parser_version)),
+    )
+
+    with pytest.raises(ValueError, match="eligible Layer 1 parser version"):
+        history._load_history_source_snapshot(Path("snapshot"), "0000000001", "accession")
+
+
+def test_history_source_reuse_propagates_full_snapshot_attestation_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def reject_tampered_snapshot(*_: object) -> object:
+        raise ValueError("tampered raw table hash")
+
+    monkeypatch.setattr(
+        history,
+        "_load_declared_cohort_snapshot",
+        reject_tampered_snapshot,
+    )
+
+    with pytest.raises(ValueError, match="tampered raw table hash"):
+        history._load_history_source_snapshot(
+            Path("snapshot"), "0000000001", "accession"
+        )
 
 
 def test_offline_arbitrary_ticker_discovery_reuses_immutable_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -774,7 +837,7 @@ def test_coverage_repair_preserves_real_cells_and_rejects_plan_mismatch(tmp_path
         files[name] = {**history._write_records(root / f"{name}.parquet", rows), "path": f"{name}.parquet"}
     history._write_json(root / "history_manifest.json", {"version": history.HISTORY_VERSION, "plan": plan,
                         "source_intake": str(intake_path), "tables": [{"ticker": "TEST", "cik": "1", "view": "LATEST_REPORTED", "period_class": "QTD_3M", "scope": {}, "files": files}]})
-    monkeypatch.setattr(history, "_load_declared_cohort_snapshot", lambda *args: SimpleNamespace(records=lambda name: ({**record, "document_fiscal_year_focus": "2026", "document_fiscal_period_focus": "Q2"},)))
+    monkeypatch.setattr(history, "_load_history_source_snapshot", lambda *args: SimpleNamespace(records=lambda name: ({**record, "document_fiscal_year_focus": "2026", "document_fiscal_period_focus": "Q2"},)))
     destination = history.repair_history_coverage(publication=root, destination=tmp_path / "repaired")
     repaired = history.HistoryPublicationReader(destination)
     assert repaired.load(ticker="TEST").cells == cells

@@ -492,3 +492,21 @@ with the declared child guard and request budget. `RAW_COMPLETE` does not mean
 history or financial readiness and does not authorize JNJ history, analysis,
 quarter publication, consumer publication, or 50-company rollout while their
 gates remain blocked.
+
+The 2026-10-13 SEC metadata transform repair uses `m2-layer1-v6` for newly
+ingested snapshots. It covers the complete SEC-staff state/province, exchange,
+ISO-country, and EDGAR-jurisdiction name tables in the exact SEC 2015 transform
+namespace. For a new 50-company cohort intake, a source-run snapshot is eligible
+only after the existing complete atomic verifier attests all table hashes,
+counts, references, package and filing identity, and its manifest declares
+either `m2-layer1-v5` or `m2-layer1-v6`. Intake preserves that actual version;
+do not edit a valid v5 manifest or bulk-reparse the 997 successful accessions.
+The ordinary historical archive readers keep their prior compatibility and do
+not by themselves certify a snapshot for new-cohort reuse.
+
+Unknown metadata lexicals, lookalike namespaces, and unsupported transform
+names remain errors. PEP's untransformed custom time text is outside this
+repair and remains fail-closed pending an explicit policy decision. Until the
+frozen v6 source passes independent verification and targeted offline retries,
+the five metadata-blocked issuers and the complete 50-company Raw cohort remain
+unaccepted.

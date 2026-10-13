@@ -36,6 +36,9 @@ from sec_xbrl.longitudinal.corpus_release import _load_declared_cohort_snapshot
 from sec_xbrl.longitudinal.materialization import Layer2RuleVersions
 
 HISTORY_VERSION = "company-history-v1"
+_SUPPORTED_HISTORY_SOURCE_PARSER_VERSIONS = frozenset(
+    {"m2-layer1-v5", "m2-layer1-v6"}
+)
 _RECORD_WRITE_BATCH_SIZE = 32
 _RECORD_WRITE_BATCH_BYTES = 8 * 1024 * 1024
 
@@ -182,7 +185,7 @@ def ingest_history(*, plan_path: Path, source_runs: tuple[Path, ...], output_run
             try:
                 existing = [root for root in roots if (root / "snapshots" / ref.cik / ref.accession.replace("-", "") / "layer1_manifest.json").exists()]
                 if existing:
-                    snapshots = [_load_declared_cohort_snapshot(root / "snapshots" / ref.cik / ref.accession.replace("-", ""), ref.cik, ref.accession) for root in existing]
+                    snapshots = [_load_history_source_snapshot(root / "snapshots" / ref.cik / ref.accession.replace("-", ""), ref.cik, ref.accession) for root in existing]
                     for snapshot in snapshots:
                         _validate_snapshot_plan(snapshot, record)
                     if len({snapshot.input.manifest_sha256 for snapshot in snapshots}) > 1:
@@ -205,7 +208,7 @@ def ingest_history(*, plan_path: Path, source_runs: tuple[Path, ...], output_run
                         finally:
                             model.close()
                         ingestor.load_and_ingest(resolved, loader, extraction / "offline-retry")
-                    snapshot = _load_declared_cohort_snapshot(ingestor.snapshot_dir(resolved), ref.cik, ref.accession)
+                    snapshot = _load_history_source_snapshot(ingestor.snapshot_dir(resolved), ref.cik, ref.accession)
                     _validate_snapshot_plan(snapshot, record)
                     outcome.update(status="INGESTED", source_run=str(output_run.absolute()))
             except Exception as exc:  # noqa: BLE001 - accession-level resumable audit boundary
@@ -228,6 +231,18 @@ def _validate_snapshot_plan(snapshot: Any, record: dict[str, Any]) -> None:
         if record.get(key) is not None
     ):
         raise ValueError("snapshot filing metadata disagrees with requested history plan")
+
+
+def _load_history_source_snapshot(directory: Path, cik: str, accession: str) -> Any:
+    """Fully verify an eligible same-schema v5/v6 source-run snapshot."""
+    snapshot = _load_declared_cohort_snapshot(directory, cik, accession)
+    parser_version = snapshot.input.parser_version
+    if parser_version not in _SUPPORTED_HISTORY_SOURCE_PARSER_VERSIONS:
+        raise ValueError(
+            "history source snapshot requires an eligible Layer 1 parser version: "
+            f"{parser_version}"
+        )
+    return snapshot
 
 
 def _validate_release_snapshot_plans(
@@ -539,7 +554,7 @@ def repair_history_coverage(*, publication: Path, destination: Path) -> Path:
     for item in intake["filings"]:
         record = item["filing"]
         directory = Path(item["source_run"]) / "snapshots" / record["cik"] / record["accession"].replace("-", "")
-        snapshot = _load_declared_cohort_snapshot(directory, record["cik"], record["accession"])
+        snapshot = _load_history_source_snapshot(directory, record["cik"], record["accession"])
         _validate_snapshot_plan(snapshot, record)
         filings.extend(snapshot.records("filing"))
     destination.parent.mkdir(parents=True, exist_ok=True)

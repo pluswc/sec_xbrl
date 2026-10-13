@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from decimal import Decimal, localcontext
+from pathlib import Path
 
 import pytest
 
@@ -27,6 +29,125 @@ def test_registers_sec_efm_transforms_used_by_inline_filings() -> None:
     assert transforms["stateprovnameen"]("Delaware") == "DE"
     assert transforms["exchnameen"]("The Nasdaq Stock Market LLC") == "NASDAQ"
     assert transforms["entityfilercategoryen"]("Large accelerated filer") == "Large Accelerated Filer"
+
+
+def test_metadata_name_transforms_match_offline_sec_staff_reference_controls() -> None:
+    from arelle import FunctionIxt
+
+    reference_path = (
+        Path(__file__).parents[1] / "fixtures" / "sec_transform_2015_metadata_reference.json"
+    )
+    reference = json.loads(reference_path.read_text(encoding="utf-8"))
+    register_sec_inline_transforms()
+    transforms = FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]
+
+    for control_name, transform_name in (
+        ("state_province_controls", "stateprovnameen"),
+        ("exchange_controls", "exchnameen"),
+        ("country_controls", "countrynameen"),
+        ("edgar_province_country_controls", "edgarprovcountryen"),
+    ):
+        assert [transforms[transform_name](source) for source, _ in reference[control_name]] == [
+            expected for _, expected in reference[control_name]
+        ]
+
+
+def test_country_and_edgar_codes_remain_distinct_code_systems() -> None:
+    from arelle import FunctionIxt
+
+    register_sec_inline_transforms()
+    transforms = FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]
+
+    assert transforms["countrynameen"]("United Kingdom") == "GB"
+    assert transforms["edgarprovcountryen"]("United Kingdom") == "X0"
+    assert transforms["countrynameen"]("United States") == "US"
+    assert transforms["edgarprovcountryen"]("United States") == "X1"
+    assert transforms["countrynameen"]("Ireland") == "IE"
+    assert transforms["edgarprovcountryen"]("Ireland") == "L2"
+
+
+def test_metadata_transforms_register_only_in_exact_sec_2015_namespace() -> None:
+    from arelle import FunctionIxt
+
+    lookalike_namespace = f"{SEC_TRANSFORM_NAMESPACE}/lookalike"
+    lookalike_before = FunctionIxt.ixtNamespaceFunctions.get(lookalike_namespace)
+
+    register_sec_inline_transforms()
+
+    assert FunctionIxt.ixtNamespaceFunctions.get(lookalike_namespace) is lookalike_before
+    exact = FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]
+    assert {"countrynameen", "stateprovnameen", "edgarprovcountryen", "exchnameen"} <= exact.keys()
+    assert "timeitemtype" not in exact
+
+
+@pytest.mark.parametrize(
+    ("transform_name", "source"),
+    (
+        ("countrynameen", "Atlantis"),
+        ("countrynameen", "UNITED KINGDOM"),
+        ("countrynameen", "United Kingdom plc"),
+        ("stateprovnameen", "INDIANA"),
+        ("stateprovnameen", "Nebraska, USA"),
+        ("edgarprovcountryen", "IRELAND"),
+        ("edgarprovcountryen", "Ireland plc"),
+        ("exchnameen", "Chicago Stock Exchange LLC"),
+        ("exchnameen", "Chicago Stock Exchange subsidiary"),
+    ),
+)
+def test_metadata_name_transforms_reject_nonreference_lexicals(
+    transform_name: str,
+    source: str,
+) -> None:
+    from arelle import FunctionIxt
+
+    register_sec_inline_transforms()
+
+    with pytest.raises(ValueError, match="unsupported SEC"):
+        FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE][transform_name](source)
+
+
+@pytest.mark.parametrize(
+    "transform_name",
+    ("countrynameen", "stateprovnameen", "edgarprovcountryen", "exchnameen"),
+)
+@pytest.mark.parametrize("source", ("", " \t\n\r ", None))
+def test_metadata_name_transforms_reject_empty_and_nonstring_values(
+    transform_name: str,
+    source: object,
+) -> None:
+    from arelle import FunctionIxt
+
+    register_sec_inline_transforms()
+
+    with pytest.raises(ValueError, match="unsupported SEC"):
+        FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE][transform_name](source)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "Chicago Stock Exchange",
+        "Chicago Stock Exchange, Inc",
+        "Chicago Stock Exchange, Inc.",
+        "The Chicago Stock Exchange, Inc.",
+        " \t\nChicago Stock Exchange\r ",
+    ),
+)
+def test_sec_exchange_name_accepts_official_chicago_variants(source: str) -> None:
+    from arelle import FunctionIxt
+
+    register_sec_inline_transforms()
+
+    assert FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["exchnameen"](source) == "CHX"
+
+
+@pytest.mark.parametrize(("source", "expected"), (("Nebraska", "NE"), ("Indiana", "IN")))
+def test_sec_state_name_accepts_observed_standard_values(source: str, expected: str) -> None:
+    from arelle import FunctionIxt
+
+    register_sec_inline_transforms()
+
+    assert FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["stateprovnameen"](source) == expected
 
 
 @pytest.mark.parametrize("source", ("Nasdaq", "NASDAQ", " \t\nNasdaq\r "))
@@ -194,8 +315,8 @@ def test_sec_english_duration_consumes_valid_ordered_whole_input(
     assert FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["durwordsen"](source) == expected
 
 
-def test_duration_conformance_has_distinct_immutable_layer1_parser_version() -> None:
-    assert Layer1Extractor.parser_version == "m2-layer1-v5"
+def test_metadata_transform_coverage_has_distinct_immutable_layer1_parser_version() -> None:
+    assert Layer1Extractor.parser_version == "m2-layer1-v6"
 
 
 @pytest.mark.parametrize(
