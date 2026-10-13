@@ -1782,4 +1782,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # Quarter producers import sec_xbrl.history. Run the CLI in that same
+    # module so scoped recovery capabilities/guards have a single owner;
+    # executing recovery in __main__ would create separate ContextVars.
+    from sec_xbrl.history import main as canonical_main
+
+    canonical_main()

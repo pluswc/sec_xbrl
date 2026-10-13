@@ -1119,3 +1119,57 @@ def test_default_gate_rejects_non_governed_derived_schema_even_with_rebound_hash
     receipt["consumer_manifest_sha256"] = history._sha256_file(manifest_path)
     receipt_path.write_text(json.dumps(receipt))
     _assert_default_recovery_denied(result)
+
+
+@pytest.mark.parametrize("fail_after_quarter", [False, True])
+def test_module_cli_owns_one_scoped_recovery_capability(tmp_path, monkeypatch, fail_after_quarter):
+    import runpy
+    import sys
+    import warnings
+
+    kwargs, _ = _recovery_fixture(tmp_path, monkeypatch)
+    foreign = tmp_path / "foreign-pending"
+    shutil.copytree(kwargs["staged_publication"], foreign / "panels")
+    (foreign / ".history-recovery-uncommitted").mkdir()
+    original = quarters.publish_quarter_history
+    capabilities = []
+
+    def publish(**arguments):
+        capability = arguments["_recovery_access"]
+        capabilities.append(capability)
+        assert history._RECOVERY_OUTPUT.get() is capability
+        # The real quarter reader must see the same owned context as the CLI.
+        history.HistoryPublicationReader(arguments["publication"], _recovery_access=capability).verify_all()
+        with pytest.raises(ValueError, match="NOT_READY"):
+            history.HistoryPublicationReader(arguments["publication"])
+        with pytest.raises(ValueError, match="NOT_READY"):
+            history.HistoryPublicationReader(foreign / "panels", _recovery_access=capability)
+        result = original(**arguments)
+        if fail_after_quarter:
+            raise ValueError("controlled CLI quarter failure")
+        return result
+
+    monkeypatch.setattr(quarters, "publish_quarter_history", publish)
+    argv = ["sec_xbrl.history", "recover-reported", "--trusted-exclusive-parent"]
+    for name, value in kwargs.items():
+        if name != "trusted_exclusive_parent":
+            argv.extend(["--" + name.replace("_", "-"), str(value)])
+    monkeypatch.setattr(sys, "argv", argv)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="'sec_xbrl.history' found in sys.modules", category=RuntimeWarning)
+        if fail_after_quarter:
+            with pytest.raises(ValueError, match="controlled CLI quarter failure"):
+                runpy.run_module("sec_xbrl.history", run_name="__main__", alter_sys=True)
+        else:
+            runpy.run_module("sec_xbrl.history", run_name="__main__", alter_sys=True)
+    assert len(capabilities) == 1
+    assert history._RECOVERY_OUTPUT.get() is None
+    assert history._HISTORY_STORAGE_GUARD.get() is None
+    with pytest.raises(ValueError, match="NOT_READY"):
+        history.HistoryPublicationReader(foreign / "panels", _recovery_access=capabilities[0])
+    if fail_after_quarter:
+        assert not (kwargs["output_root"] / "reported_recovery_receipt.json").exists()
+        with pytest.raises(ValueError, match="NOT_READY"):
+            history.HistoryPublicationReader(kwargs["output_root"] / "reported-panels", _recovery_access=capabilities[0])
+    else:
+        history.HistoryPublicationReader(kwargs["output_root"] / "panels").verify_all()

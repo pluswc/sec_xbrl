@@ -160,3 +160,8 @@ source `7218940…`도 default COMPLETE gate의 독립 검증에서 FAIL했다.
 보고서와 데이터는 보존하고, reported-only 위장 거부·dangling identifier 판별·
 immutable receipt 전체 binding을 수리한다. 규범 계약은
 [complete-reader gate 수리](../implementation/company-history-workflow.md#2026-10-13-complete-reader-gate-repair-after-source-721-fail)에 있으며 새 독립 PASS 전 actual recovery는 미승인이다.
+
+source `2027e21…`의 실제 recovery는 reported copy 이후 CLI module/context
+분리로 NOT_READY 오류가 발생했다. 실패 root·기존 증거를 보존하고
+[CLI capability-owner 수리](../implementation/company-history-workflow.md#2026-10-13-cli-capability-owner-repair-after-actual-source-2027-failure)를 적용한다.
+새 독립 검증 전 실제 재시도는 하지 않는다.

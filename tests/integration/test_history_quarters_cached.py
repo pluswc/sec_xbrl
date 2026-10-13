@@ -4,6 +4,8 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -109,31 +111,45 @@ def test_default_history_build_connects_reported_and_derived_consumer(tmp_path: 
     })
     proof["verification_report"]["sha256"] = _sha256_file(report)
     _write_json(attestation, proof)
-    recovered = recover_reported_history(
+    api_recovered = recover_reported_history(
         trusted_exclusive_parent=True,
         staged_publication=failed_stage, output_root=tmp_path / "recovered",
         intake_manifest=fixture, operational_root=output.parent,
         attestation=attestation, expected_attestation_sha256=_sha256_file(attestation),
     )
-    recovered_reader = HistoryPublicationReader(recovered)
-    assert recovered_reader.manifest["input_fingerprint"] == reader.manifest["input_fingerprint"]
-    assert recovered_reader.manifest["operational_roots"] == reader.manifest["operational_roots"]
-    assert recovered_reader.manifest["source_manifest_sha256"] == _sha256_file(reported / "history_manifest.json")
-    assert recovered_reader.manifest["supersedes_publication"] == str(recovered.parent / "reported-panels")
-    for table in reader.manifest["tables"]:
-        query = {key: table[key] for key in ("ticker", "view", "period_class")}
-        expected, actual = reader.load(**query), recovered_reader.load(**query)
-        # Parent publication locations intentionally change; all source values,
-        # candidates, dimensions, IDs, flags and ordering must remain identical.
-        for cell in expected.cells:
-            if cell.get("prior_candidate_publication") is not None:
-                cell["prior_candidate_publication"] = str(recovered.parent / "reported-panels")
-        assert actual == expected
-    assert recovered_reader._records(recovered_reader.manifest["derived_quarter"]) == reader._records(reader.manifest["derived_quarter"])
-    assert {str(p.relative_to(failed_stage)): _sha256_file(p)
-            for p in failed_stage.rglob("*") if p.is_file()} == source_hashes
-    assert {str(p.relative_to(recovered.parent / "reported-panels")): _sha256_file(p)
-            for p in (recovered.parent / "reported-panels").rglob("*") if p.is_file()} == source_hashes
-    receipt = json.loads((recovered.parent / "reported_recovery_receipt.json").read_text())
-    assert receipt["generation_source_identity"] == "a" * 40
-    assert receipt["recovery_source_identity"] == "b" * 40
+    # Exercise the public -m entrypoint in a fresh interpreter as OPS does.
+    # Imported-API-only tests cannot detect duplicated __main__ module state.
+    cli_root = tmp_path / "cli-recovered"
+    command = [sys.executable, "-m", "sec_xbrl.history", "recover-reported",
+               "--trusted-exclusive-parent", "--staged-publication", str(failed_stage),
+               "--output-root", str(cli_root), "--intake-manifest", str(fixture),
+               "--operational-root", str(output.parent), "--attestation", str(attestation),
+               "--expected-attestation-sha256", _sha256_file(attestation)]
+    completed = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
+    (tmp_path / "cli-recovery.log").write_text(completed.stdout + completed.stderr)
+    (tmp_path / "cli-recovery-result.json").write_text(json.dumps({"command": command, "returncode": completed.returncode}, indent=2))
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.stdout.strip().splitlines()[-1] == str(cli_root / "panels")
+    for recovered in (api_recovered, cli_root / "panels"):
+        recovered_reader = HistoryPublicationReader(recovered)
+        assert recovered_reader.manifest["input_fingerprint"] == reader.manifest["input_fingerprint"]
+        assert recovered_reader.manifest["operational_roots"] == reader.manifest["operational_roots"]
+        assert recovered_reader.manifest["source_manifest_sha256"] == _sha256_file(reported / "history_manifest.json")
+        assert recovered_reader.manifest["supersedes_publication"] == str(recovered.parent / "reported-panels")
+        for table in reader.manifest["tables"]:
+            query = {key: table[key] for key in ("ticker", "view", "period_class")}
+            expected, actual = reader.load(**query), recovered_reader.load(**query)
+            # Parent publication locations intentionally change; all source values,
+            # candidates, dimensions, IDs, flags and ordering must remain identical.
+            for cell in expected.cells:
+                if cell.get("prior_candidate_publication") is not None:
+                    cell["prior_candidate_publication"] = str(recovered.parent / "reported-panels")
+            assert actual == expected
+        assert recovered_reader._records(recovered_reader.manifest["derived_quarter"]) == reader._records(reader.manifest["derived_quarter"])
+        assert {str(p.relative_to(failed_stage)): _sha256_file(p)
+                for p in failed_stage.rglob("*") if p.is_file()} == source_hashes
+        assert {str(p.relative_to(recovered.parent / "reported-panels")): _sha256_file(p)
+                for p in (recovered.parent / "reported-panels").rglob("*") if p.is_file()} == source_hashes
+        receipt = json.loads((recovered.parent / "reported_recovery_receipt.json").read_text())
+        assert receipt["generation_source_identity"] == "a" * 40
+        assert receipt["recovery_source_identity"] == "b" * 40

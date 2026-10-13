@@ -349,3 +349,37 @@ per-process RLIMIT_AS 2 GiB·300초 timeout·Polars 2 threads·BLAS/OMP/MKL/
 NUMEXPR 1·Python socket deny guard 아래 수행했다. RSS sampling을 hard
 RSS/cgroup 제한으로 주장하지 않는다. 실제 데이터 재검증/복구나 broad suite
 재실행은 없었고 새 source의 독립 검증과 lead GO가 남아 있다.
+
+### 2026-10-13 actual source 2027 CLI capability 실패
+
+실제 public CLI recovery는 reported-panels atomic publish 뒤 quarter reader에서
+아직 없는 COMPLETE receipt를 요구하며 **exit 1 / 639.716초**로 중지했다.
+GNU max RSS **1,652,848 KiB**, sampled process-tree peak **1,629,296 KiB**,
+`resource_stop=false`다. `016-jnj-recovery-2027e21.log`의 traceback과 process
+result/summary에 근거한 lifecycle 실패다. 새 실패 root는 NOT_READY로 보존하며
+History/financial READY가 아니다. 원래 source·proof·기존 독립 보고서와 실제
+실패 artifacts는 변경하지 않는다.
+
+원인은 `python -m sec_xbrl.history`의 `__main__` ContextVar와 quarter producer가
+import한 `sec_xbrl.history` ContextVar가 별개였기 때문이다. 기존 cached 검증은
+imported API만 호출해 이 CLI 경계를 놓쳤다. 기존 offline NVDA 2공시에 fresh
+CLI subprocess를 추가하자 동결 2027 production bytes에서도 같은 traceback을
+재현했다. 수리는 `__main__` entrypoint에서 canonical module의 `main()`을
+호출하는 것으로 한정한다. gate/회계/Raw/quarter math는 바꾸지 않는다.
+새 동결 source의 독립 재검증 전에는 actual 재시도를 하지 않는다.
+
+최소 entrypoint 수리의 최종 writer 검증: **253 unit PASS / 15.75초**이며 기존
+251개 gate/ownership 대조를 모두 포함한다. 새 두 lifecycle 대조는 active own-root
+capability, 같은 시점의 default/cross-root 거부, 성공·실패 후 context 해제를
+확인했다. Fresh `python -m` CLI subprocess와 imported API를 모두 비교한 기존
+offline NVDA 2공시 cached gate는 **1 PASS / 22.20초**, guard 전체 22.37초,
+sampled process-group peak **423,464,960 bytes**다. 이전 a36 eager/quarter
+oracle은 **8 tables / 25 files / 4,686 panel records / 42 derived records PASS**,
+4.42초, peak **230,416,384 bytes**다. Ruff/diff check PASS.
+
+같은 2 GiB sampled process-group RSS threshold·hard per-process RLIMIT_AS
+2 GiB·300초 timeout·Polars 2·BLAS/OMP/MKL/NUMEXPR 1·socket deny guard를
+사용했다. Ruff 한 실행은 native thread pool 초기화 EAGAIN으로 중단되어 해당
+log를 보존했으며 `RAYON_NUM_THREADS=1`로 재실행해 통과했다. 제품 검증 실패나
+RSS limit 도달로 해석하지 않는다. 이 수리 작업은 actual JNJ를 실행하거나
+실패 artifacts를 수정하지 않았다. 새 source의 독립 재검증·lead GO가 필요하다.

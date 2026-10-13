@@ -420,3 +420,33 @@ claim is added. Recovery artifact retention, the trusted-parent acknowledgment,
 source-generation identity, reported bytes, quarter values and normal legacy
 reader behavior remain unchanged. New independent source PASS and lead GO are
 still required before any actual recovery.
+
+
+### 2026-10-13 CLI capability-owner repair after actual source 2027 failure
+
+The guarded actual `2027e21…` recovery failed after publishing the new reported
+copy and before quarter production. The quarter reader demanded a not-yet-created
+COMPLETE receipt. The observed run exited 1 after 639.716 seconds, with GNU time
+max RSS 1,652,848 KiB, sampled process-tree peak 1,629,296 KiB and
+`resource_stop=false`. This was a traced lifecycle defect, not a resource stop.
+The failed new NOT_READY root, original reported stage, attestation/report and
+previous independent source evidence remain preserved. No retry is implied.
+
+The cause is the Python module entrypoint: `python -m sec_xbrl.history` executed
+recovery in `__main__`, while the quarter producer imported `sec_xbrl.history`.
+The two modules had separate ContextVars. An explicit capability created by the
+CLI therefore did not match the canonical reader's active capability. Earlier
+cached tests called the imported API and did not exercise this process entrypoint.
+The same failure was reproduced on the unchanged 2027 production bytes with only
+the existing offline NVDA two-filing fixture before applying the repair.
+
+The minimal repair delegates the `__main__` entrypoint to canonical
+`sec_xbrl.history.main()`. Recovery, quarter storage and reader guards now execute
+under the same module owner. Gate logic, identity checks, context lifetime,
+accounting rules and API/CLI arguments are unchanged. There is no global or
+unscoped bypass. Synthetic CLI tests cover own-root producer access, simultaneous
+default/cross-root denial and capability expiry after success/failure. The cached
+golden now also launches a fresh `python -m` subprocess and compares all declared
+records against the imported API and fresh build, retaining the intended parent
+locator differences only. A new freeze and independent re-audit are required
+before OPS may use a new actual destination.
