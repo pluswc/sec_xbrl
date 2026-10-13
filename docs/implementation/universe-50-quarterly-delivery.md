@@ -411,6 +411,39 @@ parent는 dataset wrapper나 UI가 아니다. consumer `prepare-v3`는 수락된
 그 뒤 complete 49/pending 50, native U1–U8과 local rollout은 순서대로 별도 gate를
 유지한다.
 
+### 2026-10-14 PEP 보류, KDP 교체와 Raw exact-50 수락
+
+사용자는 2026-10-14 KST에 PEP를 보류하고 KDP(CIK `0001418135`)를 대체 회사로
+선택했다. exact 시각은 기록하지 않는다. PEP의 기존 22개 성공 Raw, custom time
+오류, plan과 partial/failure 증거는 immutable하게 보존하며 source lexical coercion,
+Fact·filing 삭제 또는 incomplete PEP 수락을 하지 않는다. 최종 membership은 기존
+accepted 49사와 KDP의 unique CIK 50개다.
+
+KDP `m2-layer1-v6` actual Raw는 22개(10-K 5, 10-Q 17), 759 files,
+132,693,374 bytes, 176 tables, 178,831 records다. public adapter 전체와 artifact
+hash/schema/count를 독립 검증했고, semantic 110 numeric·226 identity sample은 표본
+범위일 뿐 모든 Fact의 회계 정확성을 주장하지 않는다. 기존 49사 1,075 accession에
+KDP 22개를 더한 final selection은 1,097개(10-K 250, 10-K/A 5, 10-Q 839,
+10-Q/A 3)다. v2 operational report → candidate → independent report chain은
+acyclic이며 v1 finding을 그대로 보존한다. 이 두 artifact는 2026-10-14 KST에 lead가
+Raw와 exact-50 metadata/input selection으로만 locally accepted했다.
+
+annual 5 input/4 display, fixed 8 quarter bucket/17 state와 2026-10-10 financial cutoff는
+변하지 않는다. 2026-10-13 Nasdaq에서 관찰한 KDP ordinary security 한 건은 cutoff 당시의
+역사적 listing 증명이 아니다. Raw local acceptance는 history, financial, annual/quarter
+publication, native U1–U8 또는 rollout readiness가 아니다.
+
+Recovery source `5cd24385ce25ab17d0238df635266812e0069440`은 독립 source-only PASS와
+bound proof를 받았다. 이전 `2027e218…` actual CLI NOT_READY 실패와 module-as-main
+ContextVar source gap은 보존한다. 최소 CLI owner 수리의 253 unit와 fresh subprocess
+cached 2-filing gate는 PASS했다. Lead는 JNJ `COMPLETE_STAGE_RECOVERY` 한 건을
+2026-10-14 KST에 승인했고 실행이 시작됐다. transaction 내부의 governed quarter-history
+completion만 그 승인에 포함되며 standalone quarter metrics, CVX, financial publication,
+bulk 49/50 history와 자동 retry는 포함되지 않는다. 아직 exit 0, complete artifact,
+독립 recovered-artifact PASS 또는 local acceptance가 없으므로 JNJ와 전체 financial은
+계속 NOT_READY다. 상세 상태와 증거 식별은
+[2026-10-14 로컬 상태](universe50-local-status-20261014.md)에 둔다.
+
 ## 2. 불변 입력과 새 run 경계
 
 재실행 가능한 새 run identity는 `universe-50-quarterly-20261010`으로 제안한다.
