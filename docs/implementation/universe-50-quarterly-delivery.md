@@ -428,8 +428,9 @@ KDP 22개를 더한 final selection은 1,097개(10-K 250, 10-K/A 5, 10-Q 839,
 acyclic이며 v1 finding을 그대로 보존한다. 이 두 artifact는 2026-10-14 KST에 lead가
 Raw와 exact-50 metadata/input selection으로만 locally accepted했다.
 
-annual 5 input/4 display, fixed 8 quarter bucket/17 state와 2026-10-10 financial cutoff는
-변하지 않는다. 2026-10-13 Nasdaq에서 관찰한 KDP ordinary security 한 건은 cutoff 당시의
+annual 5 input/4 display, 17 metric definitions × 8 fixed quarter buckets,
+availability/reason status 보존과 2026-10-10 financial cutoff는 변하지 않는다.
+2026-10-13 Nasdaq에서 관찰한 KDP ordinary security 한 건은 cutoff 당시의
 역사적 listing 증명이 아니다. Raw local acceptance는 history, financial, annual/quarter
 publication, native U1–U8 또는 rollout readiness가 아니다.
 

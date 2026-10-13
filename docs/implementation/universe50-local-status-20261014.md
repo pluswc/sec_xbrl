@@ -13,8 +13,8 @@ KST에 사용자는 PEP를 보류하고 KDP(CIK `0001418135`)를 대체 회사�
   Fact·filing을 삭제하지 않으며, incomplete PEP를 성공으로 분류하지 않는다.
 - KDP 교체는 사용자 membership 결정이다. ticker별 parser 예외, 새 회계 의미,
   기간 선택 변경 또는 invalid source 보존 정책을 만들지 않는다.
-- annual은 5개 fiscal-year input과 4개 표시 연도, quarter는 고정 8개 calendar
-  bucket과 17개 상태 계약을 유지한다.
+- annual은 5개 fiscal-year input과 4개 표시 연도, quarter는 17개 지표 정의 ×
+  고정 8개 분기 구간을 유지하고 availability/reason 상태를 보존한다.
 - 2026-10-13 관찰한 Nasdaq 자료에는 KDP ordinary security가 하나 있었지만,
   이는 2026-10-10 cutoff 당시의 역사적 listing을 증명하지 않는다.
 
