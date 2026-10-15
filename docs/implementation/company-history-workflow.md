@@ -537,3 +537,57 @@ and runs it against that newly generated small reported fixture, never actual
 JNJ. Use fresh temporary destinations. Run Ruff and `git diff --check`.
 Writer results and the next frozen SHA are separate from independent source
 verification, lead acceptance, and any newly authorized actual OPS execution.
+
+
+## 2026-10-15 SQLite ownership repair after source 951 FAIL
+
+Independent source review rejected `9515322417df9da118fc60fa539b75d27793847b`
+(report SHA256 `06d48bc7abc79f9a89fb0b2a97e98e14250c59a91bce7576c6138f9b4e47569a`).
+Its named database was reopened by SQLite after inode capture; a replacement
+symlink could modify an unrelated database before the later ownership check.
+The public synthetic recovery probe reproduces this defect. Earlier results,
+failed roots and unbound operational configurations remain immutable. No actual
+recovery is authorized by this repair or its writer tests.
+
+The lead approved this narrow non-accounting refinement: SQLite opens the empty
+filename, using its trusted standard VFS private temporary disk database, never
+a publication/input-supplied database pathname. `temp_store=FILE`, a 2 MiB page
+cache target and disabled mmap are set; a forced-memory `TEMP_STORE=3` build is
+rejected. These are cache controls, not a whole-process memory guarantee.
+SQLite documents [empty-filename temporary databases](https://www.sqlite.org/inmemorydb.html)
+and their [open/close lifetime](https://www.sqlite.org/c3ref/open.html).
+A Linux synthetic test confirms an unlinked disk file appears under spill load.
+This supported runtime trusts the installed SQLite VFS; it does not claim
+portable protection against arbitrary replacement VFS implementations or hostile
+same-user mutation outside the existing trusted-exclusive-parent boundary.
+
+The anonymous index is rebuildable scratch and may be reclaimed on close. This
+is the explicit exception to the previous retention wording: **all named
+recovery diagnostics remain retained**, including `.chunks/quarter-spill.records`.
+That journal is created exclusively with no-follow through the held directory
+FD and written only through its original held file FD. No pathname reopening
+can redirect its writes. Root/ancestor/inode and directory-entry stamps are
+checked before operations; detected replacements abort and preserve artifacts.
+No named SQLite database or SQLite sidecar is opened under the recovery root.
+Normal publication retains its existing success cleanup; recovery does not
+recursively delete named records, chunks or failed artifacts.
+
+Private journal frames contain an unsigned 64-bit payload length, SHA256 and
+complete typed payload. OPEN/BUCKET events establish the index; each PLANNED
+mutation retains the complete key/value; APPLIED records successful mutation,
+original key type and ordinal. Duplicate candidates and Python-equal numeric
+keys preserve prior ordering/overwrite behavior. CHECKPOINT records SQLite
+commit return and the writer fsyncs the journal before returning. A failed write
+may leave a truncated last frame; only complete hash-valid frames form the
+readable prefix. PLANNED without APPLIED is unconfirmed, not proof of rollback.
+These events are diagnostic evidence, never a COMPLETE/public readiness gate.
+The codec is private and non-executable; there is no external journal replay API.
+The journal increases retained disk usage in return for reconstructible evidence.
+
+Public API/CLI, parent locators, source-generation identities, release gates and
+accounting formulas are unchanged. Acceptance adds postcapture journal/ancestor/
+restored-path/sidecar attacks, foreign-byte preservation, complete typed index
+reconstruction and interrupted-frame tests to the existing 264 controls, plus
+the same guarded cached API/fresh CLI and full old-producer oracle. Independent
+review of the new frozen source and separate lead actual-execution approval are
+still required. Raw50 acceptance does not imply History/financial readiness.

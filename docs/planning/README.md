@@ -174,3 +174,11 @@ bounded-quarter-production은 private disk spool로 전체 record/candidate/orde
 보존하는 비회계 storage 수리다. 구현·writer 검사와 새 독립 source 검증·실제 OPS
 실행 승인은 별도 상태다. [날짜별 후속 상태](../implementation/universe50-local-status-20261014.md#2026-10-14-후속--actual-5cd-resource-stop와-bounded-quarter-수리)와
 [bounded quarter 계약](../implementation/company-history-workflow.md#2026-10-14-bounded-quarter-production-after-actual-source-5cd-resource-stop)을 따른다.
+
+
+2026-10-15: source `9515322…` failed independent SQLite pathname ownership
+verification. The approved repair uses anonymous disk-backed SQLite scratch and
+retained held-FD typed journal evidence; previous failed-source evidence remains
+unchanged. See the [dated ownership contract](../implementation/company-history-workflow.md#2026-10-15-sqlite-ownership-repair-after-source-951-fail).
+New writer checks, independent source acceptance and actual execution remain
+separate; actual recovery is pending and financial readiness is not declared.

@@ -163,3 +163,36 @@ consumer Parquet는 32-row group 때문에 physical hash가 달라도 전체 ord
 scalar/JSON·schema·decoded values가 oracle과 동일해야 한다. `_sequence`, `_scope`,
 `approved_additive`, `derive_quarter`는 `5cd2438…`와 AST 동일성을 확인했다.
 새 freeze의 별도 독립 검증과 lead 판단은 아직 대기한다.
+
+
+## 2026-10-15 후속 — source 951 SQLite ownership FAIL 수리
+
+`9515322417df9da118fc60fa539b75d27793847b`는 독립 source 검증 FAIL
+(report SHA256 `06d48bc7abc79f9a89fb0b2a97e98e14250c59a91bce7576c6138f9b4e47569a`).
+소유 inode capture 후 SQLite pathname 재개방 사이의 교체가 foreign DB를
+변경했다. 기존 보고서·951 실행 미승인 draft·과거 결과는 보존한다. 새 writer의
+동결951 source를 사용한 public synthetic probe도 같은 foreign SHA 변경
+`4bb48dfb…` → `e014871a…`를 재현했다. 실제 데이터 재실행은 하지 않았다.
+
+lead 승인 범위의 비회계 수리는 anonymous temporary disk SQLite index와
+exclusive held-FD typed mutation journal이다. anonymous rebuildable scratch만
+close 시 회수하는 명시적 보존 예외이며 모든 named recovery diagnostics는
+보존한다. [날짜별 규범 계약](company-history-workflow.md#2026-10-15-sqlite-ownership-repair-after-source-951-fail)에
+trust boundary, complete/truncated frames, PLANNED/APPLIED 의미를 기록했다.
+
+새 writer 검사: 273 unit PASS(18.85초, sampled peak 275,349,504 bytes),
+NVDA cached 2-filings imported API + exact fresh `python -m` CLI recovery PASS
+(118.94초, 397,168,640 bytes), old `a36ea059…` oracle 8 tables/25 files/
+4,686 panel records/42 derived records PASS(4.47초, 232,402,944 bytes).
+전체 ordered physical scalar/JSON·schema·decoded values 및 logical metadata를
+대조했으며 row-group 변경에 따른 consumer Parquet SHA 차이만 허용했다.
+Ruff/diff check PASS. `_sequence`, `_scope`, `approved_additive`, `derive_quarter`
+AST는 frozen951과 동일하다. 테스트는 2 GiB hard per-process AS 및 sampled
+process-group RSS/300초 guard, Polars2/BLAS·OMP·Rayon1, Python socket deny
+아래 실행했고 skip 또는 resource stop이 없었다. sampled RSS와 hard virtual
+address-space limit는 같은 보장이 아니다.
+
+이는 writer의 작은 fixture 검증이며 새 frozen SHA의 독립 검증·lead 인수·
+actual 실행 GO는 아직 대기한다. Raw50/KDP 승인과 원본 source-generation
+identity는 불변이다. History/financial READY, main merge, 실제 JNJ memory
+수락을 선언하지 않는다. 이전 actual 실패 root와 원본 reported bytes는 불변이다.

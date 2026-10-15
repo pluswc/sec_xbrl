@@ -11,6 +11,7 @@ import gc
 import hashlib
 import json
 import marshal
+import os
 import re
 import shutil
 import sqlite3
@@ -37,6 +38,7 @@ from sec_xbrl.history import (
     _finalize_staged_records,
     _history_dataset_path,
     _iter_history_records,
+    _open_recovery_path,
     _rename_history_directory,
     _retain_history_artifacts,
     _sha256_file,
@@ -170,23 +172,90 @@ class _QuarterSpill:
 
     def __init__(self, directory: Path):
         _check_history_storage(directory)
-        self.path = directory / "quarter-spill.sqlite"
-        # Exclusive creation inside the owned staging root, with no reuse.
-        with self.path.open("xb"):
-            pass
-        self.bindings = {path: (path.stat().st_dev, path.stat().st_ino)
-                         for path in (self.path, directory, *directory.parents)}
-        self.db = sqlite3.connect(self.path)
-        self.db.execute("PRAGMA cache_size=-2048")
-        self.db.execute("PRAGMA journal_mode=PERSIST")
-        self.db.execute("PRAGMA temp_store=FILE")
-        self.db.execute("PRAGMA mmap_size=0")
-        self.db.execute("CREATE TABLE records (ordinal INTEGER PRIMARY KEY, bucket INTEGER, key BLOB, original_key BLOB, value BLOB, UNIQUE(bucket,key))")
-        self.db.execute("CREATE INDEX bucket_order ON records(bucket,ordinal)")
-        self.next_bucket = 0
+        self.path = directory / "quarter-spill.records"
+        self.db = None
+        self.fd = None
+        self.directory_fd = _open_recovery_path(directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            # The named diagnostic journal is never reopened for writes.
+            self.fd = os.open(self.path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                              0o600, dir_fd=self.directory_fd)
+            owned = os.fstat(self.fd)
+            parent = os.fstat(self.directory_fd)
+            self.directory_stamp = (parent.st_mtime_ns, parent.st_ctime_ns)
+            self.bindings = {path: (path.stat().st_dev, path.stat().st_ino)
+                             for path in directory.parents}
+            self.bindings[directory] = (parent.st_dev, parent.st_ino)
+            self.bindings[self.path] = (owned.st_dev, owned.st_ino)
+            self.check()
+            # Empty filename asks the trusted SQLite VFS for a private on-disk
+            # temporary database. No publication pathname or sidecar is opened.
+            self.db = sqlite3.connect("")
+            self.check()
+            options = {row[0] for row in self.execute("PRAGMA compile_options")}
+            if "TEMP_STORE=3" in options:
+                raise ValueError("quarter spill requires SQLite disk-backed temporary storage")
+            self.execute("PRAGMA temp_store=FILE")
+            if self.execute("PRAGMA temp_store").fetchone() != (1,):
+                raise ValueError("quarter spill temporary storage is not FILE")
+            self.execute("PRAGMA cache_size=-2048")
+            self.execute("PRAGMA mmap_size=0")
+            # This index is disposable; the held-FD record journal, not SQLite
+            # rollback, is retained evidence. No named DB journal is required.
+            self.execute("PRAGMA journal_mode=OFF")
+            self.execute("CREATE TABLE records (ordinal INTEGER PRIMARY KEY, bucket INTEGER, key BLOB, original_key BLOB, value BLOB, UNIQUE(bucket,key))")
+            self.execute("CREATE INDEX bucket_order ON records(bucket,ordinal)")
+            self.next_bucket = 0
+            self.sequence_number = 0
+            self._append_event({"event": "OPEN", "version": "quarter-spill-records-v1",
+                                "sqlite_version": sqlite3.sqlite_version, "temp_store": "FILE",
+                                "cache_kib": 2048, "index": "anonymous-disposable"})
+        except BaseException:
+            self.close()
+            raise
+
+    def execute(self, sql, parameters=()):
+        self.check()
+        return self.db.execute(sql, parameters)
+
+    def _append_event(self, event):
+        self.check()
+        payload = _spill_pack(event)
+        frame = len(payload).to_bytes(8, "big") + hashlib.sha256(payload).digest()
+        for part in (frame, payload):
+            remaining = memoryview(part)
+            while remaining:
+                written = os.write(self.fd, remaining)
+                if written <= 0:
+                    raise OSError("quarter spill journal short write")
+                remaining = remaining[written:]
+
+    def mutate(self, operation, bucket, key, value=None):
+        self.check()
+        self.sequence_number += 1
+        sequence = self.sequence_number
+        self._append_event({"event": "PLANNED", "sequence": sequence,
+                            "operation": operation, "bucket": bucket, "key": key, "value": value})
+        if operation == "SET":
+            self.execute("INSERT INTO records(bucket,key,original_key,value) VALUES(?,?,?,?) ON CONFLICT(bucket,key) DO UPDATE SET value=excluded.value",
+                            (bucket, _SpillMap._key(key), _spill_pack(key), _spill_pack((key, value))))
+            row = self.execute("SELECT ordinal,original_key FROM records WHERE bucket=? AND key=?",
+                                  (bucket, _SpillMap._key(key))).fetchone()
+            evidence = {"ordinal": row[0], "original_key": _spill_unpack(row[1])}
+        elif operation == "DELETE":
+            changed = self.execute("DELETE FROM records WHERE bucket=? AND key=?", (bucket, _SpillMap._key(key))).rowcount
+            if not changed:
+                # A PLANNED event without APPLIED is deliberately not reported
+                # as committed or rolled back. Public recovery fails normally.
+                raise KeyError(key)
+            evidence = {}
+        else:
+            raise ValueError("unknown private quarter spill mutation")
+        self._append_event({"event": "APPLIED", "sequence": sequence, **evidence})
 
     def mapping(self):
         self.next_bucket += 1
+        self._append_event({"event": "BUCKET", "bucket": self.next_bucket})
         return _SpillMap(self, self.next_bucket)
 
     def sequence(self):
@@ -194,6 +263,12 @@ class _QuarterSpill:
 
     def check(self):
         _check_history_storage(self.path.parent)
+        parent = os.fstat(self.directory_fd)
+        if (parent.st_mtime_ns, parent.st_ctime_ns) != self.directory_stamp:
+            raise ValueError("quarter spill ownership changed; directory entries changed")
+        owned = os.fstat(self.fd)
+        if (owned.st_dev, owned.st_ino) != self.bindings[self.path]:
+            raise ValueError("quarter spill file descriptor ownership changed")
         for path, expected in self.bindings.items():
             try:
                 actual = path.stat(follow_symlinks=False)
@@ -205,9 +280,20 @@ class _QuarterSpill:
     def checkpoint(self):
         self.check()
         self.db.commit()
+        self._append_event({"event": "CHECKPOINT", "sequence": self.sequence_number})
+        os.fsync(self.fd)
 
     def close(self):
-        self.db.close()
+        # Reclaim only SQLite's anonymous cache. Named evidence is never deleted.
+        if self.db is not None:
+            self.db.close()
+            self.db = None
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
+        if self.directory_fd is not None:
+            os.close(self.directory_fd)
+            self.directory_fd = None
 
     def resolve(self, locator):
         cell = _SpillMap(self, locator["cells"])[locator["cell_key"]]
@@ -240,30 +326,31 @@ class _SpillMap(MutableMapping):
         return json.dumps(typed(key), ensure_ascii=True, separators=(",", ":")).encode()
 
     def __getitem__(self, key):
-        row = self.spill.db.execute("SELECT value FROM records WHERE bucket=? AND key=?", (self.bucket, self._key(key))).fetchone()
+        self.spill.check()
+        row = self.spill.execute("SELECT value FROM records WHERE bucket=? AND key=?", (self.bucket, self._key(key))).fetchone()
         if row is None:
             raise KeyError(key)
         return _spill_unpack(row[0])[1]
 
     def __setitem__(self, key, value):
         # UPDATE preserves the first ordinal; INSERT OR REPLACE would not.
-        self.spill.check()
-        self.spill.db.execute("INSERT INTO records(bucket,key,original_key,value) VALUES(?,?,?,?) ON CONFLICT(bucket,key) DO UPDATE SET value=excluded.value", (self.bucket, self._key(key), _spill_pack(key), _spill_pack((key, value))))
+        self.spill.mutate("SET", self.bucket, key, value)
 
     def __delitem__(self, key):
-        self.spill.check()
-        if not self.spill.db.execute("DELETE FROM records WHERE bucket=? AND key=?", (self.bucket, self._key(key))).rowcount:
-            raise KeyError(key)
+        self.spill.mutate("DELETE", self.bucket, key)
 
     def __iter__(self):
-        for row in self.spill.db.execute("SELECT original_key FROM records WHERE bucket=? ORDER BY ordinal", (self.bucket,)):
+        self.spill.check()
+        for row in self.spill.execute("SELECT original_key FROM records WHERE bucket=? ORDER BY ordinal", (self.bucket,)):
             yield _spill_unpack(row[0])
 
     def __len__(self):
-        return self.spill.db.execute("SELECT count(*) FROM records WHERE bucket=?", (self.bucket,)).fetchone()[0]
+        self.spill.check()
+        return self.spill.execute("SELECT count(*) FROM records WHERE bucket=?", (self.bucket,)).fetchone()[0]
 
     def values(self):
-        for row in self.spill.db.execute("SELECT value FROM records WHERE bucket=? ORDER BY ordinal", (self.bucket,)):
+        self.spill.check()
+        for row in self.spill.execute("SELECT value FROM records WHERE bucket=? ORDER BY ordinal", (self.bucket,)):
             yield _spill_unpack(row[0])[1]
 
     def records(self):
@@ -282,16 +369,17 @@ class _SpillSequence(Sequence):
         return self.mapping.values()
 
     def __getitem__(self, index):
+        self.mapping.spill.check()
         if isinstance(index, slice):
             start, stop, step = index.indices(len(self))
             if step != 1:
                 raise ValueError("spill slices require ordered contiguous records")
-            return tuple(_spill_unpack(row[0])[1] for row in self.mapping.spill.db.execute("SELECT value FROM records WHERE bucket=? ORDER BY ordinal LIMIT ? OFFSET ?", (self.mapping.bucket, max(0, stop-start), start)))
+            return tuple(_spill_unpack(row[0])[1] for row in self.mapping.spill.execute("SELECT value FROM records WHERE bucket=? ORDER BY ordinal LIMIT ? OFFSET ?", (self.mapping.bucket, max(0, stop-start), start)))
         if index < 0:
             index += len(self)
         if index < 0 or index >= len(self):
             raise IndexError(index)
-        row = self.mapping.spill.db.execute("SELECT value FROM records WHERE bucket=? ORDER BY ordinal LIMIT 1 OFFSET ?", (self.mapping.bucket, index)).fetchone()
+        row = self.mapping.spill.execute("SELECT value FROM records WHERE bucket=? ORDER BY ordinal LIMIT 1 OFFSET ?", (self.mapping.bucket, index)).fetchone()
         if row is None:
             raise IndexError(index)
         return _spill_unpack(row[0])[1]
