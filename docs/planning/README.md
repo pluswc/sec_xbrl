@@ -14,6 +14,12 @@
 [T3 참조 결함과 확장 중지](../implementation/universe50-t3-reference-hold-20261017.md)에
 따라 **HOLD_FINANCIAL_EXPANSION_PENDING_T3_REFERENCE_DISPOSITION**다.
 
+2026-10-17 추가 후속: T3 참조 결함 수리·재감사 뒤 확장 재개는 사용자가 별도로
+승인해 수리 중이다. generic producer를 기존 manual reviewed-Q4 completion으로
+표현할 수 없는 별도 계약 공백과 리드의 범위 판단 항목은
+[50사 generic metric identity attestation 제안](../implementation/universe50-generic-metric-identity-proposal-20261017.md)에
+기록한다. 이 링크는 해당 제안의 구현이나 데이터 실행을 승인하지 않는다.
+
 ## 읽기 순서와 문서 소유권
 
 | 문서 | 역할 |
