@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
+import os
+import signal
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -168,3 +172,141 @@ def test_runner_has_no_network_or_collector_call() -> None:
     assert "offline=True" in source
     assert "SECArchiveClient" not in source
     assert "collect_universe(" not in source
+
+
+def test_direct_worker_callback_is_rejected_before_history(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    called = False
+
+    def forbidden(**_):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(runner, "validate_go", lambda *args: ({}, {}))
+    monkeypatch.setattr(runner.history, "build_history", forbidden, raising=False)
+    with pytest.raises(PermissionError, match="direct worker"):
+        runner.build_worker(tmp_path / "config", "CVX", tmp_path / "go", None)
+    assert called is False
+
+
+def test_worker_rechecks_bulk_gate_after_supervisor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(runner, "validate_go", lambda *args: ({}, {}))
+    with pytest.raises(ValueError, match="later-45"):
+        runner.build_worker(
+            tmp_path / "config",
+            "AAPL",
+            tmp_path / "go",
+            runner._SUPERVISOR_CAPABILITY,
+        )
+
+
+def test_supervised_first5_worker_passes_boundary(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class ReachedGuardedWork(Exception):
+        pass
+
+    monkeypatch.setattr(runner, "validate_go", lambda *args: ({}, {}))
+    monkeypatch.setattr(runner, "candidate_rows", lambda _: {"CVX": {}})
+    monkeypatch.setattr(
+        runner,
+        "manifest",
+        lambda _: (_ for _ in ()).throw(ReachedGuardedWork()),
+    )
+    with pytest.raises(ReachedGuardedWork):
+        runner.build_worker(
+            tmp_path / "config",
+            "CVX",
+            tmp_path / "go",
+            runner._SUPERVISOR_CAPABILITY,
+        )
+
+
+def test_supervisor_capability_requires_pipe_and_parent_lock(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    token = b"x" * 32
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, token)
+    os.close(write_fd)
+    monkeypatch.setenv("SEC_XBRL_T3V2_SUPERVISOR_FD", str(read_fd))
+    monkeypatch.setenv("SEC_XBRL_T3V2_SUPERVISOR_PID", "123")
+    monkeypatch.setenv("SEC_XBRL_T3V2_SUPERVISOR_SHA256", runner.hashlib.sha256(token).hexdigest())
+    for name, value in {
+        "POLARS_MAX_THREADS": "2",
+        "OMP_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "NUMEXPR_NUM_THREADS": "1",
+    }.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(runner.os, "getppid", lambda: 123)
+    monkeypatch.setattr(
+        runner.fcntl,
+        "flock",
+        lambda *_: (_ for _ in ()).throw(BlockingIOError()),
+    )
+    assert (
+        runner.receive_supervisor({"collection_root": str(tmp_path)})
+        is runner._SUPERVISOR_CAPABILITY
+    )
+
+
+def test_direct_worker_cli_boundary_has_no_capability(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    for name in (
+        "SEC_XBRL_T3V2_SUPERVISOR_FD",
+        "SEC_XBRL_T3V2_SUPERVISOR_PID",
+        "SEC_XBRL_T3V2_SUPERVISOR_SHA256",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(PermissionError, match="inherited supervisor"):
+        runner.receive_supervisor({"collection_root": str(tmp_path)})
+
+
+def test_heavy_lock_contention(tmp_path: Path) -> None:
+    with (
+        runner.heavy_lock(tmp_path),
+        pytest.raises(ValueError, match="another heavy"),
+        runner.heavy_lock(tmp_path),
+    ):
+        pass
+
+
+@pytest.mark.parametrize(
+    ("rss", "clocks", "expected"),
+    [(2, iter((0.0, 0.0, 0.1)), "RSS_LIMIT"), (0, iter((0.0, 2.0, 2.1)), "TIMEOUT")],
+)
+def test_monitor_terminates_then_kills_synthetic_process(rss: int, clocks, expected: str) -> None:
+    class Process:
+        pid = 77
+
+        def __init__(self) -> None:
+            self.waits = 0
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            self.waits += 1
+            if timeout is not None:
+                raise subprocess.TimeoutExpired("synthetic", timeout)
+            return -signal.SIGKILL
+
+    process, kills = Process(), []
+    result = runner.monitor_process(
+        process,
+        io.StringIO(),
+        limit_kib=1,
+        timeout_seconds=1,
+        rss_reader=lambda _: rss,
+        clock=lambda: next(clocks),
+        sleeper=lambda _: None,
+        kill_group=lambda pid, sig: kills.append((pid, sig)),
+    )
+    assert result[2] == expected
+    assert kills == [(77, signal.SIGTERM), (77, signal.SIGKILL)]

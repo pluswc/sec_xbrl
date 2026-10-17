@@ -12,10 +12,11 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterator, Sequence
+from typing import Any
 
 from sec_xbrl import collection_operations as ops
 from sec_xbrl import history
@@ -33,6 +34,7 @@ LIMIT_KIB, TIMEOUT = 16 * 1024 * 1024, 10_800
 CONFIG_SCHEMA = "universe50-t3v2-ops-config-v1"
 PREFLIGHT_SCHEMA = "universe50-t3v2-ops-preflight-v1"
 GO_SCHEMA = "universe50-t3v2-stage-go-v1"
+_SUPERVISOR_CAPABILITY = object()
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -121,7 +123,7 @@ def load_config(path: Path) -> tuple[dict[str, Any], str]:
     if Path(config["collection_root"]).name != config.get("run_id"):
         raise ValueError("collection_root basename must equal run_id")
     if not isinstance(config.get("engine_checkout"), str):
-        raise ValueError("engine_checkout is required")
+        raise TypeError("engine_checkout is required")
     if config.get("first5") != list(FIRST5):
         raise ValueError("first5 scope differs")
     if config.get("limits") != {
@@ -514,7 +516,81 @@ def heavy_lock(root: Path) -> Iterator[None]:
         yield
 
 
-def run_guarded_worker(config_path: Path, ticker: str, go_path: Path) -> None:
+def receive_supervisor(config: dict[str, Any]) -> object:
+    """Consume the one-shot inherited capability and prove the parent owns the heavy lock."""
+    try:
+        descriptor = int(os.environ["SEC_XBRL_T3V2_SUPERVISOR_FD"])
+        parent_pid = int(os.environ["SEC_XBRL_T3V2_SUPERVISOR_PID"])
+        expected = os.environ["SEC_XBRL_T3V2_SUPERVISOR_SHA256"]
+    except (KeyError, ValueError) as exc:
+        raise PermissionError("worker requires an inherited supervisor capability") from exc
+    if os.getppid() != parent_pid:
+        raise PermissionError("worker supervisor parent identity differs")
+    with os.fdopen(descriptor, "rb", closefd=True) as stream:
+        token = stream.read(33)
+    if len(token) != 32 or hashlib.sha256(token).hexdigest() != expected:
+        raise PermissionError("worker supervisor capability is invalid")
+    expected_environment = {
+        "POLARS_MAX_THREADS": "2",
+        "OMP_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "NUMEXPR_NUM_THREADS": "1",
+    }
+    if any(os.environ.get(name) != value for name, value in expected_environment.items()):
+        raise PermissionError("worker resource environment differs")
+    with (Path(config["collection_root"]) / ".one-heavy.lock").open(
+        "a+", encoding="utf-8"
+    ) as stream:
+        try:
+            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            pass
+        else:
+            fcntl.flock(stream, fcntl.LOCK_UN)
+            raise PermissionError("worker requires the parent-held heavy lock")
+    return _SUPERVISOR_CAPABILITY
+
+
+def monitor_process(
+    process: Any,
+    samples: Any,
+    *,
+    limit_kib: int = LIMIT_KIB,
+    timeout_seconds: float = TIMEOUT,
+    rss_reader: Any = process_tree_rss_kib,
+    clock: Any = time.monotonic,
+    sleeper: Any = time.sleep,
+    kill_group: Any = os.killpg,
+) -> tuple[int, int, str | None, float]:
+    """Supervise one process tree; tests inject clocks and process controls."""
+    started, peak, stopped = clock(), 0, None
+    while process.poll() is None:
+        elapsed, rss = clock() - started, rss_reader(process.pid)
+        peak = max(peak, rss)
+        samples.write(json.dumps({"elapsed_seconds": round(elapsed, 3), "rss_kib": rss}) + "\n")
+        samples.flush()
+        stopped = (
+            "RSS_LIMIT" if rss > limit_kib else "TIMEOUT" if elapsed > timeout_seconds else None
+        )
+        if stopped:
+            kill_group(process.pid, signal.SIGTERM)
+            try:
+                process.wait(10)
+            except subprocess.TimeoutExpired:
+                kill_group(process.pid, signal.SIGKILL)
+            break
+        sleeper(0.25)
+    return process.wait(), peak, stopped, clock() - started
+
+
+def run_guarded_worker(
+    config_path: Path,
+    ticker: str,
+    go_path: Path,
+    gate: Path | None,
+    gate_sha: str | None,
+) -> None:
     config, _, _ = validate_preflight(config_path)
     evidence = Path(config["collection_root"]) / "execution" / ticker
     evidence.mkdir(parents=True, exist_ok=True)
@@ -535,6 +611,10 @@ def run_guarded_worker(config_path: Path, ticker: str, go_path: Path) -> None:
         "--go-file",
         str(go_path.absolute()),
     ]
+    if gate is not None and gate_sha is not None:
+        command.extend(
+            ["--first5-acceptance", str(gate.absolute()), "--first5-acceptance-sha256", gate_sha]
+        )
     env = os.environ.copy()
     env.update(
         POLARS_MAX_THREADS="2",
@@ -543,31 +623,35 @@ def run_guarded_worker(config_path: Path, ticker: str, go_path: Path) -> None:
         MKL_NUM_THREADS="1",
         NUMEXPR_NUM_THREADS="1",
     )
-    started, peak, stopped = time.monotonic(), 0, None
+    token = os.urandom(32)
+    read_fd, write_fd = os.pipe()
+    env.update(
+        SEC_XBRL_T3V2_SUPERVISOR_FD=str(read_fd),
+        SEC_XBRL_T3V2_SUPERVISOR_PID=str(os.getpid()),
+        SEC_XBRL_T3V2_SUPERVISOR_SHA256=hashlib.sha256(token).hexdigest(),
+    )
     with log.open("x", encoding="utf-8") as out, samples.open("x", encoding="utf-8") as rss_out:
-        process = subprocess.Popen(
-            command, stdout=out, stderr=subprocess.STDOUT, start_new_session=True, env=env
-        )
-        while process.poll() is None:
-            elapsed, rss = time.monotonic() - started, process_tree_rss_kib(process.pid)
-            peak = max(peak, rss)
-            rss_out.write(json.dumps({"elapsed_seconds": round(elapsed, 3), "rss_kib": rss}) + "\n")
-            rss_out.flush()
-            stopped = "RSS_LIMIT" if rss > LIMIT_KIB else "TIMEOUT" if elapsed > TIMEOUT else None
-            if stopped:
-                os.killpg(process.pid, signal.SIGTERM)
-                try:
-                    process.wait(10)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                break
-            time.sleep(0.25)
-        code = process.wait()
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=out,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                env=env,
+                pass_fds=(read_fd,),
+            )
+        finally:
+            os.close(read_fd)
+        try:
+            os.write(write_fd, token)
+        finally:
+            os.close(write_fd)
+        code, peak, stopped, elapsed = monitor_process(process, rss_out)
     result = {
         "schema_version": "universe50-t3v2-resource-run-v1",
         "status": stopped or ("PASS" if code == 0 else "FAIL"),
         "returncode": code,
-        "elapsed_seconds": round(time.monotonic() - started, 3),
+        "elapsed_seconds": round(elapsed, 3),
         "peak_process_tree_rss_kib": peak,
         "limit_kib": LIMIT_KIB,
         "timeout_seconds": TIMEOUT,
@@ -580,8 +664,20 @@ def run_guarded_worker(config_path: Path, ticker: str, go_path: Path) -> None:
         raise RuntimeError(f"guarded build failed: {result['status']} ({summary})")
 
 
-def build_worker(config_path: Path, ticker: str, go_path: Path) -> Path:
+def build_worker(
+    config_path: Path,
+    ticker: str,
+    go_path: Path,
+    supervisor: object | None,
+    gate: Path | None = None,
+    gate_sha: str | None = None,
+) -> Path:
     config, preflight = validate_go(config_path, "build-one", (ticker,), go_path)
+    if supervisor is not _SUPERVISOR_CAPABILITY:
+        raise PermissionError("direct worker invocation is unsupported")
+    validate_bulk_gate(ticker, gate, gate_sha)
+    if ticker not in candidate_rows(config):
+        raise ValueError("worker ticker is outside exact-50")
     target_manifest, destination = (
         manifest(config),
         Path(config["history_root"]) / f"{ticker}-t3v2-{config['run_id']}",
@@ -672,7 +768,7 @@ def build_one(
     ):
         raise ValueError("build requires RAW_COMPLETE selected=held, pending=failed=0")
     with heavy_lock(Path(config["collection_root"])):
-        run_guarded_worker(config_path, ticker, go_path)
+        run_guarded_worker(config_path, ticker, go_path, gate, gate_sha)
     marker = validate_existing_build(config, ticker, preflight)
     if (
         marker is None
@@ -732,6 +828,8 @@ def parser() -> argparse.ArgumentParser:
     worker.add_argument("--config", type=Path, required=True)
     worker.add_argument("--ticker", required=True)
     worker.add_argument("--go-file", type=Path, required=True)
+    worker.add_argument("--first5-acceptance", type=Path)
+    worker.add_argument("--first5-acceptance-sha256")
     return value
 
 
@@ -755,7 +853,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.command == "status":
         result = scoped_status(args.config, args.scope_ticker)
     else:
-        result = build_worker(args.config, args.ticker.upper(), args.go_file)
+        config, _ = load_config(args.config)
+        supervisor = receive_supervisor(config)
+        result = build_worker(
+            args.config,
+            args.ticker.upper(),
+            args.go_file,
+            supervisor,
+            args.first5_acceptance,
+            args.first5_acceptance_sha256,
+        )
     print(
         json.dumps(result, indent=2, sort_keys=True, default=str)
         if isinstance(result, dict)

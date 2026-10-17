@@ -34,6 +34,13 @@ publication hash와 receipt가 모두 일치할 때만 허용한다.
 partial output, marker 없는 output, 변경된 output은 자동 재시도하거나 성공으로 표시하지
 않는다. 기존 collector/discovery 엔진은 수정하지 않는다.
 
+heavy worker는 지원되는 독립 실행 진입점이 아니다. `build-one` 부모가 heavy lock을
+보유한 채 생성한 32-byte one-shot pipe capability, 부모 PID, 고정 resource environment를
+worker가 모두 검증해야 한다. 같은 GO만으로 내부 worker CLI나 Python callback을 직접
+호출하면 History builder 전에 실패한다. worker도 exact-50 ticker와 first-5 이후의
+financial acceptance hash를 다시 검증한다. 부모 supervisor만 process-tree RSS와
+timeout을 감시하고 한도 초과 시 process group에 TERM 뒤 필요하면 KILL을 보낸다.
+
 ## 설정·GO·자원 경계
 
 config schema는 `universe50-t3v2-ops-config-v1`이며 `run_id`, source SHA, exact
