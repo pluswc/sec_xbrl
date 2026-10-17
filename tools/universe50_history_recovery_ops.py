@@ -33,7 +33,33 @@ FINANCIAL_ACCEPTANCE_VERSION = "universe50-first5-financial-acceptance-v1"
 FINANCIAL_ACCEPTANCE_STATUS = "LOCALLY_ACCEPTED_FIRST5_FINANCIAL"
 RUNNER_BASE_SHA = "9b6e7ec906382fba92adb5209c5b439fc7d7d6ba"
 ENGINE_BASE_SHA = "8a1b40ab1008fb9109a27b2a5bcea02a257e1694"
-FINANCIAL_SOURCE_SHA = RUNNER_BASE_SHA
+FINANCIAL_SOURCE_SHA = "fd9a17910a7b1cfbb4e71e2ded6f4bc23cda686e"
+PRIOR_RECOVERY_SOURCE_SHA = "a02c4aef36a28c3673185ddebefc01efaa8fe0ff"
+PRIOR_RECOVERY_SOURCE_TREE = "de682369314a3c74c2e727abfdb68c51c6874f55"
+PRIOR_RECOVERY_PROGRAM_SHA256 = "e18b3157a350f6b70a4563a775fd13aa3114f32b18a695d909ed13c1fca77c33"
+PRIOR_RECOVERY_RESOURCE_OPS_SHA256 = (
+    "5e4a249070e25359ec406c0c727bb0f919ffdd55624936f630e0325a41b3e4f9"
+)
+PRIOR_RECOVERY_ACCEPTANCE_SHA256 = (
+    "8487366d30a29d2d8f225e911ab91f50fb962dbacce07f1edcf71dd168a5a331"
+)
+PRIOR_RECOVERY_CONFIG_SHA256 = (
+    "00f61854cf8a0a84c7ed11d11d07005d16216f56a7d10c3e9524f70645952542"
+)
+PRIOR_RECOVERY_PREFLIGHT_SHA256 = (
+    "aa779aa51cd14dd78bc179412571f3c1bbd1aa5a8575a316269a5f6d605b7f4a"
+)
+PRIOR_RECOVERY_REQUEST_SHA256 = (
+    "8206a0a01dcf813e1cfdfe8f9a657a88b591fe34313027851e7b3c2cb6fb15da"
+)
+PRIOR_RECOVERY_GO_SHA256 = (
+    "5c410067c12fbf49b69809b86a76034063c5312e21a861732ddd306ddf204c21"
+)
+PRIOR_RECOVERY_SUMMARY_SHA256 = (
+    "0c07d38130312434acdcfc40cb87cd66c1c6d0774211884948a5620b9e5ae574"
+)
+PRIOR_RECOVERY_ACCEPTANCE_VERSION = "lead-history-recovery-source-synthetic-acceptance-v1"
+PRIOR_RECOVERY_ACCEPTANCE_STATUS = "LOCALLY_ACCEPTED_HISTORY_RECOVERY_SOURCE_AND_SYNTHETIC"
 GRAPH_RULE_VERSION = "analysis-t3-exploration-graph-v2"
 FINANCIAL_AS_OF = "2026-10-10"
 METADATA_CUTOFF = "2026-10-13T23:59:59Z"
@@ -307,6 +333,7 @@ def _validate_shape(value: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(declaration, dict) or set(declaration) not in (
             {"path", "sha256"},
             {"path", "sha256", "legacy_ops"},
+            {"path", "sha256", "recovery_ops"},
         ):
             raise ValueError("prior failed attempt declaration differs")
         _absolute(declaration["path"], "prior failed attempt")
@@ -539,7 +566,7 @@ def _verify_financial_acceptance(config: dict[str, Any]) -> dict[str, Any] | Non
         raise ValueError("first-five financial acceptance scope differs")
     first5_path = _pin(value["first5_config"], "accepted first-five config")
     first5 = _read_json(first5_path, "accepted first-five config")
-    # This process imports the 8a History engine. Canonical 9b validation runs
+    # This process imports the 8a History engine. Canonical financial validation runs
     # only in an isolated interpreter; no FULL financial execution is invented.
     source = first5.get("source") or {}
     checkout = _directory(
@@ -718,6 +745,348 @@ def _legacy_failure_root(
     }
 
 
+def _verify_prior_recovery_acceptance(
+    witness: dict[str, Any], old: dict[str, Any]
+) -> dict[str, Any]:
+    acceptance_path = _pin(witness["source_acceptance"], "prior recovery source acceptance")
+    if _sha256(acceptance_path) != PRIOR_RECOVERY_ACCEPTANCE_SHA256:
+        raise ValueError("prior recovery source acceptance is not the accepted a02 artifact")
+    acceptance = _read_json(acceptance_path, "prior recovery source acceptance")
+    if (
+        acceptance.get("schema_version") != PRIOR_RECOVERY_ACCEPTANCE_VERSION
+        or acceptance.get("status") != PRIOR_RECOVERY_ACCEPTANCE_STATUS
+        or acceptance.get("source_head") != PRIOR_RECOVERY_SOURCE_SHA
+        or acceptance.get("source_tree") != PRIOR_RECOVERY_SOURCE_TREE
+        or acceptance.get("checkout") != old["runner"]["checkout"]
+        or acceptance.get("actual_JNJ_retry_authorized") is not False
+    ):
+        raise ValueError("prior recovery source acceptance identity differs")
+    for key in ("independent_report", "writer_report", "lead_contract"):
+        _pin(acceptance.get(key), f"prior recovery acceptance {key}")
+    return {"path": str(acceptance_path), "sha256": _sha256(acceptance_path)}
+
+
+def _verify_prior_engine_snapshot(old: dict[str, Any], snapshot: Any) -> None:
+    declaration = old["engine"]
+    if not isinstance(snapshot, dict):
+        raise TypeError("prior recovery engine snapshot is required")
+    acceptance_path = _pin(declaration["source_acceptance"], "prior engine source acceptance")
+    acceptance = _read_json(acceptance_path, "prior engine source acceptance")
+    hashes = acceptance.get("module_sha256s")
+    if (
+        acceptance.get("schema_version") != ENGINE_ACCEPTANCE_VERSION
+        or acceptance.get("status") != ENGINE_ACCEPTANCE_STATUS
+        or acceptance.get("engine_source_head") != declaration["head"]
+        or acceptance.get("engine_base_sha") != ENGINE_BASE_SHA
+        or acceptance.get("graph_rule_version") != GRAPH_RULE_VERSION
+        or not isinstance(hashes, dict)
+        or set(hashes) != set(ENGINE_MODULES)
+    ):
+        raise ValueError("prior recovery engine acceptance differs")
+    _pin(acceptance.get("independent_report"), "prior engine independent report")
+    checkout = _directory(Path(declaration["checkout"]), "prior recovery engine checkout")
+    _git_state(checkout, declaration["head"], "prior recovery engine")
+    ancestor = subprocess.run(
+        ["git", "-C", str(checkout), "merge-base", "--is-ancestor", ENGINE_BASE_SHA, declaration["head"]],
+        check=False,
+    )
+    if ancestor.returncode != 0:
+        raise ValueError("prior recovery engine is not based on accepted 8a")
+    expected_files = {}
+    for name, relative in ENGINE_MODULES.items():
+        path = _regular(checkout / relative, f"prior recovery engine module {name}")
+        digest = _sha256(path)
+        if digest != _sha(hashes[name], f"prior recovery engine module {name}"):
+            raise ValueError(f"prior recovery engine module changed: {name}")
+        expected_files[name] = {"path": str(path), "sha256": digest}
+    if snapshot != {
+        "checkout": str(checkout),
+        "head": declaration["head"],
+        "base": ENGINE_BASE_SHA,
+        "acceptance": {"path": str(acceptance_path), "sha256": _sha256(acceptance_path)},
+        "independent_report": acceptance["independent_report"],
+        "files": expected_files,
+    }:
+        raise ValueError("prior recovery engine snapshot differs")
+
+
+def _recovery_failure_root(
+    config: dict[str, Any],
+    attempt: Path,
+    failure: dict[str, Any],
+    witness: Any,
+) -> tuple[Path, dict[str, Any]]:
+    """Bind an accepted a02 recovery TIMEOUT without treating it as native failure."""
+    expected_keys = {"config", "preflight", "request", "go", "program", "source_acceptance"}
+    if not isinstance(witness, dict) or set(witness) != expected_keys:
+        raise ValueError("recovery OPS failure witness pins differ")
+    config_path = _pin(witness["config"], "prior recovery config")
+    preflight_path = _pin(witness["preflight"], "prior recovery preflight")
+    request_path = _pin(witness["request"], "prior recovery request")
+    go_path = _pin(witness["go"], "prior recovery GO")
+    program = _pin(witness["program"], "prior recovery program")
+    exact_hashes = {
+        "config": (config_path, PRIOR_RECOVERY_CONFIG_SHA256),
+        "preflight": (preflight_path, PRIOR_RECOVERY_PREFLIGHT_SHA256),
+        "request": (request_path, PRIOR_RECOVERY_REQUEST_SHA256),
+        "go": (go_path, PRIOR_RECOVERY_GO_SHA256),
+        "summary": (attempt, PRIOR_RECOVERY_SUMMARY_SHA256),
+    }
+    if any(_sha256(path) != expected for path, expected in exact_hashes.values()):
+        raise ValueError("prior recovery operational artifact is not the accepted r1 artifact")
+    old = _validate_shape(_read_json(config_path, "prior recovery config"))
+    if (
+        old["runner"]["head"] != PRIOR_RECOVERY_SOURCE_SHA
+        or old["runner"]["module_sha256s"]
+        != {
+            "runner": PRIOR_RECOVERY_PROGRAM_SHA256,
+            "resource_ops": PRIOR_RECOVERY_RESOURCE_OPS_SHA256,
+        }
+    ):
+        raise ValueError("prior recovery runner source differs")
+    checkout = _directory(Path(old["runner"]["checkout"]), "prior recovery runner checkout")
+    _git_state(checkout, PRIOR_RECOVERY_SOURCE_SHA, "prior recovery runner")
+    tree = subprocess.run(
+        ["git", "-C", str(checkout), "rev-parse", "HEAD^{tree}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    expected_program = _regular(checkout / RUNNER_MODULES["runner"], "prior recovery program")
+    resource_program = _regular(
+        checkout / RUNNER_MODULES["resource_ops"], "prior recovery resource program"
+    )
+    if (
+        tree != PRIOR_RECOVERY_SOURCE_TREE
+        or program != expected_program
+        or _sha256(program) != PRIOR_RECOVERY_PROGRAM_SHA256
+        or _sha256(resource_program) != PRIOR_RECOVERY_RESOURCE_OPS_SHA256
+    ):
+        raise ValueError("prior recovery program identity differs")
+    acceptance_binding = _verify_prior_recovery_acceptance(witness, old)
+
+    if (
+        old["financial_as_of"] != config["financial_as_of"]
+        or old["first5"] != config["first5"]
+        or old["collection"] != config["collection"]
+        or old["limits"] != config["limits"]
+        or old["resource_root"] != config["resource_root"]
+    ):
+        raise ValueError("prior recovery collection, cutoff, or resources differ")
+    for key in ("ticker", "cik", "plan_sha256", "intake_sha256", "selected_filings"):
+        if old["target"][key] != config["target"][key]:
+            raise ValueError("prior recovery target scope differs")
+
+    old_paths = _target_paths(old)
+    expected_preflight_path = Path(old["execution_root"]) / "preflight.json"
+    expected_request_path = Path(old["execution_root"]) / "request.json"
+    expected_summary_path = Path(old["execution_root"]) / "execution.summary.json"
+    if (
+        preflight_path != expected_preflight_path
+        or request_path != expected_request_path
+        or attempt != expected_summary_path
+    ):
+        raise ValueError("prior recovery control location differs")
+    preflight = _read_json(preflight_path, "prior recovery preflight")
+    snapshot = preflight.get("snapshot")
+    if not isinstance(snapshot, dict):
+        raise TypeError("prior recovery preflight snapshot is required")
+    expected_resources = {
+        "process_tree_rss_kib": LIMIT_KIB,
+        "polars_max_threads": POLARS_THREADS,
+        "one_heavy_process": True,
+        "timeout_seconds": TIMEOUT_SECONDS,
+    }
+    config_pin = {"path": str(config_path), "sha256": _sha256(config_path)}
+    if (
+        set(preflight) != {"schema_version", "status", "config", "snapshot", "resources", "execution"}
+        or preflight["schema_version"] != PREFLIGHT_VERSION
+        or preflight["status"] != "PREPARED_SOURCE_ONLY"
+        or preflight["config"] != config_pin
+        or preflight["resources"] != expected_resources
+        or preflight["execution"] != "SEPARATE_ROOT_AUTHORED_EXACT_GO_REQUIRED"
+    ):
+        raise ValueError("prior recovery preflight binding differs")
+    runner_snapshot = snapshot.get("runner")
+    expected_runner_files = {
+        "runner": {"path": str(program), "sha256": PRIOR_RECOVERY_PROGRAM_SHA256},
+        "resource_ops": {
+            "path": str(resource_program),
+            "sha256": PRIOR_RECOVERY_RESOURCE_OPS_SHA256,
+        },
+    }
+    if runner_snapshot != {
+        "checkout": str(checkout),
+        "head": PRIOR_RECOVERY_SOURCE_SHA,
+        "base": RUNNER_BASE_SHA,
+        "files": expected_runner_files,
+    }:
+        raise ValueError("prior recovery runner snapshot differs")
+    _verify_prior_engine_snapshot(old, snapshot.get("engine"))
+    collection_snapshot = snapshot.get("collection")
+    if not isinstance(collection_snapshot, dict):
+        raise TypeError("prior recovery collection snapshot is required")
+    if (
+        collection_snapshot.get("manifest") != old["collection"]["manifest"]
+        or collection_snapshot.get("manifest_sha256") != old["collection"]["manifest_sha256"]
+        or collection_snapshot.get("universe_id") != old["collection"]["universe_id"]
+        or collection_snapshot.get("companies") != old["collection"]["companies"]
+        or collection_snapshot.get("selected_filings") != old["collection"]["selected_filings"]
+    ):
+        raise ValueError("prior recovery collection snapshot differs")
+    target_snapshot = collection_snapshot.get("target")
+    if not isinstance(target_snapshot, dict):
+        raise TypeError("prior recovery target snapshot is required")
+    if (
+        target_snapshot.get("ticker") != old["target"]["ticker"]
+        or target_snapshot.get("cik") != old["target"]["cik"]
+        or target_snapshot.get("selected_filings") != old["target"]["selected_filings"]
+        or target_snapshot.get("plan") != str(old_paths["plan"])
+        or target_snapshot.get("plan_sha256") != old["target"]["plan_sha256"]
+        or target_snapshot.get("intake") != str(old_paths["intake"])
+        or target_snapshot.get("intake_sha256") != old["target"]["intake_sha256"]
+        or target_snapshot.get("destination") != str(old_paths["destination"].absolute())
+        or target_snapshot.get("abandoned_output_roots") != old["target"]["abandoned_output_roots"]
+    ):
+        raise ValueError("prior recovery target snapshot differs")
+    prior_snapshot = target_snapshot.get("prior_failed_attempts")
+    if not isinstance(prior_snapshot, list) or len(prior_snapshot) != len(
+        old["target"]["approved_prior_failed_attempts"]
+    ):
+        raise ValueError("prior recovery failed-attempt snapshot differs")
+    for declaration in old["target"]["approved_prior_failed_attempts"]:
+        matches = [
+            row
+            for row in prior_snapshot
+            if row.get("path") == declaration["path"] and row.get("sha256") == declaration["sha256"]
+        ]
+        if len(matches) != 1 or any(
+            matches[0].get(key) != declaration[key]
+            for key in ("legacy_ops", "recovery_ops")
+            if key in declaration
+        ):
+            raise ValueError("prior recovery failed-attempt snapshot differs")
+    if snapshot.get("first5_financial_acceptance") is not None:
+        raise ValueError("prior first-five recovery cannot carry financial acceptance")
+
+    request = _read_json(request_path, "prior recovery request")
+    expected_request = {
+        "schema_version": REQUEST_VERSION,
+        "status": "AWAITING_EXPLICIT_ROOT_GO",
+        "operation": "recover-history-one",
+        "config_sha256": _sha256(config_path),
+        "preflight_sha256": _sha256(preflight_path),
+        "runner_head": PRIOR_RECOVERY_SOURCE_SHA,
+        "engine_head": old["engine"]["head"],
+        "collection": collection_snapshot,
+        "target": target_snapshot,
+        "first5_financial_acceptance": None,
+    }
+    if request != expected_request:
+        raise ValueError("prior recovery request binding differs")
+    go = _read_json(go_path, "prior recovery GO")
+    expected_go = {
+        "schema_version": GO_VERSION,
+        "status": "GO",
+        "authorized_by": "ROOT_LEAD",
+        "operation": "recover-history-one",
+        "config_sha256": _sha256(config_path),
+        "preflight_sha256": _sha256(preflight_path),
+        "request_sha256": _sha256(request_path),
+        "runner_head": PRIOR_RECOVERY_SOURCE_SHA,
+        "engine_head": old["engine"]["head"],
+        "collection_manifest_sha256": old["collection"]["manifest_sha256"],
+        "target": target_snapshot,
+        "first5_financial_acceptance": None,
+    }
+    if go != expected_go:
+        raise ValueError("prior recovery GO binding differs")
+
+    command = failure.get("command")
+    expected_command_tail = [
+        str(program),
+        "_worker",
+        "--config",
+        str(config_path),
+        "--go-file",
+        str(go_path),
+    ]
+    expected_log = str(attempt.with_suffix(".log"))
+    expected_samples = str(attempt.with_suffix(".rss.jsonl"))
+    elapsed = failure.get("elapsed_seconds")
+    peak = failure.get("peak_process_tree_rss_kib")
+    returncode = failure.get("returncode")
+    if (
+        set(failure)
+        != {
+            "schema_version",
+            "status",
+            "returncode",
+            "elapsed_seconds",
+            "peak_process_tree_rss_kib",
+            "limit_kib",
+            "timeout_seconds",
+            "command",
+            "log",
+            "samples",
+        }
+        or failure["schema_version"] != RESOURCE_VERSION
+        or failure["status"] != "TIMEOUT"
+        or type(returncode) is not int
+        or returncode == 0
+        or not isinstance(elapsed, (int, float))
+        or isinstance(elapsed, bool)
+        or elapsed < TIMEOUT_SECONDS
+        or type(peak) is not int
+        or not 0 < peak <= LIMIT_KIB
+        or failure["limit_kib"] != LIMIT_KIB
+        or failure["timeout_seconds"] != TIMEOUT_SECONDS
+        or not isinstance(command, list)
+        or len(command) != 7
+        or not isinstance(command[0], str)
+        or not Path(command[0]).is_absolute()
+        or command[1:] != expected_command_tail
+        or failure["log"] != expected_log
+        or failure["samples"] != expected_samples
+    ):
+        raise ValueError("prior recovery TIMEOUT summary differs")
+    _regular(Path(expected_log), "prior recovery log")
+    _regular(Path(expected_samples), "prior recovery RSS samples")
+    summary_artifacts = set(Path(old["execution_root"]).glob("execution.summary*"))
+    if summary_artifacts != {attempt, Path(expected_log), Path(expected_samples)}:
+        raise ValueError("unapproved prior recovery attempt")
+
+    root = old_paths["destination"].absolute()
+    current_paths = _target_paths(config)
+    current_destination = current_paths["destination"].absolute()
+    current_execution = Path(config["execution_root"]).absolute()
+    for protected in (
+        Path(old["execution_root"]).absolute(),
+        checkout,
+        Path(old["engine"]["checkout"]).absolute(),
+    ):
+        if any(
+            candidate == protected
+            or candidate.is_relative_to(protected)
+            or protected.is_relative_to(candidate)
+            for candidate in (current_destination, current_execution)
+        ):
+            raise ValueError("new recovery overlaps prior recovery evidence or source")
+    return root, {
+        "path": str(attempt),
+        "sha256": _sha256(attempt),
+        "recovery_ops": witness,
+        "source_acceptance": acceptance_binding,
+        "preflight": {"path": str(preflight_path), "sha256": _sha256(preflight_path)},
+        "request": {"path": str(request_path), "sha256": _sha256(request_path)},
+        "go": {"path": str(go_path), "sha256": _sha256(go_path)},
+        "runner_head": PRIOR_RECOVERY_SOURCE_SHA,
+        "engine_head": old["engine"]["head"],
+        "execution_root": old["execution_root"],
+        "output_root": str(root),
+    }
+
+
 def _target_paths(config: dict[str, Any]) -> dict[str, Path]:
     manifest = Path(config["collection"]["manifest"])
     ticker = config["target"]["ticker"]
@@ -817,6 +1186,7 @@ def _validate_collection_target(config: dict[str, Any]) -> dict[str, Any]:
     declared_attempts = []
     failure_roots = []
     legacy_bindings = []
+    recovery_bindings = []
     for declaration_item in target["approved_prior_failed_attempts"]:
         attempt = _pin(
             {k: declaration_item[k] for k in ("path", "sha256")}, "approved prior failed attempt"
@@ -827,6 +1197,11 @@ def _validate_collection_target(config: dict[str, Any]) -> dict[str, Any]:
                 config, attempt, failure, declaration_item["legacy_ops"]
             )
             legacy_bindings.append(legacy_binding)
+        elif "recovery_ops" in declaration_item:
+            root, recovery_binding = _recovery_failure_root(
+                config, attempt, failure, declaration_item["recovery_ops"]
+            )
+            recovery_bindings.append(recovery_binding)
         else:
             if (
                 attempt.parent != company_attempts
@@ -922,7 +1297,8 @@ def _validate_collection_target(config: dict[str, Any]) -> dict[str, Any]:
             "prior_failed_attempts": [
                 {"path": str(path), "sha256": _sha256(path)} for path in declared_attempts
             ]
-            + legacy_bindings,
+            + legacy_bindings
+            + recovery_bindings,
             "abandoned_output_roots": abandoned,
             "destination": str(destination),
             "receipt": str(paths["receipt"]),

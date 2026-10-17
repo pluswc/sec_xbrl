@@ -271,6 +271,21 @@ def canonical_checkout(tmp_path_factory):
     return checkout
 
 
+@pytest.fixture(scope="module")
+def prior_recovery_checkout(tmp_path_factory):
+    checkout = tmp_path_factory.mktemp("prior-recovery-a02") / "checkout"
+    source = Path(runner.__file__).parents[1]
+    subprocess.run(
+        ["git", "clone", "--quiet", "--shared", "--no-checkout", str(source), str(checkout)],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(checkout), "checkout", "--quiet", runner.PRIOR_RECOVERY_SOURCE_SHA],
+        check=True,
+    )
+    return checkout
+
+
 def _materialize_financial_acceptance(config: dict, tmp_path: Path, checkout: Path) -> Path:
     # Only a genuine-shaped first-five config is constructed; no future 45 pins.
     from tests.unit.test_universe50_financial_ops import _config as financial_config
@@ -352,11 +367,30 @@ def test_later45_gate_requires_canonical_object_cohort_receipts_and_publications
     acceptance = _materialize_financial_acceptance(config, tmp_path, canonical_checkout)
     binding = runner._verify_financial_acceptance(runner._validate_shape(config))
     assert binding is not None
+    assert runner.RUNNER_BASE_SHA == "9b6e7ec906382fba92adb5209c5b439fc7d7d6ba"
+    assert runner.FINANCIAL_SOURCE_SHA == "fd9a17910a7b1cfbb4e71e2ded6f4bc23cda686e"
+    assert runner.FINANCIAL_SOURCE_SHA != runner.RUNNER_BASE_SHA
     assert binding["source_head"] == runner.FINANCIAL_SOURCE_SHA
     assert len(binding["publication_manifests"]) == 17
 
     payload = json.loads(acceptance.read_text())
     payload["companies"] = list(runner.FIRST5)
+    _write(acceptance, payload)
+    config["first5_financial_acceptance"]["sha256"] = runner._sha256(acceptance)
+    with pytest.raises(ValueError, match="scope differs"):
+        runner._verify_financial_acceptance(runner._validate_shape(config))
+
+
+def test_later45_gate_rejects_old_9b_financial_source(
+    tmp_path: Path,
+    canonical_checkout: Path,
+) -> None:
+    config = _config(tmp_path, ticker="X06")
+    manifest = _write(Path(config["collection"]["manifest"]), {})
+    config["collection"]["manifest_sha256"] = runner._sha256(manifest)
+    acceptance = _materialize_financial_acceptance(config, tmp_path, canonical_checkout)
+    payload = json.loads(acceptance.read_text())
+    payload["source_head"] = runner.RUNNER_BASE_SHA
     _write(acceptance, payload)
     config["first5_financial_acceptance"]["sha256"] = runner._sha256(acceptance)
     with pytest.raises(ValueError, match="scope differs"):
@@ -1038,6 +1072,358 @@ def _legacy_fixture(config, checkout):
     ]
     config["target"]["abandoned_output_roots"] = [str(failed)]
     return summary, witness, failed
+
+
+def _prior_recovery_fixture(
+    tmp_path,
+    monkeypatch,
+    prior_recovery_checkout,
+    canonical_checkout,
+):
+    config, _ = _materialize_collection_target(_config(tmp_path), monkeypatch)
+    _legacy_fixture(config, canonical_checkout)
+    old = json.loads(json.dumps(config))
+    old["target"].update(
+        run_version="accepted-prior-r1",
+        history_parent=str(tmp_path / "prior-history"),
+        history_basename="JNJ-history-recovery-accepted-prior-r1",
+    )
+    Path(old["target"]["history_parent"]).mkdir()
+    old["execution_root"] = str(tmp_path / "prior-execution")
+    old["runner"] = {
+        "checkout": str(prior_recovery_checkout),
+        "head": runner.PRIOR_RECOVERY_SOURCE_SHA,
+        "module_sha256s": {
+            name: runner._sha256(prior_recovery_checkout / relative)
+            for name, relative in runner.RUNNER_MODULES.items()
+        },
+    }
+    engine_report = _write(tmp_path / "prior-engine-independent.json", {"verdict": "PASS"})
+    engine_hashes = {
+        name: runner._sha256(prior_recovery_checkout / relative)
+        for name, relative in runner.ENGINE_MODULES.items()
+    }
+    engine_acceptance = _write(
+        tmp_path / "prior-engine-acceptance.json",
+        {
+            "schema_version": runner.ENGINE_ACCEPTANCE_VERSION,
+            "status": runner.ENGINE_ACCEPTANCE_STATUS,
+            "engine_source_head": runner.PRIOR_RECOVERY_SOURCE_SHA,
+            "engine_base_sha": runner.ENGINE_BASE_SHA,
+            "graph_rule_version": runner.GRAPH_RULE_VERSION,
+            "module_sha256s": engine_hashes,
+            "independent_report": {
+                "path": str(engine_report),
+                "sha256": runner._sha256(engine_report),
+            },
+        },
+    )
+    old["engine"] = {
+        "checkout": str(prior_recovery_checkout),
+        "head": runner.PRIOR_RECOVERY_SOURCE_SHA,
+        "source_acceptance": {
+            "path": str(engine_acceptance),
+            "sha256": runner._sha256(engine_acceptance),
+        },
+    }
+    old = runner._validate_shape(old)
+    collection_binding = runner._validate_collection_target(old)
+
+    acceptance_pins = {}
+    for name in ("independent_report", "writer_report", "lead_contract"):
+        path = _write(tmp_path / f"prior-recovery-{name}.json", {"status": "PASS"})
+        acceptance_pins[name] = {"path": str(path), "sha256": runner._sha256(path)}
+    source_acceptance = _write(
+        tmp_path / "prior-recovery-source-acceptance.json",
+        {
+            "schema_version": runner.PRIOR_RECOVERY_ACCEPTANCE_VERSION,
+            "status": runner.PRIOR_RECOVERY_ACCEPTANCE_STATUS,
+            "source_head": runner.PRIOR_RECOVERY_SOURCE_SHA,
+            "source_tree": runner.PRIOR_RECOVERY_SOURCE_TREE,
+            "checkout": str(prior_recovery_checkout),
+            **acceptance_pins,
+            "actual_JNJ_retry_authorized": False,
+        },
+    )
+    monkeypatch.setattr(
+        runner, "PRIOR_RECOVERY_ACCEPTANCE_SHA256", runner._sha256(source_acceptance)
+    )
+    old_config = _write(tmp_path / "prior-recovery-config.json", old)
+    program = prior_recovery_checkout / runner.RUNNER_MODULES["runner"]
+    resource_program = prior_recovery_checkout / runner.RUNNER_MODULES["resource_ops"]
+    engine_files = {
+        name: {
+            "path": str(prior_recovery_checkout / relative),
+            "sha256": engine_hashes[name],
+        }
+        for name, relative in runner.ENGINE_MODULES.items()
+    }
+    snapshot = {
+        "runner": {
+            "checkout": str(prior_recovery_checkout),
+            "head": runner.PRIOR_RECOVERY_SOURCE_SHA,
+            "base": runner.RUNNER_BASE_SHA,
+            "files": {
+                "runner": {
+                    "path": str(program),
+                    "sha256": runner.PRIOR_RECOVERY_PROGRAM_SHA256,
+                },
+                "resource_ops": {
+                    "path": str(resource_program),
+                    "sha256": runner.PRIOR_RECOVERY_RESOURCE_OPS_SHA256,
+                },
+            },
+        },
+        "engine": {
+            "checkout": str(prior_recovery_checkout),
+            "head": runner.PRIOR_RECOVERY_SOURCE_SHA,
+            "base": runner.ENGINE_BASE_SHA,
+            "acceptance": old["engine"]["source_acceptance"],
+            "independent_report": {
+                "path": str(engine_report),
+                "sha256": runner._sha256(engine_report),
+            },
+            "files": engine_files,
+        },
+        "collection": collection_binding,
+        "first5_financial_acceptance": None,
+    }
+    preflight = _write(
+        Path(old["execution_root"]) / "preflight.json",
+        {
+            "schema_version": runner.PREFLIGHT_VERSION,
+            "status": "PREPARED_SOURCE_ONLY",
+            "config": {"path": str(old_config), "sha256": runner._sha256(old_config)},
+            "snapshot": snapshot,
+            "resources": {
+                "process_tree_rss_kib": runner.LIMIT_KIB,
+                "polars_max_threads": runner.POLARS_THREADS,
+                "one_heavy_process": True,
+                "timeout_seconds": runner.TIMEOUT_SECONDS,
+            },
+            "execution": "SEPARATE_ROOT_AUTHORED_EXACT_GO_REQUIRED",
+        },
+    )
+    request = _write(
+        Path(old["execution_root"]) / "request.json",
+        {
+            "schema_version": runner.REQUEST_VERSION,
+            "status": "AWAITING_EXPLICIT_ROOT_GO",
+            "operation": "recover-history-one",
+            "config_sha256": runner._sha256(old_config),
+            "preflight_sha256": runner._sha256(preflight),
+            "runner_head": runner.PRIOR_RECOVERY_SOURCE_SHA,
+            "engine_head": old["engine"]["head"],
+            "collection": collection_binding,
+            "target": collection_binding["target"],
+            "first5_financial_acceptance": None,
+        },
+    )
+    go = _write(
+        tmp_path / "prior-recovery-go.json",
+        {
+            "schema_version": runner.GO_VERSION,
+            "status": "GO",
+            "authorized_by": "ROOT_LEAD",
+            "operation": "recover-history-one",
+            "config_sha256": runner._sha256(old_config),
+            "preflight_sha256": runner._sha256(preflight),
+            "request_sha256": runner._sha256(request),
+            "runner_head": runner.PRIOR_RECOVERY_SOURCE_SHA,
+            "engine_head": old["engine"]["head"],
+            "collection_manifest_sha256": old["collection"]["manifest_sha256"],
+            "target": collection_binding["target"],
+            "first5_financial_acceptance": None,
+        },
+    )
+    summary = Path(old["execution_root"]) / "execution.summary.json"
+    _write(
+        summary,
+        {
+            "schema_version": runner.RESOURCE_VERSION,
+            "status": "TIMEOUT",
+            "returncode": -15,
+            "elapsed_seconds": runner.TIMEOUT_SECONDS + 1.25,
+            "peak_process_tree_rss_kib": 4_795_900,
+            "limit_kib": runner.LIMIT_KIB,
+            "timeout_seconds": runner.TIMEOUT_SECONDS,
+            "command": [
+                sys.executable,
+                str(program),
+                "_worker",
+                "--config",
+                str(old_config),
+                "--go-file",
+                str(go),
+            ],
+            "log": str(summary.with_suffix(".log")),
+            "samples": str(summary.with_suffix(".rss.jsonl")),
+        },
+    )
+    summary.with_suffix(".log").write_text("synthetic timeout\n", encoding="utf-8")
+    summary.with_suffix(".rss.jsonl").write_text(
+        json.dumps({"elapsed_seconds": 1.0, "process_tree_rss_kib": 1024}) + "\n",
+        encoding="utf-8",
+    )
+    failed = runner._target_paths(old)["destination"]
+    failed.mkdir()
+    witness = {
+        "config": {"path": str(old_config), "sha256": runner._sha256(old_config)},
+        "preflight": {"path": str(preflight), "sha256": runner._sha256(preflight)},
+        "request": {"path": str(request), "sha256": runner._sha256(request)},
+        "go": {"path": str(go), "sha256": runner._sha256(go)},
+        "program": {"path": str(program), "sha256": runner._sha256(program)},
+        "source_acceptance": {
+            "path": str(source_acceptance),
+            "sha256": runner._sha256(source_acceptance),
+        },
+    }
+    config["target"]["approved_prior_failed_attempts"].append(
+        {"path": str(summary), "sha256": runner._sha256(summary), "recovery_ops": witness}
+    )
+    config["target"]["abandoned_output_roots"].append(str(failed))
+    for name, path in (
+        ("CONFIG", old_config),
+        ("PREFLIGHT", preflight),
+        ("REQUEST", request),
+        ("GO", go),
+        ("SUMMARY", summary),
+    ):
+        monkeypatch.setattr(
+            runner, f"PRIOR_RECOVERY_{name}_SHA256", runner._sha256(path)
+        )
+    return config, {
+        "old": old,
+        "old_config": old_config,
+        "preflight": preflight,
+        "request": request,
+        "go": go,
+        "summary": summary,
+        "failed": failed,
+        "source_acceptance": source_acceptance,
+        "witness": witness,
+    }
+
+
+def test_accepted_a02_recovery_timeout_binds_exact_second_abandoned_root(
+    tmp_path, monkeypatch, prior_recovery_checkout, canonical_checkout
+):
+    config, fixture = _prior_recovery_fixture(
+        tmp_path, monkeypatch, prior_recovery_checkout, canonical_checkout
+    )
+    binding = runner._validate_collection_target(runner._validate_shape(config))
+    assert binding["target"]["state"] == "RAW_COMPLETE"
+    assert binding["target"]["abandoned_output_roots"] == config["target"][
+        "abandoned_output_roots"
+    ]
+    assert len(binding["target"]["prior_failed_attempts"]) == 2
+    recovery = next(
+        row for row in binding["target"]["prior_failed_attempts"] if "recovery_ops" in row
+    )
+    assert recovery["runner_head"] == runner.PRIOR_RECOVERY_SOURCE_SHA
+    assert recovery["output_root"] == str(fixture["failed"])
+    assert recovery["execution_root"] == fixture["old"]["execution_root"]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "summary_hash",
+        "summary_status",
+        "summary_returncode",
+        "summary_command",
+        "config_collection",
+        "config_cik",
+        "config_filing_count",
+        "config_cutoff",
+        "config_plan",
+        "config_resources",
+        "preflight",
+        "request",
+        "go",
+        "program",
+        "source_acceptance",
+        "foreign_target",
+        "omitted_failure",
+        "omitted_root",
+        "wrong_root",
+        "overlap",
+        "missing_log",
+        "unpinned_summary",
+    ],
+)
+def test_prior_recovery_timeout_rejects_mutated_unpinned_or_overlapping_witness(
+    tmp_path, monkeypatch, prior_recovery_checkout, canonical_checkout, mutation
+):
+    config, fixture = _prior_recovery_fixture(
+        tmp_path, monkeypatch, prior_recovery_checkout, canonical_checkout
+    )
+    declaration = config["target"]["approved_prior_failed_attempts"][-1]
+    witness = declaration["recovery_ops"]
+    if mutation.startswith("summary_"):
+        payload = json.loads(fixture["summary"].read_text())
+        if mutation == "summary_hash":
+            payload["elapsed_seconds"] += 1
+        elif mutation == "summary_status":
+            payload["status"] = "PASS"
+        elif mutation == "summary_returncode":
+            payload["returncode"] = 0
+        else:
+            payload["command"][2] = "build-history"
+        _write(fixture["summary"], payload)
+        if mutation != "summary_hash":
+            declaration["sha256"] = runner._sha256(fixture["summary"])
+    elif mutation.startswith("config_"):
+        payload = json.loads(fixture["old_config"].read_text())
+        if mutation == "config_collection":
+            payload["collection"]["universe_id"] = "foreign-universe"
+        elif mutation == "config_cik":
+            payload["target"]["cik"] = "9999999999"
+        elif mutation == "config_filing_count":
+            payload["target"]["selected_filings"] -= 1
+        elif mutation == "config_cutoff":
+            payload["financial_as_of"] = "2026-10-11"
+        elif mutation == "config_plan":
+            payload["target"]["plan_sha256"] = "0" * 64
+        else:
+            payload["limits"]["timeout_seconds"] -= 1
+        _write(fixture["old_config"], payload)
+        witness["config"]["sha256"] = runner._sha256(fixture["old_config"])
+    elif mutation in {"preflight", "request", "go"}:
+        path = fixture[mutation]
+        payload = json.loads(path.read_text())
+        payload["status"] = "CHANGED"
+        _write(path, payload)
+        witness[mutation]["sha256"] = runner._sha256(path)
+    elif mutation == "program":
+        foreign = tmp_path / "foreign-recovery-program.py"
+        shutil.copy2(witness["program"]["path"], foreign)
+        witness["program"] = {"path": str(foreign), "sha256": runner._sha256(foreign)}
+    elif mutation == "source_acceptance":
+        payload = json.loads(fixture["source_acceptance"].read_text())
+        payload["status"] = "REVOKED"
+        _write(fixture["source_acceptance"], payload)
+        witness["source_acceptance"]["sha256"] = runner._sha256(
+            fixture["source_acceptance"]
+        )
+    elif mutation == "foreign_target":
+        config["target"]["cik"] = "9999999999"
+    elif mutation == "omitted_failure":
+        config["target"]["approved_prior_failed_attempts"].pop()
+    elif mutation == "omitted_root":
+        config["target"]["abandoned_output_roots"].pop()
+    elif mutation == "wrong_root":
+        wrong = tmp_path / "wrong-abandoned-root"
+        wrong.mkdir()
+        config["target"]["abandoned_output_roots"][-1] = str(wrong)
+    elif mutation == "overlap":
+        config["execution_root"] = str(Path(fixture["old"]["execution_root"]) / "retry")
+    elif mutation == "missing_log":
+        fixture["summary"].with_suffix(".log").unlink()
+    else:
+        _write(fixture["summary"].with_name("execution.summary.unpinned.json"), {"status": "TIMEOUT"})
+    with pytest.raises((ValueError, TypeError)):
+        runner._validate_collection_target(runner._validate_shape(config))
 
 
 def test_legacy56a_summary_without_output_root_binds_exact_abandoned_tree(

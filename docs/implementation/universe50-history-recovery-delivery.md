@@ -2,8 +2,9 @@
 
 ## 결정과 상태
 
-리드는 accepted financial source `9b6e7ec906382fba92adb5209c5b439fc7d7d6ba`를
-runner 기준으로 두고, accepted `8a1b40ab1008fb9109a27b2a5bcea02a257e1694`에서
+리드는 canonical financial source `fd9a17910a7b1cfbb4e71e2ded6f4bc23cda686e`와
+runner ancestry 기준 `9b6e7ec906382fba92adb5209c5b439fc7d7d6ba`를 분리하고,
+accepted `8a1b40ab1008fb9109a27b2a5bcea02a257e1694`에서
 파생된 별도 bounded-memory History engine을 쓰는 복구 도구의 source/synthetic 구현만
 승인했다. 원 계약은 로컬 기록
 `work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_history_recovery_ops_contract.json`
@@ -13,9 +14,9 @@ runner 기준으로 두고, accepted `8a1b40ab1008fb9109a27b2a5bcea02a257e1694`�
 | 단계 | 현재 상태 |
 | --- | --- |
 | source/synthetic 구현 | **IMPLEMENTED CANDIDATE** — 별도 독립 검증 전 |
-| bounded-memory engine | **NOT_ACCEPTED** — 정확한 새 HEAD와 root acceptance artifact 미정 |
-| actual JNJ 복구 | **NOT_STARTED / 금지** |
-| later-45 복구 | first-five canonical financial acceptance 전 **NOT_READY** |
+| bounded-memory engine | prior `3a3d7d6…` r1은 TIMEOUT; 새 performance 후보 독립 검증·인수 대기 |
+| actual JNJ 복구 | r1 **TIMEOUT**; 새 config·request·GO 전 retry 금지 |
+| later-45 복구 | canonical financial source는 exact `fd9a179…`; actual financial은 **NOT_READY** |
 | push·PR·main 병합 | 미수행 |
 
 초기 engine 후보 `685185394993ba61493d82ca4b18f2f5464fe183`은 독립 검증에서
@@ -51,7 +52,7 @@ import path를 확인한다.
 engine checkout에는 generic quality·identity·financial runner가 없을 수 있다. 실행 시
 `PYTHONPATH=<engine>/src:<runner>` 순서를 사용하지만 recovery 도구와 resource OPS는 runner
 checkout에서, `sec_xbrl` engine 모듈은 engine checkout에서 와야 한다. recovery/8a engine 프로세스는 `tools.universe50_financial_ops`를 import하지 않는다.
-Later-45 gate 검증만 accepted first-five config가 선언한 clean exact `9b6e7ec` checkout의
+Later-45 gate 검증만 accepted first-five config가 선언한 clean exact `fd9a179` checkout의
 별도 interpreter에서 수행한다. 이 프로세스는 canonical `_validate_shape`, `_verify_runtime`,
 `_verify_output_receipt`, `_output_paths`, `_expected_publication_manifests`를 재사용한다.
 Gate-only 결과는 FULL financial 실행 config가 아니며 future 45 회사의 History pin을 만들지 않는다.
@@ -94,8 +95,8 @@ collection의 legacy `execution/<ticker>/*.summary.json*`도 전수 대조한다
 새 History와 execution evidence는 failed tree·그 자손, collection/source checkout 또는
 intake source run과 겹칠 수 없으며 symlink ancestor를 거부한다.
 
-유일한 현재 실패 예외는 JNJ의 명시적으로 pin한 과거 failed attempt와 abandoned partial
-root다. native `operation_attempts/build-*`는 `result.status=BUILD_FAILED`와 정확한
+현재 실패 예외는 JNJ의 명시적으로 pin한 과거 failed attempts와 abandoned partial
+roots다. native `operation_attempts/build-*`는 `result.status=BUILD_FAILED`와 정확한
 `result.output_root`를 요구한다. 선언 abandoned roots는 모든 실패 root와 일대일로 같아야 한다.
 old OPS56a의 RSS_LIMIT summary는 native attempt가 아니고 `output_root` 필드도 없다.
 따라서 이 경우 public RAW_COMPLETE 상태를 보존하며 다음 확장 pin 형식이 필수다:
@@ -124,7 +125,7 @@ collection universe_id는 opaque 값이다. 실제 e manifest는
 consumer publication root는 구분한다. 예를 들어 publication manifest는 새 출력 아래
 `panels/history_manifest.json`에 있으며 marker가 선언한 path/hash를 public reader가 확인한다.
 
-first-five 범위는 `TXN, HD, JNJ, CVX, NEE`다. later-45 회복에는 financial `9b6e7ec`로
+first-five 범위는 `TXN, HD, JNJ, CVX, NEE`다. later-45 회복에는 financial `fd9a179`로
 만든 canonical `universe50-first5-financial-acceptance-v1` artifact가 필수다. companies는
 문자열이 아니라 정확한 CIK/ticker object여야 한다. runner는 exact collection/cutoff/source,
 사용한 first-five config, stage receipt 전체 fileset, 다섯 회사 annual·quarterly analysis와
@@ -271,7 +272,7 @@ resource monitor에서 발생했으며 뒤의 absolute-cache NVDA 테스트까�
 - 실제 cache가 없는 지정 worktree에서 실행하고, 최종 독립 검증은 clean frozen SHA에서 수행한다.
 - test import/collection 전에 `SEC_XBRL_CORPUS_ROOT`를 존재하지 않는 evidence sentinel로 설정하고
   `SEC_XBRL_RUN_REVIEWED_Q4_INTEGRATION`은 unset한다.
-- 아래 5개 ID를 CLI에서 명시적으로 deselect한다. 기존 테스트를 숨기거나 제품 코드를 변경하지 않는다.
+- 아래 6개 ID를 CLI에서 명시적으로 deselect한다. 기존 테스트를 숨기거나 제품 코드를 변경하지 않는다.
 - collection 전에 actual data 파일 open을 거부하는 외부 guard를 설치한다. absolute/relative/symlink
   alias 및 `os.open(..., dir_fd=...)` negative control과 owned output dir-fd positive control을 수행한다.
   허용 evidence 경로의 strict ancestor는 O_DIRECTORY/순회 metadata만 허용한다.
@@ -288,6 +289,7 @@ tests/unit/test_c3_as_filed_publication.py::test_c3_m1_actual_seven_company_corp
 tests/unit/test_c3_as_filed_publication.py::test_cached_nvda_fy2024_q1_revenue_selects_direct_10q_when_available
 tests/unit/test_versioned_observation_panel.py::test_cached_nvda_fy2024_q3_revenue_is_directly_retrievable
 tests/unit/test_reviewed_q4.py::test_cached_nvda_source_to_api_snapshot_xlsx
+tests/screening/test_screening_explorer.py::test_actual_r3_projection_matches_frozen_observations_when_available
 ```
 
 위 guard 아래 Python 의존성을 설치한 환경에서 `POLARS_MAX_THREADS=2`,
@@ -296,3 +298,48 @@ tests/unit/test_reviewed_q4.py::test_cached_nvda_source_to_api_snapshot_xlsx
 `ruff check --no-cache tools/universe50_history_recovery_ops.py tests/unit/test_universe50_history_recovery_ops.py`
 및 `git diff --check`도 필요하다. actual cached integration 또는 actual recovery 명령은 포함하지 않는다.
 이 후보의 frozen SHA·writer 결과는 별도 증거 보고서에 기록하며 final acceptance를 대신하지 않는다.
+
+## 2026-10-17 r1 TIMEOUT 결속과 canonical financial gate 보정
+
+승인 계약
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_history_recovery_retry_and_ttm_gate_contract.json`
+(SHA-256 `b1be9c79db42ef9069586200d6278d9977e9029852728efa43c877ac22a4a33d`)은
+두 가지 source/synthetic 변경만 허용한다. runner ancestry 기준은 `9b6e7ec…`로 보존하되
+later-45 canonical financial source를 독립 PASS·리드 인수를 받은 exact
+`fd9a17910a7b1cfbb4e71e2ded6f4bc23cda686e`로 갱신한다. 기존 full canonical validator,
+stage receipt 전체 fileset, 17개 publication manifest 및 first-five 범위는 바꾸지 않는다.
+해당 source/synthetic 리드 인수 artifact SHA-256은
+`c1113e7423b4f4a73155299af44302d49ffb81a730fd21ebfffd9f495fdea861`이다.
+
+JNJ recovery r1은 reported 12개 table 완료 뒤 quarter 단계에서 10,800초 TIMEOUT으로
+종료됐다. 이는 성공이나 native `BUILD_FAILED`가 아니다. 새 `recovery_ops` 선언은 다음
+immutable 운영 증거를 exact hash로 결속한다.
+
+- accepted a02 clean runner HEAD/tree와 recovery/resource program
+- lead a02 source acceptance 및 그 writer/independent/contract pins
+- prior config, preflight, request, root GO와 TIMEOUT summary
+- config가 고정한 collection, 회사·CIK, plan, intake, filing count, cutoff와 resource limits
+- prior engine acceptance, independent report, clean HEAD와 일곱 module hashes
+- summary의 exact execution location, worker command, nonzero return code, 10,800초 timeout,
+  16 GiB cap, log와 RSS sample 위치
+
+고정된 r1 증거 SHA-256은 config `00f61854cf8a0a84c7ed11d11d07005d16216f56a7d10c3e9524f70645952542`,
+preflight `aa779aa51cd14dd78bc179412571f3c1bbd1aa5a8575a316269a5f6d605b7f4a`,
+request `8206a0a01dcf813e1cfdfe8f9a657a88b591fe34313027851e7b3c2cb6fb15da`,
+GO `5c410067c12fbf49b69809b86a76034063c5312e21a861732ddd306ddf204c21`,
+TIMEOUT summary `0c07d38130312434acdcfc40cb87cd66c1c6d0774211884948a5620b9e5ae574`다.
+accepted a02 source artifact SHA-256은
+`8487366d30a29d2d8f225e911ab91f50fb962dbacce07f1edcf71dd168a5a331`이다.
+
+과거 실패 History root는 prior config의 `history_parent/history_basename`에서만 도출한다.
+현재 config의 실패 선언과 abandoned root는 old OPS56a와 r1 두 건을 일대일로 모두 포함해야
+한다. hash가 바뀐 증거, foreign target, success/running summary, 누락·중복 root, 승인되지 않은
+추가 summary, prior execution/source/engine과 겹치는 새 destination 또는 execution root는
+거부한다. r1 log와 RSS sample은 summary와 함께 보존하며 JSON failure-summary 전수 검사는
+이 부속 파일을 새 attempt로 오인하지 않는다.
+
+이 보정은 retry를 실행하지 않고 새 recovery mode도 추가하지 않는다. r1의 reported staged
+산출물을 재사용하는 공개 경로는 별도 계약과 독립 staged attestation 없이는 선택하지 않는다.
+후속 actual 실행에는 새 performance engine의 독립 PASS·리드 인수, fresh output run version,
+새 config·preflight·request와 별도 root GO가 모두 필요하다. source/synthetic 검증은 actual
+Raw, History, publication 또는 cached corpus를 열지 않으며 actual 16 GiB 성공을 주장하지 않는다.
