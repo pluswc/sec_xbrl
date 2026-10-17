@@ -218,18 +218,10 @@ class _QuarterSpill:
 
     def execute(self, sql, parameters=()):
         self.check()
-        return self._execute(sql, parameters)
-
-    def _execute(self, sql, parameters=()):
-        """Execute after the owning public operation validated all path bindings."""
         return self.db.execute(sql, parameters)
 
     def _append_event(self, event):
         self.check()
-        self._write_event(event)
-
-    def _write_event(self, event):
-        """Append after the owning public operation validated all path bindings."""
         payload = _spill_pack(event)
         frame = len(payload).to_bytes(8, "big") + hashlib.sha256(payload).digest()
         for part in (frame, payload):
@@ -244,17 +236,16 @@ class _QuarterSpill:
         self.check()
         self.sequence_number += 1
         sequence = self.sequence_number
-        self._write_event({"event": "PLANNED", "sequence": sequence,
-                           "operation": operation, "bucket": bucket, "key": key, "value": value})
-        self._check_open_handles()
+        self._append_event({"event": "PLANNED", "sequence": sequence,
+                            "operation": operation, "bucket": bucket, "key": key, "value": value})
         if operation == "SET":
-            self._execute("INSERT INTO records(bucket,key,original_key,value) VALUES(?,?,?,?) ON CONFLICT(bucket,key) DO UPDATE SET value=excluded.value",
-                          (bucket, _SpillMap._key(key), _spill_pack(key), _spill_pack((key, value))))
-            row = self._execute("SELECT ordinal,original_key FROM records WHERE bucket=? AND key=?",
-                                (bucket, _SpillMap._key(key))).fetchone()
+            self.execute("INSERT INTO records(bucket,key,original_key,value) VALUES(?,?,?,?) ON CONFLICT(bucket,key) DO UPDATE SET value=excluded.value",
+                         (bucket, _SpillMap._key(key), _spill_pack(key), _spill_pack((key, value))))
+            row = self.execute("SELECT ordinal,original_key FROM records WHERE bucket=? AND key=?",
+                               (bucket, _SpillMap._key(key))).fetchone()
             evidence = {"ordinal": row[0], "original_key": _spill_unpack(row[1])}
         elif operation == "DELETE":
-            changed = self._execute("DELETE FROM records WHERE bucket=? AND key=?", (bucket, _SpillMap._key(key))).rowcount
+            changed = self.execute("DELETE FROM records WHERE bucket=? AND key=?", (bucket, _SpillMap._key(key))).rowcount
             if not changed:
                 # A PLANNED event without APPLIED is deliberately not reported
                 # as committed or rolled back. Public recovery fails normally.
@@ -262,8 +253,7 @@ class _QuarterSpill:
             evidence = {}
         else:
             raise ValueError("unknown private quarter spill mutation")
-        self._check_open_handles()
-        self._write_event({"event": "APPLIED", "sequence": sequence, **evidence})
+        self._append_event({"event": "APPLIED", "sequence": sequence, **evidence})
 
     def mapping(self):
         self.next_bucket += 1
@@ -370,6 +360,10 @@ class _SpillMap(MutableMapping):
             "SELECT original_key,value FROM records WHERE bucket=? ORDER BY ordinal",
             (self.bucket,),
         ):
+            # A caller may hold the iterator while an owned path is exchanged.
+            # Validate every record before returning it, while retaining the
+            # single ordered SQL query used by this performance path.
+            self.spill.check()
             yield _spill_unpack(row[0]), _spill_unpack(row[1])[1]
 
     def records(self):
