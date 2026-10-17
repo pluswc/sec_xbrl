@@ -12,7 +12,7 @@ import copy
 import shutil
 import uuid
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +73,7 @@ def publish_generic_metric_identity(
         "readiness": "READY",
         "universe_id": config["universe_id"],
         "financial_as_of": config["financial_as_of"],
+        "metadata_observation_cutoff": config["metadata_observation_cutoff"],
         "annual_window": copy.deepcopy(config["annual_window"]),
         "global_quarter_spine": copy.deepcopy(config["global_quarter_spine"]),
         "configured_ciks": [row["cik"] for row in config["companies"]],
@@ -153,6 +154,7 @@ class GenericMetricIdentityReader:
         expected_scope = {
             "universe_id": config["universe_id"],
             "financial_as_of": config["financial_as_of"],
+            "metadata_observation_cutoff": config["metadata_observation_cutoff"],
             "annual_window": config["annual_window"],
             "global_quarter_spine": config["global_quarter_spine"],
             "configured_ciks": [row["cik"] for row in config["companies"]],
@@ -236,13 +238,20 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("company metadata manifest changed")
     metadata = CompanyMetadataReader(metadata_root)
     metadata_by_cik = {row.cik: row for row in metadata.list_companies()}
-    cutoff = date.fromisoformat(config["financial_as_of"])
+    metadata_cutoff = _timestamp_datetime(
+        config["metadata_observation_cutoff"], "metadata_observation_cutoff"
+    )
+    metadata_observations: list[dict[str, str]] = []
     for ticker, cik in expected:
         candidate = metadata_by_cik.get(cik)
         if candidate is None or ticker not in candidate.tickers:
             raise ValueError(f"{ticker}: metadata ticker/CIK identity mismatch")
-        if not candidate.observed_at or date.fromisoformat(candidate.observed_at[:10]) > cutoff:
-            raise ValueError(f"{ticker}: metadata observation is absent or after cutoff")
+        observed_at = _timestamp(candidate.observed_at, f"{ticker} metadata observed_at")
+        if _timestamp_datetime(observed_at, f"{ticker} metadata observed_at") > metadata_cutoff:
+            raise ValueError(f"{ticker}: metadata observation is after its declared cutoff")
+        metadata_observations.append(
+            {"ticker": ticker, "cik": cik, "observed_at": observed_at}
+        )
 
     company_sources: list[dict[str, Any]] = []
     history_hashes: dict[str, str] = {}
@@ -254,7 +263,11 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
     quality_root = real_directory(Path(config["quality_root"]), "generic metric quality")
     # The additive mixed-v5/v6 quality implementation is deliberately the only
     # accepted authority.  Missing modules or incompatible APIs fail closed.
-    from sec_xbrl.metric_quality import GenericMetricQualityReader
+    from sec_xbrl.metric_quality import (
+        COLLECTOR_PROVENANCE_ASSURANCE,
+        COLLECTOR_PROVENANCE_GRANULARITY,
+        GenericMetricQualityReader,
+    )
 
     quality = GenericMetricQualityReader(
         quality_root, manifest_sha256=config["quality_manifest_sha256"]
@@ -271,6 +284,10 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
         quality.manifest.get("state") != "PASS"
         or quality.manifest.get("assurance_scope") != QUALITY_SCOPE
         or quality.manifest.get("full_financial_semantic_assurance") is not False
+        or quality.manifest.get("collector_provenance_assurance")
+        != COLLECTOR_PROVENANCE_ASSURANCE
+        or quality.manifest.get("collector_provenance_granularity")
+        != COLLECTOR_PROVENANCE_GRANULARITY
     ):
         raise ValueError("generic metric quality proof has the wrong assurance scope")
     quality_manifest = regular_file(quality.manifest_path, "generic metric quality manifest")
@@ -302,12 +319,18 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
             "root": str(metadata_root),
             "publication_id": metadata.publication_id,
             "manifest_sha256": sha256_file(metadata_manifest),
+            "observation_cutoff": config["metadata_observation_cutoff"],
+            "scope_observations": metadata_observations,
+            "historical_membership_assurance": False,
         },
         "quality": {
             "root": str(quality_root),
             "publication_id": quality.publication_id,
             "manifest_sha256": sha256_file(quality_manifest),
             "assurance_scope": QUALITY_SCOPE,
+            "full_financial_semantic_assurance": False,
+            "collector_provenance_assurance": COLLECTOR_PROVENANCE_ASSURANCE,
+            "collector_provenance_granularity": COLLECTOR_PROVENANCE_GRANULARITY,
             "rule_versions": copy.deepcopy(quality.manifest.get("rule_versions", {})),
             "parser_profiles": copy.deepcopy(quality.manifest.get("parser_profiles", [])),
         },
@@ -475,6 +498,9 @@ def _validate_config(value: Any) -> dict[str, Any]:
         raise ValueError("generic metric identity config requires an explicit source kind")
     financial_as_of = require_string(value.get("financial_as_of"), "financial_as_of")
     date.fromisoformat(financial_as_of)
+    metadata_observation_cutoff = _timestamp(
+        value.get("metadata_observation_cutoff"), "metadata_observation_cutoff"
+    )
     annual_window = value.get("annual_window")
     if annual_window != {"input_fiscal_years": 5, "display_fiscal_years": 4}:
         raise ValueError("generic metric identity requires the approved 5-input/4-display window")
@@ -516,6 +542,7 @@ def _validate_config(value: Any) -> dict[str, Any]:
         "source_kind": SOURCE_KIND,
         "universe_id": require_string(value.get("universe_id"), "universe_id"),
         "financial_as_of": financial_as_of,
+        "metadata_observation_cutoff": metadata_observation_cutoff,
         "annual_window": copy.deepcopy(annual_window),
         "global_quarter_spine": copy.deepcopy(expected_spine),
         "collection_scope_mode": _scope_mode(value.get("collection_scope_mode")),
@@ -621,3 +648,19 @@ def _sha(value: Any, field: str) -> str:
     if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
         raise ValueError(f"{field} must be a lowercase SHA-256")
     return digest
+
+
+def _timestamp(value: Any, field: str) -> str:
+    parsed = _timestamp_datetime(value, field)
+    return parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _timestamp_datetime(value: Any, field: str) -> datetime:
+    raw = require_string(value, field)
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an ISO 8601 timestamp") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{field} must include a UTC offset")
+    return parsed

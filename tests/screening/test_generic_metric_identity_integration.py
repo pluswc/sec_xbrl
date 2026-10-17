@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from sec_xbrl import collection_operations as operations
 from sec_xbrl.company_metadata import (
     MANIFEST_NAME as METADATA_MANIFEST,
 )
@@ -42,12 +44,102 @@ from sec_xbrl.screening.metric_identity import (
 from tests.screening.test_screening_metric_publication import _analysis_bundle
 from tests.unit.test_source_bindings import (
     _build_ready_histories,
-    _mixed_v2_fixture,
+    _fixture,
     _quality_config,
 )
 
-FINANCIAL_AS_OF = "2026-10-08"
+FINANCIAL_AS_OF = "2026-10-10"
+METADATA_OBSERVATION_CUTOFF = "2026-10-13T23:59:59Z"
 COHORT = ({"ticker": "FIVE", "cik": "0000000123"},)
+
+
+def _mixed_v2_fixture_at_financial_cutoff(tmp_path: Path) -> dict[str, object]:
+    first = _fixture(
+        tmp_path / "first",
+        ticker="FIVE",
+        cik="0000000123",
+        accession="0000000123-26-000001",
+        parser_version="m2-layer1-v5",
+    )
+    second = _fixture(
+        tmp_path / "second",
+        ticker="SIX",
+        cik="0000000456",
+        accession="0000000456-26-000002",
+        parser_version="m2-layer1-v6",
+    )
+    plans: dict[str, Path] = {}
+    for ticker, source in (("FIVE", first), ("SIX", second)):
+        plan = json.loads(
+            (
+                Path(source["collection"]).parent
+                / f"companies/{ticker}/plan.json"
+            ).read_text(encoding="utf-8")
+        )
+        plan["as_of_date"] = FINANCIAL_AS_OF
+        path = tmp_path / f"plans/{ticker}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(path, plan)
+        plans[ticker] = path
+    config = tmp_path / "mixed-config.json"
+    write_json(
+        config,
+        {
+            "schema_version": 1,
+            "universe_id": "mixed-source-binding-fixture",
+            "purpose": "financial and metadata cutoff separation fixture",
+            "as_of_date": FINANCIAL_AS_OF,
+            "source_observed_at": "2026-10-13T00:00:00+00:00",
+            "collection": {
+                "completed_fiscal_years": 4,
+                "analytical_fiscal_years": 3,
+                "include_subsequent_quarters": True,
+            },
+            "companies": [
+                {"ticker": "FIVE", "cik": "0000000123", "groups": ["fixture"]},
+                {"ticker": "SIX", "cik": "0000000456", "groups": ["fixture"]},
+            ],
+        },
+    )
+    collection = operations.prepare_universe(
+        config_path=config,
+        run_root=tmp_path / "mixed-run",
+        existing_plans=plans,
+    )
+    paths = {
+        "collection": collection,
+        "packages": tmp_path / "mixed-packages",
+        "first": first,
+        "second": second,
+    }
+    _install_intake(paths, "FIVE")
+    for source in (first, second):
+        package = Path(source["package"])
+        destination = Path(paths["packages"]) / package.relative_to(
+            Path(source["packages"])
+        )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(package, destination)
+    return paths
+
+
+def _install_intake(paths: dict[str, object], ticker: str) -> None:
+    source = paths["first" if ticker == "FIVE" else "second"]
+    assert isinstance(source, dict)
+    collection = Path(paths["collection"])
+    plan = json.loads(
+        (collection.parent / f"companies/{ticker}/plan.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    intake = json.loads(Path(source["intake"]).read_text(encoding="utf-8"))
+    intake["plan"] = plan
+    intake_path = collection.parent / f"companies/{ticker}/intake/history_intake.json"
+    intake_path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(
+        intake_path,
+        intake,
+    )
 
 
 def _metadata(tmp_path: Path) -> Path:
@@ -67,7 +159,7 @@ def _metadata(tmp_path: Path) -> Path:
         },
     )
     built = build_company_metadata(
-        [SnapshotInput(source, datetime(2026, 10, 8, tzinfo=UTC))]
+        [SnapshotInput(source, datetime(2026, 10, 13, 1, 2, 3, tzinfo=UTC))]
     )
     return publish_company_metadata(built, tmp_path / "metadata").root
 
@@ -121,7 +213,7 @@ def _quarterly_analysis(
 def _publish_identity_inputs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> SimpleNamespace:
-    paths = _mixed_v2_fixture(tmp_path)
+    paths = _mixed_v2_fixture_at_financial_cutoff(tmp_path)
     histories = _build_ready_histories(
         paths, tmp_path, monkeypatch, selected_tickers=("FIVE",)
     )
@@ -131,6 +223,9 @@ def _publish_identity_inputs(
         tmp_path / "quality-config.json",
         companies=COHORT,
     )
+    quality_payload = json.loads(quality_config.read_text(encoding="utf-8"))
+    quality_payload["financial_as_of"] = FINANCIAL_AS_OF
+    write_json(quality_config, quality_payload)
     quality = prepare_generic_metric_quality(
         config_path=quality_config,
         collection_manifest=Path(paths["collection"]),
@@ -164,6 +259,7 @@ def _publish_identity_inputs(
             "source_kind": GENERIC_IDENTITY_SOURCE_KIND,
             "universe_id": "mixed-source-binding-fixture",
             "financial_as_of": FINANCIAL_AS_OF,
+            "metadata_observation_cutoff": METADATA_OBSERVATION_CUTOFF,
             "annual_window": {
                 "input_fiscal_years": 5,
                 "display_fiscal_years": 4,
@@ -224,9 +320,32 @@ def test_quality_identity_annual31_dataset_v2_chain_and_subset_stability(
     assert identity.manifest["collection"]["scope_mode"] == "EXPLICIT_SUBSET"
     assert identity.manifest["collection"]["parent_requested_companies"] == 2
     assert identity.manifest["collection"]["scope_ready_companies"] == 1
+    assert identity.manifest["financial_as_of"] == "2026-10-10"
+    assert identity.manifest["metadata_observation_cutoff"] == (
+        METADATA_OBSERVATION_CUTOFF
+    )
+    assert identity.manifest["metadata"]["scope_observations"] == [
+        {
+            "ticker": "FIVE",
+            "cik": "0000000123",
+            "observed_at": "2026-10-13T01:02:03Z",
+        }
+    ]
+    assert identity.manifest["metadata"]["historical_membership_assurance"] is False
     assert identity.manifest["quality"]["assurance_scope"] == (
         "RAW_TRANSFORM_SOURCE_CONFORMANCE_ONLY"
     )
+    assert identity.manifest["quality"]["full_financial_semantic_assurance"] is False
+    assert identity.manifest["quality"]["collector_provenance_assurance"] == (
+        "CONFIG_DECLARED_NOT_SOURCE_VERIFIED"
+    )
+    status = operations.read_universe_status(
+        manifest_path=Path(prepared.paths["collection"])
+    )
+    assert {row.ticker: row.state for row in status.companies} == {
+        "FIVE": "READY",
+        "SIX": "PREPARED",
+    }
 
     metric_config = tmp_path / "metric-config.json"
     write_json(
@@ -281,6 +400,7 @@ def test_quality_identity_annual31_dataset_v2_chain_and_subset_stability(
     assert dataset_status["definition_count"] == 31
     assert dataset_status["observation_count"] == 124
 
+    _install_intake(prepared.paths, "SIX")
     _build_ready_histories(
         prepared.paths, tmp_path, monkeypatch, selected_tickers=("SIX",)
     )
@@ -295,6 +415,7 @@ def test_quality_identity_annual31_dataset_v2_chain_and_subset_stability(
     (
         "foreign_cik",
         "stale_cutoff",
+        "metadata_after_cutoff",
         "future_filing",
         "quality_proof",
         "analysis_parent",
@@ -305,14 +426,16 @@ def test_identity_rejects_wrong_scope_and_parent_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, defect: str
 ) -> None:
     prepared = _publish_identity_inputs(tmp_path, monkeypatch)
-    if defect in {"foreign_cik", "stale_cutoff"}:
+    if defect in {"foreign_cik", "stale_cutoff", "metadata_after_cutoff"}:
         config = json.loads(prepared.identity_config.read_text(encoding="utf-8"))
         if defect == "foreign_cik":
             config["companies"][0]["cik"] = "0000000999"
             config["collection_scope_companies"][0]["cik"] = "0000000999"
-        else:
+        elif defect == "stale_cutoff":
             config["financial_as_of"] = "2026-10-09"
             config["global_quarter_spine"] = _quarter_spine("2026-10-09")
+        else:
+            config["metadata_observation_cutoff"] = "2026-10-13T00:00:00Z"
         changed = tmp_path / f"{defect}-config.json"
         write_json(changed, config)
         with pytest.raises(ValueError):
@@ -341,7 +464,7 @@ def test_identity_rejects_wrong_scope_and_parent_mutation(
     else:
         manifest = prepared.identity.manifest_path
         payload = json.loads(manifest.read_text(encoding="utf-8"))
-        payload["financial_as_of"] = "2026-10-07"
+        payload["metadata_observation_cutoff"] = "2026-10-14T00:00:00Z"
         identity = {key: value for key, value in payload.items() if key != "publication_id"}
         payload["publication_id"] = (
             "generic-metric-identity-" + digest_value(identity)[:24]

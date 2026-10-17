@@ -37,6 +37,7 @@ def _identity_config() -> dict:
         "source_kind": SOURCE_KIND,
         "universe_id": "exact-50",
         "financial_as_of": "2026-10-10",
+        "metadata_observation_cutoff": "2026-10-13T23:59:59+00:00",
         "annual_window": {"input_fiscal_years": 5, "display_fiscal_years": 4},
         "global_quarter_spine": _quarter_spine("2026-10-10"),
         "collection_scope_mode": "EXPLICIT_SUBSET",
@@ -57,6 +58,7 @@ def test_identity_config_pins_approved_annual_and_quarter_windows() -> None:
     normalized = validate_identity_config(_identity_config())
     assert normalized["source_kind"] == SOURCE_KIND
     assert normalized["collection_scope_mode"] == "EXPLICIT_SUBSET"
+    assert normalized["metadata_observation_cutoff"] == "2026-10-13T23:59:59Z"
     assert normalized["global_quarter_spine"] == [
         {"calendar_year": 2024, "calendar_quarter": 4},
         {"calendar_year": 2025, "calendar_quarter": 1},
@@ -74,6 +76,8 @@ def test_identity_config_pins_approved_annual_and_quarter_windows() -> None:
     (
         lambda value: value.update(source_kind="LEGACY_UNIVERSE_DELIVERY"),
         lambda value: value.update(collection_scope_mode="INFER"),
+        lambda value: value.pop("metadata_observation_cutoff"),
+        lambda value: value.update(metadata_observation_cutoff="2026-10-13T23:59:59"),
         lambda value: value.update(collection_scope_companies=[]),
         lambda value: value.update(
             annual_window={"input_fiscal_years": 4, "display_fiscal_years": 4}
