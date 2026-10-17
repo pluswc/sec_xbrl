@@ -54,6 +54,14 @@ source/synthetic 검사에서는 unit/screening 내 6개 actual cached 테스트
 corpus 환경, precollection 실제 파일 접근 거부 및 owned RSS guard를 적용한다.
 중단된 plain full-unit 실행은 synthetic 완료 증거로 쓰지 않는다. 세부 재현 규칙은 위 전달 계약에 있다.
 
+2026-10-18 로컬 source composition 후속은
+[전달 기록](../implementation/universe50-local-source-composition-20261018.md)에 있다.
+exact `fd9a179…`에서 exact `f222a8b…`, 그 다음 exact `c9e1316…`를 ordinary merge해
+각 accepted history와 product/test bytes를 한 tracked branch에 보존했다. `e84289a…`는
+`fd9` ancestry에 이미 포함돼 replay하지 않았다. 이 상태는 구현자 source-only 후보이며
+별도 Astra 검증과 리드 인수 전이다. merged HEAD는 기존 recovery runner의 accepted
+operational component HEAD가 아니고, actual JNJ·first-five·later-45·UI 인수를 뜻하지 않는다.
+
 2026-10-17 TTM provenance 후속: source `9b6e7ec…`의 synthetic AVAILABLE TTM에서
 준비된 REPORTED 입력 top-level에 검증된 `source_snapshot_id` 전달이 빠져 strict public
 reader가 동일 원본을 모순으로 거부하는 결함을 확인했다. 좁은 보정 후보는
@@ -111,6 +119,7 @@ Raw adoption과 History build는 별도 stage GO 전에는 실행하지 않는�
 | [50사 generic metric Raw 품질 전달](../implementation/universe50-generic-metric-quality-delivery.md) | mixed v5/v6 Raw source binding과 duration·승인 lexical repair 전수 conformance, exact parent/cohort scope. **`c70087d` 독립 PASS / source+synthetic 로컬 수락**; actual 실행·full financial semantic assurance 아님 |
 | [50사 재무 통합·실행 전달](../implementation/universe50-financial-delivery.md) | accepted producer·quality·identity·OPS·package view 누적 통합, quarterly exact identity parent 결속과 explicit stage-GO offline runner. **구현 후보 / 독립 검증 대기**; actual financial 실행·인수·native 반영 아님 |
 | [50사 History bounded-memory 복구 전달](../implementation/universe50-history-recovery-delivery.md) | 별도 clean runner/engine source, immutable collection e와 실패 partial 보존, explicit root GO, guarded public History build. **f74 동시누락 FAIL 뒤 mandatory a02 r1 witness 보정 후보 / 독립 검증 대기**; 새 engine·actual retry·financial 미수락 |
+| [50사 로컬 source composition 전달](../implementation/universe50-local-source-composition-20261018.md) | exact `fd9 + f222 + c9` 이력을 ordinary merge한 tracked local handoff. **IMPLEMENTED SOURCE-ONLY CANDIDATE / 별도 Astra 검증·리드 인수 대기**. accepted operational reproduction은 clean 세 historical checkout을 계속 사용하며 merged HEAD는 actual runner/data/UI acceptance가 아니다. |
 | [기간 규칙](../implementation/period-rules.md), [Layer 2 연결](../implementation/layer2-longitudinal.md), [공시 발견 계약](../implementation/accession-contract.md) | 표시 계획으로 바꿀 수 없는 의미·입력 경계 |
 
 충돌 시 적용되는 사용자 결정과 승인 범위를 먼저 확인하고, 해당 평면의 계약을
@@ -144,6 +153,7 @@ Raw adoption과 History build는 별도 stage GO 전에는 실행하지 않는�
 | 50사 generic metric identity | [제안](../implementation/universe50-generic-metric-identity-proposal-20261017.md) · [승인 전달 계약](../implementation/universe50-generic-metric-identity-delivery-20261017.md) | 권장안 A의 별도 attestation, 명시 source kind와 합성 fresh fixture 구현은 **2026-10-17 APPROVED** | final `6470e0b`; quality final `c70087d` 통합 | **PASS**; 별도 read-only 검증 보고서 SHA-256 `9c27d0b…` | **source/synthetic LOCALLY_ACCEPTED**; actual identity 발행·인수 미수행 | 미병합; push·PR 미수행 |
 | 50사 재무 통합·offline runner | [재무 통합·실행 전달](../implementation/universe50-financial-delivery.md) | **2026-10-17 APPROVED**; 동결 source 통합, quarterly exact identity 결속, public-API-only staged runner와 합성 검증 | **IMPLEMENTED CANDIDATE**; 동결 SHA 확정 전 | 독립 검증 대기 | 미수락; actual first-five/50·native 실행 미수행 | 미병합; push·PR·scheduler 미수행 |
 | 50사 History bounded-memory 복구 | [History 복구 전달](../implementation/universe50-history-recovery-delivery.md) | **2026-10-17 SOURCE/SYNTHETIC ONLY**; r1 TIMEOUT exact witness, fd9 canonical gate, optional attested reported-stage reuse | **ATTESTED-REUSE IMPLEMENTED CANDIDATE**; 동결 SHA 대기 | source/synthetic 독립 검증 대기; component actual audit 미수행 | r1 TIMEOUT; actual reuse·later-45·financial 미수락 | 미병합; push·PR·scheduler 미수행 |
+| 50사 로컬 source composition | [2026-10-18 전달](../implementation/universe50-local-source-composition-20261018.md) | **APPROVED LOCAL SOURCE/SYNTHETIC COMPOSITION ONLY**; exact component ordinary merge와 tracked handoff docs | source merge `155fb3d…`; docs를 포함한 clean 후보 동결은 구현 인계에 기록 | 별도 Astra read-only 검증 대기 | 미수락; actual JNJ·first-five·later-45·native UI 상태와 분리 | 미병합; push·PR·remote CI·scheduler 미수행 |
 
 현재 전달 상태(2026-09-10): U3–U5 누적 이력은
 [PR #63](https://github.com/pluswc/sec_xbrl/pull/63)으로 `main`에 병합됐다. merge
