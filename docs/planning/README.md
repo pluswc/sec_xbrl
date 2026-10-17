@@ -7,7 +7,12 @@
 제한된 로컬 구현으로 확대됐고, 2026-09-10 결과는
 [U4 완료·인수](../implementation/u4-completion-and-acceptance.md)에 기록한다.
 
-2026-10-17 후속: [명시적 저장·다시 열기](../implementation/screening-explicit-save-delivery.md) — 사용자 승인된 소비자 동작 개선. 구현·자체 검증 완료, 독립 검증·운영 반영·main 병합 미완료.
+2026-10-17 후속: [명시적 저장·다시 열기](../implementation/screening-explicit-save-delivery.md) ·
+[완료·로컬 운영 반영](../implementation/screening-explicit-save-completion-20261017.md) —
+최종 `e84289a…` 독립 PASS, 기존 21사 UI 로컬 인수·운영 반영 완료. 원격과 main
+병합은 미수행이다. 50사 재무 확대는
+[T3 참조 결함과 확장 중지](../implementation/universe50-t3-reference-hold-20261017.md)에
+따라 **HOLD_FINANCIAL_EXPANSION_PENDING_T3_REFERENCE_DISPOSITION**다.
 
 ## 읽기 순서와 문서 소유권
 
@@ -32,6 +37,8 @@
 | [스크리닝 대시보드 로드맵](screening-dashboard-roadmap.md), [v1 구현 전달 계약](../implementation/screening-dashboard-delivery.md), [사용자 시나리오 인수 계약](../implementation/screening-dashboard-user-acceptance.md), [완료·로컬 인수](../implementation/screening-dashboard-completion.md), [이용 가이드](../usage/screening-dashboard.md) | annual-first 지표 가용성, 영속 screen/run/decision, S01–S08와 화면·운영 경계. **2026-10-09 최종 `acce036…` 독립 PASS·P0–P6 `LOCALLY_ACCEPTED`; 직접 UX walkthrough·P7·원격은 미완료** |
 | [일반 투자자 스크리닝 R1 전달](../implementation/screening-usability-delivery.md), [31개 지표 정의](../implementation/screening-metric-definitions.md), [R1 완료·로컬 인수](../implementation/screening-usability-completion.md) | FY+연도말 INSTANT opt-in 준비, 21 reported+10 governed derived publication, dataset v2/catalog와 v1 호환. **최종 `271fb1c…`·실제 R3 독립 PASS·`LOCALLY_ACCEPTED`; 직접 UX walkthrough·원격 미완료** |
 | [스크리닝 기업 탐색 R2 전달](../implementation/screening-explorer-delivery.md) · [완료·로컬 인수](../implementation/screening-explorer-completion.md) · [사용법](../usage/screening-explorer.md) | 21개 회사 cold-start 탐색, 선택 FY 기준 31개 지표 안내, 독립 회사 프로필·4 FY 흐름·2–4개 비교. **최종 `7e7ec15…` 독립 PASS·`LOCALLY_ACCEPTED`; 직접 walkthrough·원격 미완료** |
+| [명시적 저장·다시 열기 전달](../implementation/screening-explicit-save-delivery.md) · [완료·로컬 운영 반영](../implementation/screening-explicit-save-completion-20261017.md) | preview 무저장, 조건·결과 분리 저장, 명시 불러오기, 결과 이력 재열기와 hidden result backing. **최종 `e84289a…` 독립 404 PASS·기존 21사 UI `LOCALLY_ACCEPTED`·loopback 반영; 원격 미완료** |
+| [50 issuer T3 참조 결함과 확장 중지](../implementation/universe50-t3-reference-hold-20261017.md) | Raw exact-50 수집 상태는 보존하지만 T3 graph 참조 결함으로 CVX actual audit·first-five·50사 `FinancialREADY`는 미수락. **수리·재감사 사용자 승인 전 HOLD** |
 | [기간 규칙](../implementation/period-rules.md), [Layer 2 연결](../implementation/layer2-longitudinal.md), [공시 발견 계약](../implementation/accession-contract.md) | 표시 계획으로 바꿀 수 없는 의미·입력 경계 |
 
 충돌 시 적용되는 사용자 결정과 승인 범위를 먼저 확인하고, 해당 평면의 계약을
@@ -55,6 +62,8 @@
 | 일반 투자자 스크리닝 R1 | [R1 전달 계약](../implementation/screening-usability-delivery.md), [지표 정의](../implementation/screening-metric-definitions.md), [완료 기록](../implementation/screening-usability-completion.md) | **2026-10-09 APPROVED**; 21 reported+10 derived, opt-in FY-end INSTANT, v1 호환 | final `271fb1c968ebc03d98aea1561cd096187302a7fe`; metrics `screening-metrics-2a512baef9131d3dcef0e1da`; dataset `screening-dataset-370c328056802a7fb42d02a6` | **PASS**; 1,351 passed / 35 skipped, 651 FY2025 control 일치, native 31조건·XLSX·live GET PASS | **2026-10-09 LOCALLY_ACCEPTED** | 미병합; push·PR·remote CI 미수행 |
 | 스크리닝 기업 탐색 R2 | [R2 전달 계약](../implementation/screening-explorer-delivery.md), [완료 기록](../implementation/screening-explorer-completion.md) | **2026-10-09 APPROVED**; R3 prepared rows의 read-only 탐색·library·profile·compare, 새 재무정책 제외 | final `7e7ec154e15ed88a14c2a74d89042c39fa3fadbf`; unchanged actual R3 | **PASS**; final relevant 82, oracle·native·export·filtered/legacy flow PASS | **2026-10-09 LOCALLY_ACCEPTED** | 미병합; push·PR·remote CI 미수행 |
 | 50사 annual window 소비자 호환성 | [연간·분기 소비자 계약](../implementation/screening-quarterly-50-delivery.md), [사용법](../usage/screening-quarterly-50.md) | **2026-10-13 APPROVED**; 인수된 회사별 최대 5 FY 입력·최신 최대 4 FY 표시 schema 검증과 legacy 보존만. 회계·분기·UI 정책 변경 제외 | 로컬 구현 후보; 동결 SHA·독립 검증 대기 | 합성 metric→v2→v3 및 fail-closed 자체 검증 진행 | 미인수; first-five/50 `NOT_READY` | 미병합; push·PR 미수행 |
+| 명시적 저장·다시 열기 | [전달 계약](../implementation/screening-explicit-save-delivery.md) · [완료 기록](../implementation/screening-explicit-save-completion-20261017.md) | 2026-10-17 승인된 기존 21사 UI 저장 동작·로컬 반영; 재무·원격 제외 | final product `e84289a54acae92bee45a9d0224d71133acc13aa` | **PASS**; 404 passed, Chrome 1440/1024/768, 재시작·원자성·legacy 재열기 | **2026-10-17 LOCALLY_ACCEPTED**, loopback 운영 반영·GET-only 41/0 smoke PASS | 미병합; push·PR·remote CI 미수행 |
+| 50사 재무 확대 후속 상태 | [T3 HOLD 기록](../implementation/universe50-t3-reference-hold-20261017.md) | 결함·상태 문서화만 승인; 수리·CVX actual audit·재생성 미승인 | Raw exact-50 기존 수락 보존; T3 참조 결함 미수리 | cached tiny graph endpoint 무결성 FAIL; actual CVX `NOT_EVALUATED` | **HOLD_FINANCIAL_EXPANSION_PENDING_T3_REFERENCE_DISPOSITION** | 미병합; push·PR 미수행 |
 
 현재 전달 상태(2026-09-10): U3–U5 누적 이력은
 [PR #63](https://github.com/pluswc/sec_xbrl/pull/63)으로 `main`에 병합됐다. merge
@@ -103,6 +112,14 @@ SHA는 `9708508ec953ee4323ae29318c639abc9e0650b6`이고, 병합 시각은
   `7e7ec154e15ed88a14c2a74d89042c39fa3fadbf`다. unchanged R3 입력, 과거
   `a501d10…`·`dd67e5e…` FAIL과 독립·native 근거는
   [R2 완료 기록](../implementation/screening-explorer-completion.md)에 있다.
+- 명시적 저장·다시 열기의 최종 로컬 제품은
+  `e84289a54acae92bee45a9d0224d71133acc13aa`다. 404-test·실제 Chrome·재시작
+  독립 PASS, journal 보존, loopback 운영 반영과 원격 미수행 경계는
+  [완료 기록](../implementation/screening-explicit-save-completion-20261017.md)에 있다.
+- Raw exact-50 수집 완료는 T3 graph 또는 재무 확대 준비 완료와 같지 않다.
+  현재 CVX·first-five·50사 재무 확대는
+  [2026-10-17 HOLD 기록](../implementation/universe50-t3-reference-hold-20261017.md)의
+  사용자 결정 대기 상태다. 원본 SEC Raw는 변경하지 않는다.
 - 최초 계획 설계의 기준 부모는 위 `32212ca`였다. 당시 단일 작성자 문서와 별도
   읽기 전용 검증을 요구한 기록은 보존한다. 후속 제품의 독립 PASS·로컬 인수는
   완료 기록에만 반영하며, 아직 수행하지 않은 원격 병합을 완료로 표시하지 않는다.
