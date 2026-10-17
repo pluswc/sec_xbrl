@@ -21,6 +21,7 @@ from sec_xbrl.screening.dataset_v2 import (
     publish_screening_dataset_v2,
 )
 from sec_xbrl.screening.dataset_v3 import publish_screening_dataset_v3
+from sec_xbrl.screening.metric_identity import publish_generic_metric_identity
 from sec_xbrl.screening.server import serve
 from sec_xbrl.screening.service import ScreeningService
 from sec_xbrl.screening.store import ScreeningStore, backup_store, restore_store
@@ -35,6 +36,11 @@ def _parser() -> argparse.ArgumentParser:
     metrics = commands.add_parser("metrics", help="publish governed screening metrics")
     metrics.add_argument("--config", type=Path, required=True)
     metrics.add_argument("--destination", type=Path, required=True)
+    identity = commands.add_parser(
+        "metric-identity", help="publish a generic metric readiness identity"
+    )
+    identity.add_argument("--config", type=Path, required=True)
+    identity.add_argument("--destination", type=Path, required=True)
     prepare_v2 = commands.add_parser("prepare-v2", help="publish a screening dataset v2")
     prepare_v2.add_argument("--config", type=Path, required=True)
     prepare_v2.add_argument("--destination", type=Path, required=True)
@@ -82,6 +88,9 @@ def main(argv: list[str] | None = None) -> int:
         _print(open_screening_dataset(args.dataset).verify_all())
     elif args.command == "metrics":
         result = publish_screening_metrics(args.config, args.destination)
+        _print({"publication_id": result.publication_id, "root": str(result.root)})
+    elif args.command == "metric-identity":
+        result = publish_generic_metric_identity(args.config, args.destination)
         _print({"publication_id": result.publication_id, "root": str(result.root)})
     elif args.command == "prepare-v2":
         result = publish_screening_dataset_v2(args.config, args.destination)

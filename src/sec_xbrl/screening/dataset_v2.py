@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from sec_xbrl.company_metadata import CompanyMetadataReader
 from sec_xbrl.metrics.screening import ScreeningMetricReader
 from sec_xbrl.screening.common import (
     atomic_replace,
@@ -22,10 +23,18 @@ from sec_xbrl.screening.common import (
     sha256_file,
     write_json,
 )
-from sec_xbrl.screening.dataset import ScreeningDatasetReader
+from sec_xbrl.screening.dataset import (
+    GENERIC_IDENTITY_MANIFEST,
+    GENERIC_IDENTITY_SOURCE_KIND,
+    LEGACY_IDENTITY_SOURCE_KIND,
+    ScreeningDatasetReader,
+    _metadata_row,
+    open_screening_identity_source,
+)
 
 VERSION = "screening-dataset-v2"
 CONFIG_VERSION = "screening-prepare-config-v2"
+EXPLICIT_IDENTITY_CONFIG_VERSION = "screening-prepare-config-v2-identity-v1"
 MANIFEST = "screening_dataset_manifest.json"
 COMPANIES = "companies.json"
 METADATA = "metadata_inventory.json"
@@ -48,19 +57,13 @@ def publish_screening_dataset_v2(
     config = _validate_config(read_json(config_file, "screening v2 config"))
     destination_path = safe_new_destination(Path(destination), "screening v2 publication")
     metrics_root = real_directory(Path(config["metric_root"]), "screening metric publication")
-    source_root = real_directory(Path(config["source_dataset_root"]), "screening source dataset")
+    source_kind, source_root, source_manifest_path, source = _open_identity_source(config)
     metric_manifest_path = regular_file(
         metrics_root / "screening_metric_manifest.json", "screening metric manifest"
     )
-    source_manifest_path = regular_file(
-        source_root / MANIFEST, "screening source dataset manifest"
-    )
     if sha256_file(metric_manifest_path) != config["metric_manifest_sha256"]:
         raise ValueError("screening metric manifest differs from v2 config")
-    if sha256_file(source_manifest_path) != config["source_dataset_manifest_sha256"]:
-        raise ValueError("screening source dataset manifest differs from v2 config")
     metrics = ScreeningMetricReader(metrics_root)
-    source = ScreeningDatasetReader(source_root)
     if metrics.manifest["financial_as_of"] != config["financial_as_of"]:
         raise ValueError("metric publication financial-as-of differs from v2 config")
     if source.manifest["financial_as_of"] != config["financial_as_of"]:
@@ -71,7 +74,11 @@ def publish_screening_dataset_v2(
     if (
         identity_source.get("publication_id") != source.publication_id
         or identity_source.get("manifest_sha256")
-        != sha256_file(source_root / MANIFEST)
+        != sha256_file(source_manifest_path)
+        or (
+            config["schema_version"] == EXPLICIT_IDENTITY_CONFIG_VERSION
+            and identity_source.get("kind") != source_kind
+        )
     ):
         raise ValueError("v2 source dataset differs from metric identity source")
 
@@ -87,8 +94,7 @@ def publish_screening_dataset_v2(
         }
         for row in metrics.observations
     ]
-    companies = copy.deepcopy(source.companies)
-    metadata = copy.deepcopy(source.metadata)
+    companies, metadata = _identity_rows(source_kind, source)
     config_sha = sha256_file(config_file)
     publication_id = _publication_id(
         config_path=config_file,
@@ -110,7 +116,7 @@ def publish_screening_dataset_v2(
         write_json(staging / OBSERVATIONS, observations)
         files = _file_manifest(staging)
         metric_manifest = regular_file(metrics_root / "screening_metric_manifest.json", "metric manifest")
-        source_manifest = regular_file(source_root / MANIFEST, "source screening manifest")
+        source_manifest = regular_file(source_manifest_path, "source screening manifest")
         versions = {
             "metric_definition_versions": sorted({row["definition_version"] for row in definitions}),
             "metric_publication_id": metrics.manifest["publication_id"],
@@ -118,6 +124,17 @@ def publish_screening_dataset_v2(
             "source_dataset_publication_id": source.publication_id,
             "source_dataset_versions": copy.deepcopy(source.manifest.get("versions", {})),
         }
+        if config["schema_version"] == EXPLICIT_IDENTITY_CONFIG_VERSION:
+            versions["source_identity_kind"] = source_kind
+        source_declaration = {
+            "root": str(source_root),
+            "publication_id": source.publication_id,
+            "manifest_sha256": sha256_file(source_manifest),
+        }
+        source_key = "source_dataset"
+        if config["schema_version"] == EXPLICIT_IDENTITY_CONFIG_VERSION:
+            source_key = "identity_source"
+            source_declaration.update(kind=source_kind, manifest_name=source_manifest.name)
         manifest = {
             "schema_version": VERSION,
             "publication_id": publication_id,
@@ -143,12 +160,8 @@ def publish_screening_dataset_v2(
                     "publication_id": metrics.manifest["publication_id"],
                     "manifest_sha256": sha256_file(metric_manifest),
                 },
-                "source_dataset": {
-                    "root": str(source_root),
-                    "publication_id": source.publication_id,
-                    "manifest_sha256": sha256_file(source_manifest),
-                },
-                "metadata": copy.deepcopy(source.manifest["sources"]["metadata"]),
+                source_key: source_declaration,
+                "metadata": _identity_metadata_source(source_kind, source),
             },
             "files": files,
         }
@@ -246,27 +259,41 @@ class ScreeningDatasetV2Reader:
         metric_reader = ScreeningMetricReader(metric_root)
         if metric_reader.manifest["publication_id"] != sources["metrics"]["publication_id"]:
             raise ValueError("screening metric parent identity changed")
-        source_root = real_directory(Path(sources["source_dataset"]["root"]), "screening v1 source")
-        source_manifest = regular_file(source_root / MANIFEST, "screening v1 manifest")
-        if sha256_file(source_manifest) != sources["source_dataset"]["manifest_sha256"]:
-            raise ValueError("screening v1 identity parent changed")
+        source_kind, source_root, source_manifest, source_reader = _open_identity_source(config)
+        source_key = (
+            "source_dataset"
+            if config["schema_version"] == CONFIG_VERSION
+            else "identity_source"
+        )
+        source_declaration = sources.get(source_key)
+        if not isinstance(source_declaration, dict):
+            raise TypeError("screening v2 identity parent declaration is missing")
         if (
-            source_root
-            != real_directory(Path(config["source_dataset_root"]), "configured identity source")
-            or sources["source_dataset"]["manifest_sha256"]
-            != config["source_dataset_manifest_sha256"]
+            sha256_file(source_manifest) != source_declaration.get("manifest_sha256")
+            or source_root
+            != real_directory(Path(source_declaration.get("root", "")), "screening identity source")
+            or source_reader.publication_id != source_declaration.get("publication_id")
         ):
-            raise ValueError("screening v1 parent differs from pinned config")
-        source_reader = ScreeningDatasetReader(source_root)
-        if source_reader.publication_id != sources["source_dataset"]["publication_id"]:
-            raise ValueError("screening v1 parent identity changed")
+            raise ValueError("screening v2 identity parent changed")
+        if config["schema_version"] == EXPLICIT_IDENTITY_CONFIG_VERSION and (
+            source_declaration.get("kind") != source_kind
+            or source_declaration.get("manifest_name") != source_manifest.name
+        ):
+            raise ValueError("screening v2 explicit identity source changed")
         identity_source = metric_reader.manifest.get("identity_source") or {}
         if (
             identity_source.get("publication_id") != source_reader.publication_id
             or identity_source.get("manifest_sha256")
-            != sources["source_dataset"]["manifest_sha256"]
+            != source_declaration["manifest_sha256"]
+            or (
+                config["schema_version"] == EXPLICIT_IDENTITY_CONFIG_VERSION
+                and identity_source.get("kind") != source_kind
+            )
         ):
             raise ValueError("screening v2 parents do not share one identity source")
+        expected_companies_rows, expected_metadata_rows = _identity_rows(
+            source_kind, source_reader
+        )
         expected_support = [
             {**copy.deepcopy(row), "reason": (row.get("reasons") or [None])[0]}
             for row in metric_reader.support
@@ -279,16 +306,16 @@ class ScreeningDatasetV2Reader:
             self.metric_definitions != metric_reader.definitions
             or self.metric_support != expected_support
             or self.observations != expected_observations
-            or self.companies != source_reader.companies
-            or self.metadata != source_reader.metadata
+            or self.companies != expected_companies_rows
+            or self.metadata != expected_metadata_rows
         ):
             raise ValueError("screening v2 rows differ from governed parents")
         if (
             self.manifest["financial_as_of"] != metric_reader.manifest["financial_as_of"]
             or self.manifest["financial_as_of"] != source_reader.manifest["financial_as_of"]
             or expected_companies
-            != [{"cik": row["cik"], "ticker": row["ticker"]} for row in source_reader.companies]
-            or sources.get("metadata") != source_reader.manifest["sources"]["metadata"]
+            != [{"cik": row["cik"], "ticker": row["ticker"]} for row in expected_companies_rows]
+            or sources.get("metadata") != _identity_metadata_source(source_kind, source_reader)
         ):
             raise ValueError("screening v2 scope differs from verified parents")
         expected_versions = {
@@ -304,6 +331,8 @@ class ScreeningDatasetV2Reader:
                 source_reader.manifest.get("versions", {})
             ),
         }
+        if config["schema_version"] == EXPLICIT_IDENTITY_CONFIG_VERSION:
+            expected_versions["source_identity_kind"] = source_kind
         if self.manifest.get("versions") != expected_versions:
             raise ValueError("screening v2 version vector changed")
         expected_publication_id = _publication_id(
@@ -338,14 +367,86 @@ def open_screening_dataset(root: Path | str) -> ScreeningDatasetReader | Screeni
     return ScreeningDatasetReader(root_path)
 
 
+def _open_identity_source(config: dict[str, Any]) -> tuple[str, Path, Path, Any]:
+    if config["schema_version"] == CONFIG_VERSION:
+        kind = LEGACY_IDENTITY_SOURCE_KIND
+        root = real_directory(Path(config["source_dataset_root"]), "screening source dataset")
+        manifest = regular_file(root / MANIFEST, "screening source dataset manifest")
+        if sha256_file(manifest) != config["source_dataset_manifest_sha256"]:
+            raise ValueError("screening source dataset manifest differs from v2 config")
+        return kind, root, manifest, ScreeningDatasetReader(root)
+    declaration = config["identity_source"]
+    kind = declaration["kind"]
+    root = real_directory(Path(declaration["root"]), "screening identity source")
+    reader = open_screening_identity_source(
+        kind=kind,
+        root=root,
+        manifest_sha256=declaration["manifest_sha256"],
+    )
+    manifest_name = (
+        MANIFEST
+        if kind == LEGACY_IDENTITY_SOURCE_KIND
+        else GENERIC_IDENTITY_MANIFEST
+    )
+    manifest = regular_file(root / manifest_name, "screening identity manifest")
+    return kind, root, manifest, reader
+
+
+def _identity_rows(kind: str, source: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if kind == LEGACY_IDENTITY_SOURCE_KIND:
+        return copy.deepcopy(source.companies), copy.deepcopy(source.metadata)
+    if kind != GENERIC_IDENTITY_SOURCE_KIND:
+        raise ValueError("unsupported screening v2 identity source kind")
+    metadata_source = source.manifest.get("metadata") or {}
+    metadata = CompanyMetadataReader(
+        real_directory(Path(metadata_source.get("root", "")), "generic identity metadata")
+    )
+    candidates = metadata.list_companies()
+    candidate_by_cik = {row.cik: row for row in candidates}
+    prepared_ciks = {row["cik"] for row in source.companies}
+    companies: list[dict[str, Any]] = []
+    for identity in source.companies:
+        candidate = candidate_by_cik.get(identity["cik"])
+        if candidate is None or identity["ticker"] not in candidate.tickers:
+            raise ValueError("generic identity metadata company scope changed")
+        companies.append(
+            {
+                "cik": identity["cik"],
+                "ticker": identity["ticker"],
+                "name": candidate.name,
+                "sic_code": candidate.sic_code,
+                "sic_description": candidate.sic_description,
+                "metadata_status": candidate.metadata_status,
+                "metadata_observed_at": candidate.observed_at,
+                "financial_prepared": True,
+                "analysis_publication_id": identity["annual_analysis"]["publication_id"],
+                "source_snapshot_id": None,
+            }
+        )
+    metadata_rows = [_metadata_row(row, prepared_ciks) for row in candidates]
+    return sorted(companies, key=lambda row: row["cik"]), metadata_rows
+
+
+def _identity_metadata_source(kind: str, source: Any) -> dict[str, Any]:
+    if kind == LEGACY_IDENTITY_SOURCE_KIND:
+        return copy.deepcopy(source.manifest["sources"]["metadata"])
+    if kind == GENERIC_IDENTITY_SOURCE_KIND:
+        return copy.deepcopy(source.manifest["metadata"])
+    raise ValueError("unsupported screening v2 identity source kind")
+
+
 def _validate_config(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict) or value.get("schema_version") != CONFIG_VERSION:
+    if not isinstance(value, dict) or value.get("schema_version") not in {
+        CONFIG_VERSION,
+        EXPLICIT_IDENTITY_CONFIG_VERSION,
+    }:
         raise ValueError("unsupported screening v2 config")
+    config_version = value["schema_version"]
     fixture_kind = value.get("fixture_kind", "ACTUAL_PREPARED")
     if fixture_kind not in {"ACTUAL_PREPARED", "CACHE_FUTURE_UPDATE_FIXTURE", "SYNTHETIC_ERROR_FIXTURE"}:
         raise ValueError("unsupported screening v2 fixture kind")
-    return {
-        "schema_version": CONFIG_VERSION,
+    result = {
+        "schema_version": config_version,
         "dataset_id": require_string(value.get("dataset_id"), "dataset_id"),
         "fixture_kind": fixture_kind,
         "financial_as_of": require_string(value.get("financial_as_of"), "financial_as_of"),
@@ -353,12 +454,34 @@ def _validate_config(value: Any) -> dict[str, Any]:
         "metric_manifest_sha256": _require_sha256(
             value.get("metric_manifest_sha256"), "metric_manifest_sha256"
         ),
-        "source_dataset_root": require_string(value.get("source_dataset_root"), "source_dataset_root"),
-        "source_dataset_manifest_sha256": _require_sha256(
-            value.get("source_dataset_manifest_sha256"),
-            "source_dataset_manifest_sha256",
+    }
+    if config_version == CONFIG_VERSION:
+        result.update(
+            source_dataset_root=require_string(
+                value.get("source_dataset_root"), "source_dataset_root"
+            ),
+            source_dataset_manifest_sha256=_require_sha256(
+                value.get("source_dataset_manifest_sha256"),
+                "source_dataset_manifest_sha256",
+            ),
+        )
+        return result
+    declaration = value.get("identity_source")
+    if not isinstance(declaration, dict) or declaration.get("kind") not in {
+        LEGACY_IDENTITY_SOURCE_KIND,
+        GENERIC_IDENTITY_SOURCE_KIND,
+    }:
+        raise ValueError("screening v2 config requires an explicit identity source kind")
+    if "source_dataset_root" in value or "source_dataset_manifest_sha256" in value:
+        raise ValueError("explicit v2 identity config cannot mix legacy source fields")
+    result["identity_source"] = {
+        "kind": declaration["kind"],
+        "root": require_string(declaration.get("root"), "identity_source.root"),
+        "manifest_sha256": _require_sha256(
+            declaration.get("manifest_sha256"), "identity_source.manifest_sha256"
         ),
     }
+    return result
 
 
 def _require_sha256(value: Any, field: str) -> str:

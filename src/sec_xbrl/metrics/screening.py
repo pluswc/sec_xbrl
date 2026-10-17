@@ -24,6 +24,7 @@ from sec_xbrl.analysis import open_analysis
 
 VERSION = "screening-metrics-v1"
 CONFIG_VERSION = "screening-metric-config-v1"
+EXPLICIT_IDENTITY_CONFIG_VERSION = "screening-metric-config-v2"
 MANIFEST = "screening_metric_manifest.json"
 DEFINITIONS = "metric_definitions.json"
 SUPPORT = "metric_support.json"
@@ -271,18 +272,9 @@ def publish_screening_metrics(
     config_file = regular_file(Path(config_path), "screening metric config")
     config = _validate_config(read_json(config_file, "screening metric config"))
     destination_path = safe_new_destination(Path(destination), "screening metric publication")
-    from sec_xbrl.screening.dataset import ScreeningDatasetReader
-
-    source_dataset_root = real_directory(
-        Path(config["source_dataset_root"]), "screening identity source dataset"
+    source_dataset, identity_kind, source_dataset_root, source_manifest_path = (
+        _open_identity_source(config)
     )
-    source_manifest_path = regular_file(
-        source_dataset_root / "screening_dataset_manifest.json",
-        "screening identity source manifest",
-    )
-    if sha256_file(source_manifest_path) != config["source_dataset_manifest_sha256"]:
-        raise ValueError("screening identity source manifest differs from metric config")
-    source_dataset = ScreeningDatasetReader(source_dataset_root)
     if source_dataset.manifest["financial_as_of"] != config["financial_as_of"]:
         raise ValueError("screening identity source financial-as-of differs from metric config")
     if {(row["cik"], row["ticker"]) for row in source_dataset.companies} != {
@@ -301,6 +293,9 @@ def publish_screening_metrics(
         manifest_sha = sha256_file(manifest_path)
         if manifest_sha != company["analysis_manifest_sha256"]:
             raise ValueError(f"{ticker}: analysis manifest differs from metric config")
+        _validate_generic_identity_analysis_parent(
+            identity_kind, source_dataset, company, analysis_root, manifest_sha
+        )
         client = open_analysis(analysis_root)
         _verify_analysis_files(analysis_root, client.manifest)
         _validate_analysis_scope(client.manifest, ticker, config["financial_as_of"])
@@ -377,6 +372,15 @@ def publish_screening_metrics(
             target.parent.mkdir(parents=True, exist_ok=True)
             write_json(target, snapshot)
         files = _file_manifest(staging)
+        identity_source = {
+            "root": str(source_dataset_root),
+            "publication_id": source_dataset.publication_id,
+            "manifest_sha256": sha256_file(source_manifest_path),
+            "versions": copy.deepcopy(source_dataset.manifest.get("versions", {})),
+        }
+        if config["schema_version"] == EXPLICIT_IDENTITY_CONFIG_VERSION:
+            identity_source["kind"] = identity_kind
+            identity_source["manifest_name"] = source_manifest_path.name
         manifest = {
             "schema_version": VERSION,
             "publication_id": publication_id,
@@ -391,12 +395,7 @@ def publish_screening_metrics(
             "observation_count": len(observations),
             "support_count": len(support),
             "sources": sources,
-            "identity_source": {
-                "root": str(source_dataset_root),
-                "publication_id": source_dataset.publication_id,
-                "manifest_sha256": sha256_file(source_dataset_root / "screening_dataset_manifest.json"),
-                "versions": copy.deepcopy(source_dataset.manifest.get("versions", {})),
-            },
+            "identity_source": identity_source,
             "versions": _metric_versions(observations, source_dataset.manifest.get("versions", {})),
             "files": files,
         }
@@ -517,22 +516,22 @@ class ScreeningMetricReader:
 
     def _verify_identity_manifest(self) -> None:
         source = self.manifest.get("identity_source") or {}
+        kind = _manifest_identity_kind(self.manifest, source)
         root = real_directory(Path(source.get("root", "")), "screening metric identity source")
-        manifest_path = regular_file(
-            root / "screening_dataset_manifest.json", "identity source manifest"
-        )
+        manifest_path = regular_file(root / _identity_manifest_name(kind), "identity source manifest")
         if sha256_file(manifest_path) != source.get("manifest_sha256"):
             raise ValueError("screening metric identity source changed")
 
     def _verify_identity_source(self) -> None:
-        from sec_xbrl.screening.dataset import ScreeningDatasetReader
-
         source = self.manifest.get("identity_source") or {}
-        root = real_directory(Path(source.get("root", "")), "screening metric identity source")
-        manifest_path = regular_file(root / "screening_dataset_manifest.json", "identity source manifest")
-        if sha256_file(manifest_path) != source.get("manifest_sha256"):
-            raise ValueError("screening metric identity source changed")
-        reader = ScreeningDatasetReader(root)
+        kind = _manifest_identity_kind(self.manifest, source)
+        from sec_xbrl.screening.dataset import open_screening_identity_source
+
+        reader = open_screening_identity_source(
+            kind=kind,
+            root=source.get("root", ""),
+            manifest_sha256=source.get("manifest_sha256", ""),
+        )
         if (
             reader.publication_id != source.get("publication_id")
             or reader.manifest.get("versions", {}) != source.get("versions", {})
@@ -544,6 +543,21 @@ class ScreeningMetricReader:
             or reader.manifest["financial_as_of"] != self.manifest["financial_as_of"]
         ):
             raise ValueError("screening metric identity source scope changed")
+        if kind == "GENERIC_METRIC_IDENTITY_ATTESTATION":
+            by_cik = {
+                row["cik"]: row for row in self.manifest["config"]["companies"]
+            }
+            for cik, company in by_cik.items():
+                metric_source = next(
+                    row for row in self.manifest["sources"] if row["cik"] == cik
+                )
+                _validate_generic_identity_analysis_parent(
+                    kind,
+                    reader,
+                    company,
+                    real_directory(Path(metric_source["root"]), "screening metric analysis"),
+                    metric_source["manifest_sha256"],
+                )
 
     def _verify_sources(self) -> None:
         source_by_cik = {row["cik"]: row for row in self.manifest.get("sources", [])}
@@ -613,9 +627,111 @@ class ScreeningMetricReader:
             raise ValueError("screening metric support differs from governed prepared inputs")
 
 
+def _open_identity_source(config: dict[str, Any]) -> tuple[Any, str, Path, Path]:
+    from sec_xbrl.screening.dataset import (
+        LEGACY_IDENTITY_SOURCE_KIND,
+        open_screening_identity_source,
+    )
+
+    if config["schema_version"] == CONFIG_VERSION:
+        kind = LEGACY_IDENTITY_SOURCE_KIND
+        root_value = config["source_dataset_root"]
+        digest = config["source_dataset_manifest_sha256"]
+    else:
+        declaration = config["identity_source"]
+        kind = declaration["kind"]
+        root_value = declaration["root"]
+        digest = declaration["manifest_sha256"]
+    root = real_directory(Path(root_value), "screening metric identity source")
+    reader = open_screening_identity_source(kind=kind, root=root, manifest_sha256=digest)
+    manifest_path = regular_file(
+        root / _identity_manifest_name(kind), "identity source manifest"
+    )
+    return reader, kind, root, manifest_path
+
+
+def _identity_manifest_name(kind: str) -> str:
+    from sec_xbrl.screening.dataset import (
+        GENERIC_IDENTITY_MANIFEST,
+        GENERIC_IDENTITY_SOURCE_KIND,
+        LEGACY_IDENTITY_SOURCE_KIND,
+    )
+
+    if kind == LEGACY_IDENTITY_SOURCE_KIND:
+        return "screening_dataset_manifest.json"
+    if kind == GENERIC_IDENTITY_SOURCE_KIND:
+        return GENERIC_IDENTITY_MANIFEST
+    raise ValueError("unsupported explicit screening metric identity source kind")
+
+
+def _manifest_identity_kind(manifest: dict[str, Any], source: dict[str, Any]) -> str:
+    from sec_xbrl.screening.dataset import (
+        GENERIC_IDENTITY_SOURCE_KIND,
+        LEGACY_IDENTITY_SOURCE_KIND,
+    )
+
+    config = manifest.get("config") or {}
+    if config.get("schema_version") == CONFIG_VERSION:
+        if "kind" in source or "identity_source" in config:
+            raise ValueError("legacy metric publication identity source shape changed")
+        return LEGACY_IDENTITY_SOURCE_KIND
+    if config.get("schema_version") != EXPLICIT_IDENTITY_CONFIG_VERSION:
+        raise ValueError("screening metric publication config schema changed")
+    kind = source.get("kind")
+    if kind not in {LEGACY_IDENTITY_SOURCE_KIND, GENERIC_IDENTITY_SOURCE_KIND}:
+        raise ValueError("screening metric publication lacks an explicit identity source kind")
+    if source.get("manifest_name") != _identity_manifest_name(kind):
+        raise ValueError("screening metric identity manifest name changed")
+    declaration = config.get("identity_source") or {}
+    if (
+        declaration.get("kind") != kind
+        or declaration.get("root") != source.get("root")
+        or declaration.get("manifest_sha256") != source.get("manifest_sha256")
+    ):
+        raise ValueError("screening metric identity declaration changed")
+    return kind
+
+
+def _validate_generic_identity_analysis_parent(
+    kind: str,
+    reader: Any,
+    company: dict[str, Any],
+    analysis_root: Path,
+    manifest_sha256: str,
+) -> None:
+    from sec_xbrl.screening.dataset import GENERIC_IDENTITY_SOURCE_KIND
+
+    if kind != GENERIC_IDENTITY_SOURCE_KIND:
+        return
+    source = reader.annual_analysis_source(company["cik"])
+    if (
+        source.get("root") != str(analysis_root)
+        or source.get("manifest_sha256") != manifest_sha256
+        or source.get("period_mode") != "ANNUAL"
+        or source.get("history_manifest_sha256") is None
+    ):
+        raise ValueError(
+            f"{company['ticker']}: annual metric analysis differs from generic identity"
+        )
+    identity_company = next(
+        row for row in reader.companies if row["cik"] == company["cik"]
+    )
+    if (
+        company.get("input_years") != identity_company.get("input_years")
+        or company.get("display_years") != identity_company.get("display_years")
+    ):
+        raise ValueError(
+            f"{company['ticker']}: annual metric year window differs from generic identity"
+        )
+
+
 def _validate_config(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict) or value.get("schema_version") != CONFIG_VERSION:
+    if not isinstance(value, dict) or value.get("schema_version") not in {
+        CONFIG_VERSION,
+        EXPLICIT_IDENTITY_CONFIG_VERSION,
+    }:
         raise ValueError("unsupported screening metric config")
+    config_version = value["schema_version"]
     companies = value.get("companies")
     if not isinstance(companies, list) or not companies:
         raise ValueError("screening metric config requires companies")
@@ -653,19 +769,43 @@ def _validate_config(value: Any) -> dict[str, Any]:
         date.fromisoformat(financial_as_of)
     except ValueError as exc:
         raise ValueError("financial_as_of must be an ISO date") from exc
-    source_manifest_sha = _require_sha256(
-        value.get("source_dataset_manifest_sha256"),
-        "source_dataset_manifest_sha256",
-    )
-    return {
-        "schema_version": CONFIG_VERSION,
+    result = {
+        "schema_version": config_version,
         "financial_as_of": financial_as_of,
-        "source_dataset_root": require_string(
-            value.get("source_dataset_root"), "source_dataset_root"
-        ),
-        "source_dataset_manifest_sha256": source_manifest_sha,
         "companies": normalized,
     }
+    if config_version == CONFIG_VERSION:
+        result.update(
+            source_dataset_root=require_string(
+                value.get("source_dataset_root"), "source_dataset_root"
+            ),
+            source_dataset_manifest_sha256=_require_sha256(
+                value.get("source_dataset_manifest_sha256"),
+                "source_dataset_manifest_sha256",
+            ),
+        )
+        return result
+    from sec_xbrl.screening.dataset import (
+        GENERIC_IDENTITY_SOURCE_KIND,
+        LEGACY_IDENTITY_SOURCE_KIND,
+    )
+
+    declaration = value.get("identity_source")
+    if not isinstance(declaration, dict) or declaration.get("kind") not in {
+        LEGACY_IDENTITY_SOURCE_KIND,
+        GENERIC_IDENTITY_SOURCE_KIND,
+    }:
+        raise ValueError("screening metric config requires an explicit identity source kind")
+    if "source_dataset_root" in value or "source_dataset_manifest_sha256" in value:
+        raise ValueError("explicit metric identity config cannot mix legacy source fields")
+    result["identity_source"] = {
+        "kind": declaration["kind"],
+        "root": require_string(declaration.get("root"), "identity_source.root"),
+        "manifest_sha256": _require_sha256(
+            declaration.get("manifest_sha256"), "identity_source.manifest_sha256"
+        ),
+    }
+    return result
 
 
 def _validate_year_list(value: Any, field: str, *, maximum: int) -> list[int]:
