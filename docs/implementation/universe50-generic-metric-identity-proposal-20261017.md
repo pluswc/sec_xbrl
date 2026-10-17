@@ -88,7 +88,8 @@ source kind는 설정과 저장 manifest에 명시하고, 파일 모양이나 �
   source binding, 재현 가능한 입력 manifest·hash와 assessment artifact identity
 - 회사별 accepted history identity와 parent hash
 - 회사별 annual analysis identity와 고정된 history parent
-- 회사별 quarterly analysis/metric identity와 고정된 quarter evidence parent
+- 회사별 quarterly analysis identity와 그 `quarter_source_evidence`, history quarter
+  rule/version; quarterly metric은 이 attestation의 입력이 아니라 이후 child로 생산됨
 - annual은 입력 5 FY·표시 4 FY, quarterly는 최근 8 calendar bucket
   `2024Q4–2026Q3`이라는 동일 범위 증명
 - 사용한 canonical/rule/schema version, unavailable 상태와 그 이유의 보존
@@ -156,8 +157,10 @@ manual reviewed-Q4 재분류, accuracy `PASS` 생략, reader의 `READY` 검사 �
    입력/source binding이 없으면 상태는 `BLOCKED`이고 dataset build를 거부한다.
 5. 저장 후 다시 연 consumer는 manifest의 source kind와 attestation identity를 다시
    검증한다.
-6. annual-31과 quarterly-17 publication은 정확한 attestation parent를 기록하고,
-   dataset v2/v3가 그 identity를 보존한다.
+6. annual-31 publication은 정확한 attestation parent를 기록한다. quarterly-17은
+   기존 producer parent 계약대로 annual metric parent를 검증해 동일 identity에
+   전이적으로 결합되며, dataset v2/v3가 그 identity를 보존한다. 이를 위해 기존
+   quarterly producer의 parent 계약을 변경하지 않는다.
 7. Raw, legacy reviewed-Q4/completion gate, 기존 publication/catalog/export와 user
    journal이 변경되지 않았음을 회귀 증거로 남긴다. 정상 manual dimensional-Q4
    gate는 어떤 경로에서도 약화하지 않는다.
