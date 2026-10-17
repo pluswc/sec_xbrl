@@ -40,6 +40,12 @@ worker가 모두 검증해야 한다. 같은 GO만으로 내부 worker CLI나 Py
 호출하면 History builder 전에 실패한다. worker도 exact-50 ticker와 first-5 이후의
 financial acceptance hash를 다시 검증한다. 부모 supervisor만 process-tree RSS와
 timeout을 감시하고 한도 초과 시 process group에 TERM 뒤 필요하면 KILL을 보낸다.
+monitor의 `KeyboardInterrupt`, `SystemExit` 또는 다른 오류도 같은 소유 process group을
+TERM→bounded wait→KILL로 종료하고 reap한 뒤에만 예외를 다시 발생시키고 heavy lock을
+놓는다. 이 중단은 `SUPERVISOR_INTERRUPTED`, 오류 종류와 `child_reaped`를 fresh summary에
+남긴다. 다른 process group은 신호 대상으로 삼지 않는다. Linux worker는 builder 진입
+전에 `PR_SET_PDEATHSIG=SIGKILL`을 설정하고 부모 PID를 다시 확인한다. Linux guard를
+설정할 수 없거나 그 사이 부모가 바뀌면 fail closed 한다.
 
 ## 설정·GO·자원 경계
 

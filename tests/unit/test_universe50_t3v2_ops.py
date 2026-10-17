@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 import types
 from pathlib import Path
 from types import SimpleNamespace
@@ -185,7 +186,7 @@ def test_direct_worker_callback_is_rejected_before_history(
 
     monkeypatch.setattr(runner, "validate_go", lambda *args: ({}, {}))
     monkeypatch.setattr(runner.history, "build_history", forbidden, raising=False)
-    with pytest.raises(PermissionError, match="inherited supervisor"):
+    with pytest.raises(PermissionError, match="declared supervisor"):
         runner.build_worker(tmp_path / "config", "CVX", tmp_path / "go")
     assert called is False
 
@@ -193,6 +194,7 @@ def test_direct_worker_callback_is_rejected_before_history(
 def test_worker_rechecks_bulk_gate_after_supervisor(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    monkeypatch.setattr(runner, "install_parent_death_guard", lambda: None)
     monkeypatch.setattr(runner, "validate_go", lambda *args: ({}, {}))
     monkeypatch.setattr(runner, "receive_supervisor", lambda _: None)
     with pytest.raises(ValueError, match="later-45"):
@@ -209,6 +211,7 @@ def test_supervised_first5_worker_passes_boundary(
     class ReachedGuardedWork(Exception):
         pass
 
+    monkeypatch.setattr(runner, "install_parent_death_guard", lambda: None)
     monkeypatch.setattr(runner, "validate_go", lambda *args: ({}, {}))
     monkeypatch.setattr(runner, "receive_supervisor", lambda _: None)
     monkeypatch.setattr(runner, "candidate_rows", lambda _: {"CVX": {}})
@@ -294,7 +297,7 @@ def test_monitor_terminates_then_kills_synthetic_process(rss: int, clocks, expec
                 raise subprocess.TimeoutExpired("synthetic", timeout)
             return -signal.SIGKILL
 
-    process, kills = Process(), []
+    process, terminated = Process(), []
     result = runner.monitor_process(
         process,
         io.StringIO(),
@@ -303,7 +306,170 @@ def test_monitor_terminates_then_kills_synthetic_process(rss: int, clocks, expec
         rss_reader=lambda _: rss,
         clock=lambda: next(clocks),
         sleeper=lambda _: None,
-        kill_group=lambda pid, sig: kills.append((pid, sig)),
+        terminate=lambda child: terminated.append(child.pid) or -signal.SIGKILL,
     )
     assert result[2] == expected
-    assert kills == [(77, signal.SIGTERM), (77, signal.SIGKILL)]
+    assert terminated == [77]
+
+
+def test_terminate_owned_group_sends_term_then_kill_and_reaps() -> None:
+    class Process:
+        pid = 88
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            if timeout is not None:
+                raise subprocess.TimeoutExpired("synthetic", timeout)
+            return -signal.SIGKILL
+
+    signals = []
+    assert (
+        runner.terminate_owned_process_group(
+            Process(),
+            kill_group=lambda pid, sig: signals.append((pid, sig)),
+            group_id=lambda pid: pid,
+        )
+        == -signal.SIGKILL
+    )
+    assert signals == [(88, signal.SIGTERM), (88, signal.SIGKILL)]
+
+
+@pytest.mark.parametrize(
+    "failure", [KeyboardInterrupt("stop"), SystemExit(70), RuntimeError("monitor")]
+)
+def test_monitor_failure_reaps_real_child_before_lock_release(
+    failure: BaseException, tmp_path: Path
+) -> None:
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"],
+        start_new_session=True,
+    )
+
+    def fail(_pid):
+        raise failure
+
+    with runner.heavy_lock(tmp_path), pytest.raises(type(failure)):
+        runner.supervise_owned_process(process, io.StringIO(), rss_reader=fail)
+    assert process.poll() is not None
+    with runner.heavy_lock(tmp_path):
+        pass
+
+
+def test_guarded_run_preserves_interrupt_summary_after_reaping(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = {"collection_root": str(tmp_path)}
+    monkeypatch.setattr(
+        runner,
+        "validate_preflight",
+        lambda _: (config, {}, tmp_path / "preflight.json"),
+    )
+    original_popen = subprocess.Popen
+    child = None
+
+    def sleeping_child(_command, **kwargs):
+        nonlocal child
+        child = original_popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            stdout=kwargs["stdout"],
+            stderr=kwargs["stderr"],
+            start_new_session=True,
+            env=kwargs["env"],
+            pass_fds=kwargs["pass_fds"],
+        )
+        return child
+
+    monkeypatch.setattr(runner.subprocess, "Popen", sleeping_child)
+    monkeypatch.setattr(
+        runner,
+        "supervise_owned_process",
+        lambda *_: (_ for _ in ()).throw(KeyboardInterrupt("synthetic interrupt")),
+    )
+    with runner.heavy_lock(tmp_path), pytest.raises(KeyboardInterrupt):
+        runner.run_guarded_worker(tmp_path / "config", "CVX", tmp_path / "go", None, None)
+    assert child is not None and child.poll() is not None
+    summaries = list((tmp_path / "execution" / "CVX").glob("*.summary.json"))
+    assert len(summaries) == 1
+    summary = json.loads(summaries[0].read_text())
+    assert summary["status"] == "SUPERVISOR_INTERRUPTED"
+    assert summary["error_type"] == "KeyboardInterrupt"
+    assert summary["child_reaped"] is True
+    with runner.heavy_lock(tmp_path):
+        pass
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux operations contract")
+def test_real_inherited_capability_positive(tmp_path: Path) -> None:
+    token = os.urandom(32)
+    token_read, token_write = os.pipe()
+    result_read, result_write = os.pipe()
+    with runner.heavy_lock(tmp_path):
+        pid = os.fork()
+        if pid == 0:
+            try:
+                os.close(token_write)
+                os.close(result_read)
+                os.environ.update(
+                    SEC_XBRL_T3V2_SUPERVISOR_FD=str(token_read),
+                    SEC_XBRL_T3V2_SUPERVISOR_PID=str(os.getppid()),
+                    SEC_XBRL_T3V2_SUPERVISOR_SHA256=runner.hashlib.sha256(token).hexdigest(),
+                    POLARS_MAX_THREADS="2",
+                    OMP_NUM_THREADS="1",
+                    OPENBLAS_NUM_THREADS="1",
+                    MKL_NUM_THREADS="1",
+                    NUMEXPR_NUM_THREADS="1",
+                )
+                runner.install_parent_death_guard()
+                runner.receive_supervisor({"collection_root": str(tmp_path)})
+                os.write(result_write, b"PASS")
+                os._exit(0)
+            except (OSError, RuntimeError, ValueError):
+                os._exit(70)
+        os.close(token_read)
+        os.close(result_write)
+        os.write(token_write, token)
+        os.close(token_write)
+        result = os.read(result_read, 4)
+        os.close(result_read)
+        _, status = os.waitpid(pid, 0)
+    assert result == b"PASS"
+    assert os.waitstatus_to_exitcode(status) == 0
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux operations contract")
+def test_parent_death_guard_stops_worker_after_abrupt_supervisor_exit() -> None:
+    pid_read, pid_write = os.pipe()
+    supervisor = os.fork()
+    if supervisor == 0:
+        ack_read, ack_write = os.pipe()
+        worker = os.fork()
+        if worker == 0:
+            os.close(pid_read)
+            os.close(ack_read)
+            os.environ["SEC_XBRL_T3V2_SUPERVISOR_PID"] = str(os.getppid())
+            runner.install_parent_death_guard()
+            os.write(pid_write, f"{os.getpid()}\n".encode())
+            os.write(ack_write, b"1")
+            time.sleep(60)
+            os._exit(0)
+        os.close(ack_write)
+        os.read(ack_read, 1)
+        os._exit(0)
+    os.close(pid_write)
+    worker_pid = int(os.read(pid_read, 32).strip())
+    os.close(pid_read)
+    os.waitpid(supervisor, 0)
+    deadline = time.monotonic() + 3
+    state = None
+    while time.monotonic() < deadline:
+        try:
+            state = Path(f"/proc/{worker_pid}/stat").read_text().split()[2]
+        except FileNotFoundError:
+            state = None
+            break
+        if state == "Z":
+            break
+        time.sleep(0.02)
+    assert state in {None, "Z"}

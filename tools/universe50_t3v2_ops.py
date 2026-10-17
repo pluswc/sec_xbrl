@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import fcntl
 import hashlib
 import json
@@ -550,6 +551,46 @@ def receive_supervisor(config: dict[str, Any]) -> None:
             raise PermissionError("worker requires the parent-held heavy lock")
 
 
+def install_parent_death_guard() -> None:
+    """Linux-only fail-closed worker death if its validated supervisor disappears."""
+    if not sys.platform.startswith("linux"):
+        raise RuntimeError("history worker parent-death guard requires Linux")
+    try:
+        expected_parent = int(os.environ["SEC_XBRL_T3V2_SUPERVISOR_PID"])
+    except (KeyError, ValueError) as exc:
+        raise PermissionError("worker requires a declared supervisor parent") from exc
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(1, signal.SIGKILL, 0, 0, 0) != 0:  # PR_SET_PDEATHSIG
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+    if os.getppid() != expected_parent:
+        raise PermissionError("worker parent exited before parent-death guard installation")
+
+
+def terminate_owned_process_group(
+    process: Any,
+    *,
+    kill_group: Any = os.killpg,
+    group_id: Any = os.getpgid,
+) -> int:
+    """Terminate and reap only the session-leading process group created by this runner."""
+    if type(process.pid) is not int or process.pid <= 1 or group_id(process.pid) != process.pid:
+        raise RuntimeError("refusing to signal a process group not owned by this supervisor")
+    if process.poll() is None:
+        try:
+            kill_group(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            return process.wait(10)
+        except subprocess.TimeoutExpired:
+            try:
+                kill_group(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+    return process.wait()
+
+
 def monitor_process(
     process: Any,
     samples: Any,
@@ -559,7 +600,7 @@ def monitor_process(
     rss_reader: Any = process_tree_rss_kib,
     clock: Any = time.monotonic,
     sleeper: Any = time.sleep,
-    kill_group: Any = os.killpg,
+    terminate: Any = terminate_owned_process_group,
 ) -> tuple[int, int, str | None, float]:
     """Supervise one process tree; tests inject clocks and process controls."""
     started, peak, stopped = clock(), 0, None
@@ -572,14 +613,19 @@ def monitor_process(
             "RSS_LIMIT" if rss > limit_kib else "TIMEOUT" if elapsed > timeout_seconds else None
         )
         if stopped:
-            kill_group(process.pid, signal.SIGTERM)
-            try:
-                process.wait(10)
-            except subprocess.TimeoutExpired:
-                kill_group(process.pid, signal.SIGKILL)
+            terminate(process)
             break
         sleeper(0.25)
     return process.wait(), peak, stopped, clock() - started
+
+
+def supervise_owned_process(process: Any, samples: Any, **monitor_options: Any):
+    """Never return or propagate an interruption while the owned child remains alive."""
+    try:
+        return monitor_process(process, samples, **monitor_options)
+    except BaseException:
+        terminate_owned_process_group(process)
+        raise
 
 
 def run_guarded_worker(
@@ -628,23 +674,49 @@ def run_guarded_worker(
         SEC_XBRL_T3V2_SUPERVISOR_PID=str(os.getpid()),
         SEC_XBRL_T3V2_SUPERVISOR_SHA256=hashlib.sha256(token).hexdigest(),
     )
-    with log.open("x", encoding="utf-8") as out, samples.open("x", encoding="utf-8") as rss_out:
-        try:
-            process = subprocess.Popen(
-                command,
-                stdout=out,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-                env=env,
-                pass_fds=(read_fd,),
-            )
-        finally:
-            os.close(read_fd)
-        try:
-            os.write(write_fd, token)
-        finally:
-            os.close(write_fd)
-        code, peak, stopped, elapsed = monitor_process(process, rss_out)
+    process = None
+    started = time.monotonic()
+    try:
+        with log.open("x", encoding="utf-8") as out, samples.open("x", encoding="utf-8") as rss_out:
+            try:
+                process = subprocess.Popen(
+                    command,
+                    stdout=out,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                    env=env,
+                    pass_fds=(read_fd,),
+                )
+            finally:
+                os.close(read_fd)
+            try:
+                os.write(write_fd, token)
+            finally:
+                os.close(write_fd)
+            code, peak, stopped, elapsed = supervise_owned_process(process, rss_out)
+    except BaseException as exc:
+        for descriptor in (read_fd, write_fd):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        if process is not None and process.poll() is None:
+            terminate_owned_process_group(process)
+        failure = {
+            "schema_version": "universe50-t3v2-resource-run-v1",
+            "status": "SUPERVISOR_INTERRUPTED",
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "elapsed_seconds": round(time.monotonic() - started, 3),
+            "limit_kib": LIMIT_KIB,
+            "timeout_seconds": TIMEOUT,
+            "command": command,
+            "log": str(log),
+            "samples": str(samples),
+            "child_reaped": process is None or process.poll() is not None,
+        }
+        summary.write_text(json.dumps(failure, indent=2, sort_keys=True) + "\n")
+        raise
     result = {
         "schema_version": "universe50-t3v2-resource-run-v1",
         "status": stopped or ("PASS" if code == 0 else "FAIL"),
@@ -669,6 +741,7 @@ def build_worker(
     gate: Path | None = None,
     gate_sha: str | None = None,
 ) -> Path:
+    install_parent_death_guard()
     config, preflight = validate_go(config_path, "build-one", (ticker,), go_path)
     receive_supervisor(config)
     validate_bulk_gate(ticker, gate, gate_sha)
