@@ -13,13 +13,44 @@ gate 변경, live UI 반영, push·PR·main 병합은 승인하지 않았다.
 | --- | --- |
 | 제안 | 기존 source inventory에서 `fd9 + f222 + c9` tracked handoff를 권고 |
 | 범위 승인 | **APPROVED — LOCAL SOURCE/SYNTHETIC COMPOSITION ONLY** |
-| 구현 | exact `fd9`에서 ordinary merge로 exact `f222`, 그 다음 exact `c9`를 통합한 후보 |
-| 독립 검증 | 별도 Astra read-only 검증 대기 |
-| 로컬 인수 | 미수락; 리드 판단 대기 |
+| 구현 | exact `fd9`에서 ordinary merge로 exact `f222`, 그 다음 exact `c9`를 통합한 `135d49b…` |
+| 독립 검증 | **PASS** — exact `135d49b…`, 410 passed, HTTP 2개 environment-deselected |
+| 로컬 인수 | **LOCALLY_ACCEPTED_SOURCE_AND_SYNTHETIC_ONLY** — 2026-10-18 KST root lead |
 | main 병합 | 미수행; push·PR·remote CI도 미수행 |
 
 source composition은 component의 actual-data acceptance가 아니다. component별 기존
 source/synthetic 인수도 새 merge commit에 자동 승계되지 않는다.
+
+## 2026-10-18 독립 검증과 로컬 source 인수
+
+구현 후보 `135d49bfbd97f77cbd5018efa82ec56a3650c58d`, tree
+`5ab9f797cf319233d91edce0ca9c700cc964f1fb`를 별도 Astra가 read-only로 검증해
+**PASS**했다. 독립 검증은 세 component의 282개 non-doc path가 exact accepted
+component bytes와 같은지, ordinary merge ancestry, source gate 불변, tracked 문서의 상태
+분리를 확인했다. guarded source/synthetic test는 410개가 통과했다. sandbox가 owned
+loopback socket 생성 자체를 막아 explicit-save HTTP test 2개는 environment-deselected로
+분리했으며 실패나 PASS로 바꾸지 않았다. 독립 report SHA-256은
+`34b5b06d4527fa8d044009d83acea0fcfc14861dbe316abc99e3cea7f3b0f602`다.
+
+root lead는 이 exact source/tree를
+**LOCALLY_ACCEPTED_SOURCE_AND_SYNTHETIC_ONLY**로 인수했다. 인수 결정은 다음을
+명시한다.
+
+- 인수 source는 exact `135d49b…`이며 후속 문서 commit은 그 source와 독립 결과를
+  변경하지 않는다.
+- actual 운영 component HEAD는 계속 exact `fd9a179…`, `f222a8b…`, `c9e1316…`다.
+  merged HEAD를 actual runner/engine/financial HEAD로 사용하지 않는다.
+- 이 결정이 새로 인수한 actual data와 native UI는 없고 main 병합도 아니다.
+- actual JNJ v3는 계속 `RUNNING` reference `90986`으로 별도이며 이 source 인수가 그
+  완료·감사·인수를 뜻하지 않는다.
+- first-five와 later-45 financial은 계속 `NOT_READY`이고 기존 live 21사 explicit-save는
+  변경하지 않았다.
+
+선택적 로컬 결정 기록
+`lead_local_source_composition_acceptance_135d49b.json`의 SHA-256은
+`22aebf6f8f05fd0b11601f51fda02bd24c7a8b6e7fa6fc49fed6a7be7361ad2a`다.
+이 추적 문서가 결정의 범위와 다음 gate를 자체적으로 보존하므로 fresh checkout은
+`work/` 기록에 의존하지 않는다.
 
 ## exact component와 merge history
 
@@ -102,8 +133,8 @@ live server, journal 또는 catalog를 변경하지 않는다.
 
 다음 순서를 건너뛰지 않는다.
 
-1. 이 clean source composition 후보에 대한 별도 Astra read-only 검증
-2. 리드의 source composition 로컬 인수 판단
+1. 이 clean source composition 후보에 대한 별도 Astra read-only 검증 — **PASS 완료**
+2. 리드의 source composition 로컬 인수 판단 — **SOURCE/SYNTHETIC ONLY 완료**
 3. 진행 중인 actual JNJ의 별도 완료·독립 audit·리드 인수
 4. accepted History를 부모로 한 first-five financial 실행·독립 검증·로컬 인수
 5. first-five acceptance 뒤 later-45 History/financial과 exact-50 publication
