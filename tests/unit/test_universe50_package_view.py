@@ -25,10 +25,14 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def fixture(tmp_path: Path, *, duplicate: bool = False, missing: bool = False) -> dict[str, object]:
+def fixture(
+    tmp_path: Path, *, duplicate: bool = False, missing: bool = False, agent_prefix: bool = False
+) -> dict[str, object]:
     tmp_path.mkdir(parents=True, exist_ok=True)
     cik = "0000000123"
     accessions = ["0000000123-25-000001", "0000000123-25-000002"]
+    if agent_prefix:
+        accessions[0] = "0001104659-25-000001"
     roots = [tmp_path / "cache-a", tmp_path / "cache-b"]
     for root in roots:
         root.mkdir()
@@ -104,6 +108,13 @@ def test_publish_selects_declared_root_order_and_creates_only_hardlinks(tmp_path
     assert verified["selected_ciks"] == [case["cik"]]
 
 
+def test_accepts_submission_agent_accession_prefix(tmp_path: Path) -> None:
+    case = fixture(tmp_path, agent_prefix=True)
+    manifest = json.loads(publish(case).read_text())
+    agent_filing = next(row for row in manifest["filings"] if row["accession"].startswith("0001104659"))
+    assert agent_filing["cik"] == "0000000123"
+
+
 def test_rejects_wrong_candidate_hash(tmp_path: Path) -> None:
     case = fixture(tmp_path)
     case["candidate_hash"] = "0" * 64
@@ -175,6 +186,84 @@ def test_cross_filesystem_link_failure_has_no_copy_fallback(
     assert not Path(case["destination"]).exists()
 
 
+def test_rejects_candidate_replaced_after_authenticated_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case = fixture(tmp_path)
+    original = view.authenticated_json
+    candidate = Path(case["candidate"])
+    replaced = False
+
+    def replace_after_read(path: Path, label: str, expected: str | None = None):
+        nonlocal replaced
+        result = original(path, label, expected)
+        if path == candidate and not replaced:
+            replaced = True
+            payload = json.loads(candidate.read_text())
+            payload["selection"][0]["ticker"] = "UNPINNED-TICKER"
+            replacement = candidate.with_suffix(".replacement")
+            write_json(replacement, payload)
+            replacement.replace(candidate)
+        return result
+
+    monkeypatch.setattr(view, "authenticated_json", replace_after_read)
+    with pytest.raises(ValueError, match="file identity changed"):
+        publish(case)
+    assert not Path(case["destination"]).exists()
+
+
+@pytest.mark.parametrize("target_label", ["plan", "intake", "Layer 1 manifest"])
+def test_rejects_metadata_replaced_after_authenticated_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_label: str
+) -> None:
+    case = fixture(tmp_path)
+    original = view.authenticated_json
+    replaced = False
+
+    def replace_after_read(path: Path, label: str, expected: str | None = None):
+        nonlocal replaced
+        result = original(path, label, expected)
+        if label == target_label and not replaced:
+            replaced = True
+            replacement = path.with_name(path.name + ".replacement")
+            replacement.write_bytes(path.read_bytes())
+            replacement.replace(path)
+        return result
+
+    monkeypatch.setattr(view, "authenticated_json", replace_after_read)
+    with pytest.raises(ValueError, match="file identity changed"):
+        publish(case)
+    assert not Path(case["destination"]).exists()
+
+
+def test_failure_never_deletes_exchanged_temporary_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case = fixture(tmp_path)
+    foreign = tmp_path / "unrelated"
+    foreign.mkdir()
+    sentinel = foreign / "keep"
+    sentinel.write_bytes(b"PREEXISTING")
+    displaced = tmp_path / "displaced-owned-temp"
+    observed_temporary: Path | None = None
+
+    def exchange_then_fail(_source: Path, target: Path, **_kwargs: object) -> None:
+        nonlocal observed_temporary
+        observed_temporary = Path(target).parents[2]
+        observed_temporary.rename(displaced)
+        foreign.rename(observed_temporary)
+        raise OSError("synthetic link failure after temp replacement")
+
+    monkeypatch.setattr(view.os, "link", exchange_then_fail)
+    with pytest.raises(OSError, match="synthetic link failure") as raised:
+        publish(case)
+    assert observed_temporary is not None
+    assert (observed_temporary / "keep").read_bytes() == b"PREEXISTING"
+    assert displaced.exists()
+    assert not Path(case["destination"]).exists()
+    assert any("preserved" in note for note in raised.value.__notes__)
+
+
 def test_verify_rejects_changed_manifest_and_missing_view_file(tmp_path: Path) -> None:
     case = fixture(tmp_path)
     manifest_path = publish(case)
@@ -194,4 +283,28 @@ def test_verify_rejects_changed_archive_bytes(tmp_path: Path) -> None:
     manifest = json.loads(manifest_path.read_text())
     Path(manifest["filings"][0]["chosen_source"]["path"]).write_bytes(b"changed")
     with pytest.raises(ValueError, match="source file identity changed|package hash changed"):
+        view.verify_package_view(Path(case["destination"]), manifest_hash)
+
+
+def test_verify_rejects_manifest_replaced_after_authenticated_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case = fixture(tmp_path)
+    manifest_path = publish(case)
+    manifest_hash = digest(manifest_path)
+    original = view.authenticated_json
+    replaced = False
+
+    def replace_after_read(path: Path, label: str, expected: str | None = None):
+        nonlocal replaced
+        result = original(path, label, expected)
+        if label == "package view manifest" and not replaced:
+            replaced = True
+            replacement = path.with_name(path.name + ".replacement")
+            replacement.write_bytes(path.read_bytes())
+            replacement.replace(path)
+        return result
+
+    monkeypatch.setattr(view, "authenticated_json", replace_after_read)
+    with pytest.raises(ValueError, match="file identity changed"):
         view.verify_package_view(Path(case["destination"]), manifest_hash)

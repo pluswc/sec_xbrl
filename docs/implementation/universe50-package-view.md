@@ -8,8 +8,11 @@ exact-50 annual-and-quarterly input set (KDP replaces held PEP; financial cutoff
 recast, calculate a metric, or assert financial readiness.
 
 The proposal and code implementation are approved for local development. The
-implementation state is **IMPLEMENTED** only at its frozen local commit after
-self-tests. Independent Astra verification is **PENDING**. Local acceptance,
+first frozen implementation `07c12cf` failed independent verification and
+remains immutable evidence. Its three returned findings (submission-agent
+accession prefixes, metadata hash/reopen races, and unsafe recursive failure
+cleanup) are repaired in the subsequent frozen local commit after self-tests.
+Independent Astra re-verification is **PENDING**. Local acceptance,
 actual-data execution, PR, CI, main merge, and operational publication have not
 occurred. In particular, this work has not read, hashed, or linked the 1,097
 actual ZIP payloads.
@@ -30,6 +33,9 @@ intake digest, exact plan/intake CIK-accession membership, unique selection,
 and candidate totals. Each intake `source_run` identifies its immutable
 `snapshots/{cik}/{accession-without-dashes}/layer1_manifest.json`; that manifest
 must match the filing identity and supplies the authoritative package SHA-256.
+The accession prefix is not required to equal the filer CIK because a filing
+agent may be the accession submitter; the plan, intake, and Layer 1 manifest
+must instead agree exactly on the separately validated CIK and accession.
 This receipt is a source-package identity check, not a new Raw-quality or
 financial-readiness decision.
 
@@ -41,12 +47,21 @@ metadata, changed files, duplicate identities, symlinks, path traversal,
 existing/partial destinations, destinations beneath cache or source-run roots,
 and different filesystems fail closed.
 
+Candidate, plan, intake, Layer 1, and package-view manifest JSON is hashed and
+parsed from the same open file bytes. Device, inode, size, mode, and nanosecond mtime
+receipts are checked against the path and checked again before publication or
+verification completes, so replacing a path cannot bless different parsed
+content under the original hash.
+
 Publication uses `os.link` only. It has no copy fallback and never writes,
 chmods, or changes timestamps on source or linked ZIP inodes. Source device,
-inode, size, and nanosecond mtime are checked before and after linking. A
+inode, size, mode, and nanosecond mtime are checked before and after linking.
+The expected hardlink-count and ctime changes are not claimed as immutable. A
 sibling private temporary directory holds the links and manifest; strict
-verification completes before one rename exposes the new root. Failure removes
-only that new temporary directory.
+verification completes before one rename exposes the new root. Destination
+ancestors and the temporary root are pinned by device and inode. On failure,
+the adapter never recursively deletes a replaceable pathname: partial evidence
+is preserved at the named temporary path for explicit inspection and cleanup.
 
 The manifest binds the candidate, ordered roots, 50-CIK/1,097-filing scope,
 Layer 1 manifest path and digest, authoritative archive digest, chosen source
