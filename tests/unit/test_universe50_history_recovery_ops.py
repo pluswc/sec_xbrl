@@ -1081,7 +1081,9 @@ def _prior_recovery_fixture(
     canonical_checkout,
 ):
     config, _ = _materialize_collection_target(_config(tmp_path), monkeypatch)
-    _legacy_fixture(config, canonical_checkout)
+    legacy_summary, legacy_witness, legacy_failed = _legacy_fixture(
+        config, canonical_checkout
+    )
     old = json.loads(json.dumps(config))
     old["target"].update(
         run_version="accepted-prior-r1",
@@ -1302,6 +1304,9 @@ def _prior_recovery_fixture(
         "failed": failed,
         "source_acceptance": source_acceptance,
         "witness": witness,
+        "legacy_summary": legacy_summary,
+        "legacy_witness": legacy_witness,
+        "legacy_failed": legacy_failed,
     }
 
 
@@ -1320,9 +1325,54 @@ def test_accepted_a02_recovery_timeout_binds_exact_second_abandoned_root(
     recovery = next(
         row for row in binding["target"]["prior_failed_attempts"] if "recovery_ops" in row
     )
+    legacy = next(
+        row for row in binding["target"]["prior_failed_attempts"] if "legacy_ops" in row
+    )
     assert recovery["runner_head"] == runner.PRIOR_RECOVERY_SOURCE_SHA
     assert recovery["output_root"] == str(fixture["failed"])
     assert recovery["execution_root"] == fixture["old"]["execution_root"]
+    assert legacy["output_root"] == str(fixture["legacy_failed"])
+
+
+def test_post_r1_jnj_rejects_recovery_timeout_and_root_omitted_together(
+    tmp_path, monkeypatch, prior_recovery_checkout, canonical_checkout
+):
+    config, _ = _prior_recovery_fixture(
+        tmp_path, monkeypatch, prior_recovery_checkout, canonical_checkout
+    )
+    removed_attempt = config["target"]["approved_prior_failed_attempts"].pop()
+    removed_root = config["target"]["abandoned_output_roots"].pop()
+    assert "recovery_ops" in removed_attempt
+    assert removed_root.endswith("JNJ-history-recovery-accepted-prior-r1")
+    with pytest.raises(ValueError, match="exactly one accepted a02 r1"):
+        runner._validate_collection_target(runner._validate_shape(config))
+
+
+def test_post_r1_jnj_rejects_duplicate_recovery_timeout_witness(
+    tmp_path, monkeypatch, prior_recovery_checkout, canonical_checkout
+):
+    config, _ = _prior_recovery_fixture(
+        tmp_path, monkeypatch, prior_recovery_checkout, canonical_checkout
+    )
+    config["target"]["approved_prior_failed_attempts"].append(
+        json.loads(json.dumps(config["target"]["approved_prior_failed_attempts"][-1]))
+    )
+    with pytest.raises(ValueError, match="exactly one accepted a02 r1"):
+        runner._validate_shape(config)
+
+
+def test_post_r1_jnj_rejects_all_failure_declarations_and_roots_omitted(
+    tmp_path, monkeypatch, prior_recovery_checkout, canonical_checkout
+):
+    config, fixture = _prior_recovery_fixture(
+        tmp_path, monkeypatch, prior_recovery_checkout, canonical_checkout
+    )
+    config["target"]["approved_prior_failed_attempts"] = []
+    config["target"]["abandoned_output_roots"] = []
+    assert fixture["legacy_summary"].is_file()
+    assert fixture["summary"].is_file()
+    with pytest.raises(ValueError, match="unapproved prior legacy OPS attempt"):
+        runner._validate_collection_target(runner._validate_shape(config))
 
 
 @pytest.mark.parametrize(
@@ -1343,6 +1393,7 @@ def test_accepted_a02_recovery_timeout_binds_exact_second_abandoned_root(
         "go",
         "program",
         "source_acceptance",
+        "foreign_witness",
         "foreign_target",
         "omitted_failure",
         "omitted_root",
@@ -1406,6 +1457,9 @@ def test_prior_recovery_timeout_rejects_mutated_unpinned_or_overlapping_witness(
         witness["source_acceptance"]["sha256"] = runner._sha256(
             fixture["source_acceptance"]
         )
+    elif mutation == "foreign_witness":
+        declaration["path"] = str(fixture["legacy_summary"])
+        declaration["sha256"] = runner._sha256(fixture["legacy_summary"])
     elif mutation == "foreign_target":
         config["target"]["cik"] = "9999999999"
     elif mutation == "omitted_failure":
@@ -1427,13 +1481,19 @@ def test_prior_recovery_timeout_rejects_mutated_unpinned_or_overlapping_witness(
 
 
 def test_legacy56a_summary_without_output_root_binds_exact_abandoned_tree(
-    tmp_path, monkeypatch, canonical_checkout
+    tmp_path, monkeypatch, prior_recovery_checkout, canonical_checkout
 ):
-    config, _ = _materialize_collection_target(_config(tmp_path), monkeypatch)
-    summary, _, failed = _legacy_fixture(config, canonical_checkout)
+    config, fixture = _prior_recovery_fixture(
+        tmp_path, monkeypatch, prior_recovery_checkout, canonical_checkout
+    )
+    summary = fixture["legacy_summary"]
+    failed = fixture["legacy_failed"]
     assert "output_root" not in json.loads(summary.read_text())
     binding = runner._validate_collection_target(runner._validate_shape(config))
-    assert binding["target"]["prior_failed_attempts"][0]["output_root"] == str(failed)
+    legacy = next(
+        row for row in binding["target"]["prior_failed_attempts"] if "legacy_ops" in row
+    )
+    assert legacy["output_root"] == str(failed)
     assert (
         binding["target"]["state"] == "RAW_COMPLETE"
     )  # old OPS never wrote a native build attempt
@@ -1454,13 +1514,17 @@ def test_legacy56a_summary_without_output_root_binds_exact_abandoned_tree(
     ],
 )
 def test_legacy_failure_rejects_unbound_changed_or_overlapping_attempt(
-    tmp_path, monkeypatch, canonical_checkout, mutation
+    tmp_path, monkeypatch, prior_recovery_checkout, canonical_checkout, mutation
 ):
-    config, _ = _materialize_collection_target(_config(tmp_path), monkeypatch)
-    summary, witness, failed = _legacy_fixture(config, canonical_checkout)
+    config, fixture = _prior_recovery_fixture(
+        tmp_path, monkeypatch, prior_recovery_checkout, canonical_checkout
+    )
+    summary = fixture["legacy_summary"]
+    witness = fixture["legacy_witness"]
+    failed = fixture["legacy_failed"]
     if mutation == "unbound":
-        config["target"]["approved_prior_failed_attempts"] = []
-        config["target"]["abandoned_output_roots"] = []
+        config["target"]["approved_prior_failed_attempts"].pop(0)
+        config["target"]["abandoned_output_roots"].pop(0)
     elif mutation == "wrong_root":
         config["target"]["abandoned_output_roots"] = [str(tmp_path)]
     elif mutation == "inside_root":

@@ -338,6 +338,14 @@ def _validate_shape(value: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("prior failed attempt declaration differs")
         _absolute(declaration["path"], "prior failed attempt")
         _sha(declaration["sha256"], "prior failed attempt")
+    legacy_count = sum("legacy_ops" in declaration for declaration in prior)
+    recovery_count = sum("recovery_ops" in declaration for declaration in prior)
+    if ticker == "JNJ" and runner["head"] != PRIOR_RECOVERY_SOURCE_SHA and (
+        recovery_count > 1 or (legacy_count > 0 and recovery_count != 1)
+    ):
+        raise ValueError(
+            "post-r1 JNJ recovery requires exactly one accepted a02 r1 recovery witness"
+        )
     for root in abandoned:
         _absolute(root, "abandoned output root")
     if bool(prior) != bool(abandoned):

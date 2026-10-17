@@ -343,3 +343,25 @@ accepted a02 source artifact SHA-256은
 후속 actual 실행에는 새 performance engine의 독립 PASS·리드 인수, fresh output run version,
 새 config·preflight·request와 별도 root GO가 모두 필요하다. source/synthetic 검증은 actual
 Raw, History, publication 또는 cached corpus를 열지 않으며 actual 16 GiB 성공을 주장하지 않는다.
+
+### f74 독립 FAIL과 complete-failure 보정
+
+후보 `f74defdb1947dfead8b9579c6432f5465a1e2931`은 r1 `recovery_ops` 선언과 그
+abandoned root를 함께 제거하면 남은 legacy56a 선언만으로 검증을 통과해 독립 FAIL했다.
+일대일 비교가 호출자가 제시한 두 목록만 비교했고, r1 execution과 History root가 새
+`history_parent` 밖에 있어 orphan 탐색에도 잡히지 않은 것이 원인이다. 독립 보고서 SHA-256은
+`b451d3856b05d74ddb58df40e9fa8459193214478b2f4936670d211962910e96`, 좁은 보정 계약
+SHA-256은 `dfa4d96413bfa72aef239001af39b94561732cd3e363315e332ceec694534483`다.
+
+이 post-r1 runner의 JNJ config에서 old OPS56a `legacy_ops`가 선언되면 exact accepted a02 r1
+`recovery_ops`가 정확히 한 건 있어야 한다. 0건과 복제 선언은 config shape에서 거부하며,
+한 건을 외국 summary/source/GO/program으로 바꾸면 기존 exact r1 결속에서 거부한다.
+actual collection의 legacy summary 전수 검사는 그대로 유지되므로 legacy56a 선언까지 함께
+빼는 경우도 undeclared legacy attempt로 실패한다. 이 둘을 합쳐 현재 JNJ 재시도에는
+legacy56a와 r1 TIMEOUT 두 실패와 두 root가 모두 필요하다. legacy-only JNJ post-r1 config는
+유효하지 않다.
+
+accepted a02 r1의 과거 config는 자기 실행 전 상태이므로 이 후속 gate 대상이 아니다. 이를
+통해 그 config/preflight/request/GO를 검증하면서 과거 의미를 소급 변경하지 않는다. 다른 회사,
+native/legacy witness의 개별 형식 검증, 회계·Raw·engine·fd9 canonical fileset 및 lifecycle
+정책은 바꾸지 않는다. 이 보정도 source/synthetic 전용이며 새 actual retry 권한이 아니다.
