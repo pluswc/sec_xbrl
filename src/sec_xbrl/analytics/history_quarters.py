@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import sqlite3
+import stat
 import tempfile
 from collections import defaultdict
 from collections.abc import MutableMapping, Sequence
@@ -22,6 +23,7 @@ from copy import deepcopy
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from time import monotonic
 from types import SimpleNamespace
 from typing import Any
 
@@ -216,10 +218,18 @@ class _QuarterSpill:
 
     def execute(self, sql, parameters=()):
         self.check()
+        return self._execute(sql, parameters)
+
+    def _execute(self, sql, parameters=()):
+        """Execute after the owning public operation validated all path bindings."""
         return self.db.execute(sql, parameters)
 
     def _append_event(self, event):
         self.check()
+        self._write_event(event)
+
+    def _write_event(self, event):
+        """Append after the owning public operation validated all path bindings."""
         payload = _spill_pack(event)
         frame = len(payload).to_bytes(8, "big") + hashlib.sha256(payload).digest()
         for part in (frame, payload):
@@ -234,16 +244,17 @@ class _QuarterSpill:
         self.check()
         self.sequence_number += 1
         sequence = self.sequence_number
-        self._append_event({"event": "PLANNED", "sequence": sequence,
-                            "operation": operation, "bucket": bucket, "key": key, "value": value})
+        self._write_event({"event": "PLANNED", "sequence": sequence,
+                           "operation": operation, "bucket": bucket, "key": key, "value": value})
+        self._check_open_handles()
         if operation == "SET":
-            self.execute("INSERT INTO records(bucket,key,original_key,value) VALUES(?,?,?,?) ON CONFLICT(bucket,key) DO UPDATE SET value=excluded.value",
-                            (bucket, _SpillMap._key(key), _spill_pack(key), _spill_pack((key, value))))
-            row = self.execute("SELECT ordinal,original_key FROM records WHERE bucket=? AND key=?",
-                                  (bucket, _SpillMap._key(key))).fetchone()
+            self._execute("INSERT INTO records(bucket,key,original_key,value) VALUES(?,?,?,?) ON CONFLICT(bucket,key) DO UPDATE SET value=excluded.value",
+                          (bucket, _SpillMap._key(key), _spill_pack(key), _spill_pack((key, value))))
+            row = self._execute("SELECT ordinal,original_key FROM records WHERE bucket=? AND key=?",
+                                (bucket, _SpillMap._key(key))).fetchone()
             evidence = {"ordinal": row[0], "original_key": _spill_unpack(row[1])}
         elif operation == "DELETE":
-            changed = self.execute("DELETE FROM records WHERE bucket=? AND key=?", (bucket, _SpillMap._key(key))).rowcount
+            changed = self._execute("DELETE FROM records WHERE bucket=? AND key=?", (bucket, _SpillMap._key(key))).rowcount
             if not changed:
                 # A PLANNED event without APPLIED is deliberately not reported
                 # as committed or rolled back. Public recovery fails normally.
@@ -251,7 +262,8 @@ class _QuarterSpill:
             evidence = {}
         else:
             raise ValueError("unknown private quarter spill mutation")
-        self._append_event({"event": "APPLIED", "sequence": sequence, **evidence})
+        self._check_open_handles()
+        self._write_event({"event": "APPLIED", "sequence": sequence, **evidence})
 
     def mapping(self):
         self.next_bucket += 1
@@ -263,19 +275,23 @@ class _QuarterSpill:
 
     def check(self):
         _check_history_storage(self.path.parent)
+        self._check_open_handles()
+        for path, expected in self.bindings.items():
+            try:
+                actual = path.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise ValueError("quarter spill ownership changed; artifacts preserved") from exc
+            if stat.S_ISLNK(actual.st_mode) or (actual.st_dev, actual.st_ino) != expected:
+                raise ValueError("quarter spill ownership changed; artifacts preserved")
+
+    def _check_open_handles(self):
+        """Cheaply detect changes to the held directory entry and journal FD."""
         parent = os.fstat(self.directory_fd)
         if (parent.st_mtime_ns, parent.st_ctime_ns) != self.directory_stamp:
             raise ValueError("quarter spill ownership changed; directory entries changed")
         owned = os.fstat(self.fd)
         if (owned.st_dev, owned.st_ino) != self.bindings[self.path]:
             raise ValueError("quarter spill file descriptor ownership changed")
-        for path, expected in self.bindings.items():
-            try:
-                actual = path.stat(follow_symlinks=False)
-            except OSError as exc:
-                raise ValueError("quarter spill ownership changed; artifacts preserved") from exc
-            if path.is_symlink() or (actual.st_dev, actual.st_ino) != expected:
-                raise ValueError("quarter spill ownership changed; artifacts preserved")
 
     def checkpoint(self):
         self.check()
@@ -326,7 +342,6 @@ class _SpillMap(MutableMapping):
         return json.dumps(typed(key), ensure_ascii=True, separators=(",", ":")).encode()
 
     def __getitem__(self, key):
-        self.spill.check()
         row = self.spill.execute("SELECT value FROM records WHERE bucket=? AND key=?", (self.bucket, self._key(key))).fetchone()
         if row is None:
             raise KeyError(key)
@@ -340,18 +355,22 @@ class _SpillMap(MutableMapping):
         self.spill.mutate("DELETE", self.bucket, key)
 
     def __iter__(self):
-        self.spill.check()
         for row in self.spill.execute("SELECT original_key FROM records WHERE bucket=? ORDER BY ordinal", (self.bucket,)):
             yield _spill_unpack(row[0])
 
     def __len__(self):
-        self.spill.check()
         return self.spill.execute("SELECT count(*) FROM records WHERE bucket=?", (self.bucket,)).fetchone()[0]
 
     def values(self):
-        self.spill.check()
         for row in self.spill.execute("SELECT value FROM records WHERE bucket=? ORDER BY ordinal", (self.bucket,)):
             yield _spill_unpack(row[0])[1]
+
+    def items(self):
+        for row in self.spill.execute(
+            "SELECT original_key,value FROM records WHERE bucket=? ORDER BY ordinal",
+            (self.bucket,),
+        ):
+            yield _spill_unpack(row[0]), _spill_unpack(row[1])[1]
 
     def records(self):
         return _SpillSequence(self)
@@ -369,7 +388,6 @@ class _SpillSequence(Sequence):
         return self.mapping.values()
 
     def __getitem__(self, index):
-        self.mapping.spill.check()
         if isinstance(index, slice):
             start, stop, step = index.indices(len(self))
             if step != 1:
@@ -409,12 +427,14 @@ class _SpillGroups:
             yield key, self.get(key)
 
 
-def _quarter_progress(stage, table, count):
+def _quarter_progress(stage, table, count, started_at):
     import resource
 
+    now = monotonic()
     print(json.dumps({"stage": stage, "ticker": table["ticker"],
                       "view": table["view"], "period_class": table["period_class"],
-                      "records": count, "process_maxrss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}), flush=True)
+                      "records": count, "process_maxrss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                      "monotonic_seconds": now, "elapsed_seconds": now - started_at}), flush=True)
 
 
 def _spill_reported_table(old, table, publication, by_fact, targets, materialized, changes, spill, additive):
@@ -428,7 +448,8 @@ def _spill_reported_table(old, table, publication, by_fact, targets, materialize
     columns, rows = source["columns"], source["rows"]
     info = table["files"]["cells"]
     count = 0
-    _quarter_progress("QUARTER_SPILL_BEGIN", table, count)
+    started_at = monotonic()
+    _quarter_progress("QUARTER_SPILL_BEGIN", table, count, started_at)
     for original in _iter_history_records(_history_dataset_path(old.root, info), info):
         cell = deepcopy(dict(original))
         value = cell.get("value_lineage")
@@ -488,9 +509,9 @@ def _spill_reported_table(old, table, publication, by_fact, targets, materialize
         count += 1
         if count % 32 == 0:
             spill.checkpoint()
-            _quarter_progress("QUARTER_SPILL_FLUSH", table, count)
+            _quarter_progress("QUARTER_SPILL_FLUSH", table, count, started_at)
     spill.checkpoint()
-    _quarter_progress("QUARTER_SPILL_END", table, count)
+    _quarter_progress("QUARTER_SPILL_END", table, count, started_at)
 
 
 def _assemble_spilled_table(target, staging, spill):
