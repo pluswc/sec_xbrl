@@ -66,8 +66,8 @@ checkpoint 생성 시 SQLite commit, journal checkpoint append와 `fsync`를 마
 검증한다. 이후 public `records`/`materialize` 전에 다시 검증하고, 성공 cleanup 직전에도
 검증한다. journal checksum을 다시 계산한 payload 변조도 trusted rolling digest와
 다르므로 실패한다. journal truncate/append/frame 손상, row/candidate 변경·삭제,
-ordinal이나 schema 변경도 실패한다. 검증은 journal frame 하나와 SQLite row 하나씩
-순차 처리하며 전체 record를 RAM에 올리지 않는다. 재사용 가능한 public dataset은 각
+ordinal이나 schema 변경도 실패한다. 검증은 journal payload를 최대 64 KiB chunk씩, SQLite row는 하나씩
+순차 처리한다. 손상된 frame length도 전체 journal 크기의 RAM 할당을 유발하지 않는다. 재사용 가능한 public dataset은 각
 iteration 시작과 성공 cleanup에서 다시 검증한다. History의 bounded batch iterator는
 offset slice로 앞부분을 반복 재주사하지 않으므로 검증은 output row/chunk마다 반복되지
 않는다. 손상을 발견하면 public 결과를
@@ -113,17 +113,91 @@ unit, synthetic integration, 관련 History spill/recovery regression과 Ruff가
 전용으로 재검증한다. actual cached regression과 JNJ retry는 이 source 전달에 포함되지
 않는다.
 
-보완 후보의 구현자 source/synthetic 자체검사는 unit 1,519 passed / 4 skipped, 관련
-Fiscal/History/synthetic 246 passed, 전체 `src`/`tests` Ruff와 diff check PASS다. 모든
-Python/Polars 검사는 hard `RLIMIT_AS` 없이 16 GiB process-tree RSS sampled guard와
-timeout 아래에서 실행했다. 최대 관측 RSS는 full unit 약 1.00 GiB, 관련 검사 약
-260 MiB였다. 이 수치는 synthetic source 검사의 실행 한계일 뿐 actual JNJ 16 GiB
-통과 증거가 아니다.
+### 2026-10-17 F3/F4 정정과 검사 경계
+
+두 번째 동결 `5a48407017337debb443c4bbc7a10a4b663431e8`도 독립 검증
+**FAIL**이다. F1/F2의 55 controls와 93 Parquet 비교는 통과했지만, NULL BLOB 또는
+sort key가 `TypeError`를 일으키면 public close가 DB와 세 FD를 남겼다(F3).
+첫 frame length를 journal 전체 나머지 길이로 바꾸면 checksum 거부 전에 전체를
+읽는 RAM 요청이 가능했다(F4). 독립 report SHA-256은
+`67c4db8dec8f3755b73f4b1433958136305105c17a50ec9b96e16c44b75cb52a`다.
+
+lead는 기존 구현자의 memory 소유권을 종료하고 별도 Astra를 이 두 경계의 단일
+구현자로 명시적으로 배정했다. 구현 역할 상향은 오류 양상에 따른 범위 한정 판단이며
+모델 성능 우위 주장이 아니다. 승인 계약 SHA-256은
+`1ee9b82b8029422595eaf530afb23d4fb40bd319b12dccad1c7fdac6ec76c234`다.
+수정 범위는 Fiscal spill 무결성/정리 경계, 해당 unit test와 이 전달 문서/계획이다.
+`history.py`, eager API, typed encoding, 기존 checkpoint digest, 회계·기간·선택과
+publication 의미는 그대로다.
+
+- F3: BLOB은 실제 `bytes`인지 검사한다. NULL, 잘못된 key/sort/schema 및 일반 검증
+  예외는 `FiscalTimeSeriesError`로 정규화한다. 성공 정리 전 검증 실패나 interrupt가
+  발생해도 DB와 세 FD를 각각 닫는 시도를 끝내고 오류를 반환하며 journal을 보존한다.
+  interrupt는 cleanup 뒤 원래 interrupt로 반환한다. 개별 OS/DB close 자체가 실패하면
+  다른 handle도 모두 시도하고, 실패한 handle은 public close로 다시 닫을 수 있게 유지한다.
+  실제 남은 handle이 있는 동안 public `_closed`를 terminal로 만들지 않는다.
+- F4: payload checksum과 `SHA256(previous_digest || uint64_length || payload)`를
+  같은 64 KiB 이하 chunk들로 갱신한다. digest 형식은 그대로이며 untrusted length가
+  큰 단일 read/allocation을 결정하지 않는다. 8/128/512 panels의 forged length와
+  큰 typed unicode frame/short-read에서 거부 및 원래 digest 호환을 검사한다.
+
+이전 구현자 unit **1,519 passed / 4 skipped**와 독립 검증 초기 **1,522 passed /
+1 skipped**는 실제 캐시를 읽는 unmarked unit test를 배제하지 않았다. 해당 결과는
+source/synthetic-only 수락 근거에서 제외한다. 이전 interrupted run, 자체검사,
+ancestor-directory 과잉 차단 및 launch 실패는 각각 원래 실행 증거로 보존하며
+제품 실패나 유효한 source-only PASS로 재분류하지 않는다. 독립 검증자의 수정된
+5-test-deselected 재실행은 1,519 passed였으나 F3/F4 제품 FAIL을 해소하지 않았다.
+
+모든 후속 source/synthetic unit 검사에는 다음 절차를 적용한다. 이 규칙은 lead의
+검사 범위 정정 SHA-256
+`b36d68ef113573883b9a41c30e8aee176eb46e376a30d7af7ab7753f48610853`을
+추적 문서에 승격한 것이다.
+
+1. 지정 구현 checkout에서 실행하며 검증용 동결은 clean 상태여야 한다. main이나
+   다른 실행 checkout을 cwd/PYTHONPATH로 쓰지 않는다. Python은 승인된 main venv의
+   절대 경로를 사용하며 이는 실행기 의존성 공유만을 뜻한다.
+2. pytest import/collection 전에 `SEC_XBRL_CORPUS_ROOT`를 존재하지 않는 evidence
+   sentinel로 설정하고 `SEC_XBRL_RUN_REVIEWED_Q4_INTEGRATION`을 unset한다.
+3. 다음 다섯 node ID를 외부 CLI `--deselect`로 명시적으로 제외한다. 기존 test를
+   수정하거나 skip 표시를 추가해 실행 범위 문제를 숨기지 않는다.
+
+```text
+tests/unit/test_corpus_release.py::test_actual_seven_company_corpus_is_admitted_when_cached
+tests/unit/test_c3_as_filed_publication.py::test_c3_m1_actual_seven_company_corpus_when_cached
+tests/unit/test_c3_as_filed_publication.py::test_cached_nvda_fy2024_q1_revenue_selects_direct_10q_when_available
+tests/unit/test_versioned_observation_panel.py::test_cached_nvda_fy2024_q3_revenue_is_directly_retrievable
+tests/unit/test_reviewed_q4.py::test_cached_nvda_source_to_api_snapshot_xlsx
+```
+
+4. collection 전 실제 data/cache/publication roots와 network를 거부하는 guard를 설치한다.
+   own evidence 경로의 엄격한 ancestor에는 directory traversal/scandir metadata만 허용하고,
+   실제 파일 open이나 무관한 subtree는 계속 거부한다. absolute/relative/symlink/dirfd
+   실제 파일 접근 거부와 own output dirfd 허용을 자체 검사한다. 첫 unexpected denial에
+   중지하고 harness 실패와 제품 실패를 구분한다. Python audit guard는 native library
+   모든 I/O를 보장하지 못하므로 실제 cached entrypoints를 별도로 deselect하고, 남은
+   실제 loader의 JSON 접근을 native Parquet read 전에 차단한다.
+5. `POLARS_MAX_THREADS=2`, sampled process-tree RSS 16 GiB, timeout 10,800초,
+   단일 heavy worker와 parent-death/owned-child cleanup을 적용한다. Python/Polars에는
+   address-space 제한을 걸지 않는다. 자체 evidence 및 `/tmp` basetemp만 사용한다.
+6. `tests/unit`와 `tests/integration/test_history_panel_memory_synthetic.py`를 실행한다.
+   passed/failed/skipped/deselected, warnings, elapsed/peak RSS, guard denials와 child
+   reaping을 기록한다. 이 실행은 5개를 제외한 전체 unit이지 cached 포함 full suite가 아니다.
+   기존 55 synthetic controls/93 Parquet 비교 및 `ruff check --no-cache src tests`,
+   `git diff --check`도 수행한다.
+
+새 F3/F4 후보의 구현자 검사 결과와 source SHA는 인계 report에 기록한다. focused
+Fiscal unit/public History synthetic은 **77 passed**이고, 기존 55 controls와 93 Parquet
+비교도 PASS다. guarded 전체 허용 unit + public synthetic integration은 **1,561 passed /
+5 deselected / 0 skipped**, 73.64초, peak process-tree RSS 301,768,704 bytes였다.
+네 가지 예상 실제 open 거부 control을 통과했고 unexpected denial은 0이며 모든 owned
+worker는 reap됐다. 전체 src/tests Ruff와 diff check도 PASS다. 독립 검증과 lead 수락은
+새 동결 이후 별도 단계다. synthetic RSS는
+actual JNJ 16 GiB cap 통과나 실제 input byte 보존의 증거가 아니다.
 
 ## 4. 상태와 후속 실행
 
-이 문서의 source/synthetic 보완 구현은 사용자 승인 범위다. 이전 `6851853…` 독립
-FAIL은 보존하며 새 보완 동결의 독립 검증과 lead acceptance는 아직 별도 상태다. 16 GiB
+이 문서의 source/synthetic 보완 구현은 사용자 승인 범위다. 이전 `6851853…`와 `5a48407…` 독립
+FAIL은 보존하며 새 F3/F4 동결의 독립 검증과 lead acceptance는 아직 별도 상태다. 16 GiB
 actual PASS, JNJ recovery, first-five financial readiness, exact-50 financial readiness를
 이 구현만으로 주장하지 않는다.
 

@@ -8,6 +8,7 @@ the real context boundaries remain first-class evidence on every column/cell.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import marshal
 import os
@@ -28,6 +29,7 @@ from sec_xbrl.analytics.company_analysis_panel import CompanyAnalysisPanelResult
 FISCAL_TIME_SERIES_VERSION = "analysis-company-fiscal-timeseries-v2"
 _PERIOD_CLASSES = frozenset({"QTD_3M", "YTD_6M", "YTD_9M", "FY", "TTM", "INSTANT", "OTHER_DURATION"})
 _SPILL_VERSION = "fiscal-timeseries-spill-v2"
+_SPILL_VERIFY_CHUNK_BYTES = 64 * 1024
 _SPILL_ORDER_IDENTITY = (
     "integrity:rows:ordinal",
     "integrity:candidates:ordinal",
@@ -321,8 +323,15 @@ class FiscalTimeSeriesSpilledResult:
     def close(self, *, success: bool) -> None:
         if self._closed:
             return
-        self._closed = True
-        self._spill.close(success=success)
+        try:
+            self._spill.close(success=success)
+        finally:
+            # A cleanup exception must not strand owned handles behind a
+            # terminal public flag. Remaining handles can be closed again.
+            self._closed = self._spill.db is None and all(
+                getattr(self._spill, name) is None
+                for name in ("fd", "directory_fd", "root_fd")
+            )
 
 
 class _SpilledRecordSequence(Sequence[dict[str, Any]]):
@@ -738,12 +747,22 @@ class _FiscalTimeSeriesSpill:
             offset += 40
             if size > expected_size - offset:
                 raise FiscalTimeSeriesError("fiscal spill journal frame is truncated")
-            payload = _pread_exact(self.fd, size, offset)
-            if len(payload) != size:
-                raise FiscalTimeSeriesError("fiscal spill journal frame is truncated")
-            if hashlib.sha256(payload).digest() != header[8:]:
+            checksum = hashlib.sha256()
+            chain = hashlib.sha256(digest + header[:8])
+            consumed = 0
+            while consumed < size:
+                count = min(_SPILL_VERIFY_CHUNK_BYTES, size - consumed)
+                chunk = _pread_exact(self.fd, count, offset + consumed)
+                if len(chunk) != count:
+                    raise FiscalTimeSeriesError("fiscal spill journal frame is truncated")
+                checksum.update(chunk)
+                chain.update(chunk)
+                consumed += count
+            if checksum.digest() != header[8:]:
                 raise FiscalTimeSeriesError("fiscal spill journal checksum changed")
-            digest = _chain_digest(digest, payload)
+            # Same SHA256(previous_digest || uint64_length || payload), without
+            # an allocation controlled by a possibly forged frame length.
+            digest = chain.digest()
             events += 1
             offset += size
         if offset != expected_size:
@@ -761,13 +780,15 @@ class _FiscalTimeSeriesSpill:
         for ordinal, row_id, review, label, record_payload in self.execute(
             "SELECT ordinal,row_id,review,label,record FROM rows ORDER BY ordinal"
         ):
+            if type(record_payload) is not bytes:
+                raise FiscalTimeSeriesError("fiscal spill row BLOB type changed")
             integrity = _integrity_payload(
                 "ROW",
                 ordinal,
                 row_id,
                 review,
                 label,
-                bytes(record_payload),
+                record_payload,
             )
             row_digest = _chain_digest(row_digest, integrity)
             row_records += 1
@@ -781,13 +802,15 @@ class _FiscalTimeSeriesSpill:
             "SELECT ordinal,row_id,column_id,period,record "
             "FROM candidates ORDER BY ordinal"
         ):
+            if type(period_payload) is not bytes or type(record_payload) is not bytes:
+                raise FiscalTimeSeriesError("fiscal spill candidate BLOB type changed")
             integrity = _integrity_payload(
                 "CANDIDATE",
                 ordinal,
                 row_id,
                 column_id,
-                bytes(period_payload),
-                bytes(record_payload),
+                period_payload,
+                record_payload,
             )
             candidate_digest = _chain_digest(candidate_digest, integrity)
             candidate_records += 1
@@ -798,19 +821,23 @@ class _FiscalTimeSeriesSpill:
             raise FiscalTimeSeriesError("fiscal spill candidate payload changed")
 
     def verify_integrity(self) -> None:
-        self.check()
-        if self._checkpoint is None:
-            raise FiscalTimeSeriesError("fiscal spill has no committed checkpoint")
-        if (
-            self._checkpoint.get("version") != _SPILL_VERSION
-            or self._checkpoint.get("order_identity") != _SPILL_ORDER_IDENTITY
-        ):
-            raise FiscalTimeSeriesError("fiscal spill schema/order identity changed")
         try:
+            self.check()
+            if self._checkpoint is None:
+                raise FiscalTimeSeriesError("fiscal spill has no committed checkpoint")
+            if (
+                self._checkpoint.get("version") != _SPILL_VERSION
+                or self._checkpoint.get("order_identity") != _SPILL_ORDER_IDENTITY
+            ):
+                raise FiscalTimeSeriesError("fiscal spill schema/order identity changed")
             self._verify_journal(self._checkpoint)
             self._verify_sql(self._checkpoint)
-        except sqlite3.Error as exc:
-            raise FiscalTimeSeriesError("fiscal spill SQL integrity check failed") from exc
+        except FiscalTimeSeriesError:
+            raise
+        except Exception as exc:
+            # SQLite can return malformed scalar types as well as raise SQL
+            # errors. Neither may escape as an apparently unrelated TypeError.
+            raise FiscalTimeSeriesError("fiscal spill integrity check failed") from exc
 
     def row_count(self) -> int:
         return int(self.execute("SELECT count(*) FROM rows").fetchone()[0])
@@ -854,29 +881,42 @@ class _FiscalTimeSeriesSpill:
         if success:
             try:
                 self.verify_integrity()
-            except (OSError, sqlite3.Error, FiscalTimeSeriesError) as exc:
+            except BaseException as exc:  # noqa: BLE001 - deferred until every handle is attempted
                 error = exc
                 success = False
+        # Each owned handle gets its own cleanup attempt, including after an
+        # unexpected verification/close error or an interruption. Keep any
+        # unreleased handle reachable for a subsequent public close(False).
         if self.db is not None:
             try:
                 self.db.close()
-            except sqlite3.Error as exc:  # pragma: no cover - platform close failure
-                error = error or exc
-            self.db = None
+            except BaseException as exc:  # noqa: BLE001 - deferred until every handle is attempted
+                error = exc if not isinstance(exc, Exception) else error or exc
+            else:
+                self.db = None
         if success and error is None:
             try:
                 self.check()
                 os.fsync(self.fd)
                 os.unlink(self.path.name, dir_fd=self.directory_fd)
                 os.rmdir(self.directory.name, dir_fd=self.root_fd)
-            except (OSError, FiscalTimeSeriesError) as exc:
+            except BaseException as exc:  # noqa: BLE001 - deferred until every handle is attempted
                 error = exc
         for descriptor in ("fd", "directory_fd", "root_fd"):
             value = getattr(self, descriptor, None)
-            if value is not None:
+            if value is None:
+                continue
+            try:
                 os.close(value)
+            except BaseException as exc:  # noqa: BLE001 - deferred until every handle is attempted
+                if isinstance(exc, OSError) and exc.errno == errno.EBADF:
+                    setattr(self, descriptor, None)
+                error = exc if not isinstance(exc, Exception) else error or exc
+            else:
                 setattr(self, descriptor, None)
         if error is not None:
+            if isinstance(error, Exception) and not isinstance(error, FiscalTimeSeriesError):
+                raise FiscalTimeSeriesError("fiscal spill cleanup failed") from error
             raise error
 
 

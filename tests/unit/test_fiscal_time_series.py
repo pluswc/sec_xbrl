@@ -565,3 +565,177 @@ def test_spilled_builder_explicitly_rejects_unsupported_custom_timezone(tmp_path
             spill_root=tmp_path,
         )
     assert list(tmp_path.glob("fiscal-timeseries-*/fiscal-time-series-spill.records"))
+
+
+def _assert_spill_resources_released(result, descriptors, connection):
+    assert result._closed
+    assert result._spill.db is None
+    for name, descriptor in descriptors.items():
+        assert getattr(result._spill, name) is None
+        with pytest.raises(OSError):
+            fiscal_module.os.fstat(descriptor)
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connection.execute("SELECT 1")
+
+
+@pytest.mark.parametrize("sql", [
+    "UPDATE candidates SET record=NULL",
+    "UPDATE candidates SET period=NULL",
+    "UPDATE candidates SET row_id=NULL",
+    "UPDATE candidates SET column_id=NULL",
+    "UPDATE rows SET record=NULL",
+    "UPDATE rows SET review=NULL",
+    "UPDATE rows SET label=NULL",
+    "UPDATE rows SET row_id=NULL",
+    "UPDATE candidates SET record=9223372036854775807",
+    "UPDATE candidates SET period=9223372036854775807",
+    "UPDATE rows SET record=9223372036854775807",
+    "UPDATE rows SET record='not-a-blob'",
+    "UPDATE candidates SET record='not-a-blob'",
+    "UPDATE candidates SET period='not-a-blob'",
+])
+def test_malformed_sql_integrity_is_domain_error_and_public_close_releases_every_handle(tmp_path, sql):
+    result = FiscalTimeSeriesBuilder().build_spilled(
+        inputs=(FiscalTimeSeriesInput(_typed_panel(2024, 1), "--12-31"),), spill_root=tmp_path,
+    )
+    spill = result._spill
+    descriptors = {name: getattr(spill, name) for name in ("fd", "directory_fd", "root_fd")}
+    connection = spill.db
+    journal = result.diagnostic_path
+    before = journal.read_bytes()
+    spill.execute(sql)
+    with pytest.raises(FiscalTimeSeriesError, match="spill"):
+        result.materialize()
+    with pytest.raises(FiscalTimeSeriesError, match="spill"):
+        result.close(success=True)
+    _assert_spill_resources_released(result, descriptors, connection)
+    assert journal.read_bytes() == before
+    result.close(success=False)  # fully closed, idempotent public cleanup
+
+
+@pytest.mark.parametrize("site", ["check", "_verify_journal", "_verify_sql", "verify_integrity"])
+@pytest.mark.parametrize("exception", [TypeError, RuntimeError, KeyboardInterrupt, SystemExit])
+def test_public_close_cleans_after_unexpected_verification_errors_and_interrupts(tmp_path, monkeypatch, site, exception):
+    result = FiscalTimeSeriesBuilder().build_spilled(
+        inputs=(FiscalTimeSeriesInput(_typed_panel(2024, 1), "--12-31"),), spill_root=tmp_path,
+    )
+    spill = result._spill
+    descriptors = {name: getattr(spill, name) for name in ("fd", "directory_fd", "root_fd")}
+    connection = spill.db
+    journal = result.diagnostic_path
+    before = journal.read_bytes()
+
+    def fail(*args):
+        raise exception("injected integrity interruption")
+
+    monkeypatch.setattr(spill, site, fail)
+    expected = FiscalTimeSeriesError if issubclass(exception, Exception) else exception
+    with pytest.raises(expected):
+        result.close(success=True)
+    _assert_spill_resources_released(result, descriptors, connection)
+    assert journal.read_bytes() == before
+
+
+@pytest.mark.parametrize("handle", ["db", "fd", "directory_fd", "root_fd"])
+@pytest.mark.parametrize("exception", [RuntimeError, KeyboardInterrupt])
+def test_cleanup_failure_does_not_skip_other_handles_or_make_public_close_terminal(tmp_path, monkeypatch, handle, exception):
+    result = FiscalTimeSeriesBuilder().build_spilled(
+        inputs=(FiscalTimeSeriesInput(_typed_panel(2024, 1), "--12-31"),), spill_root=tmp_path,
+    )
+    spill = result._spill
+    descriptors = {name: getattr(spill, name) for name in ("fd", "directory_fd", "root_fd")}
+    connection = spill.db
+    journal = result.diagnostic_path
+    before = journal.read_bytes()
+    raised = False
+    if handle == "db":
+        class CloseOnce:
+            def close(self):
+                nonlocal raised
+                if not raised:
+                    raised = True
+                    raise exception("injected close failure")
+                connection.close()
+        spill.db = CloseOnce()
+    else:
+        close = fiscal_module.os.close
+        def close_once(descriptor):
+            nonlocal raised
+            if descriptor == descriptors[handle] and not raised:
+                raised = True
+                raise exception("injected close failure")
+            close(descriptor)
+        monkeypatch.setattr(fiscal_module.os, "close", close_once)
+    expected = FiscalTimeSeriesError if issubclass(exception, Exception) else exception
+    with pytest.raises(expected):
+        result.close(success=False)
+    assert raised
+    assert not result._closed
+    for name in ("db", "fd", "directory_fd", "root_fd"):
+        assert (getattr(spill, name) is not None) == (name == handle)
+    result.close(success=False)
+    _assert_spill_resources_released(result, descriptors, connection)
+    assert journal.read_bytes() == before
+
+
+@pytest.mark.parametrize("panels", [8, 128, 512])
+def test_forged_first_frame_cannot_request_whole_journal_allocation(tmp_path, monkeypatch, panels):
+    def inputs():
+        for index in range(panels):
+            year = 2024 + index
+            yield FiscalTimeSeriesInput(_panel(year, 1, f"{year}-01-01", f"{year}-04-01"), "--12-31")
+    result = FiscalTimeSeriesBuilder().build_spilled(inputs=inputs(), spill_root=tmp_path)
+    spill = result._spill
+    connection = spill.db
+    descriptors = {name: getattr(spill, name) for name in ("fd", "directory_fd", "root_fd")}
+    journal = result.diagnostic_path
+    size = journal.stat().st_size
+    with journal.open("r+b") as stream:
+        stream.write((size - 40).to_bytes(8, "big"))
+    requests = []
+    pread = fiscal_module.os.pread
+    def tracked(descriptor, count, offset):
+        requests.append(count)
+        assert count <= 64 * 1024, "untrusted frame allocated more than a fixed verification chunk"
+        return pread(descriptor, count, offset)
+    monkeypatch.setattr(fiscal_module.os, "pread", tracked)
+    with pytest.raises(FiscalTimeSeriesError, match="journal checksum"):
+        result.materialize()
+    assert requests and max(requests) <= 64 * 1024
+    if panels >= 128:
+        assert size > 64 * 1024
+        assert max(requests) < size - 40
+    with pytest.raises(FiscalTimeSeriesError, match="journal checksum"):
+        result.close(success=True)
+    _assert_spill_resources_released(result, descriptors, connection)
+    assert journal.stat().st_size == size
+
+
+def test_streamed_journal_checks_preserve_original_digest_with_large_typed_frames_and_short_reads(tmp_path, monkeypatch):
+    panel = _typed_panel(2024, 1)
+    value = deepcopy(panel.values)
+    value[0]["large_provenance"] = {"payload": "한글🙂" * 40_000, "ordered": [1, "2", None]}
+    panel = replace(panel, values=value)
+    inputs = (FiscalTimeSeriesInput(panel, "--12-31"),)
+    expected = FiscalTimeSeriesBuilder().build(inputs=inputs)
+    result = FiscalTimeSeriesBuilder().build_spilled(inputs=inputs, spill_root=tmp_path)
+    data = result.diagnostic_path.read_bytes()
+    digest = hashlib.sha256(b"fiscal-timeseries-journal-v2").digest()
+    offset, largest = 0, 0
+    while offset < len(data):
+        size = int.from_bytes(data[offset:offset + 8], "big")
+        payload = data[offset + 40:offset + 40 + size]
+        assert hashlib.sha256(payload).digest() == data[offset + 8:offset + 40]
+        digest = hashlib.sha256(digest + size.to_bytes(8, "big") + payload).digest()
+        offset += 40 + size
+        largest = max(largest, size)
+    assert largest > 64 * 1024
+    assert digest == result._spill._checkpoint["journal_digest"]
+    pread = fiscal_module.os.pread
+    def short_reads(descriptor, count, offset):
+        assert count <= 64 * 1024
+        return pread(descriptor, min(count, 4093), offset)
+    monkeypatch.setattr(fiscal_module.os, "pread", short_reads)
+    assert result.materialize() == expected
+    result.close(success=True)
+    assert not result.diagnostic_path.exists()
