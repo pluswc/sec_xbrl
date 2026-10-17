@@ -71,7 +71,9 @@ def test_accessibility_compact_results_and_admin_mode_contract() -> None:
     assert "#company-query" in JS
     assert "저장된 정렬" in JS
     assert "defaultDataset:null" in JS and "contextToken:0" in JS
-    assert "await loadInputContext(r.dataset_id)" in JS
+    # Saved-run dataset restoration is a behavioral contract, covered by the
+    # explicit-save service/HTTP tests and native history-reopen verification.
+    # Do not require a direct helper call in this static accessibility test.
     assert "await loadInputContext(d.dataset_id)" in JS
 
 
