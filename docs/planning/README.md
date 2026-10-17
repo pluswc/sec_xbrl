@@ -24,6 +24,10 @@
 `c70087d`와 identity `6470e0b`는 각각 독립 PASS와 source/synthetic 로컬 수락을 마쳤다.
 후속 [50사 재무 통합·실행 전달 계약](../implementation/universe50-financial-delivery.md)은
 이 source들과 연차·분기 producer를 누적 통합하고 explicit stage GO runner를 구현한다.
+초기 통합 후보 `900d351`은 독립 검증에서 FULL first-five 인수 결속, READY History build
+결속, supervisor parent-death guard, 연간·분기 fiscal 범위 분리(F1–F4)가 부족해 FAIL로
+반환됐다. [재무 통합·실행 전달 계약](../implementation/universe50-financial-delivery.md)은
+승인된 좁은 보정과 합성 재검증 상태를 추적하며 actual financial은 계속 NOT_READY다.
 새 통합 후보의 독립 검증과 actual first-five/50사 발행·로컬 인수·main 병합은 수행하지 않았다.
 
 2026-10-17 사용자·리드 후속 승인으로 identity 앞단의 별도

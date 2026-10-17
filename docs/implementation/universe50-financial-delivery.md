@@ -14,7 +14,7 @@
 | 범위 승인 | **APPROVED** — 동결 source 통합, quarterly identity 결속, offline runner와 합성 검증 |
 | 입력 source | producer `8a1b40a`, generic identity `6470e0b`, OPS `56a9d57`, package view `6e6f379` |
 | identity 검증·인수 | `6470e0b` 독립 PASS, source/synthetic 로컬 수락 |
-| 통합 구현 | **IMPLEMENTED CANDIDATE** — 새 동결 SHA와 독립 검증 확정 전 |
+| 통합 구현 | `900d351` 독립 **FAIL** 뒤 F1–F4 좁은 보정 구현 중; 새 동결 SHA 확정 전 |
 | actual financial 실행 | **NOT_STARTED / NOT_READY** |
 | actual first-five·50사 인수 | 미수행 |
 | native UI·저장 journal 반영 | 미수행 |
@@ -76,8 +76,9 @@ stage request와 운영자가 별도로 작성한 exact GO를 요구한다. conf
 
 - exact-50 collection manifest path/hash와 parent company count 50
 - `FULL` 또는 `EXPLICIT_SUBSET`; first-five는 정확히 `TXN, HD, JNJ, CVX, NEE`
-- scoped 회사의 CIK/ticker, history root/manifest hash, collector·plan·intake 선언 hash,
-  5 input FY와 4 display FY
+- scoped 회사의 CIK/ticker, history build output root, consumer panels publication root와
+  manifest hash, collector·plan·intake 선언 hash, 연간 5 input FY·4 display FY 및 별도 명시
+  `quarter_input_years`
 - `financial_as_of=2026-10-10`과 별도
   `metadata_observation_cutoff=2026-10-13T23:59:59Z`
 - package view root/manifest hash, source HEAD, 실행에 import되는 모든 producer·OPS·package
@@ -102,7 +103,8 @@ receipt는 output의 전체 regular-file 집합, 각 hash와 크기를 고정하
 
 1. metadata publication 확인 또는 별도 fresh exact-50 metadata 발행
 2. `prepare_analysis` annual 5 FY (`include_year_end_balances=True`)
-3. `prepare_analysis` quarterly (`include_quarter_source_evidence=True`)
+3. `prepare_analysis` quarterly를 회사별 명시 `quarter_input_years` 범위로 실행
+   (`include_quarter_source_evidence=True`)
 4. package view와 exact histories를 사용한 generic quality
 5. metadata·quality·history·annual/quarterly analysis를 고정한 generic identity
 6. annual 31 metrics와 annual dataset v2
@@ -130,7 +132,11 @@ path나 lowercase hash로 모두 치환해야 하며 runner는 placeholder, 상�
     "cik": "0000097476",
     "input_years": [2021, 2022, 2023, 2024, 2025],
     "display_years": [2022, 2023, 2024, 2025],
-    "history_root": "/absolute/fresh/history/TXN",
+    "quarter_input_years": [2021, 2022, 2023, 2024, 2025, 2026],
+    "history_output_root": "/absolute/fresh/history/TXN-t3v2-run",
+    "history_root": "/absolute/fresh/history/TXN-t3v2-run/panels",
+    "build_manifest": "/absolute/exact50/companies/TXN/build_manifest.json",
+    "build_manifest_sha256": "<64-hex>",
     "history_manifest_sha256": "<64-hex>",
     "collector_source_commit_sha": "<40-hex>",
     "plan_sha256": "<64-hex>",
@@ -205,7 +211,90 @@ path나 lowercase hash로 모두 치환해야 하며 runner는 placeholder, 상�
 
 기존 first-five metadata를 쓸 때는 `metadata`를
 `{"mode":"EXISTING_PUBLICATION","root":"/absolute/root","manifest_sha256":"<64-hex>"}`로
-바꾼다. final 50 실행은 `collection_scope_mode=FULL`과 회사 50개를 요구한다.
+바꾼다. `history_output_root`는 build marker의 전체 출력 root이고, `history_root`는
+`history_manifest.json`이 실제로 있는 consumer `panels` publication root다. 예를 들어
+accepted CVX는 `.../CVX-t3v2-exact50-t3v2-20261017-e`와 그 아래 `panels`를 각각
+기록한다. runner는 두 경로를 합치거나 하나에서 다른 하나를 추론하지 않고 build marker의
+`output_root`, `publication`, `history_manifest`와 각각 정확히 비교한다.
+
+`input_years`와 `display_years`는 연간 publication의 5-input/4-display 계약이다.
+`quarter_input_years`는 분기 analysis에만 사용하는 별도 fiscal-year 범위다. 첫 해는 연간
+입력의 첫 해와 같고, 연속된 정수이며, 연간 마지막 해를 포함해야 한다. 마지막 fiscal year는
+각 회사의 governed History 감사 결과에서 명시한다. calendar 2026이라는 이유로 끝 연도를
+2026으로 추론하지 않는다. 예를 들어 실제 날짜가 2026년이어도 FY2027로 보고된 회사는
+`quarter_input_years`에 2027을 포함해야 한다. 이 분리는 연간 최신 4개 표시, 분기 기간 분류,
+reported/derived 산술 또는 source selection 정책을 바꾸지 않는다.
+
+final 50 실행은 `collection_scope_mode=FULL`, 회사 50개와 다음 선언을 추가로 요구한다.
+
+```json
+"first5_financial_acceptance": {
+  "path": "/absolute/lead/first5-financial-acceptance.json",
+  "sha256": "<64-hex>"
+}
+```
+
+부분집합 config에는 이 필드를 넣을 수 없다. runner는 acceptance를 생성하지 않으며 FULL
+preflight, request, GO 검증과 worker 시작 때마다 path/hash와 내부 증거를 다시 연다.
+
+### first-five local acceptance artifact v1
+
+리드는 first-five 전체 public chain의 별도 독립 검증과 로컬 인수가 끝난 뒤에만 아래 exact
+schema를 작성한다. `companies` 순서는 항상 TXN, HD, JNJ, CVX, NEE다. `first5_config`는
+실제로 사용한 `EXPLICIT_SUBSET` config이고 FULL config와 source HEAD, module pins,
+financial·metadata cutoff, exact-50 collection parent, metadata 및 다섯 회사의 모든
+history/build pin이 같아야 한다.
+
+```json
+{
+  "schema_version": "universe50-first5-financial-acceptance-v1",
+  "status": "LOCALLY_ACCEPTED_FIRST5_FINANCIAL",
+  "source_head": "<40-hex-final-integration-SHA>",
+  "financial_as_of": "2026-10-10",
+  "metadata_observation_cutoff": "2026-10-13T23:59:59Z",
+  "collection": {
+    "manifest": "/absolute/exact50/collection_manifest.json",
+    "manifest_sha256": "<64-hex>",
+    "parent_company_count": 50
+  },
+  "companies": [
+    {"ticker": "TXN", "cik": "<10-digit>"},
+    {"ticker": "HD", "cik": "<10-digit>"},
+    {"ticker": "JNJ", "cik": "<10-digit>"},
+    {"ticker": "CVX", "cik": "<10-digit>"},
+    {"ticker": "NEE", "cik": "<10-digit>"}
+  ],
+  "first5_config": {"path": "/absolute/first5-config.json", "sha256": "<64-hex>"},
+  "stage_receipts": {
+    "annual-analysis": {"path": "/absolute/receipts/annual-analysis.json", "sha256": "<64-hex>"},
+    "quarterly-analysis": {"path": "/absolute/receipts/quarterly-analysis.json", "sha256": "<64-hex>"},
+    "quality": {"path": "/absolute/receipts/quality.json", "sha256": "<64-hex>"},
+    "identity": {"path": "/absolute/receipts/identity.json", "sha256": "<64-hex>"},
+    "annual-metrics": {"path": "/absolute/receipts/annual-metrics.json", "sha256": "<64-hex>"},
+    "annual-dataset-v2": {"path": "/absolute/receipts/annual-dataset-v2.json", "sha256": "<64-hex>"},
+    "quarterly-metrics": {"path": "/absolute/receipts/quarterly-metrics.json", "sha256": "<64-hex>"},
+    "combined-dataset-v3": {"path": "/absolute/receipts/combined-dataset-v3.json", "sha256": "<64-hex>"}
+  },
+  "publication_manifests": [
+    {"name": "metadata", "root": "<absolute-root>", "manifest": "<absolute-manifest>", "manifest_sha256": "<64-hex>"},
+    {"name": "quality", "root": "<absolute-root>", "manifest": "<absolute-manifest>", "manifest_sha256": "<64-hex>"},
+    {"name": "identity", "root": "<absolute-root>", "manifest": "<absolute-manifest>", "manifest_sha256": "<64-hex>"},
+    {"name": "annual_metrics", "root": "<absolute-root>", "manifest": "<absolute-manifest>", "manifest_sha256": "<64-hex>"},
+    {"name": "annual_dataset_v2", "root": "<absolute-root>", "manifest": "<absolute-manifest>", "manifest_sha256": "<64-hex>"},
+    {"name": "quarterly_metrics", "root": "<absolute-root>", "manifest": "<absolute-manifest>", "manifest_sha256": "<64-hex>"},
+    {"name": "combined_dataset_v3", "root": "<absolute-root>", "manifest": "<absolute-manifest>", "manifest_sha256": "<64-hex>"},
+    {"name": "annual_analysis:TXN", "root": "<absolute-root>", "manifest": "<absolute-manifest>", "manifest_sha256": "<64-hex>"},
+    {"name": "quarterly_analysis:TXN", "root": "<absolute-root>", "manifest": "<absolute-manifest>", "manifest_sha256": "<64-hex>"}
+  ]
+}
+```
+
+`publication_manifests`의 마지막 두 행은 같은 순서로 HD, JNJ, CVX, NEE까지 반복해 정확히
+17개다. fresh metadata를 first-five 실행에서 새로 발행했다면 `stage_receipts`에는
+`metadata` receipt도 추가해 정확히 9개다. 각 receipt는 PASS/source HEAD/stage/output root와
+전체 output 파일 hash를 다시 검증한다. 각 manifest 행의 root·manifest 경로와 hash는
+first-five config에서 계산한 exact 목록과 순서까지 같아야 한다. 누락·추가·변조·partial
+output이나 다른 parent/config는 FULL 실행을 거부한다.
 
 모든 명령은 clean configured checkout에서 같은 interpreter와 `PYTHONPATH=src:.`를 사용한다.
 
@@ -231,6 +320,7 @@ scope, parent receipts와 outputs를 그대로 복사한 아래 GO를 별도 경
   "config_sha256": "<64-hex>",
   "request_sha256": "<64-hex>",
   "scope_companies": [{"ticker": "TXN", "cik": "0000097476"}],
+  "first5_financial_acceptance": null,
   "parent_receipts": [],
   "outputs": ["/absolute/fresh/output/annual-analysis"]
 }
@@ -254,6 +344,30 @@ public `CompanyMetadataReader`의 정확한 50개 CIK/ticker를 collection paren
 증명하지 않는다. 기존 first-five metadata publication도 명시 hash와 같은 reader 검증을
 통해 계속 사용할 수 있다.
 
+## 900d351 독립 FAIL과 좁은 보정 계약
+
+독립 검증은 `900d351`에서 네 실행 경계 결함을 확인했다. 보고서는
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/independent_financial_integration_900d351/report.json`
+(SHA-256 `648a6200db3e2112cfdfca54c69705ba6f22624d91344c776cbed6ae570f3bcd`)에
+보존한다. 리드의 F1–F3 보정 계약 SHA-256은
+`f6311eb994ba306854d7686cf16547b0bfd36faabce9ec36ad1ba341f9475e5f`, F4 추가
+분기 범위 계약 SHA-256은
+`80903f4b8cd753ddb2abec76929529590539f02485269a44e3c8d69f511ad504`다.
+
+- F1: FULL 실행은 리드가 별도로 작성한 exact first-five local acceptance와 그 stage
+  receipt·publication manifest hash를 preflight, request, GO, worker마다 다시 검증한다.
+- F2: 선택 READY marker의 build output root와 consumer panels publication root를 구분하고,
+  history manifest·plan·intake·financial cutoff까지 config와 정확히 결속한다.
+- F3: supervisor는 accepted OPS가 요구하는 T3V2 parent PID namespace와 financial
+  capability namespace를 함께 전달한다. 직접 worker 호출은 계속 거부한다.
+- F4: 연간 fiscal 범위를 분기 분석에 재사용하지 않는다. 회사별 명시
+  `quarter_input_years`가 이후 FY2026 분기와 calendar 2026에 놓인 FY2027 분기를 포함할 수
+  있어야 하며, 최종 8 calendar-quarter bucket의 reported/derived/source-date 의미는 기존
+  producer가 그대로 결정한다.
+
+이 보정은 runner, 합성 검증과 이 전달 문서에만 적용하며 공개 analysis·History·분기 계산
+정책을 바꾸지 않는다. actual financial GO는 여전히 없다.
+
 ## 검증과 실행 전 gate
 
 source 후보는 최소한 다음을 통과해야 한다.
@@ -264,6 +378,8 @@ source 후보는 최소한 다음을 통과해야 한다.
 - first-five publication 뒤 범위 밖 회사 진행에도 기존 publication 재열기 안정성
 - legacy annual/quarterly와 v1/v2/v3, explicit save/load 및 관련 golden·HTTP 회귀
 - unit/screening tests, Ruff와 clean diff 검사
+- 연간 FY2025 종료 뒤 FY2026 분기와 연간 FY2026 종료 뒤 calendar 2026에 놓인 FY2027
+  분기가 명시 분기 범위와 공개 quarterly producer를 거쳐 최종 8개 bucket에 보존되는 회귀
 
 그 뒤 별도 검증자가 정확한 clean SHA를 검증해 PASS해야 리드가 actual stage GO 여부를
 판단한다. actual Raw/history payload 읽기, SEC network, production DB, live UI, main 병합,
