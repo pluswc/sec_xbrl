@@ -1,6 +1,6 @@
 # 50사 generic metric Raw 품질 전달 계약
 
-기준일: **2026-10-17**  
+기준일: **2026-10-17**
 현재 상태: **APPROVED / IMPLEMENTED CANDIDATE / INDEPENDENT VERIFICATION PENDING**
 
 ## 1. 승인 범위와 주장
