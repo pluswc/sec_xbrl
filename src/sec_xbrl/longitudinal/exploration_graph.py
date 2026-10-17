@@ -21,7 +21,7 @@ from sec_xbrl.longitudinal.materialization import (
     VerifiedLayer2Publication,
 )
 
-EXPLORATION_GRAPH_RULE_VERSION = "analysis-t3-exploration-graph-v1"
+EXPLORATION_GRAPH_RULE_VERSION = "analysis-t3-exploration-graph-v2"
 
 
 class ExplorationGraphError(RuntimeError):
@@ -329,7 +329,13 @@ def _mapping_index(publication: VerifiedLayer2Publication) -> dict[str, dict[tup
 
 
 def _concept_node_id(row: Mapping[str, Any]) -> str:
-    return _id("concept", row.get("cik"), row.get("source_filing_id"), row.get("raw_concept_id"))
+    return _id(
+        "node",
+        row.get("cik"),
+        row.get("source_filing_id"),
+        "CONCEPT",
+        str(row["raw_concept_id"]),
+    )
 
 
 def _concept_node(row: Mapping[str, Any]) -> dict[str, Any]:

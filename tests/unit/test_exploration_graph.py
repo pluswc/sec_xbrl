@@ -55,7 +55,7 @@ def _release() -> CorpusRelease:
     input_row = Layer1SnapshotInput(cik, accession, "10-Q", "2025-05-01", "2025-03-29", "snap:one", hashlib.sha256(accession.encode()).hexdigest())
     snapshot = CorpusSnapshot(input_row, manifest, Path("/fixture/layer1_manifest.json"), MappingProxyType({}), MappingProxyType({name: len(rows) for name, rows in tables.items()}), MappingProxyType({name: tuple(MappingProxyType(dict(row)) for row in rows) for name, rows in tables.items()}))
     rules = Layer2RuleVersions("period-v1", "mapping-v1", "recast-v1", "selection-v1")
-    return CorpusRelease(Path("/fixture"), "fixture", (cik,), (snapshot,), Layer2Run("t3-exploration-fixture-v1", "fixture", (input_row,), rules))
+    return CorpusRelease(Path("/fixture"), "fixture", (cik,), (snapshot,), Layer2Run("t3-exploration-fixture-reference-repair-v2", "fixture", (input_row,), rules))
 
 
 def test_t3_keeps_independent_lenses_and_network_evidence(tmp_path: Path) -> None:
@@ -68,6 +68,19 @@ def test_t3_keeps_independent_lenses_and_network_evidence(tmp_path: Path) -> Non
     )
     publication = Layer2PublicationReader().load(result.publication.run_root)
     reader = ExplorationGraphReader()
+    nodes_by_id = {
+        row["analysis_exploration_node_id"]: row
+        for row in publication.records(reader.node_dataset)
+    }
+    assert all(
+        edge[endpoint] in nodes_by_id
+        for edge in publication.records(reader.edge_dataset)
+        for endpoint in ("from_node_id", "to_node_id")
+    )
+    assert {
+        row["exploration_graph_rule_version"]
+        for row in (*publication.records(reader.node_dataset), *publication.records(reader.edge_dataset))
+    } == {"analysis-t3-exploration-graph-v2"}
     roots = reader.roots_for_fact(publication, cik="0000320193", fiscal_year=2025, fiscal_quarter=1, raw_concept_qname="us-gaap:Revenues")
     total = next(row for row in roots if row["source_fact_id"] == "fact:total")
     paths = reader.traverse(publication, root_node_ids=(total["analysis_exploration_node_id"],), max_depth=4)
@@ -88,6 +101,20 @@ def test_t3_keeps_independent_lenses_and_network_evidence(tmp_path: Path) -> Non
         for row in statement
     )
     assert any(row["edge_kind"] == "MEMBER_HIERARCHY" and row["source_network_type"] == "DEF" for row in graph_edges)
+    concept = next(
+        row for row in nodes_by_id.values()
+        if row["node_kind"] == "CONCEPT" and row["raw_id"] == "concept:revenue"
+    )
+    concept_paths = reader.traverse(
+        publication,
+        root_node_ids=(concept["analysis_exploration_node_id"],),
+        max_depth=1,
+    )
+    assert {
+        row["incoming_edge"].get("scope_kind")
+        for row in concept_paths
+        if row["incoming_edge"] is not None
+    } >= {"TOTAL_FACT", "CONCEPT_AXIS_LENS"}
     assert result.node_count and result.edge_count
 
 

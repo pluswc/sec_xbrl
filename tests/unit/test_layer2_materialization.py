@@ -195,6 +195,31 @@ def test_failed_validation_leaves_no_partial_published_run(tmp_path: Path) -> No
     assert not (tmp_path / "layer2" / "l2-m0-fixture-v1").exists()
 
 
+@pytest.mark.parametrize("missing", ["analysis_exploration_node", "analysis_exploration_edge"])
+def test_exploration_graph_datasets_must_publish_as_an_atomic_pair(
+    tmp_path: Path, missing: str
+) -> None:
+    graph: dict[str, list[dict[str, object]]] = {
+        "analysis_exploration_node": [
+            {
+                "cik": "0000320193",
+                "analysis_exploration_node_id": "node:a",
+                "node_kind": "CONCEPT",
+                "origin": "STANDARD_CONCEPT",
+                "raw_id": "raw:a",
+                "raw_qname": "us-gaap:A",
+            }
+        ],
+        "analysis_exploration_edge": [],
+    }
+    graph.pop(missing)
+    with pytest.raises(Layer2MaterializationError, match="paired node and edge datasets"):
+        Layer2Publisher(tmp_path / "layer2").publish(
+            _run(), {**graph, "analytical_fact": _datasets()["analytical_fact"]}
+        )
+    assert not (tmp_path / "layer2" / "l2-m0-fixture-v1").exists()
+
+
 def test_changed_rule_version_requires_separate_run_identifier(tmp_path: Path) -> None:
     publisher = Layer2Publisher(tmp_path / "layer2")
     publisher.publish(_run(), _datasets())
