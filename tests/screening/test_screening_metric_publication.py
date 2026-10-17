@@ -68,7 +68,15 @@ class _IdentityDataset:
         return {"publication_id": self.publication_id}
 
 
-def _analysis_bundle(root: Path, years: tuple[int, ...] = (2024, 2025)) -> Path:
+def _analysis_bundle(
+    root: Path,
+    years: tuple[int, ...] = (2024, 2025),
+    *,
+    ticker: str = "TEST",
+    cik: str = "0000000001",
+    financial_as_of: str = "2026-10-08",
+    history_root: Path | None = None,
+) -> Path:
     profile = expanded_analysis_profile()
     rows = []
     cells = []
@@ -95,7 +103,7 @@ def _analysis_bundle(root: Path, years: tuple[int, ...] = (2024, 2025)) -> Path:
                 {
                     "statement_types": [statement[row["row_id"]]],
                     "source_relationship_edge_id": f"edge-{row['row_id']}",
-                    "accession": f"0000000001-{year}-000001",
+                    "accession": f"{cik}-{year}-000001",
                 }
             ]
             cell = {
@@ -119,7 +127,7 @@ def _analysis_bundle(root: Path, years: tuple[int, ...] = (2024, 2025)) -> Path:
             }
             cells.append(cell)
             lineage = {
-                "accession": f"0000000001-{year}-000001",
+                "accession": f"{cik}-{year}-000001",
                 "source_filing_id": f"filing-{year}",
                 "selected_source_fact_id": cell["source_fact_id"],
                 "raw_concept_qname": qname,
@@ -143,7 +151,7 @@ def _analysis_bundle(root: Path, years: tuple[int, ...] = (2024, 2025)) -> Path:
     datasets = {"core_rows": rows, "core_cells": cells}
     datasets.update({f"trace_{digit}": traces[digit] for digit in traces})
     for name, records in datasets.items():
-        relative = f"TEST/LATEST_REPORTED/{name}.parquet"
+        relative = f"{ticker}/LATEST_REPORTED/{name}.parquet"
         files[name] = {"path": relative, **_write_records(root / relative, tuple(records))}
     manifest = {
         "version": ANALYSIS_VERSION,
@@ -151,12 +159,20 @@ def _analysis_bundle(root: Path, years: tuple[int, ...] = (2024, 2025)) -> Path:
         "period_mode": "ANNUAL",
         "balance_scope": {"included": True, "rule_version": "annual-exact-year-end-instant-v1"},
         "companies": {
-            "TEST": {
-                "as_of": "2026-10-08", "years": list(years),
+            ticker: {
+                "as_of": financial_as_of, "years": list(years),
                 "views": {"LATEST_REPORTED": {"files": files}},
             }
         },
     }
+    if history_root is not None:
+        history_root = history_root.resolve()
+        manifest["source_manifest_hashes"] = {
+            "history_manifest_sha256": sha256_file(
+                history_root / "history_manifest.json"
+            )
+        }
+        manifest["companies"][ticker]["source_publication"] = str(history_root)
     (root / "analysis_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     return root
 
