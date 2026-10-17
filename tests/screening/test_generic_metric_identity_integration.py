@@ -19,6 +19,10 @@ from sec_xbrl.company_metadata import (
 )
 from sec_xbrl.history import _write_records
 from sec_xbrl.metric_quality import prepare_generic_metric_quality
+from sec_xbrl.metrics.quarterly_screening import (
+    QuarterlyMetricReader,
+    publish_quarterly_screening_metrics,
+)
 from sec_xbrl.metrics.screening import (
     MANIFEST as METRIC_MANIFEST,
 )
@@ -35,11 +39,23 @@ from sec_xbrl.screening.dataset_v2 import (
     ScreeningDatasetV2Reader,
     publish_screening_dataset_v2,
 )
+from sec_xbrl.screening.dataset_v3 import (
+    CONFIG_VERSION as DATASET_V3_CONFIG_VERSION,
+)
+from sec_xbrl.screening.dataset_v3 import (
+    ScreeningDatasetV3Reader,
+    publish_screening_dataset_v3,
+)
 from sec_xbrl.screening.metric_identity import (
     CONFIG_VERSION,
     GenericMetricIdentityReader,
     _quarter_spine,
     publish_generic_metric_identity,
+)
+from sec_xbrl.screening.quarterly import MANIFEST as QUARTERLY_MANIFEST
+from tests.screening.test_quarterly_screening_producer import (
+    _one_quarter_inputs,
+    _profile_rows,
 )
 from tests.screening.test_screening_metric_publication import _analysis_bundle
 from tests.unit.test_source_bindings import (
@@ -177,25 +193,16 @@ def _quarterly_analysis(
     )
     manifest_path = root / "analysis_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    columns_path = root / "FIVE/LATEST_REPORTED/columns.parquet"
-    columns = tuple(
-        {
-            "fiscal_year": year,
-            "fiscal_quarter": quarter,
-            "period_class": "QTD_3M",
-        }
-        for year, quarter in (
-            (2024, 4),
-            (2025, 1),
-            (2025, 2),
-            (2025, 3),
-            (2025, 4),
-            (2026, 1),
-            (2026, 2),
-            (2026, 3),
-        )
-    )
-    column_info = _write_records(columns_path, columns)
+    columns, cells, traces = _one_quarter_inputs()
+    records = {
+        "columns": columns,
+        "core_rows": _profile_rows(),
+        "core_cells": cells,
+        **{
+            f"trace_{digit}": traces if digit == "0" else []
+            for digit in "0123456789abcdef"
+        },
+    }
     manifest["publication_id"] = "quarterly-analysis-five-v1"
     manifest["period_mode"] = "QUARTERLY"
     manifest.pop("balance_scope")
@@ -203,9 +210,12 @@ def _quarterly_analysis(
         "included": True,
         "rule_version": "quarter-typed-primary-pre-evidence-v1",
     }
-    manifest["companies"]["FIVE"]["views"]["LATEST_REPORTED"]["files"][
-        "columns"
-    ] = {"path": "FIVE/LATEST_REPORTED/columns.parquet", **column_info}
+    files = manifest["companies"]["FIVE"]["views"]["LATEST_REPORTED"]["files"]
+    for name, rows in records.items():
+        relative = files.get(name, {}).get(
+            "path", f"FIVE/LATEST_REPORTED/{name}.parquet"
+        )
+        files[name] = {"path": relative, **_write_records(root / relative, rows)}
     write_json(manifest_path, manifest)
     return root
 
@@ -400,6 +410,61 @@ def test_quality_identity_annual31_dataset_v2_chain_and_subset_stability(
     assert dataset_status["definition_count"] == 31
     assert dataset_status["observation_count"] == 124
 
+    quarterly_config = tmp_path / "quarterly-config.json"
+    write_json(
+        quarterly_config,
+        {
+            "schema_version": "quarterly-screening-metric-config-v1",
+            "financial_as_of": FINANCIAL_AS_OF,
+            "source_commit_sha": "f" * 40,
+            "annual_metric_root": str(metrics.root),
+            "annual_metric_manifest_sha256": sha256_file(
+                metrics.root / METRIC_MANIFEST
+            ),
+            "companies": [
+                {
+                    **COHORT[0],
+                    "analysis_root": str(prepared.quarterly),
+                    "analysis_manifest_sha256": sha256_file(
+                        prepared.quarterly / "analysis_manifest.json"
+                    ),
+                }
+            ],
+        },
+    )
+    quarterly = publish_quarterly_screening_metrics(
+        quarterly_config, tmp_path / "quarterly-metrics"
+    )
+    quarterly_status = QuarterlyMetricReader(quarterly.root).verify_all()
+    assert quarterly_status["definitions"] == 17
+    assert quarterly_status["observations"] == 136
+    assert QuarterlyMetricReader(quarterly.root).manifest["annual_parent"][
+        "generic_identity"
+    ]["publication_id"] == identity.publication_id
+
+    dataset_v3_config = tmp_path / "dataset-v3-config.json"
+    write_json(
+        dataset_v3_config,
+        {
+            "schema_version": DATASET_V3_CONFIG_VERSION,
+            "dataset_id": "generic-first-five-quarterly-fixture",
+            "fixture_kind": "SYNTHETIC_ERROR_FIXTURE",
+            "annual_dataset_root": str(dataset.root),
+            "annual_manifest_sha256": sha256_file(dataset.manifest_path),
+            "quarterly_metric_root": str(quarterly.root),
+            "quarterly_manifest_sha256": sha256_file(
+                quarterly.root / QUARTERLY_MANIFEST
+            ),
+        },
+    )
+    dataset_v3 = publish_screening_dataset_v3(
+        dataset_v3_config, tmp_path / "dataset-v3"
+    )
+    dataset_v3_status = ScreeningDatasetV3Reader(dataset_v3).verify_all()
+    assert dataset_v3_status["company_count"] == 1
+    assert dataset_v3_status["quarter_definition_count"] == 17
+    assert dataset_v3_status["quarter_observation_count"] == 136
+
     _install_intake(prepared.paths, "SIX")
     _build_ready_histories(
         prepared.paths, tmp_path, monkeypatch, selected_tickers=("SIX",)
@@ -408,6 +473,9 @@ def test_quality_identity_annual31_dataset_v2_chain_and_subset_stability(
         identity.publication_id
     )
     assert ScreeningDatasetV2Reader(dataset.root).publication_id == dataset.publication_id
+    assert ScreeningDatasetV3Reader(dataset_v3).publication_id == (
+        dataset_v3_status["publication_id"]
+    )
 
 
 @pytest.mark.parametrize(

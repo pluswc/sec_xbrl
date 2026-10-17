@@ -17,6 +17,7 @@ from sec_xbrl.metrics.quarterly_screening import (
     _exact_subtract,
     _percentage,
     _quarter_spine,
+    _verify_generic_identity_quarterly_parent,
     build_quarterly_company_records,
     publish_quarterly_screening_metrics,
 )
@@ -25,6 +26,53 @@ from sec_xbrl.metrics.screening import sha256_file
 CIK = "0000000001"
 AS_OF = "2026-10-10"
 USD = ['["iso4217:USD"]', "[]"]
+
+
+@pytest.mark.parametrize(
+    "defect", ("foreign", "stale", "unrelated_same_company", "unrelated_history")
+)
+def test_generic_identity_rejects_unattested_quarterly_parent(defect: str) -> None:
+    company = {"ticker": "TEST", "cik": CIK}
+    quarterly_source = {
+        "root": "/quarter-a",
+        "publication_id": "quarter-a",
+        "manifest_sha256": "a" * 64,
+        "declared_files": {"TEST/core_rows.parquet": "d" * 64},
+        "history_manifest_sha256": "b" * 64,
+        "quarter_source_evidence": {
+            "included": True,
+            "rule_version": "quarter-typed-primary-pre-evidence-v1",
+        },
+    }
+    attested = {
+        **company,
+        "quarterly_analysis": {
+            "root": "/quarter-a",
+            "publication_id": "quarter-a",
+            "manifest_sha256": "a" * 64,
+            "declared_files": {"TEST/core_rows.parquet": "d" * 64},
+            "period_mode": "QUARTERLY",
+            "history_manifest_sha256": "b" * 64,
+            "quarter_source_evidence": {
+                "included": True,
+                "rule_version": "quarter-typed-primary-pre-evidence-v1",
+            },
+        },
+    }
+    if defect == "foreign":
+        attested["cik"] = "0000000002"
+    elif defect == "stale":
+        attested["quarterly_analysis"]["manifest_sha256"] = "c" * 64
+    elif defect == "unrelated_same_company":
+        attested["quarterly_analysis"]["root"] = "/quarter-b"
+    else:
+        attested["quarterly_analysis"]["history_manifest_sha256"] = "e" * 64
+    with pytest.raises(ValueError, match="differs from generic identity"):
+        _verify_generic_identity_quarterly_parent(
+            SimpleNamespace(companies=[attested]),
+            company=company,
+            quarterly_source=quarterly_source,
+        )
 
 
 def _profile_rows() -> list[dict]:
