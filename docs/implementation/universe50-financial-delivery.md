@@ -24,6 +24,13 @@ source/synthetic PASS는 actual financial payload, actual publication 또는 nat
 대신하지 않는다. 최종 통합 후보는 깨끗한 동결 SHA에서 별도 읽기 전용 검증을 통과해야
 actual stage GO 후보가 된다.
 
+별도 운영선에서 CVX의 새 History publication은 전수 독립 PASS와 리드 인수를 마쳤다.
+리드 인수 증거 `lead_actual_CVX_history_acceptance.json`의 SHA-256은
+`34c953a97a65ff2e36acbb72340553551c596978fa02a6622e3d85ae6d2bd51e`다. 이는 CVX
+History 한 회사의 부모 입력 수락이며 first-five quality/identity/financial chain, exact-50
+financial readiness 또는 이 통합 source의 독립 PASS를 뜻하지 않는다. 나머지 History
+build는 별도 운영 stage에서 직렬 진행되며 이 구현은 해당 payload를 읽거나 실행하지 않는다.
+
 ## 누적 source와 보존 경계
 
 통합 branch는 producer `8a1b40a`를 기준으로 검증된 identity `6470e0b`, OPS
