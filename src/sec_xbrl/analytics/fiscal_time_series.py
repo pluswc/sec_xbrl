@@ -16,16 +16,24 @@ import tempfile
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from itertools import islice
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sec_xbrl.analytics.company_analysis_panel import CompanyAnalysisPanelResult
 
 FISCAL_TIME_SERIES_VERSION = "analysis-company-fiscal-timeseries-v2"
 _PERIOD_CLASSES = frozenset({"QTD_3M", "YTD_6M", "YTD_9M", "FY", "TTM", "INSTANT", "OTHER_DURATION"})
+_SPILL_VERSION = "fiscal-timeseries-spill-v2"
+_SPILL_ORDER_IDENTITY = (
+    "integrity:rows:ordinal",
+    "integrity:candidates:ordinal",
+    "output:rows:review,label,row_id",
+    "output:cells:row_id,column_id,ordinal",
+)
 
 
 class FiscalTimeSeriesError(ValueError):
@@ -271,6 +279,10 @@ class FiscalTimeSeriesSpilledResult:
     def records(self, name: str) -> Iterator[dict[str, Any]]:
         if self._closed:
             raise FiscalTimeSeriesError("spilled result is closed")
+        self._spill.verify_integrity()
+        yield from self._records_unverified(name)
+
+    def _records_unverified(self, name: str) -> Iterator[dict[str, Any]]:
         if name == "columns":
             yield from self._columns
         elif name == "rows":
@@ -296,10 +308,13 @@ class FiscalTimeSeriesSpilledResult:
 
     def materialize(self) -> FiscalTimeSeriesResult:
         """Materialize for compatibility checks, not bounded production use."""
+        if self._closed:
+            raise FiscalTimeSeriesError("spilled result is closed")
+        self._spill.verify_integrity()
         return FiscalTimeSeriesResult(
-            columns=tuple(self.records("columns")),
-            rows=tuple(self.records("rows")),
-            cells=tuple(self.records("cells")),
+            columns=tuple(self._records_unverified("columns")),
+            rows=tuple(self._records_unverified("rows")),
+            cells=tuple(self._records_unverified("cells")),
             scope=deepcopy(self.scope),
         )
 
@@ -319,7 +334,10 @@ class _SpilledRecordSequence(Sequence[dict[str, Any]]):
         return self._result.counts[self._name]
 
     def __iter__(self) -> Iterator[dict[str, Any]]:
-        return self._result.records(self._name)
+        if self._result._closed:
+            raise FiscalTimeSeriesError("spilled result is closed")
+        self._result._spill.verify_integrity()
+        return self._result._records_unverified(self._name)
 
     def __getitem__(self, index: int | slice) -> Any:
         if isinstance(index, slice):
@@ -344,11 +362,25 @@ def _spill_pack(value: Any) -> bytes:
             if isinstance(item, (list, tuple)):
                 return (type(item).__name__, [encode(value) for value in item])
             if isinstance(item, datetime):
-                return ("datetime", (item.isoformat(), item.fold))
-            if isinstance(item, (date, time, Decimal)):
+                return (
+                    "datetime",
+                    (item.replace(tzinfo=None).isoformat(), item.fold, _encode_timezone(item.tzinfo)),
+                )
+            if isinstance(item, time):
+                return (
+                    "time",
+                    (item.replace(tzinfo=None).isoformat(), item.fold, _encode_timezone(item.tzinfo)),
+                )
+            if isinstance(item, (date, Decimal)):
                 return (type(item).__name__, str(item))
             if isinstance(item, timedelta):
                 return ("timedelta", (item.days, item.seconds, item.microseconds))
+            try:
+                marshal.dumps(item)
+            except ValueError as exc:
+                raise FiscalTimeSeriesError(
+                    f"unsupported typed spill scalar: {type(item).__name__}"
+                ) from exc
             return ("scalar", item)
 
         return b"T" + marshal.dumps(encode(value))
@@ -368,13 +400,18 @@ def _spill_unpack(payload: bytes) -> Any:
             values = [decode(nested) for nested in value]
             return values if kind == "list" else tuple(values)
         if kind == "datetime":
-            return datetime.fromisoformat(value[0]).replace(fold=value[1])
+            return datetime.fromisoformat(value[0]).replace(
+                fold=value[1], tzinfo=_decode_timezone(value[2])
+            )
+        if kind == "time":
+            return time.fromisoformat(value[0]).replace(
+                fold=value[1], tzinfo=_decode_timezone(value[2])
+            )
         if kind == "timedelta":
             return timedelta(days=value[0], seconds=value[1], microseconds=value[2])
-        if kind in {"date", "time", "Decimal"}:
+        if kind in {"date", "Decimal"}:
             return {
                 "date": date.fromisoformat,
-                "time": time.fromisoformat,
                 "Decimal": Decimal,
             }[kind](value)
         if kind == "scalar":
@@ -382,6 +419,81 @@ def _spill_unpack(payload: bytes) -> Any:
         raise FiscalTimeSeriesError("invalid fiscal time-series spill scalar")
 
     return decode(marshal.loads(payload[1:]))
+
+
+def _encode_timezone(value: Any) -> tuple[Any, ...]:
+    if value is None:
+        return ("NAIVE",)
+    if value is UTC:
+        return ("UTC",)
+    if type(value) is timezone:
+        offset = value.utcoffset(None)
+        if offset is None:
+            raise FiscalTimeSeriesError("fixed-offset timezone has no UTC offset")
+        return (
+            "FIXED_OFFSET",
+            offset.days,
+            offset.seconds,
+            offset.microseconds,
+            value.tzname(None),
+        )
+    if isinstance(value, ZoneInfo):
+        return ("ZONEINFO", value.key)
+    raise FiscalTimeSeriesError(
+        f"unsupported typed spill timezone: {type(value).__name__}"
+    )
+
+
+def _decode_timezone(value: tuple[Any, ...]) -> Any:
+    kind = value[0]
+    if kind == "NAIVE":
+        return None
+    if kind == "UTC":
+        return UTC
+    if kind == "FIXED_OFFSET":
+        offset = timedelta(days=value[1], seconds=value[2], microseconds=value[3])
+        return timezone(offset, value[4])
+    if kind == "ZONEINFO":
+        try:
+            return ZoneInfo(value[1])
+        except ZoneInfoNotFoundError as exc:
+            raise FiscalTimeSeriesError(
+                f"typed spill timezone is unavailable: {value[1]}"
+            ) from exc
+    raise FiscalTimeSeriesError("invalid typed spill timezone")
+
+
+def _chain_digest(current: bytes, payload: bytes) -> bytes:
+    return hashlib.sha256(
+        current + len(payload).to_bytes(8, "big") + payload
+    ).digest()
+
+
+def _integrity_payload(kind: str, *parts: Any) -> bytes:
+    result = bytearray()
+    for item in (kind, *parts):
+        if isinstance(item, bytes):
+            tag, payload = b"B", item
+        elif type(item) is int:
+            tag, payload = b"I", str(item).encode("ascii")
+        elif isinstance(item, str):
+            tag, payload = b"S", item.encode("utf-8")
+        else:  # pragma: no cover - every integrity key has a fixed scalar type
+            raise TypeError(f"unsupported integrity key: {type(item).__name__}")
+        result.extend(tag)
+        result.extend(len(payload).to_bytes(8, "big"))
+        result.extend(payload)
+    return bytes(result)
+
+
+def _pread_exact(fd: int, size: int, offset: int) -> bytes:
+    result = bytearray()
+    while len(result) < size:
+        chunk = os.pread(fd, size - len(result), offset + len(result))
+        if not chunk:
+            break
+        result.extend(chunk)
+    return bytes(result)
 
 
 class _FiscalTimeSeriesSpill:
@@ -398,7 +510,7 @@ class _FiscalTimeSeriesSpill:
         self.path = self.directory / "fiscal-time-series-spill.records"
         self.fd = os.open(
             self.path.name,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
             0o600,
             dir_fd=self.directory_fd,
         )
@@ -411,6 +523,17 @@ class _FiscalTimeSeriesSpill:
             "path": (path_stat.st_dev, path_stat.st_ino),
         }
         self.db: sqlite3.Connection | None = None
+        self._journal_digest = hashlib.sha256(
+            b"fiscal-timeseries-journal-v2"
+        ).digest()
+        self._journal_events = 0
+        self._row_digest = hashlib.sha256(b"fiscal-timeseries-rows-v2").digest()
+        self._candidate_digest = hashlib.sha256(
+            b"fiscal-timeseries-candidates-v2"
+        ).digest()
+        self._row_records = 0
+        self._candidate_records = 0
+        self._checkpoint: dict[str, Any] | None = None
         try:
             self.db = sqlite3.connect("")
             options = {row[0] for row in self.execute("PRAGMA compile_options")}
@@ -428,7 +551,8 @@ class _FiscalTimeSeriesSpill:
             self.execute("PRAGMA journal_mode=OFF")
             self.execute(
                 "CREATE TABLE rows ("
-                "row_id TEXT PRIMARY KEY, review INTEGER, label TEXT, record BLOB)"
+                "ordinal INTEGER PRIMARY KEY, row_id TEXT UNIQUE, "
+                "review INTEGER, label TEXT, record BLOB)"
             )
             self.execute(
                 "CREATE TABLE candidates ("
@@ -439,7 +563,15 @@ class _FiscalTimeSeriesSpill:
                 "CREATE INDEX candidate_coordinate "
                 "ON candidates(row_id, column_id, ordinal)"
             )
-            self._append({"event": "OPEN", "version": "fiscal-timeseries-spill-v1"})
+            self._initial_sql_identity = self._sql_identity()
+            self._append(
+                {
+                    "event": "OPEN",
+                    "version": _SPILL_VERSION,
+                    "sql_identity": self._initial_sql_identity,
+                    "order_identity": _SPILL_ORDER_IDENTITY,
+                }
+            )
         except BaseException:
             self.close(success=False)
             raise
@@ -471,6 +603,15 @@ class _FiscalTimeSeriesSpill:
             raise FiscalTimeSeriesError("fiscal spill is closed")
         return self.db.execute(sql, parameters)
 
+    def _sql_identity(self) -> tuple[tuple[Any, ...], ...]:
+        return tuple(
+            tuple(row)
+            for row in self.execute(
+                "SELECT type,name,tbl_name,sql FROM sqlite_master "
+                "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
+            )
+        )
+
     def _append(self, event: dict[str, Any]) -> None:
         self.check()
         payload = _spill_pack(event)
@@ -482,19 +623,39 @@ class _FiscalTimeSeriesSpill:
                 if written <= 0:
                     raise OSError("fiscal spill journal short write")
                 remaining = remaining[written:]
+        self._journal_digest = _chain_digest(self._journal_digest, payload)
+        self._journal_events += 1
 
     def add_row(self, row_id: str, record: dict[str, Any]) -> None:
-        inserted = self.execute(
+        review = int(bool(record.get("mapping_review_required")))
+        label = str(record.get("label") or "")
+        record_payload = _spill_pack(record)
+        cursor = self.execute(
             "INSERT OR IGNORE INTO rows(row_id,review,label,record) VALUES(?,?,?,?)",
-            (
-                row_id,
-                int(bool(record.get("mapping_review_required"))),
-                str(record.get("label") or ""),
-                _spill_pack(record),
-            ),
-        ).rowcount
-        if inserted:
-            self._append({"event": "ROW", "row_id": row_id, "record": record})
+            (row_id, review, label, record_payload),
+        )
+        if cursor.rowcount:
+            ordinal = int(
+                self.execute(
+                    "SELECT ordinal FROM rows WHERE row_id=?", (row_id,)
+                ).fetchone()[0]
+            )
+            self._append(
+                {
+                    "event": "ROW",
+                    "ordinal": ordinal,
+                    "row_id": row_id,
+                    "review": review,
+                    "label": label,
+                    "record": record,
+                    "record_payload": record_payload,
+                }
+            )
+            integrity = _integrity_payload(
+                "ROW", ordinal, row_id, review, label, record_payload
+            )
+            self._row_digest = _chain_digest(self._row_digest, integrity)
+            self._row_records += 1
 
     def add_candidate(
         self,
@@ -505,30 +666,151 @@ class _FiscalTimeSeriesSpill:
         value: Mapping[str, Any],
     ) -> None:
         record = (dict(definition), dict(binding), dict(value))
-        self.execute(
+        column_id = _id("column", period)
+        period_payload = _spill_pack(period)
+        record_payload = _spill_pack(record)
+        cursor = self.execute(
             "INSERT INTO candidates(row_id,column_id,period,record) VALUES(?,?,?,?)",
-            (
-                row_id,
-                _id("column", period),
-                _spill_pack(period),
-                _spill_pack(record),
-            ),
+            (row_id, column_id, period_payload, record_payload),
         )
+        ordinal = int(cursor.lastrowid)
         self._append(
             {
                 "event": "CANDIDATE",
+                "ordinal": ordinal,
                 "row_id": row_id,
+                "column_id": column_id,
                 "period": period,
+                "period_payload": period_payload,
                 "record": record,
+                "record_payload": record_payload,
             }
         )
+        integrity = _integrity_payload(
+            "CANDIDATE",
+            ordinal,
+            row_id,
+            column_id,
+            period_payload,
+            record_payload,
+        )
+        self._candidate_digest = _chain_digest(self._candidate_digest, integrity)
+        self._candidate_records += 1
 
     def checkpoint(self) -> None:
         if self.db is None:
             raise FiscalTimeSeriesError("fiscal spill is closed")
         self.db.commit()
-        self._append({"event": "CHECKPOINT"})
+        checkpoint_event = {
+            "event": "CHECKPOINT",
+            "version": _SPILL_VERSION,
+            "order_identity": _SPILL_ORDER_IDENTITY,
+            "sql_identity": self._initial_sql_identity,
+            "journal_prefix_digest": self._journal_digest.hex(),
+            "journal_prefix_events": self._journal_events,
+            "row_digest": self._row_digest.hex(),
+            "row_records": self._row_records,
+            "candidate_digest": self._candidate_digest.hex(),
+            "candidate_records": self._candidate_records,
+        }
+        self._append(checkpoint_event)
         os.fsync(self.fd)
+        self._checkpoint = {
+            **checkpoint_event,
+            "journal_digest": self._journal_digest,
+            "journal_events": self._journal_events,
+            "journal_size": os.fstat(self.fd).st_size,
+        }
+        self.verify_integrity()
+
+    def _verify_journal(self, checkpoint: Mapping[str, Any]) -> None:
+        expected_size = int(checkpoint["journal_size"])
+        if os.fstat(self.fd).st_size != expected_size:
+            raise FiscalTimeSeriesError("fiscal spill journal size changed")
+        offset = 0
+        events = 0
+        digest = hashlib.sha256(b"fiscal-timeseries-journal-v2").digest()
+        while offset < expected_size:
+            header = _pread_exact(self.fd, 40, offset)
+            if len(header) != 40:
+                raise FiscalTimeSeriesError("fiscal spill journal is truncated")
+            size = int.from_bytes(header[:8], "big")
+            offset += 40
+            if size > expected_size - offset:
+                raise FiscalTimeSeriesError("fiscal spill journal frame is truncated")
+            payload = _pread_exact(self.fd, size, offset)
+            if len(payload) != size:
+                raise FiscalTimeSeriesError("fiscal spill journal frame is truncated")
+            if hashlib.sha256(payload).digest() != header[8:]:
+                raise FiscalTimeSeriesError("fiscal spill journal checksum changed")
+            digest = _chain_digest(digest, payload)
+            events += 1
+            offset += size
+        if offset != expected_size:
+            raise FiscalTimeSeriesError("fiscal spill journal framing changed")
+        if events != checkpoint["journal_events"]:
+            raise FiscalTimeSeriesError("fiscal spill journal event count changed")
+        if digest != checkpoint["journal_digest"]:
+            raise FiscalTimeSeriesError("fiscal spill journal content changed")
+
+    def _verify_sql(self, checkpoint: Mapping[str, Any]) -> None:
+        if self._sql_identity() != checkpoint["sql_identity"]:
+            raise FiscalTimeSeriesError("fiscal spill SQL schema changed")
+        row_digest = hashlib.sha256(b"fiscal-timeseries-rows-v2").digest()
+        row_records = 0
+        for ordinal, row_id, review, label, record_payload in self.execute(
+            "SELECT ordinal,row_id,review,label,record FROM rows ORDER BY ordinal"
+        ):
+            integrity = _integrity_payload(
+                "ROW",
+                ordinal,
+                row_id,
+                review,
+                label,
+                bytes(record_payload),
+            )
+            row_digest = _chain_digest(row_digest, integrity)
+            row_records += 1
+        if row_records != checkpoint["row_records"] or row_digest.hex() != checkpoint["row_digest"]:
+            raise FiscalTimeSeriesError("fiscal spill row payload changed")
+        candidate_digest = hashlib.sha256(
+            b"fiscal-timeseries-candidates-v2"
+        ).digest()
+        candidate_records = 0
+        for ordinal, row_id, column_id, period_payload, record_payload in self.execute(
+            "SELECT ordinal,row_id,column_id,period,record "
+            "FROM candidates ORDER BY ordinal"
+        ):
+            integrity = _integrity_payload(
+                "CANDIDATE",
+                ordinal,
+                row_id,
+                column_id,
+                bytes(period_payload),
+                bytes(record_payload),
+            )
+            candidate_digest = _chain_digest(candidate_digest, integrity)
+            candidate_records += 1
+        if (
+            candidate_records != checkpoint["candidate_records"]
+            or candidate_digest.hex() != checkpoint["candidate_digest"]
+        ):
+            raise FiscalTimeSeriesError("fiscal spill candidate payload changed")
+
+    def verify_integrity(self) -> None:
+        self.check()
+        if self._checkpoint is None:
+            raise FiscalTimeSeriesError("fiscal spill has no committed checkpoint")
+        if (
+            self._checkpoint.get("version") != _SPILL_VERSION
+            or self._checkpoint.get("order_identity") != _SPILL_ORDER_IDENTITY
+        ):
+            raise FiscalTimeSeriesError("fiscal spill schema/order identity changed")
+        try:
+            self._verify_journal(self._checkpoint)
+            self._verify_sql(self._checkpoint)
+        except sqlite3.Error as exc:
+            raise FiscalTimeSeriesError("fiscal spill SQL integrity check failed") from exc
 
     def row_count(self) -> int:
         return int(self.execute("SELECT count(*) FROM rows").fetchone()[0])
@@ -569,11 +851,17 @@ class _FiscalTimeSeriesSpill:
 
     def close(self, *, success: bool) -> None:
         error: BaseException | None = None
+        if success:
+            try:
+                self.verify_integrity()
+            except (OSError, sqlite3.Error, FiscalTimeSeriesError) as exc:
+                error = exc
+                success = False
         if self.db is not None:
             try:
                 self.db.close()
             except sqlite3.Error as exc:  # pragma: no cover - platform close failure
-                error = exc
+                error = error or exc
             self.db = None
         if success and error is None:
             try:

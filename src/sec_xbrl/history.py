@@ -19,6 +19,7 @@ from collections.abc import Iterator, Sequence
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, replace
 from datetime import date
+from itertools import islice
 from pathlib import Path
 from typing import Any
 
@@ -709,8 +710,7 @@ def _stage_records(
     # batch from losing its original representation before a late string
     # promotes the complete column to String.
     schemas = []
-    for start in range(0, len(records), _RECORD_WRITE_BATCH_SIZE):
-        batch = records[start : start + _RECORD_WRITE_BATCH_SIZE]
+    for batch in _iter_record_batches(records):
         schemas.append(
             pl.from_dicts(
                 _schema_record_batch(batch, json_fields),
@@ -796,6 +796,15 @@ def _schema_record_batch(
         }
         for row in batch
     ]
+
+
+def _iter_record_batches(
+    records: Sequence[dict[str, Any]],
+) -> Iterator[tuple[dict[str, Any], ...]]:
+    """Repeatably scan bounded batches without offset rescans."""
+    iterator = iter(records)
+    while batch := tuple(islice(iterator, _RECORD_WRITE_BATCH_SIZE)):
+        yield batch
 
 
 def _schema_value(key: str, value: Any, json_fields: list[str]) -> Any:

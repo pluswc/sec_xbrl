@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import gc
+import hashlib
 import sqlite3
 import weakref
 from copy import deepcopy
 from dataclasses import replace
-from datetime import date
+from datetime import UTC, date, datetime, time, timedelta, timezone, tzinfo
 from decimal import Decimal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pytest
 
@@ -18,6 +20,7 @@ from sec_xbrl.analytics import (
     FiscalTimeSeriesInput,
     FiscalTimeSeriesQuery,
 )
+from sec_xbrl.analytics import fiscal_time_series as fiscal_module
 
 
 def _panel(
@@ -328,3 +331,237 @@ def test_spilled_builder_cleanup_never_removes_a_foreign_replacement(tmp_path):
         result.close(success=True)
     assert foreign.read_bytes() == b"FOREIGN"
     assert retained.exists()
+
+
+@pytest.mark.parametrize(
+    "attack",
+    ("checksum", "authenticated_payload", "truncate", "append"),
+)
+def test_spilled_builder_rejects_journal_mutation_and_preserves_diagnostics(
+    tmp_path, attack
+):
+    result = FiscalTimeSeriesBuilder().build_spilled(
+        inputs=(FiscalTimeSeriesInput(_typed_panel(2024, 1), "--12-31"),),
+        spill_root=tmp_path,
+    )
+    journal = result.diagnostic_path
+    data = bytearray(journal.read_bytes())
+    frame_size = int.from_bytes(data[:8], "big")
+    if attack == "checksum":
+        data[8] ^= 1
+    elif attack == "authenticated_payload":
+        data[40 + frame_size - 1] ^= 1
+        data[8:40] = hashlib.sha256(data[40 : 40 + frame_size]).digest()
+    elif attack == "truncate":
+        del data[-1]
+    else:
+        data.extend(b"unexpected append")
+    with journal.open("r+b") as stream:
+        stream.write(data)
+        stream.truncate()
+    changed = journal.read_bytes()
+    with pytest.raises(FiscalTimeSeriesError, match="journal"):
+        result.materialize()
+    with pytest.raises(FiscalTimeSeriesError, match="journal"):
+        result.close(success=True)
+    assert journal.read_bytes() == changed
+
+
+@pytest.mark.parametrize(
+    "attack",
+    (
+        "candidate",
+        "missing_candidate",
+        "row",
+        "missing_row",
+        "order",
+        "ordinal",
+        "schema",
+    ),
+)
+def test_spilled_builder_binds_live_sql_to_committed_checkpoint(
+    tmp_path, attack
+):
+    result = FiscalTimeSeriesBuilder().build_spilled(
+        inputs=(FiscalTimeSeriesInput(_typed_panel(2024, 1), "--12-31"),),
+        spill_root=tmp_path,
+    )
+    journal = result.diagnostic_path
+    original = journal.read_bytes()
+    spill = result._spill
+    if attack == "candidate":
+        ordinal, payload = spill.execute(
+            "SELECT ordinal,record FROM candidates ORDER BY ordinal LIMIT 1"
+        ).fetchone()
+        definition, binding, value = fiscal_module._spill_unpack(payload)
+        value["value_numeric"] = "999999"
+        spill.execute(
+            "UPDATE candidates SET record=? WHERE ordinal=?",
+            (fiscal_module._spill_pack((definition, binding, value)), ordinal),
+        )
+    elif attack == "missing_candidate":
+        spill.execute("DELETE FROM candidates WHERE ordinal=(SELECT min(ordinal) FROM candidates)")
+    elif attack == "row":
+        spill.execute("UPDATE rows SET label='changed' WHERE ordinal=(SELECT min(ordinal) FROM rows)")
+    elif attack == "missing_row":
+        spill.execute("DELETE FROM rows WHERE ordinal=(SELECT min(ordinal) FROM rows)")
+    elif attack == "order":
+        spill.execute("UPDATE rows SET review=1-review")
+    elif attack == "ordinal":
+        spill.execute("UPDATE candidates SET ordinal=ordinal+1000000")
+    else:
+        spill.execute("DROP INDEX candidate_coordinate")
+    with pytest.raises(FiscalTimeSeriesError, match="spill"):
+        result.materialize()
+    assert journal.read_bytes() == original
+    with pytest.raises(FiscalTimeSeriesError, match="spill"):
+        result.close(success=True)
+    assert journal.read_bytes() == original
+
+
+def test_spilled_builder_verifies_once_before_bounded_materialization(
+    tmp_path, monkeypatch
+):
+    result = FiscalTimeSeriesBuilder().build_spilled(
+        inputs=(FiscalTimeSeriesInput(_typed_panel(2024, 1), "--12-31"),),
+        spill_root=tmp_path,
+    )
+    verifications = 0
+    original = result._spill._verify_sql
+
+    def counted(checkpoint):
+        nonlocal verifications
+        verifications += 1
+        return original(checkpoint)
+
+    monkeypatch.setattr(result._spill, "_verify_sql", counted)
+    result.materialize()
+    assert verifications == 1
+    result.close(success=True)
+    assert verifications == 2
+
+
+def test_spilled_dataset_reverifies_before_every_public_iteration(tmp_path):
+    result = FiscalTimeSeriesBuilder().build_spilled(
+        inputs=(FiscalTimeSeriesInput(_typed_panel(2024, 1), "--12-31"),),
+        spill_root=tmp_path,
+    )
+    view = result.dataset("cells")
+    assert list(view)
+    ordinal, payload = result._spill.execute(
+        "SELECT ordinal,record FROM candidates ORDER BY ordinal LIMIT 1"
+    ).fetchone()
+    definition, binding, value = fiscal_module._spill_unpack(payload)
+    value["value_numeric"] = "999999"
+    result._spill.execute(
+        "UPDATE candidates SET record=? WHERE ordinal=?",
+        (fiscal_module._spill_pack((definition, binding, value)), ordinal),
+    )
+    with pytest.raises(FiscalTimeSeriesError, match="candidate payload changed"):
+        list(view)
+    with pytest.raises(FiscalTimeSeriesError, match="candidate payload changed"):
+        result.close(success=True)
+
+
+def test_spilled_dataset_cannot_be_reused_after_result_close(tmp_path):
+    result = FiscalTimeSeriesBuilder().build_spilled(
+        inputs=(FiscalTimeSeriesInput(_typed_panel(2024, 1), "--12-31"),),
+        spill_root=tmp_path,
+    )
+    view = result.dataset("cells")
+    assert list(view)
+    result.close(success=True)
+    with pytest.raises(FiscalTimeSeriesError, match="closed"):
+        list(view)
+
+
+def _temporal_signature(value):
+    zone = getattr(value, "tzinfo", None)
+    return {
+        "type": type(value),
+        "repr": repr(value),
+        "fold": getattr(value, "fold", None),
+        "decimal": value.as_tuple() if isinstance(value, Decimal) else None,
+        "timezone_type": type(zone) if zone is not None else None,
+        "timezone_key": getattr(zone, "key", None),
+        "timezone_name": value.tzname() if isinstance(value, (datetime, time)) else None,
+        "utc_offset": value.utcoffset() if isinstance(value, (datetime, time)) else None,
+    }
+
+
+def test_spilled_builder_preserves_temporal_fold_timezone_and_decimal_identity(tmp_path):
+    values = {
+        "time_fold": time(1, 2, 3, fold=1),
+        "datetime_fold": datetime(2024, 11, 3, 1, 30, fold=1),  # noqa: DTZ001
+        "decimal_exponent": Decimal("1.2300"),
+        "decimal_signed_zero": Decimal("-0.00"),
+        "date": date(2024, 1, 1),
+        "timedelta": timedelta(days=-1, microseconds=2),
+        "utc_time": time(1, 2, tzinfo=UTC, fold=1),
+        "named_fixed_time": time(
+            1,
+            2,
+            tzinfo=timezone(timedelta(hours=-5), "EST-FIXED"),
+            fold=1,
+        ),
+        "named_fixed_datetime": datetime(
+            2024,
+            1,
+            1,
+            12,
+            tzinfo=timezone(timedelta(hours=9), "KST-FIXED"),
+            fold=1,
+        ),
+    }
+    try:
+        new_york = ZoneInfo("America/New_York")
+        values["zoneinfo_datetime"] = datetime(
+            2024, 11, 3, 1, 30, tzinfo=new_york, fold=1
+        )
+        values["zoneinfo_time"] = time(1, 30, tzinfo=new_york, fold=1)
+    except ZoneInfoNotFoundError:
+        pass
+    panel = _typed_panel(2024, 1)
+    panel_values = deepcopy(panel.values)
+    panel_values[0]["temporal_provenance"] = values
+    panel = replace(panel, values=panel_values)
+    eager = FiscalTimeSeriesBuilder().build(
+        inputs=(FiscalTimeSeriesInput(panel, "--12-31"),)
+    )
+    spilled = FiscalTimeSeriesBuilder().build_spilled(
+        inputs=(FiscalTimeSeriesInput(panel, "--12-31"),), spill_root=tmp_path
+    )
+    try:
+        actual = spilled.materialize()
+        before = eager.cells[0]["candidate_lineage"][0]["value"]["temporal_provenance"]
+        after = actual.cells[0]["candidate_lineage"][0]["value"]["temporal_provenance"]
+        assert {key: _temporal_signature(value) for key, value in after.items()} == {
+            key: _temporal_signature(value) for key, value in before.items()
+        }
+    finally:
+        spilled.close(success=True)
+
+
+def test_spilled_builder_explicitly_rejects_unsupported_custom_timezone(tmp_path):
+    class CustomTimezone(tzinfo):
+        def utcoffset(self, value):
+            return timedelta(hours=1)
+
+        def dst(self, value):
+            return timedelta(0)
+
+        def tzname(self, value):
+            return "CUSTOM"
+
+    panel = _typed_panel(2024, 1)
+    panel_values = deepcopy(panel.values)
+    panel_values[0]["custom_timezone"] = datetime(
+        2024, 1, 1, tzinfo=CustomTimezone()
+    )
+    panel = replace(panel, values=panel_values)
+    with pytest.raises(FiscalTimeSeriesError, match="unsupported typed spill timezone"):
+        FiscalTimeSeriesBuilder().build_spilled(
+            inputs=(FiscalTimeSeriesInput(panel, "--12-31"),),
+            spill_root=tmp_path,
+        )
+    assert list(tmp_path.glob("fiscal-timeseries-*/fiscal-time-series-spill.records"))
