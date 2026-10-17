@@ -83,6 +83,8 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
         def _get(self) -> None:
             parsed = urlparse(self.path)
             query = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
+            if "dataset_publication_id" in query:
+                service.require_publication(query["dataset_id"], query["dataset_publication_id"])
             if parsed.path == "/":
                 self._text(HTML, "text/html; charset=utf-8")
             elif parsed.path == "/app.css":
@@ -95,6 +97,10 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
                 self._json(service.status())
             elif parsed.path == "/api/screens":
                 self._json(service.store.list_screens())
+            elif parsed.path == "/api/screen-revisions":
+                self._json(service.store.list_saved_revisions())
+            elif match := re.fullmatch(rf"/api/saved-conditions/({ID})", parsed.path):
+                self._json(service.saved_condition(match.group(1)))
             elif parsed.path == "/api/runs":
                 self._json(service.store.list_runs(query.get("revision_id")))
             elif parsed.path == "/api/decisions":
@@ -103,60 +109,128 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
                 self._json(service.metric_availability(query["dataset_id"], cik=query.get("cik")))
             elif parsed.path == "/api/metric-catalog":
                 self._json(service.metric_catalog(query["dataset_id"]))
+            elif parsed.path == "/api/quarter-metric-catalog":
+                self._json(service.quarter_metric_catalog(query["dataset_id"]))
+            elif parsed.path == "/api/quarter-periods":
+                self._json(service.quarter_periods(query["dataset_id"], cik=query.get("cik")))
+            elif parsed.path == "/api/quarter-series":
+                self._json(
+                    service.quarter_series(
+                        query["dataset_id"],
+                        cik=query["cik"],
+                        metric_id=query["metric_id"],
+                        limit=int(query.get("limit", 8)),
+                    )
+                )
+            elif parsed.path == "/api/quarter-explorer":
+                self._json(
+                    service.quarter_explorer(
+                        query["dataset_id"],
+                        calendar_year=int(query["calendar_year"]),
+                        calendar_quarter=int(query["calendar_quarter"]),
+                    )
+                )
+            elif parsed.path == "/api/quarter-comparison":
+                self._json(
+                    service.quarter_comparison(
+                        query["dataset_id"],
+                        ciks=query["ciks"].split(","),
+                        metric_id=query["metric_id"],
+                        calendar_year=int(query["calendar_year"]),
+                        calendar_quarter=int(query["calendar_quarter"]),
+                    )
+                )
             elif parsed.path == "/api/explorer":
-                self._json(service.company_explorer(
-                    query["dataset_id"], fiscal_year=_optional_int(query.get("fiscal_year")),
-                    query=query.get("query"), sort=query.get("sort", "company"),
-                    direction=query.get("direction", "asc"),
-                ))
+                self._json(
+                    service.company_explorer(
+                        query["dataset_id"],
+                        fiscal_year=_optional_int(query.get("fiscal_year")),
+                        query=query.get("query"),
+                        sort=query.get("sort", "company"),
+                        direction=query.get("direction", "asc"),
+                    )
+                )
             elif parsed.path == "/api/metric-library":
-                self._json(service.metric_library(
-                    query["dataset_id"], fiscal_year=_optional_int(query.get("fiscal_year")),
-                    query=query.get("query"), category=query.get("category"),
-                ))
+                self._json(
+                    service.metric_library(
+                        query["dataset_id"],
+                        fiscal_year=_optional_int(query.get("fiscal_year")),
+                        query=query.get("query"),
+                        category=query.get("category"),
+                    )
+                )
             elif parsed.path == "/api/company-profile":
-                self._json(service.company_profile(
-                    query["dataset_id"], cik=query["cik"],
-                    fiscal_year=_optional_int(query.get("fiscal_year")),
-                ))
+                self._json(
+                    service.company_profile(
+                        query["dataset_id"],
+                        cik=query["cik"],
+                        fiscal_year=_optional_int(query.get("fiscal_year")),
+                    )
+                )
             elif parsed.path == "/api/company-comparison":
-                self._json(service.company_comparison(
-                    query["dataset_id"], ciks=query["ciks"].split(","),
-                    metric_ids=query["metric_ids"].split(","),
-                    fiscal_year=_optional_int(query.get("fiscal_year")),
-                ))
+                self._json(
+                    service.company_comparison(
+                        query["dataset_id"],
+                        ciks=query["ciks"].split(","),
+                        metric_ids=query["metric_ids"].split(","),
+                        fiscal_year=_optional_int(query.get("fiscal_year")),
+                    )
+                )
             elif parsed.path == "/api/series":
-                self._json(service.metric_series(query["dataset_id"], cik=query["cik"], metric_id=query["metric_id"]))
+                self._json(
+                    service.metric_series(
+                        query["dataset_id"], cik=query["cik"], metric_id=query["metric_id"]
+                    )
+                )
             elif parsed.path == "/api/metadata":
                 prepared = None if "prepared" not in query else _bool(query["prepared"])
-                self._json(service.metadata_inventory(
-                    query["dataset_id"], query=query.get("query"), sic_code=query.get("sic_code"),
-                    prepared=prepared, offset=int(query.get("offset", 0)), limit=int(query.get("limit", 100)),
-                ))
+                self._json(
+                    service.metadata_inventory(
+                        query["dataset_id"],
+                        query=query.get("query"),
+                        sic_code=query.get("sic_code"),
+                        prepared=prepared,
+                        offset=int(query.get("offset", 0)),
+                        limit=int(query.get("limit", 100)),
+                    )
+                )
             elif parsed.path == "/api/peers":
                 self._json(service.peer_candidates(query["dataset_id"], cik=query["cik"]))
             elif parsed.path == "/api/run-comparison":
                 self._json(service.compare_runs(query["old_run_id"], query["new_run_id"]))
             elif parsed.path == "/api/peer-comparison":
-                self._json(service.compare_peers(
-                    query["dataset_id"], ciks=query["ciks"].split(","),
-                    metric_id=query["metric_id"], fiscal_year=int(query["fiscal_year"]),
-                ))
+                self._json(
+                    service.compare_peers(
+                        query["dataset_id"],
+                        ciks=query["ciks"].split(","),
+                        metric_id=query["metric_id"],
+                        fiscal_year=int(query["fiscal_year"]),
+                    )
+                )
             elif match := re.fullmatch(rf"/api/revisions/({ID})", parsed.path):
                 self._json(service.store.revision(match.group(1)))
             elif match := re.fullmatch(rf"/api/runs/({ID})", parsed.path):
                 self._json(service.run(match.group(1)))
             elif match := re.fullmatch(rf"/api/runs/({ID})/trace", parsed.path):
-                self._json(service.trace(match.group(1), cik=query["cik"], metric_id=query["metric_id"]))
+                self._json(
+                    service.trace(match.group(1), cik=query["cik"], metric_id=query["metric_id"])
+                )
             elif parsed.path.startswith("/exports/"):
                 name = parsed.path.removeprefix("/exports/")
                 if not re.fullmatch(r"[A-Za-z0-9_.-]+", name):
                     raise ValueError("unsafe export name")
                 path = export_root / name
-                if not path.is_file() or path.is_symlink() or path.resolve().parent != export_root.resolve():
+                if (
+                    not path.is_file()
+                    or path.is_symlink()
+                    or path.resolve().parent != export_root.resolve()
+                ):
                     raise ValueError("export does not exist")
                 service.store.export_for_path(path)
-                self._bytes(path.read_bytes(), mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+                self._bytes(
+                    path.read_bytes(),
+                    mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+                )
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
 
@@ -164,16 +238,46 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
             parsed = urlparse(self.path)
             body = self._body()
             if parsed.path == "/api/screens":
-                self._json(service.create_screen(body.get("name"), body.get("content")), HTTPStatus.CREATED)
+                self._json(
+                    service.create_screen(body.get("name"), body.get("content"), dataset_id=body.get("dataset_id")), HTTPStatus.CREATED
+                )
             elif match := re.fullmatch(rf"/api/screens/({ID})/revisions", parsed.path):
-                self._json(service.revise_screen(match.group(1), body.get("content")), HTTPStatus.CREATED)
+                self._json(
+                    service.revise_screen(match.group(1), body.get("content"), dataset_id=body.get("dataset_id")), HTTPStatus.CREATED
+                )
             elif parsed.path == "/api/runs":
-                self._json(service.execute(body.get("revision_id"), body.get("dataset_id")), HTTPStatus.CREATED)
+                self._json(
+                    service.execute(body.get("revision_id"), body.get("dataset_id")),
+                    HTTPStatus.CREATED,
+                )
+            elif parsed.path == "/api/preview":
+                self._json(
+                    service.preview(body.get("content"), body.get("dataset_id")),
+                    HTTPStatus.OK,
+                )
+            elif parsed.path == "/api/results":
+                self._json(
+                    service.save_result(
+                        name=body.get("name"),
+                        content=body.get("content"),
+                        dataset_id=body.get("dataset_id"),
+                        preview_hash=body.get("preview_hash"),
+                        revision_id=body.get("revision_id"),
+                    ),
+                    HTTPStatus.CREATED,
+                )
             elif parsed.path == "/api/decisions":
-                self._json(service.add_decision(
-                    cik=body.get("cik"), state=body.get("state"), rationale=body.get("rationale"),
-                    run_id=body.get("run_id"), actor=body.get("actor"), evidence_ids=body.get("evidence_ids"),
-                ), HTTPStatus.CREATED)
+                self._json(
+                    service.add_decision(
+                        cik=body.get("cik"),
+                        state=body.get("state"),
+                        rationale=body.get("rationale"),
+                        run_id=body.get("run_id"),
+                        actor=body.get("actor"),
+                        evidence_ids=body.get("evidence_ids"),
+                    ),
+                    HTTPStatus.CREATED,
+                )
             elif match := re.fullmatch(rf"/api/runs/({ID})/exports", parsed.path):
                 run_id = match.group(1)
                 selected_format = require_string(body.get("format"), "format").lower()
@@ -183,8 +287,11 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
                     f"{uuid.uuid4().hex}.{selected_format}"
                 )
                 result = service.export_run(
-                    run_id, export_root / name, scope=scope,
-                    selected_ciks=body.get("selected_ciks"), format=selected_format,
+                    run_id,
+                    export_root / name,
+                    scope=scope,
+                    selected_ciks=body.get("selected_ciks"),
+                    format=selected_format,
                 )
                 self._json({**result, "download_url": "/exports/" + name}, HTTPStatus.CREATED)
             else:
@@ -213,13 +320,20 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
                 address = ipaddress.ip_address(parsed.hostname or "")
             except ValueError as exc:
                 raise PermissionError("state-changing request origin is not loopback") from exc
-            if parsed.scheme != "http" or not address.is_loopback or parsed.netloc != self.headers.get("Host"):
+            if (
+                parsed.scheme != "http"
+                or not address.is_loopback
+                or parsed.netloc != self.headers.get("Host")
+            ):
                 raise PermissionError("state-changing request origin differs from local service")
 
         def _json(self, value: Any, status: HTTPStatus = HTTPStatus.OK) -> None:
             self._bytes(
-                json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8"),
-                "application/json; charset=utf-8", status,
+                json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str).encode(
+                    "utf-8"
+                ),
+                "application/json; charset=utf-8",
+                status,
             )
 
         def _text(self, value: str, content_type: str) -> None:
@@ -236,13 +350,18 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
             self.send_header("Content-Length", str(len(value)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'")
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'",
+            )
             self.send_header("Referrer-Policy", "no-referrer")
             self.end_headers()
             self.wfile.write(value)
 
         def _error(self, exc: Exception) -> None:
-            status = HTTPStatus.FORBIDDEN if isinstance(exc, PermissionError) else HTTPStatus.BAD_REQUEST
+            status = (
+                HTTPStatus.FORBIDDEN if isinstance(exc, PermissionError) else HTTPStatus.BAD_REQUEST
+            )
             self._json({"error": str(exc)}, status)
 
         def log_message(self, format: str, *args: Any) -> None:

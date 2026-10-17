@@ -129,7 +129,9 @@ def test_run_comparison_separates_revision_from_universe_membership(
     service = _service(screening_dataset, tmp_path)
     first_revision = service.create_screen("비교", revision_content)
     first = service.execute(first_revision["revision_id"], "fixture")
-    second_revision = service.revise_screen(first_revision["screen_id"], revision_content)
+    changed = json.loads(json.dumps(revision_content))
+    changed["columns"] = [*changed["columns"], "decision"]
+    second_revision = service.revise_screen(first_revision["screen_id"], changed)
     second = service.execute(second_revision["revision_id"], "fixture")
     comparison = service.compare_runs(first["run_id"], second["run_id"])
     assert comparison["changed_dimensions"]["condition_revision"] is True

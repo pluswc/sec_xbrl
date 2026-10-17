@@ -1,0 +1,71 @@
+{
+  "fixture_kind": "SYNTHETIC_QUARTER_SCHEMA_FIXTURE_V2",
+  "records": [
+    {
+      "allowed_source_kinds": [
+        "REPORTED"
+      ],
+      "canonical_value_scale": "1",
+      "category": "PROFITABILITY",
+      "definition_version": "quarter-reported-core-v1",
+      "formula": null,
+      "label_ko": "분기 매출",
+      "metric_id": "quarter_revenue",
+      "observation_basis": "QTD_3M",
+      "rule_version": "quarter-reported-selection-v1",
+      "status": "ACTIVE",
+      "unit": "USD",
+      "unit_kind": "MONEY"
+    },
+    {
+      "allowed_source_kinds": [
+        "REPORTED",
+        "DERIVED_QUARTER"
+      ],
+      "canonical_value_scale": "1",
+      "category": "CASH_FLOW",
+      "definition_version": "quarter-derived-additive-v1",
+      "formula": "Q1=direct QTD; Q2=YTD_6M-Q1_QTD; Q3=YTD_9M-YTD_6M; Q4=FY-YTD_9M",
+      "label_ko": "분기 영업현금흐름",
+      "metric_id": "quarter_cfo",
+      "observation_basis": "QTD_3M",
+      "rule_version": "quarter-additive-m8-v1",
+      "status": "ACTIVE",
+      "unit": "USD",
+      "unit_kind": "MONEY"
+    },
+    {
+      "allowed_source_kinds": [
+        "REPORTED"
+      ],
+      "canonical_value_scale": "1",
+      "category": "PROFITABILITY",
+      "definition_version": "quarter-reported-core-v1",
+      "formula": null,
+      "label_ko": "분기 매출총이익",
+      "metric_id": "quarter_gross_profit",
+      "observation_basis": "QTD_3M",
+      "rule_version": "quarter-reported-selection-v1",
+      "status": "ACTIVE",
+      "unit": "USD",
+      "unit_kind": "MONEY"
+    },
+    {
+      "allowed_source_kinds": [
+        "DERIVED_METRIC"
+      ],
+      "canonical_value_scale": "1",
+      "category": "GROWTH",
+      "definition_version": "quarter-ttm-v1",
+      "formula": "SUM(4 contiguous eligible QTD observations)",
+      "label_ko": "최근 4개 분기 매출 합계",
+      "metric_id": "ttm_revenue",
+      "observation_basis": "TTM",
+      "rule_version": "quarter-ttm-contiguous-v1",
+      "status": "DECLARED_UNAVAILABLE_UNTIL_COMPATIBLE_INPUTS",
+      "unit": "USD",
+      "unit_kind": "MONEY"
+    }
+  ],
+  "schema_version": "quarter-metric-definitions-v1"
+}

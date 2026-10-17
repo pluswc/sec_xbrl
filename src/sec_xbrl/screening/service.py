@@ -21,6 +21,7 @@ from sec_xbrl.screening.common import (
 from sec_xbrl.screening.company_descriptions import CompanyDescriptionReader
 from sec_xbrl.screening.dataset import ScreeningDatasetReader
 from sec_xbrl.screening.dataset_v2 import ScreeningDatasetV2Reader, open_screening_dataset
+from sec_xbrl.screening.dataset_v3 import ScreeningDatasetV3Reader
 from sec_xbrl.screening.explorer import ScreeningExplorer, public_copy
 from sec_xbrl.screening.store import ScreeningStore
 
@@ -44,6 +45,21 @@ VISIBLE_COLUMNS = {
 }
 
 
+def _preview_response(
+    content: dict[str, Any], dataset_id: str, evaluated: dict[str, Any]
+) -> dict[str, Any]:
+    frozen = json.loads(canonical_json(content))
+    result = json.loads(canonical_json(evaluated))
+    preview_hash = digest_value({"dataset_id": dataset_id, "content": frozen, "result": result})
+    return {
+        **result,
+        "persistence_state": "PREVIEW",
+        "content": frozen,
+        "condition_hash": digest_value(frozen),
+        "preview_hash": preview_hash,
+    }
+
+
 class ScreeningService:
     """Application service over verified publications and an append-only store."""
 
@@ -64,7 +80,7 @@ class ScreeningService:
             if reader.manifest["dataset_id"] != dataset_id:
                 raise ValueError("dataset catalog ID differs from publication")
             self.datasets[dataset_id] = reader
-            if isinstance(reader, ScreeningDatasetV2Reader):
+            if isinstance(reader, (ScreeningDatasetV2Reader, ScreeningDatasetV3Reader)):
                 self.explorers[dataset_id] = ScreeningExplorer(reader)
         if company_descriptions is not None:
             bound = self.datasets.get(company_descriptions.dataset_id)
@@ -84,7 +100,9 @@ class ScreeningService:
             status["company_descriptions"] = self.company_descriptions.verify_all()
         return status
 
-    def metric_availability(self, dataset_id: str, *, cik: str | None = None) -> list[dict[str, Any]]:
+    def metric_availability(
+        self, dataset_id: str, *, cik: str | None = None
+    ) -> list[dict[str, Any]]:
         reader = self._dataset(dataset_id)
         rows = reader.metric_support
         if cik is not None:
@@ -118,16 +136,24 @@ class ScreeningService:
             ]
         result = []
         for definition in definitions:
-            rows = [row for row in reader.metric_support if row["metric_id"] == definition["metric_id"]]
+            rows = [
+                row for row in reader.metric_support if row["metric_id"] == definition["metric_id"]
+            ]
             result.append(
                 {
                     **json.loads(canonical_json(definition)),
                     "coverage": {
-                        "companies_available": sum(row.get("execution_supported") is True for row in rows),
+                        "companies_available": sum(
+                            row.get("execution_supported") is True for row in rows
+                        ),
                         "companies_total": len(rows),
-                        "periods_available": sum(int(row.get("available_periods") or 0) for row in rows),
+                        "periods_available": sum(
+                            int(row.get("available_periods") or 0) for row in rows
+                        ),
                     },
-                    "business_availability": "AVAILABLE" if any(row.get("execution_supported") for row in rows) else "UNAVAILABLE",
+                    "business_availability": "AVAILABLE"
+                    if any(row.get("execution_supported") for row in rows)
+                    else "UNAVAILABLE",
                     "unavailable_reasons": sorted(
                         {
                             reason
@@ -139,6 +165,175 @@ class ScreeningService:
                 }
             )
         return result
+
+    def quarter_metric_catalog(self, dataset_id: str) -> list[dict[str, Any]]:
+        reader = self._quarter_dataset(dataset_id)
+        result = []
+        for definition in reader.quarter_definitions:
+            rows = [
+                row
+                for row in reader.quarter_observations
+                if row["metric_id"] == definition["metric_id"]
+            ]
+            result.append(
+                {
+                    **json.loads(canonical_json(definition)),
+                    "label": definition["label_ko"],
+                    "period_class": definition["observation_basis"],
+                    "coverage": {
+                        "companies_available": len(
+                            {
+                                row["cik"]
+                                for row in rows
+                                if row["availability_status"] == "AVAILABLE"
+                            }
+                        ),
+                        "companies_total": len(reader.companies),
+                        "periods_available": sum(
+                            row["availability_status"] == "AVAILABLE" for row in rows
+                        ),
+                    },
+                }
+            )
+        return result
+
+    def quarter_periods(self, dataset_id: str, *, cik: str | None = None) -> dict[str, Any]:
+        reader = self._quarter_dataset(dataset_id)
+        if cik is not None:
+            cik = require_cik(cik)
+        rows = [row for row in reader.quarter_period_inventory if cik is None or row["cik"] == cik]
+        return {
+            "spine": json.loads(canonical_json(reader.quarterly.manifest["global_quarter_spine"])),
+            "rows": json.loads(canonical_json(rows)),
+        }
+
+    def quarter_series(
+        self, dataset_id: str, *, cik: str, metric_id: str, limit: int = 8
+    ) -> dict[str, Any]:
+        reader = self._quarter_dataset(dataset_id)
+        cik = require_cik(cik)
+        metric_id = require_string(metric_id, "metric_id")
+        if type(limit) is not int or not 1 <= limit <= 8:
+            raise ValueError("quarter series limit must be one to eight")
+        rows = [
+            row
+            for row in reader.quarter_observations
+            if row["cik"] == cik and row["metric_id"] == metric_id
+        ]
+        if not rows:
+            raise ValueError("quarter series is not prepared")
+        rows.sort(key=lambda row: (row["calendar_year"], row["calendar_quarter"]))
+        return {
+            "metric": next(
+                row for row in reader.quarter_definitions if row["metric_id"] == metric_id
+            ),
+            "observations": json.loads(canonical_json(rows[-limit:])),
+        }
+
+    def quarter_explorer(
+        self, dataset_id: str, *, calendar_year: int, calendar_quarter: int
+    ) -> dict[str, Any]:
+        reader = self._quarter_dataset(dataset_id)
+        _validate_period_policy(
+            {
+                "mode": "FIXED_CALENDAR_QUARTER_END",
+                "calendar_year": calendar_year,
+                "calendar_quarter": calendar_quarter,
+            }
+        )
+        inventory = {
+            (row["cik"], row["calendar_year"], row["calendar_quarter"]): row
+            for row in reader.quarter_period_inventory
+        }
+        rows = []
+        for company in reader.companies:
+            observations = {
+                row["metric_id"]: json.loads(canonical_json(row))
+                for row in reader.quarter_observations
+                if row["cik"] == company["cik"]
+                and row["calendar_year"] == calendar_year
+                and row["calendar_quarter"] == calendar_quarter
+            }
+            rows.append(
+                {
+                    "company": json.loads(canonical_json(company)),
+                    "period": json.loads(
+                        canonical_json(inventory[(company["cik"], calendar_year, calendar_quarter)])
+                    ),
+                    "metrics": observations,
+                }
+            )
+        selected_metrics = []
+        for metric in self.quarter_metric_catalog(dataset_id):
+            matching = [row["metrics"][metric["metric_id"]] for row in rows]
+            available = sum(
+                item["availability_status"] == "AVAILABLE"
+                and not item.get("quality_blocking")
+                and item.get("quality_status") != "BLOCK"
+                for item in matching
+            )
+            selected_metrics.append(
+                {
+                    **metric,
+                    "aggregate_coverage": metric["coverage"],
+                    "coverage": {
+                        "companies_available": available,
+                        "companies_total": len(reader.companies),
+                        "periods_available": available,
+                    },
+                }
+            )
+        return {
+            "calendar_year": calendar_year,
+            "calendar_quarter": calendar_quarter,
+            "financial_as_of": reader.manifest["financial_as_of"],
+            "metrics": selected_metrics,
+            "rows": rows,
+        }
+
+    def quarter_comparison(
+        self,
+        dataset_id: str,
+        *,
+        ciks: list[str],
+        metric_id: str,
+        calendar_year: int,
+        calendar_quarter: int,
+    ) -> dict[str, Any]:
+        reader = self._quarter_dataset(dataset_id)
+        if len(ciks) < 2 or len(ciks) > 4 or len(set(ciks)) != len(ciks):
+            raise ValueError("quarter comparison requires two to four unique companies")
+        rows = []
+        for raw in ciks:
+            cik = require_cik(raw)
+            company = reader.company(cik)
+            matches = [
+                row
+                for row in reader.quarter_observations
+                if row["cik"] == cik
+                and row["metric_id"] == metric_id
+                and row["calendar_year"] == calendar_year
+                and row["calendar_quarter"] == calendar_quarter
+            ]
+            if len(matches) != 1:
+                raise ValueError("quarter comparison cell is not unique")
+            rows.append({"company": company, "observation": json.loads(canonical_json(matches[0]))})
+        signatures = {
+            (
+                r["observation"]["definition_version"],
+                r["observation"]["unit"],
+                r["observation"]["selection_as_of_date"],
+            )
+            for r in rows
+        }
+        if len(signatures) != 1:
+            raise ValueError("quarter comparison scope is incompatible")
+        return {
+            "calendar_year": calendar_year,
+            "calendar_quarter": calendar_quarter,
+            "metric_id": metric_id,
+            "rows": rows,
+        }
 
     def company_explorer(
         self,
@@ -186,17 +381,30 @@ class ScreeningService:
                 fiscal_year=fiscal_year,
             )
         )
-        if self.company_descriptions is not None and self.company_descriptions.dataset_id == dataset_id:
+        if (
+            self.company_descriptions is not None
+            and self.company_descriptions.dataset_id == dataset_id
+        ):
             row = self.company_descriptions.company(cik)
             result["company_description"] = {
                 key: row.get(key)
                 for key in (
-                    "status", "text", "locale", "provider_name", "profile_url",
-                    "checked_at", "observed_at", "publication_id", "temporal_scope", "reason",
+                    "status",
+                    "text",
+                    "locale",
+                    "provider_name",
+                    "profile_url",
+                    "checked_at",
+                    "observed_at",
+                    "publication_id",
+                    "temporal_scope",
+                    "reason",
                     "content_fixture_kind",
                 )
             }
-            result["company_description"]["publication_id"] = self.company_descriptions.publication_id
+            result["company_description"]["publication_id"] = (
+                self.company_descriptions.publication_id
+            )
         return result
 
     def company_comparison(
@@ -223,7 +431,8 @@ class ScreeningService:
         if not any(row["metric_id"] == metric_id for row in reader.metric_support):
             raise ValueError("unknown metric_id")
         rows = [
-            row for row in reader.observations
+            row
+            for row in reader.observations
             if row["cik"] == cik and row["metric_id"] == metric_id
         ]
         if not rows:
@@ -247,7 +456,8 @@ class ScreeningService:
         if query:
             needle = query.casefold()
             rows = [
-                row for row in rows
+                row
+                for row in rows
                 if needle in str(row.get("name") or "").casefold()
                 or any(needle in ticker.casefold() for ticker in row.get("tickers", []))
                 or needle in row["cik"]
@@ -256,7 +466,12 @@ class ScreeningService:
             rows = [row for row in rows if row.get("sic_code") == sic_code]
         if prepared is not None:
             rows = [row for row in rows if row.get("financial_prepared") is prepared]
-        return {"total": len(rows), "offset": offset, "limit": limit, "rows": rows[offset:offset + limit]}
+        return {
+            "total": len(rows),
+            "offset": offset,
+            "limit": limit,
+            "rows": rows[offset : offset + limit],
+        }
 
     def peer_candidates(self, dataset_id: str, *, cik: str) -> dict[str, Any]:
         reader = self._dataset(dataset_id)
@@ -265,59 +480,54 @@ class ScreeningService:
         if target is None:
             raise ValueError("company is not present in metadata inventory")
         sic = target.get("sic_code")
-        peers = [] if sic is None else [
-            row for row in reader.metadata if row["cik"] != cik and row.get("sic_code") == sic
-        ]
+        peers = (
+            []
+            if sic is None
+            else [
+                row for row in reader.metadata if row["cik"] != cik and row.get("sic_code") == sic
+            ]
+        )
         return {
             "target": target,
             "peers": peers,
             "limitation": "SEC SIC is a current coarse peer-candidate signal, not accounting equivalence.",
         }
 
-    def create_screen(self, name: str, content: dict[str, Any]) -> dict[str, Any]:
-        self._validate_revision(content)
-        return self.store.create_screen(name, content)
+    def _saved_context(self, dataset_id: str) -> dict[str, Any]:
+        reader = self._dataset(dataset_id)
+        return {"dataset_id": dataset_id, "publication_id": reader.publication_id, "manifest_digest": digest_value(reader.manifest)}
 
-    def revise_screen(self, screen_id: str, content: dict[str, Any]) -> dict[str, Any]:
-        self._validate_revision(content)
-        return self.store.revise_screen(screen_id, content)
+    def saved_condition(self, revision_id: str) -> dict[str, Any]:
+        revision = self.store.revision(revision_id)
+        context = revision["saved_context"]
+        if context is not None:
+            if self._saved_context(context["dataset_id"]) != context:
+                raise ValueError("saved condition dataset publication has changed")
+            return {**revision, "context_origin": "SAVED", "open_dataset_id": context["dataset_id"]}
+        runs = self.store.list_runs(revision_id)
+        identities = {(run["dataset_id"], run["dataset_publication_id"]) for run in runs}
+        if len(identities) == 1:
+            dataset_id, publication_id = identities.pop()
+            if self._dataset(dataset_id).publication_id != publication_id:
+                raise ValueError("historical condition dataset publication has changed")
+            return {**revision, "context_origin": "HISTORICAL_RUN", "open_dataset_id": dataset_id}
+        return {**revision, "context_origin": "UNKNOWN", "open_dataset_id": None}
+
+    def create_screen(self, name: str, content: dict[str, Any], *, dataset_id: str | None = None) -> dict[str, Any]:
+        self._validate_revision(content, reader=self._dataset(dataset_id) if dataset_id is not None else None)
+        return self.store.create_screen(name, content, context=self._saved_context(dataset_id) if dataset_id is not None else None)
+
+    def revise_screen(self, screen_id: str, content: dict[str, Any], *, dataset_id: str | None = None) -> dict[str, Any]:
+        self._validate_revision(content, reader=self._dataset(dataset_id) if dataset_id is not None else None)
+        return self.store.revise_screen(screen_id, content, context=self._saved_context(dataset_id) if dataset_id is not None else None)
 
     def execute(self, revision_id: str, dataset_id: str) -> dict[str, Any]:
         reader = self._dataset(dataset_id)
         revision = self.store.revision(revision_id)
         content = revision["content"]
-        self._validate_revision(content, reader=reader)
-        targets = _select_universe(reader, content["universe"])
-        universe_payload = {
-            "dataset_publication_id": reader.publication_id,
-            "metadata_publication_id": reader.manifest["sources"]["metadata"]["publication_id"],
-            "selector": content["universe"],
-            "ciks": [row["cik"] for row in targets],
-        }
-        universe = self.store.save_universe(universe_payload)
-        rows = [self._evaluate_company(reader, company, content) for company in targets]
-        rows = _sort_rows(rows, content["sort"])
-        counts = {state.lower(): sum(row["aggregate"] == state for row in rows) for state in AGGREGATES}
-        counts.update(
-            target=len(rows),
-            quality_block=sum(row["quality_blocking"] for row in rows),
-        )
-        if counts["target"] != counts["pass"] + counts["fail"] + counts["undetermined"]:
-            raise AssertionError("screen result counts do not reconcile")
-        dataset_versions = json.loads(canonical_json(reader.manifest.get("versions", {})))
-        predicate_versions = sorted(
-            {
-                predicate["definition_version"]
-                for predicate in content["predicates"]
-            }
-        )
-        versions = {
-            "engine": ENGINE_VERSION,
-            "dataset_publication_id": reader.publication_id,
-            "dataset": dataset_versions,
-            "predicate_definition_versions": predicate_versions,
-            "metadata_publication_id": reader.manifest["sources"]["metadata"]["publication_id"],
-        }
+        evaluated = self._evaluate(content, dataset_id)
+        universe = self.store.save_universe(evaluated.pop("universe"))
+        versions = evaluated["versions"]
         input_material = {
             "revision_id": revision_id,
             "revision_hash": revision["content_hash"],
@@ -326,22 +536,102 @@ class ScreeningService:
             "versions": versions,
         }
         payload = {
+            **evaluated,
             "revision_id": revision_id,
             "universe_snapshot_id": universe["universe_snapshot_id"],
+            "input_hash": digest_value(input_material),
+        }
+        return self.store.save_run(payload)
+
+    def preview(self, content: dict[str, Any], dataset_id: str) -> dict[str, Any]:
+        """Evaluate a draft without writing any journal record."""
+        evaluated = self._evaluate(content, dataset_id)
+        evaluated.pop("universe")
+        return _preview_response(content, dataset_id, evaluated)
+
+    def save_result(
+        self,
+        *,
+        name: str,
+        content: dict[str, Any],
+        dataset_id: str,
+        preview_hash: str,
+        revision_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Validate once against the preview digest and persist that same evaluation."""
+        evaluated = self._evaluate(content, dataset_id)
+        universe = evaluated.pop("universe")
+        expected = _preview_response(content, dataset_id, evaluated)
+        if require_string(preview_hash, "preview_hash") != expected["preview_hash"]:
+            raise ValueError("preview is stale; run the preview again before saving")
+        if revision_id is not None:
+            context = self.store.revision(revision_id)["saved_context"]
+            if context is not None and context != self._saved_context(dataset_id):
+                raise ValueError("saved condition dataset differs from the preview")
+        return self.store.save_explicit_result(
+            name=name,
+            content=content,
+            universe_content=universe,
+            payload=evaluated,
+            revision_id=revision_id,
+        )
+
+    def _evaluate(self, content: dict[str, Any], dataset_id: str) -> dict[str, Any]:
+        reader = self._dataset(dataset_id)
+        self._validate_revision(content, reader=reader)
+        targets = _select_universe(reader, content["universe"])
+        universe_payload = {
+            "dataset_publication_id": reader.publication_id,
+            "metadata_publication_id": reader.manifest["sources"]["metadata"]["publication_id"],
+            "selector": content["universe"],
+            "ciks": [row["cik"] for row in targets],
+        }
+        rows = [self._evaluate_company(reader, company, content) for company in targets]
+        rows = _sort_rows(rows, content["sort"])
+        counts = {
+            state.lower(): sum(row["aggregate"] == state for row in rows) for state in AGGREGATES
+        }
+        counts.update(
+            target=len(rows),
+            quality_block=sum(row["quality_blocking"] for row in rows),
+        )
+        if counts["target"] != counts["pass"] + counts["fail"] + counts["undetermined"]:
+            raise AssertionError("screen result counts do not reconcile")
+        dataset_versions = json.loads(canonical_json(reader.manifest.get("versions", {})))
+        predicate_versions = sorted(
+            {predicate["definition_version"] for predicate in content["predicates"]}
+        )
+        versions = {
+            "engine": ENGINE_VERSION,
+            "dataset_publication_id": reader.publication_id,
+            "dataset": dataset_versions,
+            "predicate_definition_versions": predicate_versions,
+            "metadata_publication_id": reader.manifest["sources"]["metadata"]["publication_id"],
+        }
+        return {
+            "universe": universe_payload,
             "dataset_id": dataset_id,
             "dataset_publication_id": reader.publication_id,
             "fixture_kind": reader.manifest["fixture_kind"],
             "financial_as_of": reader.manifest["financial_as_of"],
             "period_policy": content["period_policy"],
             "versions": versions,
-            "input_hash": digest_value(input_material),
             "counts": counts,
             "rows": rows,
         }
-        return self.store.save_run(payload)
+
+    def require_publication(self, dataset_id: str, publication_id: str) -> None:
+        """Reject source lookups that would mix a frozen result with newer data."""
+        if self._dataset(dataset_id).publication_id != publication_id:
+            raise ValueError(
+                "dataset publication has changed; 저장 당시 자료가 현재 자료와 다릅니다. "
+                "저장 결과는 보존되며 당시 자료를 복원한 뒤 다시 열 수 있습니다."
+            )
 
     def run(self, run_id: str) -> dict[str, Any]:
-        return self.store.run(run_id)
+        run = self.store.run(run_id)
+        self.require_publication(run["dataset_id"], run["dataset_publication_id"])
+        return run
 
     def trace(self, run_id: str, *, cik: str, metric_id: str) -> dict[str, Any]:
         run = self.store.run(run_id)
@@ -415,16 +705,12 @@ class ScreeningService:
         old_rule_vector = {
             "engine": old["versions"].get("engine"),
             "dataset": old["versions"].get("dataset"),
-            "predicate_definition_versions": old["versions"].get(
-                "predicate_definition_versions"
-            ),
+            "predicate_definition_versions": old["versions"].get("predicate_definition_versions"),
         }
         new_rule_vector = {
             "engine": new["versions"].get("engine"),
             "dataset": new["versions"].get("dataset"),
-            "predicate_definition_versions": new["versions"].get(
-                "predicate_definition_versions"
-            ),
+            "predicate_definition_versions": new["versions"].get("predicate_definition_versions"),
         }
         changed = {
             "data": old["dataset_publication_id"] != new["dataset_publication_id"],
@@ -489,7 +775,11 @@ class ScreeningService:
             selected = [require_cik(cik) for cik in selected_ciks]
             if len(selected) != len(set(selected)):
                 raise ValueError("selected export contains duplicate CIKs")
-        rows = run["rows"] if selected is None else [row for row in run["rows"] if row["cik"] in selected]
+        rows = (
+            run["rows"]
+            if selected is None
+            else [row for row in run["rows"] if row["cik"] in selected]
+        )
         if selected is not None and {row["cik"] for row in rows} != set(selected):
             raise ValueError("selected export contains a CIK outside the run")
         destination_path = safe_new_destination(Path(destination), "screening export")
@@ -558,8 +848,17 @@ class ScreeningService:
         except KeyError as exc:
             raise ValueError("company explorer requires a v2 screening dataset") from exc
 
+    def _quarter_dataset(self, dataset_id: str) -> ScreeningDatasetV3Reader:
+        reader = self._dataset(dataset_id)
+        if not isinstance(reader, ScreeningDatasetV3Reader):
+            raise TypeError("quarterly analysis requires a v3 screening dataset")
+        return reader
+
     def _validate_revision(
-        self, content: dict[str, Any], *, reader: ScreeningDatasetReader | ScreeningDatasetV2Reader | None = None
+        self,
+        content: dict[str, Any],
+        *,
+        reader: ScreeningDatasetReader | ScreeningDatasetV2Reader | None = None,
     ) -> None:
         if not isinstance(content, dict):
             raise TypeError("screen revision must be an object")
@@ -579,15 +878,27 @@ class ScreeningService:
                 predicate.get("definition_version"), "metric definition version"
             )
             if reader is not None:
-                supports = [row for row in reader.metric_support if row["metric_id"] == metric_id]
+                quarterly = (
+                    content.get("period_policy", {}).get("mode") == "FIXED_CALENDAR_QUARTER_END"
+                )
+                supports = [
+                    row
+                    for row in (
+                        getattr(reader, "quarter_support", [])
+                        if quarterly
+                        else reader.metric_support
+                    )
+                    if row["metric_id"] == metric_id
+                ]
                 if not supports:
                     raise ValueError("unknown metric_id")
-                if not any(row["execution_supported"] for row in supports):
+                if not any(
+                    row.get("execution_supported", row.get("available_bucket_count", 0) > 0)
+                    for row in supports
+                ):
                     reason = sorted({row.get("reason") for row in supports})
                     raise ValueError(f"metric is unavailable for execution: {reason}")
-                if definition_version not in {
-                    row.get("definition_version") for row in supports
-                }:
+                if definition_version not in {row.get("definition_version") for row in supports}:
                     raise ValueError("metric definition version is not prepared")
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate metric predicate")
@@ -609,7 +920,10 @@ class ScreeningService:
             raise ValueError("metric sort column requires a matching predicate")
 
     def _evaluate_company(
-        self, reader: ScreeningDatasetReader | ScreeningDatasetV2Reader, company: dict[str, Any], content: dict[str, Any]
+        self,
+        reader: ScreeningDatasetReader | ScreeningDatasetV2Reader,
+        company: dict[str, Any],
+        content: dict[str, Any],
     ) -> dict[str, Any]:
         evaluations = []
         for predicate in content["predicates"]:
@@ -641,7 +955,9 @@ class ScreeningService:
         }
 
 
-def _select_universe(reader: ScreeningDatasetReader | ScreeningDatasetV2Reader, selector: dict[str, Any]) -> list[dict[str, Any]]:
+def _select_universe(
+    reader: ScreeningDatasetReader | ScreeningDatasetV2Reader, selector: dict[str, Any]
+) -> list[dict[str, Any]]:
     mode = selector["mode"]
     rows = reader.companies
     if mode == "CIKS":
@@ -664,22 +980,39 @@ def _find_observation(
     *,
     definition_version: str | None = None,
 ) -> dict[str, Any] | None:
-    rows = [
-        row for row in reader.observations
-        if row["cik"] == cik and row["metric_id"] == metric_id
-    ]
+    quarterly = policy["mode"] == "FIXED_CALENDAR_QUARTER_END"
+    source_rows = getattr(reader, "quarter_observations", []) if quarterly else reader.observations
+    rows = [row for row in source_rows if row["cik"] == cik and row["metric_id"] == metric_id]
     if definition_version is not None:
         rows = [
             row
             for row in rows
-            if row.get("metric_definition_version") == definition_version
+            if row.get("metric_definition_version", row.get("definition_version"))
+            == definition_version
         ]
     if policy["mode"] == "FIXED_FISCAL_YEAR":
         rows = [row for row in rows if row["fiscal_year"] == policy["fiscal_year"]]
+    elif quarterly:
+        rows = [
+            row
+            for row in rows
+            if row["calendar_year"] == policy["calendar_year"]
+            and row["calendar_quarter"] == policy["calendar_quarter"]
+        ]
+        rows = [
+            {
+                **row,
+                "quality_blocking": bool(
+                    row.get("quality_blocking") or row.get("quality_status") == "BLOCK"
+                ),
+                "trace": row.get("source_lineage"),
+            }
+            for row in rows
+        ]
     else:
         rows.sort(key=lambda row: row["fiscal_year"], reverse=True)
         offset = policy.get("offset", 0)
-        rows = rows[offset:offset + 1]
+        rows = rows[offset : offset + 1]
     if len(rows) > 1:
         raise ValueError("metric observation is not unique at screening grain")
     return json.loads(canonical_json(rows[0])) if rows else None
@@ -702,7 +1035,11 @@ def _evaluate_predicate(
         return {
             **base,
             "result": "UNDETERMINED",
-            "reason": observation.get("unavailable_reason") or "OBSERVATION_UNAVAILABLE",
+            "reason": (
+                observation.get("unavailable_reason")
+                or observation.get("reason")
+                or "OBSERVATION_UNAVAILABLE"
+            ),
         }
     value = _decimal(observation["value"])
     threshold = _decimal(predicate["threshold"])
@@ -756,16 +1093,31 @@ def _validate_universe(value: Any) -> None:
 
 
 def _validate_period_policy(value: Any) -> None:
-    if not isinstance(value, dict) or value.get("mode") not in {"FIXED_FISCAL_YEAR", "LATEST_COMPLETE_ANNUAL"}:
+    modes = {"FIXED_FISCAL_YEAR", "LATEST_COMPLETE_ANNUAL", "FIXED_CALENDAR_QUARTER_END"}
+    if not isinstance(value, dict) or value.get("mode") not in modes:
         raise ValueError("invalid period policy")
     if value["mode"] == "FIXED_FISCAL_YEAR":
         year = value.get("fiscal_year")
-        if type(year) is not int or not 1900 <= year <= 2200 or set(value) != {"mode", "fiscal_year"}:
+        if (
+            type(year) is not int
+            or not 1900 <= year <= 2200
+            or set(value) != {"mode", "fiscal_year"}
+        ):
             raise ValueError("fixed annual policy requires one fiscal year")
-    else:
+    elif value["mode"] == "LATEST_COMPLETE_ANNUAL":
         offset = value.get("offset", 0)
         if type(offset) is not int or not 0 <= offset <= 20 or set(value) - {"mode", "offset"}:
             raise ValueError("latest annual offset is invalid")
+    else:
+        year, quarter = value.get("calendar_year"), value.get("calendar_quarter")
+        if (
+            type(year) is not int
+            or not 1900 <= year <= 2200
+            or type(quarter) is not int
+            or quarter not in {1, 2, 3, 4}
+            or set(value) != {"mode", "calendar_year", "calendar_quarter"}
+        ):
+            raise ValueError("fixed calendar quarter-end policy requires one year and quarter")
 
 
 def _sort_rows(rows: list[dict[str, Any]], spec: dict[str, Any]) -> list[dict[str, Any]]:
@@ -777,8 +1129,14 @@ def _sort_rows(rows: list[dict[str, Any]], spec: dict[str, Any]) -> list[dict[st
     def value(row: dict[str, Any]) -> tuple[bool, Any]:
         if column.startswith("metric:"):
             metric_id = column.split(":", 1)[1]
-            item = next((item for item in row["predicates"] if item["metric_id"] == metric_id), None)
-            raw = None if item is None or item["observation"] is None else item["observation"].get("value")
+            item = next(
+                (item for item in row["predicates"] if item["metric_id"] == metric_id), None
+            )
+            raw = (
+                None
+                if item is None or item["observation"] is None
+                else item["observation"].get("value")
+            )
             return raw is None, Decimal(raw) if raw is not None else Decimal(0)
         raw = row.get(column)
         return raw is None, str(raw or "")
@@ -799,7 +1157,16 @@ def _decision_state(events: list[dict[str, Any]], run_id: str) -> dict[str, str]
 
 
 def _write_csv(path: Path, payload: dict[str, Any]) -> None:
-    fields = ["record_type", "cik", "ticker", "name", "sic_code", "aggregate", "quality_blocking", "record_json"]
+    fields = [
+        "record_type",
+        "cik",
+        "ticker",
+        "name",
+        "sic_code",
+        "aggregate",
+        "quality_blocking",
+        "record_json",
+    ]
     with path.open("w", newline="", encoding="utf-8-sig") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields)
         writer.writeheader()
@@ -808,25 +1175,25 @@ def _write_csv(path: Path, payload: dict[str, Any]) -> None:
                 "record_type": "EXPORT",
                 "record_json": _csv_safe(
                     {
-                        "metadata": {
-                            key: value for key, value in payload.items() if key != "rows"
-                        },
+                        "metadata": {key: value for key, value in payload.items() if key != "rows"},
                         "canonical_payload_hash": digest_value(payload),
                     }
                 ),
             }
         )
         for row in payload["rows"]:
-            writer.writerow({
-                "record_type": "ROW",
-                "cik": row["cik"],
-                "ticker": _csv_safe(row["ticker"]),
-                "name": _csv_safe(row.get("name")),
-                "sic_code": row.get("sic_code"),
-                "aggregate": row["aggregate"],
-                "quality_blocking": str(row["quality_blocking"]).lower(),
-                "record_json": _csv_safe(row),
-            })
+            writer.writerow(
+                {
+                    "record_type": "ROW",
+                    "cik": row["cik"],
+                    "ticker": _csv_safe(row["ticker"]),
+                    "name": _csv_safe(row.get("name")),
+                    "sic_code": row.get("sic_code"),
+                    "aggregate": row["aggregate"],
+                    "quality_blocking": str(row["quality_blocking"]).lower(),
+                    "record_json": _csv_safe(row),
+                }
+            )
 
 
 def _write_xlsx(path: Path, payload: dict[str, Any]) -> None:
@@ -891,9 +1258,7 @@ def _write_xlsx(path: Path, payload: dict[str, Any]) -> None:
     workbook.save(path)
 
 
-def _xlsx_text(
-    value: str, *, record_key: str, long_records: list[dict[str, Any]]
-) -> str:
+def _xlsx_text(value: str, *, record_key: str, long_records: list[dict[str, Any]]) -> str:
     """Return inline text or a lossless descriptor backed by safe XLSX chunks."""
     utf16_units = len(value.encode("utf-16-le")) // 2
     if len(value) <= XLSX_DIRECT_TEXT_LIMIT and utf16_units <= 32_000:

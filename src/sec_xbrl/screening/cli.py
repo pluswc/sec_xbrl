@@ -20,6 +20,8 @@ from sec_xbrl.screening.dataset_v2 import (
     open_screening_dataset,
     publish_screening_dataset_v2,
 )
+from sec_xbrl.screening.dataset_v3 import publish_screening_dataset_v3
+from sec_xbrl.screening.metric_identity import publish_generic_metric_identity
 from sec_xbrl.screening.server import serve
 from sec_xbrl.screening.service import ScreeningService
 from sec_xbrl.screening.store import ScreeningStore, backup_store, restore_store
@@ -34,9 +36,17 @@ def _parser() -> argparse.ArgumentParser:
     metrics = commands.add_parser("metrics", help="publish governed screening metrics")
     metrics.add_argument("--config", type=Path, required=True)
     metrics.add_argument("--destination", type=Path, required=True)
+    identity = commands.add_parser(
+        "metric-identity", help="publish a generic metric readiness identity"
+    )
+    identity.add_argument("--config", type=Path, required=True)
+    identity.add_argument("--destination", type=Path, required=True)
     prepare_v2 = commands.add_parser("prepare-v2", help="publish a screening dataset v2")
     prepare_v2.add_argument("--config", type=Path, required=True)
     prepare_v2.add_argument("--destination", type=Path, required=True)
+    prepare_v3 = commands.add_parser("prepare-v3", help="publish an annual + quarterly dataset v3")
+    prepare_v3.add_argument("--config", type=Path, required=True)
+    prepare_v3.add_argument("--destination", type=Path, required=True)
     descriptions = commands.add_parser(
         "descriptions-prepare", help="publish governed Korean company-description text"
     )
@@ -79,9 +89,15 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "metrics":
         result = publish_screening_metrics(args.config, args.destination)
         _print({"publication_id": result.publication_id, "root": str(result.root)})
+    elif args.command == "metric-identity":
+        result = publish_generic_metric_identity(args.config, args.destination)
+        _print({"publication_id": result.publication_id, "root": str(result.root)})
     elif args.command == "prepare-v2":
         result = publish_screening_dataset_v2(args.config, args.destination)
         _print({"publication_id": result.publication_id, "root": str(result.root)})
+    elif args.command == "prepare-v3":
+        root = publish_screening_dataset_v3(args.config, args.destination)
+        _print({"publication_id": open_screening_dataset(root).publication_id, "root": str(root)})
     elif args.command == "descriptions-prepare":
         if args.dry_run:
             result = review_company_description_plan(args.plan, args.dataset)
@@ -90,16 +106,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.destination is None:
             raise ValueError("descriptions-prepare requires --destination unless --dry-run")
         result = publish_company_descriptions(args.plan, args.dataset, args.destination)
-        _print({
-            "publication_id": result.publication_id,
-            "root": str(result.root),
-            "manifest_sha256": result.manifest_sha256,
-        })
+        _print(
+            {
+                "publication_id": result.publication_id,
+                "root": str(result.root),
+                "manifest_sha256": result.manifest_sha256,
+            }
+        )
     elif args.command == "descriptions-status":
         dataset = open_screening_dataset(args.dataset)
-        reader = CompanyDescriptionReader(
-            args.publication, args.manifest_sha256, dataset
-        )
+        reader = CompanyDescriptionReader(args.publication, args.manifest_sha256, dataset)
         _print(reader.verify_all())
     elif args.command == "serve":
         catalog = _catalog(args.catalog)
@@ -126,7 +142,11 @@ def _catalog(path: Path) -> dict[str, Path]:
         raise ValueError("screening catalog requires datasets")
     result: dict[str, Path] = {}
     for row in datasets:
-        if not isinstance(row, dict) or not isinstance(row.get("dataset_id"), str) or not isinstance(row.get("root"), str):
+        if (
+            not isinstance(row, dict)
+            or not isinstance(row.get("dataset_id"), str)
+            or not isinstance(row.get("root"), str)
+        ):
             raise TypeError("invalid screening catalog entry")
         if row["dataset_id"] in result:
             raise ValueError("duplicate screening catalog dataset ID")
