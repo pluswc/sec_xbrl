@@ -22,8 +22,7 @@ def _write(path: Path, value: object) -> Path:
 def _companies() -> list[dict[str, str]]:
     tickers = [*runner.FIRST5, "KDP", *(f"X{index:02d}" for index in range(6, 50))]
     return [
-        {"ticker": ticker, "cik": f"{index:010d}"}
-        for index, ticker in enumerate(tickers, start=1)
+        {"ticker": ticker, "cik": f"{index:010d}"} for index, ticker in enumerate(tickers, start=1)
     ]
 
 
@@ -144,16 +143,12 @@ def _materialize_collection_target(
     collection["candidate_sha256"] = runner._sha256(candidate)
     paths = runner._target_paths(config)
     plan = _write(paths["plan"], {"as_of_date": runner.FINANCIAL_AS_OF})
-    intake = _write(
-        paths["intake"], {"complete": True, "plan": json.loads(plan.read_text())}
-    )
+    intake = _write(paths["intake"], {"complete": True, "plan": json.loads(plan.read_text())})
     config["target"]["plan_sha256"] = runner._sha256(plan)
     config["target"]["intake_sha256"] = runner._sha256(intake)
     candidate_payload = json.loads(candidate.read_text())
     target_row = next(
-        row
-        for row in candidate_payload["selection"]
-        if row["ticker"] == config["target"]["ticker"]
+        row for row in candidate_payload["selection"] if row["ticker"] == config["target"]["ticker"]
     )
     target_row["plan_sha256"] = config["target"]["plan_sha256"]
     target_row["intake_sha256"] = config["target"]["intake_sha256"]
@@ -162,9 +157,10 @@ def _materialize_collection_target(
     Path(config["target"]["history_parent"]).mkdir()
     Path(config["resource_root"]).mkdir(exist_ok=True)
     if prior_failure:
+        abandoned = Path(config["target"]["history_parent"]) / "old-partial"
         attempt = _write(
             paths["company_root"] / "operation_attempts/build-failed.json",
-            {"result": {"status": "BUILD_FAILED"}},
+            {"result": {"status": "BUILD_FAILED", "output_root": str(abandoned)}},
         )
         abandoned = Path(config["target"]["history_parent"]) / "old-partial"
         abandoned.mkdir()
@@ -182,22 +178,16 @@ def _materialize_collection_target(
     target = config["target"]
     run = SimpleNamespace(
         manifest={
-            "companies": [
-                {"ticker": target["ticker"], "plan_sha256": target["plan_sha256"]}
-            ]
+            "companies": [{"ticker": target["ticker"], "plan_sha256": target["plan_sha256"]}]
         },
         plans={target["ticker"]: json.loads(plan.read_text())},
     )
-    monkeypatch.setattr(
-        runner.ops, "read_universe_status", lambda **_: status, raising=False
-    )
+    monkeypatch.setattr(runner.ops, "read_universe_status", lambda **_: status, raising=False)
     monkeypatch.setattr(runner.ops, "_attest_run", lambda _: run, raising=False)
     monkeypatch.setattr(
         runner.ops,
         "_attest_intake",
-        lambda *_: SimpleNamespace(
-            sha256=target["intake_sha256"], complete=True, error=None
-        ),
+        lambda *_: SimpleNamespace(sha256=target["intake_sha256"], complete=True, error=None),
         raising=False,
     )
     return config, status
@@ -206,14 +196,10 @@ def _materialize_collection_target(
 def test_target_reopens_exact_collection_and_allows_only_pinned_jnj_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config, _ = _materialize_collection_target(
-        _config(tmp_path), monkeypatch, prior_failure=True
-    )
+    config, _ = _materialize_collection_target(_config(tmp_path), monkeypatch, prior_failure=True)
     binding = runner._validate_collection_target(runner._validate_shape(config))
     assert binding["target"]["state"] == "BUILD_FAILED"
-    assert binding["target"]["destination"].endswith(
-        "JNJ-history-recovery-bounded-memory-v1"
-    )
+    assert binding["target"]["destination"].endswith("JNJ-history-recovery-bounded-memory-v1")
 
     extra = _write(
         Path(config["collection"]["manifest"]).parent
@@ -271,125 +257,99 @@ def _receipt(root: Path, stage: str) -> tuple[Path, dict]:
     return path, value
 
 
-def _materialize_financial_acceptance(config: dict, tmp_path: Path) -> Path:
-    cohort = [
-        row
-        for ticker in runner.FIRST5
-        for row in config["collection"]["companies"]
-        if row["ticker"] == ticker
-    ]
-    expected_collection = {
-        "manifest": config["collection"]["manifest"],
-        "manifest_sha256": config["collection"]["manifest_sha256"],
-        "parent_company_count": 50,
-    }
-    roots = {stage: tmp_path / "accepted" / stage for stage in runner.FINANCIAL_STAGES}
-    manifest_rows = []
-    metadata = _write(tmp_path / "accepted/metadata/company_metadata_manifest.json", {})
-    manifest_rows.append(
-        {
-            "name": "metadata",
-            "root": str(metadata.parent),
-            "manifest": str(metadata),
-            "manifest_sha256": runner._sha256(metadata),
-        }
+@pytest.fixture(scope="module")
+def canonical_checkout(tmp_path_factory):
+    checkout = tmp_path_factory.mktemp("canonical9b") / "checkout"
+    source = Path(runner.__file__).parents[1]
+    subprocess.run(
+        ["git", "clone", "--quiet", "--shared", "--no-checkout", str(source), str(checkout)],
+        check=True,
     )
-    simple = {
-        "quality": "generic_metric_quality_manifest.json",
-        "identity": "generic_metric_identity_manifest.json",
-        "annual-metrics": "screening_metric_manifest.json",
-        "annual-dataset-v2": "screening_dataset_manifest.json",
-        "quarterly-metrics": "quarterly_screening_metric_manifest.json",
-        "combined-dataset-v3": "screening_dataset_v3_manifest.json",
+    subprocess.run(
+        ["git", "-C", str(checkout), "checkout", "--quiet", runner.FINANCIAL_SOURCE_SHA], check=True
+    )
+    return checkout
+
+
+def _materialize_financial_acceptance(config: dict, tmp_path: Path, checkout: Path) -> Path:
+    # Only a genuine-shaped first-five config is constructed; no future 45 pins.
+    from tests.unit.test_universe50_financial_ops import _config as financial_config
+    from tools import universe50_financial_ops as financial
+
+    first5 = financial_config(tmp_path / "accepted")
+    first5["collection"] = {
+        k: config["collection"][k] for k in ("manifest", "manifest_sha256", "parent_company_count")
     }
-    names = {
-        "quality": "quality",
-        "identity": "identity",
-        "annual-metrics": "annual_metrics",
-        "annual-dataset-v2": "annual_dataset_v2",
-        "quarterly-metrics": "quarterly_metrics",
-        "combined-dataset-v3": "combined_dataset_v3",
+    first5["source"] = {
+        "checkout": str(checkout),
+        "head": runner.FINANCIAL_SOURCE_SHA,
+        "module_sha256s": {
+            name: runner._sha256(checkout / relative)
+            for name, relative in financial.PINNED_MODULES.items()
+        },
     }
-    for stage, filename in simple.items():
-        manifest = _write(roots[stage] / filename, {"stage": stage})
-        manifest_rows.append(
-            {
-                "name": names[stage],
-                "root": str(manifest.parent),
-                "manifest": str(manifest),
-                "manifest_sha256": runner._sha256(manifest),
-            }
-        )
-    analysis_manifests: dict[tuple[str, str], Path] = {}
+    metadata = _write(
+        Path(first5["metadata"]["root"]) / financial.company_metadata.MANIFEST_NAME,
+        {"synthetic": True},
+    )
+    first5["metadata"]["manifest_sha256"] = runner._sha256(metadata)
+    for key, filename in (
+        ("quality", financial.metric_quality.MANIFEST_NAME),
+        ("identity", financial.metric_identity.MANIFEST_NAME),
+        ("annual_metrics", financial.screening.MANIFEST),
+        ("annual_dataset_v2", financial.dataset_v2.MANIFEST),
+        ("quarterly_metrics", financial.quarterly_screening.MANIFEST),
+        ("combined_dataset_v3", financial.dataset_v3.MANIFEST),
+        ("quality_indexes", "fixture.json"),
+        ("quality_bindings", "fixture.json"),
+    ):
+        _write(Path(first5["outputs"][key]) / filename, {"synthetic": key})
     for ticker in runner.FIRST5:
-        for stage, prefix in (
-            ("annual-analysis", "annual_analysis"),
-            ("quarterly-analysis", "quarterly_analysis"),
-        ):
-            manifest = _write(
-                roots[stage] / ticker / "analysis_manifest.json",
-                {"stage": stage, "ticker": ticker},
-            )
-            analysis_manifests[(ticker, prefix)] = manifest
-    for ticker in runner.FIRST5:
-        for prefix in ("annual_analysis", "quarterly_analysis"):
-            manifest = analysis_manifests[(ticker, prefix)]
-            manifest_rows.append(
-                {
-                    "name": f"{prefix}:{ticker}",
-                    "root": str(manifest.parent),
-                    "manifest": str(manifest),
-                    "manifest_sha256": runner._sha256(manifest),
-                }
+        for key in ("annual_analysis", "quarterly_analysis"):
+            _write(
+                Path(first5["outputs"][key]) / ticker / "analysis_manifest.json",
+                {"synthetic": ticker},
             )
     receipts = {}
-    for stage in sorted(runner.FINANCIAL_STAGES):
-        path, _ = _receipt(roots[stage], stage)
+    for stage in financial.FIRST5_ACCEPTED_STAGES:
+        receipt = {
+            "schema_version": financial.RECEIPT_VERSION,
+            "status": "PASS",
+            "stage": stage,
+            "source_head": runner.FINANCIAL_SOURCE_SHA,
+            "go_sha256": "a" * 64,
+            "outputs": financial._output_receipts(first5, stage),
+        }
+        path = _write(tmp_path / "accepted-receipts" / f"{stage}.json", receipt)
         receipts[stage] = {"path": str(path), "sha256": runner._sha256(path)}
-    first5_config = _write(
-        tmp_path / "accepted/first5-config.json",
-        {
-            "schema_version": "universe50-financial-ops-config-v1",
-            "collection_scope_mode": "EXPLICIT_SUBSET",
-            "financial_as_of": runner.FINANCIAL_AS_OF,
-            "metadata_observation_cutoff": runner.METADATA_CUTOFF,
-            "collection": expected_collection,
-            "source": {"head": runner.FINANCIAL_SOURCE_SHA},
-            "companies": list(reversed(cohort)),
-        },
-    )
-    acceptance = _write(
-        tmp_path / "accepted/first5-acceptance.json",
+    first5_path = _write(tmp_path / "first5-config.json", first5)
+    path = _write(
+        tmp_path / "first5-acceptance.json",
         {
             "schema_version": runner.FINANCIAL_ACCEPTANCE_VERSION,
             "status": runner.FINANCIAL_ACCEPTANCE_STATUS,
             "source_head": runner.FINANCIAL_SOURCE_SHA,
             "financial_as_of": runner.FINANCIAL_AS_OF,
             "metadata_observation_cutoff": runner.METADATA_CUTOFF,
-            "collection": expected_collection,
-            "companies": cohort,
-            "first5_config": {
-                "path": str(first5_config),
-                "sha256": runner._sha256(first5_config),
-            },
+            "collection": first5["collection"],
+            "companies": financial._first5_companies(first5),
+            "first5_config": {"path": str(first5_path), "sha256": runner._sha256(first5_path)},
             "stage_receipts": receipts,
-            "publication_manifests": manifest_rows,
+            "publication_manifests": financial._expected_publication_manifests(first5),
         },
     )
-    config["first5_financial_acceptance"] = {
-        "path": str(acceptance),
-        "sha256": runner._sha256(acceptance),
-    }
-    return acceptance
+    config["first5_financial_acceptance"] = {"path": str(path), "sha256": runner._sha256(path)}
+    return path
 
 
 def test_later45_gate_requires_canonical_object_cohort_receipts_and_publications(
     tmp_path: Path,
+    canonical_checkout: Path,
 ) -> None:
     config = _config(tmp_path, ticker="X06")
     manifest = _write(Path(config["collection"]["manifest"]), {})
     config["collection"]["manifest_sha256"] = runner._sha256(manifest)
-    acceptance = _materialize_financial_acceptance(config, tmp_path)
+    acceptance = _materialize_financial_acceptance(config, tmp_path, canonical_checkout)
     binding = runner._verify_financial_acceptance(runner._validate_shape(config))
     assert binding is not None
     assert binding["source_head"] == runner.FINANCIAL_SOURCE_SHA
@@ -470,12 +430,8 @@ def test_execute_recovery_uses_public_history_and_writes_typed_receipt(
         },
     )
     monkeypatch.setattr(runner.history, "build_history", build_history, raising=False)
-    monkeypatch.setattr(
-        runner.history, "HistoryPublicationReader", Reader, raising=False
-    )
-    monkeypatch.setattr(
-        runner.ops, "_create_build_attestation", lambda **_: marker, raising=False
-    )
+    monkeypatch.setattr(runner.history, "HistoryPublicationReader", Reader, raising=False)
+    monkeypatch.setattr(runner.ops, "_create_build_attestation", lambda **_: marker, raising=False)
     monkeypatch.setattr(
         runner.ops,
         "_validate_build_attestation",
@@ -491,9 +447,7 @@ def test_execute_recovery_uses_public_history_and_writes_typed_receipt(
     monkeypatch.setattr(
         runner.ops,
         "read_universe_status",
-        lambda **_: SimpleNamespace(
-            companies=(SimpleNamespace(ticker="JNJ", state="READY"),)
-        ),
+        lambda **_: SimpleNamespace(companies=(SimpleNamespace(ticker="JNJ", state="READY"),)),
         raising=False,
     )
     receipt_path = runner._execute_recovery(config, go)
@@ -562,8 +516,7 @@ def test_clean_runner_and_engine_imports_are_separate_from_financial_modules(
     )
     report = _write(tmp_path / "independent-report.json", {"verdict": "PASS"})
     hashes = {
-        name: runner._sha256(engine / relative)
-        for name, relative in runner.ENGINE_MODULES.items()
+        name: runner._sha256(engine / relative) for name, relative in runner.ENGINE_MODULES.items()
     }
     acceptance = _write(
         tmp_path / "engine-acceptance.json",
@@ -598,7 +551,7 @@ def test_clean_runner_and_engine_imports_are_separate_from_financial_modules(
                     "path": str(acceptance),
                     "sha256": runner._sha256(acceptance),
                 },
-            }
+            },
         },
     )
     script = (
@@ -612,9 +565,7 @@ def test_clean_runner_and_engine_imports_are_separate_from_financial_modules(
         "print(u['head'], v['head'])"
     )
     env = os.environ.copy()
-    env["PYTHONPATH"] = os.pathsep.join(
-        (str(engine / "src"), str(runner_checkout))
-    )
+    env["PYTHONPATH"] = os.pathsep.join((str(engine / "src"), str(runner_checkout)))
     result = subprocess.run(
         [sys.executable, "-c", script, str(declaration)],
         check=False,
@@ -629,7 +580,14 @@ def test_clean_runner_and_engine_imports_are_separate_from_financial_modules(
 
 def test_source_has_no_financial_runner_import_or_network_path() -> None:
     source = Path(runner.__file__).read_text(encoding="utf-8")
-    assert "universe50_financial_ops" not in source
+    import ast
+
+    imports = [
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+    ]
+    assert not any("universe50_financial_ops" in ast.unparse(node) for node in imports)
     assert "SECArchiveClient" not in source
     assert "collect_universe(" not in source
 
@@ -681,9 +639,7 @@ def test_real_guarded_tiny_child_reaches_recovery_handler(
                     NUMEXPR_NUM_THREADS="1",
                     SEC_XBRL_T3V2_SUPERVISOR_FD=str(token_read),
                     SEC_XBRL_T3V2_SUPERVISOR_PID=str(os.getppid()),
-                    SEC_XBRL_T3V2_SUPERVISOR_SHA256=runner.hashlib.sha256(
-                        token
-                    ).hexdigest(),
+                    SEC_XBRL_T3V2_SUPERVISOR_SHA256=runner.hashlib.sha256(token).hexdigest(),
                 )
                 result = runner._worker(tmp_path / "config", tmp_path / "go")
                 os.write(result_write, str(result).encode())
@@ -771,3 +727,440 @@ def test_interrupted_supervisor_terminates_and_reaps_owned_child(
     assert summary["status"] == "SUPERVISOR_INTERRUPTED"
     assert summary["child_reaped"] is True
     assert not paths["receipt"].exists()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "outputs_missing",
+        "quality_rebound",
+        "quality_indexes_rebound",
+        "metadata_rebound",
+        "metadata_hash",
+        "manifest_swap",
+        "missing_receipt",
+        "extra_receipt",
+        "fileset",
+        "shape",
+    ],
+)
+def test_canonical_gate_rejects_rehashed_broken_bindings(tmp_path, canonical_checkout, mutation):
+    config = _config(tmp_path, ticker="X06")
+    path = _materialize_financial_acceptance(config, tmp_path, canonical_checkout)
+    acceptance = json.loads(path.read_text())
+    first_path = Path(acceptance["first5_config"]["path"])
+    first = json.loads(first_path.read_text())
+    if mutation == "outputs_missing":
+        del first["outputs"]
+    elif mutation in {"quality_rebound", "quality_indexes_rebound"}:
+        first["outputs"][mutation.removesuffix("_rebound")] = str(tmp_path / "foreign-output")
+    elif mutation == "metadata_rebound":
+        first["metadata"]["root"] = first["outputs"]["quality"]
+    elif mutation == "metadata_hash":
+        first["metadata"]["manifest_sha256"] = "0" * 64
+    elif mutation == "manifest_swap":
+        acceptance["publication_manifests"][1], acceptance["publication_manifests"][2] = (
+            acceptance["publication_manifests"][2],
+            acceptance["publication_manifests"][1],
+        )
+    elif mutation == "missing_receipt":
+        del acceptance["stage_receipts"]["quality"]
+    elif mutation == "extra_receipt":
+        acceptance["stage_receipts"]["metadata"] = acceptance["stage_receipts"]["quality"]
+    elif mutation == "fileset":
+        _write(Path(first["outputs"]["quality"]) / "unreceipted.json", {})
+    else:
+        del first["package_view"]
+    _write(first_path, first)
+    acceptance["first5_config"]["sha256"] = runner._sha256(first_path)
+    _write(path, acceptance)
+    config["first5_financial_acceptance"]["sha256"] = runner._sha256(path)
+    with pytest.raises(ValueError, match="canonical financial gate rejected"):
+        runner._verify_financial_acceptance(config)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "history_recovery_receipt-previous-v1.json",
+        "ops_build_receipt.json",
+        "build_manifest.json",
+        "build_manifest.json.partial",
+        "history_recovery_receipt-old.json.partial",
+    ],
+)
+def test_all_prior_receipts_and_markers_block_new_version(tmp_path, monkeypatch, name):
+    config, _ = _materialize_collection_target(_config(tmp_path), monkeypatch)
+    _write(runner._target_paths(config)["company_root"] / name, {"orphan": True})
+    with pytest.raises(ValueError, match="already has"):
+        runner._validate_collection_target(config)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "wrong_abandoned",
+        "descendant",
+        "missing_root",
+        "symlink_ancestor",
+        "orphan_partial",
+        "evidence_descendant",
+        "conflicting_root",
+    ],
+)
+def test_failed_root_binding_and_ancestry_are_closed(tmp_path, monkeypatch, mutation):
+    config, _ = _materialize_collection_target(_config(tmp_path), monkeypatch, prior_failure=True)
+    failed = Path(config["target"]["abandoned_output_roots"][0])
+    if mutation == "wrong_abandoned":
+        other = tmp_path / "unrelated"
+        other.mkdir()
+        config["target"]["abandoned_output_roots"] = [str(other)]
+    elif mutation == "descendant":
+        child = failed / "fresh-child"
+        child.mkdir()
+        config["target"]["history_parent"] = str(child)
+    elif mutation == "missing_root":
+        pin = config["target"]["approved_prior_failed_attempts"][0]
+        _write(Path(pin["path"]), {"status": "BUILD_FAILED"})
+        pin["sha256"] = runner._sha256(Path(pin["path"]))
+    elif mutation == "evidence_descendant":
+        config["execution_root"] = str(failed / "evidence")
+    elif mutation == "conflicting_root":
+        pin = config["target"]["approved_prior_failed_attempts"][0]
+        value = json.loads(Path(pin["path"]).read_text())
+        value["output_root"] = str(tmp_path)
+        _write(Path(pin["path"]), value)
+        pin["sha256"] = runner._sha256(Path(pin["path"]))
+    elif mutation == "symlink_ancestor":
+        link = tmp_path / "link"
+        link.symlink_to(failed, target_is_directory=True)
+        (failed / "child").mkdir()
+        config["target"]["history_parent"] = str(link / "child")
+    else:
+        (Path(config["target"]["history_parent"]) / "JNJ-history-recovery-older-v1").mkdir()
+    with pytest.raises(ValueError):
+        runner._validate_collection_target(config)
+
+
+def test_real_synthetic_public_history_attestation_ready_and_typed_receipt(tmp_path, monkeypatch):
+    """One tiny synthetic filing, real public build/reader/attestation/status.
+
+    Only the exact-50/source authorization snapshot is substituted: a one-company
+    unit fixture cannot claim the real universe or a lead-approved source HEAD.
+    """
+    from dataclasses import asdict, replace
+
+    import polars as pl
+
+    from tests.unit.test_exploration_graph import _release
+
+    synthetic = _release().snapshots[0]
+    source = tmp_path / "synthetic-raw"
+    raw_dir = (
+        source / "snapshots" / synthetic.input.cik / synthetic.input.accession.replace("-", "")
+    )
+    raw_dir.mkdir(parents=True)
+    for name in synthetic.tables:
+        rows = [dict(row) for row in synthetic.records(name)]
+        if name == "unit":
+            for row in rows:
+                row.update(numerator_measures='["iso4217:USD"]', denominator_measures="[]")
+        pl.DataFrame(rows).write_parquet(raw_dir / f"{name}.parquet")
+    raw_manifest = replace(
+        synthetic.manifest,
+        source_fact_count=3,
+        materialized_fact_count=3,
+        concept_count=5,
+        context_count=1,
+        unit_count=1,
+    )
+    _write(raw_dir / "layer1_manifest.json", asdict(raw_manifest))
+    filing = {
+        key: synthetic.records("filing")[0][key]
+        for key in ("cik", "accession", "form", "filed_date", "report_date")
+    }
+    plan = {
+        "version": runner.history.HISTORY_VERSION,
+        "as_of_date": runner.FINANCIAL_AS_OF,
+        "report_start": filing["report_date"],
+        "report_end": filing["report_date"],
+        "recent_fiscal_years": None,
+        "companies": [{"ticker": "SYN", "cik": synthetic.input.cik, "filings": [filing]}],
+    }
+    universe_config = _write(
+        tmp_path / "tiny-universe.json",
+        {
+            "schema_version": 1,
+            "universe_id": "tiny-synthetic-recovery",
+            "purpose": "synthetic test",
+            "as_of_date": runner.FINANCIAL_AS_OF,
+            "source_observed_at": "2026-10-10T00:00:00Z",
+            "collection": {
+                "completed_fiscal_years": 4,
+                "analytical_fiscal_years": 3,
+                "include_subsequent_quarters": True,
+            },
+            "companies": [{"ticker": "SYN", "cik": synthetic.input.cik}],
+        },
+    )
+    manifest = runner.ops.prepare_universe(
+        config_path=universe_config,
+        run_root=tmp_path / "collection",
+        existing_plans={"SYN": _write(tmp_path / "tiny-plan.json", plan)},
+        offline=True,
+    )
+    config = _config(tmp_path)
+    config["collection"]["manifest"] = str(manifest)
+    config["target"].update(
+        ticker="SYN",
+        cik=synthetic.input.cik,
+        history_basename="SYN-history-recovery-bounded-memory-v1",
+        selected_filings=1,
+    )
+    paths = runner._target_paths(config)
+    _write(
+        paths["intake"],
+        {
+            "version": runner.history.HISTORY_VERSION,
+            "complete": True,
+            "plan": plan,
+            "filings": [
+                {"ticker": "SYN", "filing": filing, "source_run": str(source), "status": "REUSED"}
+            ],
+        },
+    )
+    config["target"]["plan_sha256"] = runner._sha256(paths["plan"])
+    config["target"]["intake_sha256"] = runner._sha256(paths["intake"])
+    before = {str(p): runner._sha256(p) for p in source.rglob("*") if p.is_file()}
+    assert (
+        runner.ops.read_universe_status(manifest_path=manifest).companies[0].state == "RAW_COMPLETE"
+    )
+    monkeypatch.setattr(
+        runner,
+        "_snapshot",
+        lambda _: {
+            "runner": {"synthetic_authorization_only": True},
+            "engine": {"synthetic_authorization_only": True},
+            "first5_financial_acceptance": None,
+            "collection": {
+                "manifest": str(manifest),
+                "manifest_sha256": runner._sha256(manifest),
+                "target": {"prior_failed_attempts": [], "abandoned_output_roots": []},
+            },
+        },
+    )
+    receipt_path = runner._execute_recovery(
+        config, _write(tmp_path / "tiny-go.json", {"synthetic": True})
+    )
+    receipt = json.loads(receipt_path.read_text())
+    assert receipt["schema_version"] == runner.RECEIPT_VERSION
+    assert receipt["status"] == "READY"
+    assert runner.ops.read_universe_status(manifest_path=manifest).companies[0].state == "READY"
+    reader = runner.history.HistoryPublicationReader(Path(receipt["publication"]))
+    reader.verify_all()
+    assert reader.manifest["tables"]
+    assert any(table["files"]["cells"]["count"] for table in reader.manifest["tables"])
+    assert receipt["build_manifest_sha256"] == runner._sha256(paths["marker"])
+    assert before == {str(p): runner._sha256(p) for p in source.rglob("*") if p.is_file()}
+    assert not paths["old_receipt"].exists()
+
+
+def _legacy_fixture(config, checkout):
+    root = Path(config["collection"]["manifest"]).parent
+    ticker = config["target"]["ticker"]
+    old = {
+        "schema_version": "universe50-t3v2-ops-config-v1",
+        "run_id": "old-exact50-run",
+        "source_sha": runner.ENGINE_BASE_SHA,
+        "first5": list(runner.FIRST5),
+        "collection_root": str(root),
+        "history_root": str(root.parent / "failed-history"),
+        "limits": config["limits"],
+    }
+    config_path = _write(root.parent / "legacy-config.json", old)
+    program = checkout / "tools/universe50_t3v2_ops.py"
+    witness = {
+        "config": {"path": str(config_path), "sha256": runner._sha256(config_path)},
+        "program": {"path": str(program), "sha256": runner._sha256(program)},
+    }
+    preflight = _write(
+        root / "ops_preflight.json",
+        {
+            "schema_version": "universe50-t3v2-ops-preflight-v1",
+            "status": "PREPARED",
+            "source_sha": runner.ENGINE_BASE_SHA,
+            "run_id": old["run_id"],
+            "config": witness["config"],
+            "modules": {"program": witness["program"], "engine": {"aggregate_sha256": "b" * 64}},
+        },
+    )
+    go = _write(
+        root.parent / "legacy-go.json",
+        {
+            "schema_version": "universe50-t3v2-stage-go-v1",
+            "status": "GO",
+            "operation": "build-one",
+            "run_id": old["run_id"],
+            "source_sha": runner.ENGINE_BASE_SHA,
+            "ops_config_sha256": runner._sha256(config_path),
+            "preflight_sha256": runner._sha256(preflight),
+            "program_sha256": runner._sha256(program),
+            "engine_modules_sha256": "b" * 64,
+            "tickers": [ticker],
+        },
+    )
+    witness["go"] = {"path": str(go), "sha256": runner._sha256(go)}
+    summary = _write(
+        root / "execution" / ticker / "prior.summary.json",
+        {
+            "schema_version": "universe50-t3v2-resource-run-v1",
+            "status": "RSS_LIMIT",
+            "returncode": -15,
+            "limit_kib": runner.LIMIT_KIB,
+            "timeout_seconds": runner.TIMEOUT_SECONDS,
+            "command": [
+                sys.executable,
+                str(program),
+                "_build-worker",
+                "--config",
+                str(config_path),
+                "--ticker",
+                ticker,
+                "--go-file",
+                str(go),
+            ],
+        },
+    )
+    failed = Path(old["history_root"]) / f"{ticker}-t3v2-{old['run_id']}"
+    failed.mkdir(parents=True)
+    config["target"]["approved_prior_failed_attempts"] = [
+        {"path": str(summary), "sha256": runner._sha256(summary), "legacy_ops": witness}
+    ]
+    config["target"]["abandoned_output_roots"] = [str(failed)]
+    return summary, witness, failed
+
+
+def test_legacy56a_summary_without_output_root_binds_exact_abandoned_tree(
+    tmp_path, monkeypatch, canonical_checkout
+):
+    config, _ = _materialize_collection_target(_config(tmp_path), monkeypatch)
+    summary, _, failed = _legacy_fixture(config, canonical_checkout)
+    assert "output_root" not in json.loads(summary.read_text())
+    binding = runner._validate_collection_target(runner._validate_shape(config))
+    assert binding["target"]["prior_failed_attempts"][0]["output_root"] == str(failed)
+    assert (
+        binding["target"]["state"] == "RAW_COMPLETE"
+    )  # old OPS never wrote a native build attempt
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "unbound",
+        "wrong_root",
+        "inside_root",
+        "command",
+        "config",
+        "go",
+        "preflight",
+        "orphan_summary",
+        "program",
+    ],
+)
+def test_legacy_failure_rejects_unbound_changed_or_overlapping_attempt(
+    tmp_path, monkeypatch, canonical_checkout, mutation
+):
+    config, _ = _materialize_collection_target(_config(tmp_path), monkeypatch)
+    summary, witness, failed = _legacy_fixture(config, canonical_checkout)
+    if mutation == "unbound":
+        config["target"]["approved_prior_failed_attempts"] = []
+        config["target"]["abandoned_output_roots"] = []
+    elif mutation == "wrong_root":
+        config["target"]["abandoned_output_roots"] = [str(tmp_path)]
+    elif mutation == "inside_root":
+        child = failed / "fresh"
+        child.mkdir()
+        config["target"]["history_parent"] = str(child)
+    elif mutation == "command":
+        value = json.loads(summary.read_text())
+        value["command"][6] = "HD"
+        _write(summary, value)
+        config["target"]["approved_prior_failed_attempts"][0]["sha256"] = runner._sha256(summary)
+    elif mutation in {"config", "go", "program"}:
+        foreign = _write(tmp_path / "foreign.json", {})
+        witness[mutation] = {"path": str(foreign), "sha256": runner._sha256(foreign)}
+    elif mutation == "preflight":
+        _write(Path(config["collection"]["manifest"]).parent / "ops_preflight.json", {})
+    else:
+        _write(summary.parent / "orphan.summary.json", {"status": "RSS_LIMIT"})
+    with pytest.raises(ValueError):
+        runner._validate_collection_target(runner._validate_shape(config))
+
+
+@pytest.mark.parametrize("stop", ["timeout", "interrupt", "rss"])
+def test_real_validator_child_owned_cleanup(tmp_path, monkeypatch, stop):
+    import time
+
+    pid_file = tmp_path / "validator.pid"
+    script = f"\nfrom pathlib import Path\nimport os, time\nPath({str(pid_file)!r}).write_text(str(os.getpid()))\ntime.sleep(60)\n"
+    supervise = runner.resource_ops.supervise_owned_process
+    owned = []
+
+    def monitor(process, samples, **kwargs):
+        owned.append(process)
+        end = time.monotonic() + 5
+        while not pid_file.exists() and time.monotonic() < end:
+            time.sleep(0.01)
+        assert pid_file.exists()
+        if stop == "interrupt":
+            raise KeyboardInterrupt
+        if stop == "rss":
+            kwargs["rss_reader"] = lambda _: runner.LIMIT_KIB + 1
+        return supervise(process, samples, **kwargs)
+
+    monkeypatch.setattr(runner.resource_ops, "supervise_owned_process", monitor)
+    with pytest.raises(KeyboardInterrupt if stop == "interrupt" else ValueError):
+        runner._run_canonical_validator(script, [], tmp_path, timeout_seconds=0.05)
+    assert len(owned) == 1
+    assert owned[0].poll() is not None
+    assert not Path(f"/proc/{owned[0].pid}").exists()
+
+
+def test_real_validator_child_dies_after_abrupt_parent_exit(tmp_path):
+    import signal
+    import time
+
+    pid_file = tmp_path / "validator.pid"
+    child = f"\nfrom pathlib import Path\nimport os, time\nPath({str(pid_file)!r}).write_text(str(os.getpid()))\ntime.sleep(60)\n"
+    parent_script = (
+        "from pathlib import Path\nfrom tools import universe50_history_recovery_ops as r\n"
+        f"r._run_canonical_validator({child!r}, [], Path({str(tmp_path)!r}))\n"
+    )
+    parent = subprocess.Popen([sys.executable, "-c", parent_script])
+    pid = None
+    try:
+        end = time.monotonic() + 10
+        while not pid_file.exists() and time.monotonic() < end:
+            time.sleep(0.02)
+        assert pid_file.exists()
+        pid = int(pid_file.read_text())
+        parent.kill()
+        parent.wait(timeout=5)
+        end = time.monotonic() + 5
+        while time.monotonic() < end:
+            stat = Path(f"/proc/{pid}/stat")
+            if not stat.exists() or stat.read_text().split()[2] == "Z":
+                break
+            time.sleep(0.02)
+        else:
+            pytest.fail("canonical validator survived parent death")
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+            parent.wait(timeout=5)
+        if (
+            pid
+            and Path(f"/proc/{pid}/stat").exists()
+            and Path(f"/proc/{pid}/stat").read_text().split()[2] != "Z"
+        ):
+            os.kill(pid, signal.SIGKILL)

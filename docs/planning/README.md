@@ -34,6 +34,13 @@ financial `9b6e7ec` source/synthetic 후보의 독립 PASS와 리드 인수 뒤,
 [50사 History bounded-memory 복구 전달](../implementation/universe50-history-recovery-delivery.md)에
 기록한다. recovery source/synthetic 구현만 승인됐으며 engine source acceptance와 actual
 root GO는 아직 없다. 따라서 JNJ actual 복구와 financial readiness는 계속 미수행이다.
+후보 `26d1b8a`는 canonical first-five config/output 결속과 prior failure/receipt/root 보존 결함으로
+독립 FAIL했다. 리드가 승인한 R1–R4 좁은 보정은 별도 Astra 단일 writer가 구현했으며
+real-public synthetic History→READY와 별도9b validator child lifecycle을 검사한다.
+새 freeze는 독립 검증·로컬 인수 대기이며 actual retry 승인을 포함하지 않는다.
+source/synthetic 검사에서는 unit 내 5개 cached 테스트를 명시적으로 제외하고 nonexistent
+corpus 환경, precollection 실제 파일 접근 거부 및 owned RSS guard를 적용한다.
+중단된 plain full-unit 실행은 synthetic 완료 증거로 쓰지 않는다. 세부 재현 규칙은 위 전달 계약에 있다.
 
 2026-10-17 사용자·리드 후속 승인으로 identity 앞단의 별도
 [generic metric Raw 품질 전달 계약](../implementation/universe50-generic-metric-quality-delivery.md)을

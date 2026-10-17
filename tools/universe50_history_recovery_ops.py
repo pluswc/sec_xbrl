@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -91,8 +92,7 @@ def _write_new(path: Path, value: dict[str, Any], label: str) -> Path:
         raise FileExistsError(f"{label} must be new: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        + "\n",
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n",
         encoding="utf-8",
     )
     return path
@@ -126,14 +126,14 @@ def _absolute(value: Any, label: str) -> Path:
 
 def _regular(path: Path, label: str) -> Path:
     path = Path(path).absolute()
-    if path.is_symlink() or not path.is_file():
+    if path.is_symlink() or not path.is_file() or path != path.resolve():
         raise ValueError(f"{label} must be a regular file: {path}")
     return path.resolve()
 
 
 def _directory(path: Path, label: str) -> Path:
     path = Path(path).absolute()
-    if path.is_symlink() or not path.is_dir():
+    if path.is_symlink() or not path.is_dir() or path != path.resolve():
         raise ValueError(f"{label} must be a real directory: {path}")
     return path.resolve()
 
@@ -184,13 +184,9 @@ def _validate_companies(value: Any) -> list[dict[str, str]]:
         ):
             raise ValueError("company identity is malformed")
         result.append({"ticker": ticker, "cik": cik})
-    if len({row["ticker"] for row in result}) != 50 or len(
-        {row["cik"] for row in result}
-    ) != 50:
+    if len({row["ticker"] for row in result}) != 50 or len({row["cik"] for row in result}) != 50:
         raise ValueError("exact-50 company identities must be unique")
-    if "PEP" in {row["ticker"] for row in result} or "KDP" not in {
-        row["ticker"] for row in result
-    }:
+    if "PEP" in {row["ticker"] for row in result} or "KDP" not in {row["ticker"] for row in result}:
         raise ValueError("exact-50 membership must exclude PEP and include KDP")
     return result
 
@@ -308,7 +304,10 @@ def _validate_shape(value: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(prior, list) or not isinstance(abandoned, list):
         raise TypeError("prior failure declarations must be lists")
     for declaration in prior:
-        if not isinstance(declaration, dict) or set(declaration) != {"path", "sha256"}:
+        if not isinstance(declaration, dict) or set(declaration) not in (
+            {"path", "sha256"},
+            {"path", "sha256", "legacy_ops"},
+        ):
             raise ValueError("prior failed attempt declaration differs")
         _absolute(declaration["path"], "prior failed attempt")
         _sha(declaration["sha256"], "prior failed attempt")
@@ -347,7 +346,15 @@ def _verify_runner_source(config: dict[str, Any]) -> dict[str, Any]:
     checkout = _directory(Path(declaration["checkout"]), "runner checkout")
     state = _git_state(checkout, declaration["head"], "runner")
     ancestor = subprocess.run(
-        ["git", "-C", str(checkout), "merge-base", "--is-ancestor", RUNNER_BASE_SHA, declaration["head"]],
+        [
+            "git",
+            "-C",
+            str(checkout),
+            "merge-base",
+            "--is-ancestor",
+            RUNNER_BASE_SHA,
+            declaration["head"],
+        ],
         check=False,
     )
     if ancestor.returncode != 0:
@@ -429,44 +436,65 @@ def _verify_engine_source(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _verify_output_receipt(receipt: dict[str, Any], stage: str) -> list[Path]:
-    outputs = receipt.get("outputs")
-    if not isinstance(outputs, list) or not outputs:
-        raise ValueError(f"accepted {stage} output receipt is missing")
-    roots = []
-    for output in outputs:
-        if not isinstance(output, dict) or set(output) != {"root", "files"}:
-            raise ValueError(f"accepted {stage} output shape differs")
-        root = _directory(_absolute(output["root"], f"accepted {stage} output"), f"accepted {stage} output")
-        declared = output["files"]
-        if not isinstance(declared, list) or not declared:
-            raise ValueError(f"accepted {stage} output files are missing")
-        expected = set()
-        for row in declared:
-            if not isinstance(row, dict):
-                raise TypeError(f"accepted {stage} output file differs")
-            relative = Path(str(row.get("relative_path", "")))
-            if relative.is_absolute() or ".." in relative.parts or not relative.parts:
-                raise ValueError(f"accepted {stage} output path is unsafe")
-            path = _regular(root / relative, f"accepted {stage} output file")
-            if (
-                str(path) != row.get("path")
-                or _sha256(path) != row.get("sha256")
-                or path.stat().st_size != row.get("size")
-            ):
-                raise ValueError(f"accepted {stage} output file changed")
-            expected.add(str(relative))
-        if len(expected) != len(declared):
-            raise ValueError(f"accepted {stage} output contains duplicate file declarations")
-        actual = {
-            str(path.relative_to(root))
-            for path in root.rglob("*")
-            if path.is_file() and not path.is_symlink()
-        }
-        if actual != expected or any(path.is_symlink() for path in root.rglob("*")):
-            raise ValueError(f"accepted {stage} output fileset changed")
-        roots.append(root)
-    return roots
+def _run_canonical_validator(
+    script: str,
+    arguments: list[str],
+    checkout: Path,
+    *,
+    timeout_seconds: float = 60,
+) -> str:
+    """Guard the isolated read-only validator even outside a History supervisor."""
+    bootstrap = """
+import ctypes, os, signal, sys
+if not sys.platform.startswith("linux"):
+    raise RuntimeError("canonical validator requires Linux parent-death guard")
+libc = ctypes.CDLL(None, use_errno=True)
+if libc.prctl(1, signal.SIGKILL, 0, 0, 0) != 0:
+    raise OSError(ctypes.get_errno(), "canonical validator parent-death guard failed")
+if os.getppid() != int(os.environ["SEC_XBRL_RECOVERY_VALIDATOR_PARENT_PID"]):
+    raise PermissionError("canonical validator parent exited before guard installation")
+"""
+    env = os.environ.copy()
+    env.update(
+        PYTHONPATH=os.pathsep.join((str(checkout / "src"), str(checkout))),
+        PYTHONDONTWRITEBYTECODE="1",
+        POLARS_MAX_THREADS="2",
+        OMP_NUM_THREADS="1",
+        OPENBLAS_NUM_THREADS="1",
+        MKL_NUM_THREADS="1",
+        NUMEXPR_NUM_THREADS="1",
+        SEC_XBRL_RECOVERY_VALIDATOR_PARENT_PID=str(os.getpid()),
+    )
+    with (
+        tempfile.TemporaryFile(mode="w+") as output,
+        tempfile.TemporaryFile(mode="w+") as errors,
+        tempfile.TemporaryFile(mode="w+") as samples,
+    ):
+        process = subprocess.Popen(
+            [sys.executable, "-c", bootstrap + script, *arguments],
+            cwd=checkout,
+            env=env,
+            stdout=output,
+            stderr=errors,
+            start_new_session=True,
+        )
+        try:
+            code, _peak, stopped, _elapsed = resource_ops.supervise_owned_process(
+                process,
+                samples,
+                limit_kib=LIMIT_KIB,
+                timeout_seconds=timeout_seconds,
+            )
+        except BaseException:
+            resource_ops.terminate_owned_process_group(process)
+            raise
+        errors.seek(0)
+        if code or stopped:
+            raise ValueError(
+                f"canonical financial gate rejected: {stopped or code}: {errors.read().strip()}"
+            )
+        output.seek(0)
+        return output.read()
 
 
 def _verify_financial_acceptance(config: dict[str, Any]) -> dict[str, Any] | None:
@@ -511,126 +539,190 @@ def _verify_financial_acceptance(config: dict[str, Any]) -> dict[str, Any] | Non
         raise ValueError("first-five financial acceptance scope differs")
     first5_path = _pin(value["first5_config"], "accepted first-five config")
     first5 = _read_json(first5_path, "accepted first-five config")
-    first5_companies = first5.get("companies")
-    first5_by_ticker = (
-        {row.get("ticker"): row for row in first5_companies}
-        if isinstance(first5_companies, list)
-        and all(isinstance(row, dict) for row in first5_companies)
-        else {}
+    # This process imports the 8a History engine. Canonical 9b validation runs
+    # only in an isolated interpreter; no FULL financial execution is invented.
+    source = first5.get("source") or {}
+    checkout = _directory(
+        _absolute(source.get("checkout"), "financial checkout"), "financial checkout"
     )
-    if (
-        first5.get("schema_version") != "universe50-financial-ops-config-v1"
-        or first5.get("collection_scope_mode") != "EXPLICIT_SUBSET"
-        or first5.get("financial_as_of") != FINANCIAL_AS_OF
-        or first5.get("metadata_observation_cutoff") != METADATA_CUTOFF
-        or first5.get("collection") != expected_collection
-        or first5.get("source", {}).get("head") != FINANCIAL_SOURCE_SHA
-        or not isinstance(first5_companies, list)
-        or len(first5_companies) != len(FIRST5)
-        or set(first5_by_ticker) != set(FIRST5)
-        or [
-            {
-                "ticker": ticker_name,
-                "cik": first5_by_ticker.get(ticker_name, {}).get("cik"),
-            }
-            for ticker_name in FIRST5
-        ]
-        != cohort
-    ):
-        raise ValueError("accepted first-five config differs")
-    receipts = value["stage_receipts"]
-    if not isinstance(receipts, dict) or not FINANCIAL_STAGES <= set(receipts) or set(
-        receipts
-    ) - (FINANCIAL_STAGES | {"metadata"}):
-        raise ValueError("first-five financial stage receipt set differs")
-    output_roots: list[Path] = []
-    receipt_bindings = {}
-    for stage, declaration in sorted(receipts.items()):
-        receipt_path = _pin(declaration, f"accepted {stage} receipt")
-        receipt = _read_json(receipt_path, f"accepted {stage} receipt")
-        if (
-            receipt.get("schema_version") != "universe50-financial-stage-receipt-v1"
-            or receipt.get("status") != "PASS"
-            or receipt.get("stage") != stage
-            or receipt.get("source_head") != FINANCIAL_SOURCE_SHA
-            or SHA256.fullmatch(str(receipt.get("go_sha256", ""))) is None
-        ):
-            raise ValueError(f"accepted {stage} receipt identity differs")
-        output_roots.extend(_verify_output_receipt(receipt, stage))
-        receipt_bindings[stage] = {
-            "path": str(receipt_path),
-            "sha256": _sha256(receipt_path),
-        }
-    names = [
-        "metadata",
-        "quality",
-        "identity",
-        "annual_metrics",
-        "annual_dataset_v2",
-        "quarterly_metrics",
-        "combined_dataset_v3",
-        *[
-            name
-            for company in FIRST5
-            for name in (f"annual_analysis:{company}", f"quarterly_analysis:{company}")
-        ],
-    ]
-    manifests = value["publication_manifests"]
-    if not isinstance(manifests, list) or [row.get("name") for row in manifests] != names:
-        raise ValueError("first-five publication manifest set differs")
-    manifest_bindings = []
-    for row in manifests:
-        if not isinstance(row, dict) or set(row) != {
-            "name",
-            "root",
-            "manifest",
-            "manifest_sha256",
-        }:
-            raise ValueError("first-five publication manifest declaration differs")
-        root = _directory(_absolute(row["root"], "accepted publication root"), "accepted publication root")
-        manifest = _regular(_absolute(row["manifest"], "accepted publication manifest"), "accepted publication manifest")
-        if manifest.parent != root or _sha256(manifest) != row["manifest_sha256"]:
-            raise ValueError("accepted publication manifest changed")
-        if row["name"] != "metadata" and not any(
-            manifest.is_relative_to(output_root) for output_root in output_roots
-        ):
-            raise ValueError("accepted publication is outside accepted stage outputs")
-        manifest_bindings.append({**row})
+    _git_state(checkout, FINANCIAL_SOURCE_SHA, "canonical financial validator")
+    script = """
+import json, sys
+from pathlib import Path
+from tools import universe50_financial_ops as f
+first5_path = f._pin(sys.argv[1], sys.argv[3], "accepted first-five config")
+acceptance_path = f._pin(sys.argv[2], sys.argv[4], "accepted first-five acceptance")
+a = f._read_json(acceptance_path, "first-five acceptance")
+c = f._validate_shape(f._read_json(first5_path, "first-five config"))
+f._verify_runtime(c)
+if (c["collection_scope_mode"] != "EXPLICIT_SUBSET"
+    or f._first5_companies(c) != a["companies"]
+    or c["collection"] != a["collection"]
+    or c["source"]["head"] != a["source_head"]
+    or c["financial_as_of"] != a["financial_as_of"]
+    or c["metadata_observation_cutoff"] != a["metadata_observation_cutoff"]):
+    raise ValueError("accepted first-five config differs")
+stages = list(f.FIRST5_ACCEPTED_STAGES)
+if c["metadata"]["mode"] == "PUBLISH_EXACT50":
+    stages.insert(0, "metadata")
+if set(a["stage_receipts"]) != set(stages):
+    raise ValueError("first-five financial stage receipt set differs")
+for stage in stages:
+    pin = a["stage_receipts"][stage]
+    if set(pin) != {"path", "sha256"}:
+        raise ValueError("accepted receipt pin differs")
+    p = f._pin(pin["path"], pin["sha256"], "accepted receipt")
+    r = f._read_json(p, "accepted receipt")
+    if (r.get("schema_version") != f.RECEIPT_VERSION or r.get("status") != "PASS"
+        or r.get("stage") != stage or r.get("source_head") != a["source_head"]
+        or not isinstance(r.get("go_sha256"), str)
+        or f.SHA256.fullmatch(r["go_sha256"]) is None):
+        raise ValueError("accepted receipt identity differs")
+    f._verify_output_receipt(r, stage)
+    if [v.get("root") for v in r["outputs"]] != [str(v) for v in f._output_paths(c, stage)]:
+        raise ValueError("accepted " + stage + " receipt output roots differ")
+expected = f._expected_publication_manifests(c)
+if a["publication_manifests"] != expected:
+    raise ValueError("first-five accepted publication manifests differ")
+if c["metadata"]["mode"] == "EXISTING_PUBLICATION":
+    if expected[0]["manifest_sha256"] != c["metadata"]["manifest_sha256"]:
+        raise ValueError("accepted metadata manifest differs from config")
+print(json.dumps({"stage_receipts": a["stage_receipts"], "publication_manifests": expected}))
+"""
+    validated = json.loads(
+        _run_canonical_validator(
+            script,
+            [
+                str(first5_path),
+                str(path),
+                value["first5_config"]["sha256"],
+                config["first5_financial_acceptance"]["sha256"],
+            ],
+            checkout,
+        )
+    )
+    _pin(config["first5_financial_acceptance"], "first-five financial acceptance")
+    _pin(value["first5_config"], "accepted first-five config")
+    receipt_bindings = validated["stage_receipts"]
+    manifest_bindings = validated["publication_manifests"]
     return {
         "path": str(path),
         "sha256": _sha256(path),
         "source_head": FINANCIAL_SOURCE_SHA,
+        "validation_scope": "CANONICAL_FIRST5_GATE_ONLY",
+        "validator_checkout": str(checkout),
+        "first5_config": value["first5_config"],
         "companies": cohort,
         "stage_receipts": receipt_bindings,
         "publication_manifests": manifest_bindings,
     }
 
 
-def _failed_attempt(value: dict[str, Any]) -> bool:
-    statuses = []
-
-    def visit(item: Any) -> None:
-        if isinstance(item, dict):
-            for key, nested in item.items():
-                if key in {"status", "plan_status"} and isinstance(nested, str):
-                    statuses.append(nested)
-                visit(nested)
-        elif isinstance(item, list):
-            for nested in item:
-                visit(nested)
-
-    visit(value)
-    return any(status in {"BUILD_FAILED", "FAIL", "FAILED"} for status in statuses)
+def _legacy_failure_root(
+    config: dict[str, Any],
+    attempt: Path,
+    failure: dict[str, Any],
+    witness: Any,
+) -> tuple[Path, dict[str, Any]]:
+    """Derive the old OPS destination only from its pinned 56a command contract."""
+    if not isinstance(witness, dict) or set(witness) != {"config", "go", "program"}:
+        raise ValueError("legacy OPS failure requires config, GO and program pins")
+    config_path = _pin(witness["config"], "legacy OPS config")
+    go_path = _pin(witness["go"], "legacy OPS GO")
+    program = _pin(witness["program"], "legacy OPS program")
+    program_sha = "5e4a249070e25359ec406c0c727bb0f919ffdd55624936f630e0325a41b3e4f9"
+    if _sha256(program) != program_sha or program.name != "universe50_t3v2_ops.py":
+        raise ValueError("legacy OPS program is not accepted 56a source")
+    old = _read_json(config_path, "legacy OPS config")
+    go = _read_json(go_path, "legacy OPS GO")
+    target = config["target"]["ticker"]
+    command = failure.get("command")
+    if (
+        failure.get("schema_version") != "universe50-t3v2-resource-run-v1"
+        or failure.get("status") not in {"RSS_LIMIT", "TIMEOUT", "FAIL", "INTERRUPTED"}
+        or failure.get("limit_kib") != LIMIT_KIB
+        or failure.get("timeout_seconds") != TIMEOUT_SECONDS
+        or not isinstance(command, list)
+        or len(command) != 9
+        or not isinstance(command[0], str)
+        or not Path(command[0]).is_absolute()
+        or command[1:]
+        != [
+            str(program),
+            "_build-worker",
+            "--config",
+            str(config_path),
+            "--ticker",
+            target,
+            "--go-file",
+            str(go_path),
+        ]
+    ):
+        raise ValueError("legacy OPS failed command identity differs")
+    if (
+        old.get("schema_version") != "universe50-t3v2-ops-config-v1"
+        or old.get("source_sha") != ENGINE_BASE_SHA
+        or old.get("first5") != list(FIRST5)
+        or old.get("limits") != config["limits"]
+        or old.get("collection_root") != str(Path(config["collection"]["manifest"]).parent)
+    ):
+        raise ValueError("legacy OPS config collection/source differs")
+    preflight = _regular(
+        Path(old["collection_root"]) / "ops_preflight.json", "legacy OPS preflight"
+    )
+    proof = _read_json(preflight, "legacy OPS preflight")
+    if (
+        proof.get("schema_version") != "universe50-t3v2-ops-preflight-v1"
+        or proof.get("status") != "PREPARED"
+        or proof.get("source_sha") != ENGINE_BASE_SHA
+        or proof.get("run_id") != old.get("run_id")
+        or proof.get("config") != witness["config"]
+        or proof.get("modules", {}).get("program") != witness["program"]
+    ):
+        raise ValueError("legacy OPS preflight binding differs")
+    engine_digest = proof.get("modules", {}).get("engine", {}).get("aggregate_sha256")
+    _sha(engine_digest, "legacy engine modules")
+    if go != {
+        "schema_version": "universe50-t3v2-stage-go-v1",
+        "status": "GO",
+        "operation": "build-one",
+        "run_id": old["run_id"],
+        "source_sha": ENGINE_BASE_SHA,
+        "ops_config_sha256": _sha256(config_path),
+        "preflight_sha256": _sha256(preflight),
+        "program_sha256": program_sha,
+        "engine_modules_sha256": engine_digest,
+        "tickers": [target],
+    }:
+        raise ValueError("legacy OPS GO binding differs")
+    expected_parent = Path(old["collection_root"]) / "execution" / target
+    if attempt.parent != expected_parent or not attempt.name.endswith(".summary.json"):
+        raise ValueError("legacy OPS failure summary location differs")
+    root = (
+        _absolute(old.get("history_root"), "legacy History root") / f"{target}-t3v2-{old['run_id']}"
+    )
+    # Scan the owned legacy execution area so an unpinned second attempt cannot hide.
+    expected = {
+        Path(row["path"]).resolve()
+        for row in config["target"]["approved_prior_failed_attempts"]
+        if "legacy_ops" in row
+    }
+    if set(expected_parent.glob("*.summary.json*")) != expected:
+        raise ValueError("unapproved prior legacy OPS attempt")
+    return root, {
+        "path": str(attempt),
+        "sha256": _sha256(attempt),
+        "legacy_ops": witness,
+        "preflight": {"path": str(preflight), "sha256": _sha256(preflight)},
+        "output_root": str(root),
+    }
 
 
 def _target_paths(config: dict[str, Any]) -> dict[str, Path]:
     manifest = Path(config["collection"]["manifest"])
     ticker = config["target"]["ticker"]
     company_root = manifest.parent / "companies" / ticker
-    destination = (
-        Path(config["target"]["history_parent"])
-        / config["target"]["history_basename"]
-    )
+    destination = Path(config["target"]["history_parent"]) / config["target"]["history_basename"]
     return {
         "company_root": company_root,
         "plan": company_root / "plan.json",
@@ -671,8 +763,7 @@ def _validate_collection_target(config: dict[str, Any]) -> dict[str, Any]:
     }
     if (
         set(candidate_by_ticker) != {row["ticker"] for row in identities}
-        or candidate_identities
-        != {(row["ticker"], row["cik"]) for row in identities}
+        or candidate_identities != {(row["ticker"], row["cik"]) for row in identities}
         or sum(row.get("selected_filings", -1) for row in rows) != 1097
         or "PEP" in candidate_by_ticker
         or "KDP" not in candidate_by_ticker
@@ -710,31 +801,109 @@ def _validate_collection_target(config: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("target plan or intake attestation differs")
     if row.state == "READY" or any(
         path.exists() or path.is_symlink()
-        for path in (paths["marker"], paths["old_receipt"], paths["receipt"], paths["destination"])
+        for path in (
+            paths["marker"],
+            paths["old_receipt"],
+            paths["receipt"],
+            paths["destination"],
+            *paths["company_root"].glob("history_recovery_receipt-*"),
+            *paths["company_root"].glob("ops_build_receipt*"),
+            *paths["company_root"].glob("build_manifest*"),
+        )
     ):
         raise ValueError("target already has a marker, receipt, READY state, or selected output")
     company_attempts = paths["company_root"] / "operation_attempts"
-    actual_attempts = sorted(company_attempts.glob("build-*.json"))
+    actual_attempts = sorted(company_attempts.glob("build-*"))
     declared_attempts = []
+    failure_roots = []
+    legacy_bindings = []
     for declaration_item in target["approved_prior_failed_attempts"]:
-        attempt = _pin(declaration_item, "approved prior failed attempt")
-        if attempt.parent != company_attempts or not _failed_attempt(
-            _read_json(attempt, "approved prior failed attempt")
-        ):
-            raise ValueError("prior build attempt is not an exact failed target attempt")
-        declared_attempts.append(attempt)
-    if actual_attempts != declared_attempts:
+        attempt = _pin(
+            {k: declaration_item[k] for k in ("path", "sha256")}, "approved prior failed attempt"
+        )
+        failure = _read_json(attempt, "approved prior failed attempt")
+        if "legacy_ops" in declaration_item:
+            root, legacy_binding = _legacy_failure_root(
+                config, attempt, failure, declaration_item["legacy_ops"]
+            )
+            legacy_bindings.append(legacy_binding)
+        else:
+            if (
+                attempt.parent != company_attempts
+                or failure.get("result", {}).get("status") != "BUILD_FAILED"
+            ):
+                raise ValueError("prior build attempt is not an exact failed target attempt")
+            declared_attempts.append(attempt)
+            root_value = failure["result"].get("output_root")
+            if "output_root" in failure and failure["output_root"] != root_value:
+                raise ValueError("conflicting failed attempt output roots")
+            root = _absolute(root_value, "failed attempt output root")
+        failure_roots.append(_directory(root, "failed output root"))
+    legacy_attempts = sorted(
+        (manifest.parent / "execution" / target["ticker"]).glob("*.summary.json*")
+    )
+    declared_legacy = sorted(Path(row["path"]) for row in legacy_bindings)
+    if legacy_attempts != declared_legacy:
+        raise ValueError("target contains an unapproved prior legacy OPS attempt")
+    if actual_attempts != sorted(declared_attempts):
         raise ValueError("target contains an unapproved prior build attempt")
     expected_state = "BUILD_FAILED" if declared_attempts else "RAW_COMPLETE"
     if row.state != expected_state:
         raise ValueError("target public state differs from approved recovery state")
     destination = paths["destination"].absolute()
-    abandoned = []
-    for root_value in target["abandoned_output_roots"]:
-        root = _directory(Path(root_value), "abandoned output root")
-        if root == destination or root.is_relative_to(destination) or destination.is_relative_to(root):
+    parent = _directory(Path(target["history_parent"]), "history parent")
+    if destination != destination.resolve() or Path(target["history_parent"]) != parent:
+        raise ValueError("new recovery paths contain symlink or noncanonical ancestry")
+    abandoned = [
+        _directory(Path(value), "abandoned output root")
+        for value in target["abandoned_output_roots"]
+    ]
+    if len(set(failure_roots)) != len(failure_roots) or sorted(failure_roots) != sorted(abandoned):
+        raise ValueError("abandoned roots differ from exact failed attempt output roots")
+    execution = Path(config["execution_root"])
+    if execution != execution.resolve():
+        raise ValueError("execution root has unsafe ancestry")
+    for root in abandoned:
+        if (
+            root == destination
+            or root.is_relative_to(destination)
+            or parent.is_relative_to(root)
+            or execution.is_relative_to(root)
+            or root.is_relative_to(execution)
+        ):
             raise ValueError("new recovery output overlaps abandoned partial output")
-        abandoned.append(str(root))
+    protected = [
+        manifest.parent,
+        Path(config["runner"]["checkout"]),
+        Path(config["engine"]["checkout"]),
+    ]
+    payload = getattr(intake, "payload", None) or {}
+    protected.extend(
+        _absolute(item["source_run"], "intake source run")
+        for item in payload.get("filings", [])
+        if "source_run" in item
+    )
+    for root in protected:
+        root = root.resolve()
+        if (
+            destination.is_relative_to(root)
+            or root.is_relative_to(destination)
+            or execution.is_relative_to(root)
+            or root.is_relative_to(execution)
+        ):
+            raise ValueError("new recovery output overlaps source or collection")
+    if execution.is_relative_to(destination) or destination.is_relative_to(execution):
+        raise ValueError("recovery evidence and History output overlap")
+    # Reject orphan partials from any recovery version, even if no receipt exists.
+    known = set(abandoned)
+    partials = [
+        *parent.glob(f"{target['ticker']}-history-recovery-*"),
+        *parent.glob(f"{target['ticker']}-t3v2-*"),
+    ]
+    for partial in partials:
+        if partial.resolve() not in known:
+            raise ValueError("unapproved prior recovery partial output")
+    abandoned = [str(root) for root in abandoned]
     return {
         "manifest": str(manifest),
         "manifest_sha256": _sha256(manifest),
@@ -752,7 +921,8 @@ def _validate_collection_target(config: dict[str, Any]) -> dict[str, Any]:
             "intake_sha256": target["intake_sha256"],
             "prior_failed_attempts": [
                 {"path": str(path), "sha256": _sha256(path)} for path in declared_attempts
-            ],
+            ]
+            + legacy_bindings,
             "abandoned_output_roots": abandoned,
             "destination": str(destination),
             "receipt": str(paths["receipt"]),
@@ -834,9 +1004,7 @@ def request_stage(config_path: Path) -> Path:
         "runner_head": config["runner"]["head"],
         "engine_head": config["engine"]["head"],
         "collection": preflight_value["snapshot"]["collection"],
-        "first5_financial_acceptance": preflight_value["snapshot"][
-            "first5_financial_acceptance"
-        ],
+        "first5_financial_acceptance": preflight_value["snapshot"]["first5_financial_acceptance"],
         "target": preflight_value["snapshot"]["collection"]["target"],
     }
     return _write_new(_request_path(config), value, "History recovery request")
@@ -855,9 +1023,7 @@ def _expected_go(config_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
         "runner_head": config["runner"]["head"],
         "engine_head": config["engine"]["head"],
         "collection": preflight_value["snapshot"]["collection"],
-        "first5_financial_acceptance": preflight_value["snapshot"][
-            "first5_financial_acceptance"
-        ],
+        "first5_financial_acceptance": preflight_value["snapshot"]["first5_financial_acceptance"],
         "target": preflight_value["snapshot"]["collection"]["target"],
     }
     if request != expected_request:
@@ -874,9 +1040,7 @@ def _expected_go(config_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
         "engine_head": config["engine"]["head"],
         "collection_manifest_sha256": config["collection"]["manifest_sha256"],
         "target": preflight_value["snapshot"]["collection"]["target"],
-        "first5_financial_acceptance": preflight_value["snapshot"][
-            "first5_financial_acceptance"
-        ],
+        "first5_financial_acceptance": preflight_value["snapshot"]["first5_financial_acceptance"],
     }
 
 
