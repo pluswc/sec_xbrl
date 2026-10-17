@@ -9,11 +9,17 @@ the real context boundaries remain first-class evidence on every column/cell.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterable, Mapping, Sequence
+import marshal
+import os
+import sqlite3
+import tempfile
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
+from itertools import islice
+from pathlib import Path
 from typing import Any
 
 from sec_xbrl.analytics.company_analysis_panel import CompanyAnalysisPanelResult
@@ -123,6 +129,467 @@ class FiscalTimeSeriesBuilder:
             scope={**scope, "fiscal_time_series_version": FISCAL_TIME_SERIES_VERSION},
         )
         return result
+
+    def build_spilled(
+        self,
+        *,
+        inputs: Iterable[FiscalTimeSeriesInput],
+        spill_root: Path,
+        expected_periods: Sequence[FiscalPeriod] = (),
+    ) -> FiscalTimeSeriesSpilledResult:
+        """Build the same ordered records with bounded panel ownership.
+
+        The eager ``build`` API remains the compatibility boundary.  This
+        additive path consumes and releases one input panel at a time, keeping
+        the row/candidate index in a private disk-backed SQLite temporary
+        database.  A typed, checksummed journal remains in ``spill_root`` on
+        failure; callers explicitly remove it only after every output table has
+        been durably staged.
+        """
+        expected = tuple(expected_periods)
+        spill = _FiscalTimeSeriesSpill(spill_root)
+        try:
+            iterator = iter(inputs)
+            scope: dict[str, Any] | None = None
+            by_period: dict[tuple[int, int | None, str], dict[str, Any]] = {}
+            consumed = 0
+            while True:
+                try:
+                    item = next(iterator)
+                except StopIteration:
+                    break
+                panel = item.panel
+                item_scope = _shared_scope((item,))
+                if scope is None:
+                    scope = item_scope
+                    _validate_expected(expected, scope["period_class"])
+                elif any(
+                    item_scope[field] != scope[field]
+                    for field in ("cik", "period_class", "selection_view", "selection_as_of_date")
+                ):
+                    raise FiscalTimeSeriesError(
+                        "time series cannot mix company, period class, view, or as-of date"
+                    )
+                period = (
+                    panel.scope["fiscal_year"],
+                    panel.scope["fiscal_quarter"],
+                    panel.scope["period_class"],
+                )
+                column = _column(period, item.fiscal_year_end, _period_evidence(panel))
+                previous = by_period.get(period)
+                if previous is not None and previous != column:
+                    raise FiscalTimeSeriesError(
+                        "one fiscal label has incompatible actual period evidence"
+                    )
+                by_period[period] = column
+                definitions = {
+                    str(row["analysis_line_id"]): row for row in panel.definitions
+                }
+                bindings = {str(row["analysis_line_id"]): row for row in panel.bindings}
+                definition = binding = value = key = None
+                for value in panel.values:
+                    line_id = str(value["analysis_line_id"])
+                    definition, binding = definitions.get(line_id), bindings.get(line_id)
+                    if definition is None or binding is None:
+                        raise FiscalTimeSeriesError(
+                            "T5 value has no definition/binding lineage"
+                        )
+                    _validate_value_scope(value, panel.scope)
+                    _validate_derived_q4(value, panel.scope)
+                    key = _row_key(definition, binding, value)
+                    row_id = _id("row", key)
+                    spill.add_row(
+                        row_id,
+                        _row(row_id, key, definition, binding, value),
+                    )
+                    spill.add_candidate(
+                        row_id,
+                        period,
+                        definition,
+                        binding,
+                        value,
+                    )
+                consumed += 1
+                # Do not ask the producer for the next panel while references
+                # to this one remain in the consumer frame.
+                del definitions, bindings, definition, binding, value, key
+                del panel, item, item_scope
+            if not consumed or scope is None:
+                raise FiscalTimeSeriesError(
+                    "time series requires at least one selected panel"
+                )
+            for period in expected:
+                key = (
+                    period.fiscal_year,
+                    period.fiscal_quarter,
+                    period.period_class,
+                )
+                by_period.setdefault(key, _missing_column(key))
+            columns = _annotate_comparability(
+                tuple(
+                    sorted(
+                        by_period.values(),
+                        key=lambda item: item["column_order_key"],
+                    )
+                )
+            )
+            spill.checkpoint()
+            return FiscalTimeSeriesSpilledResult(
+                spill=spill,
+                columns=columns,
+                scope={**scope, "fiscal_time_series_version": FISCAL_TIME_SERIES_VERSION},
+            )
+        except BaseException:
+            spill.close(success=False)
+            raise
+
+
+class FiscalTimeSeriesSpilledResult:
+    """Owned record iterators for a disk-spilled fiscal pivot."""
+
+    def __init__(
+        self,
+        *,
+        spill: _FiscalTimeSeriesSpill,
+        columns: tuple[dict[str, Any], ...],
+        scope: dict[str, Any],
+    ) -> None:
+        self._spill = spill
+        self._columns = columns
+        self.scope = scope
+        self.counts = {
+            "columns": len(columns),
+            "rows": spill.row_count(),
+            "cells": spill.cell_count(),
+        }
+        self._closed = False
+
+    @property
+    def diagnostic_path(self) -> Path:
+        return self._spill.path
+
+    def records(self, name: str) -> Iterator[dict[str, Any]]:
+        if self._closed:
+            raise FiscalTimeSeriesError("spilled result is closed")
+        if name == "columns":
+            yield from self._columns
+        elif name == "rows":
+            yield from self._spill.rows()
+        elif name == "cells":
+            columns = {
+                (
+                    row["fiscal_year"],
+                    row["fiscal_quarter"],
+                    row["period_class"],
+                ): row
+                for row in self._columns
+            }
+            yield from self._spill.cells(columns)
+        else:
+            raise FiscalTimeSeriesError(f"unknown spilled dataset: {name}")
+
+    def dataset(self, name: str) -> Sequence[dict[str, Any]]:
+        """Return a re-iterable, bounded sequence view for history staging."""
+        if name not in self.counts:
+            raise FiscalTimeSeriesError(f"unknown spilled dataset: {name}")
+        return _SpilledRecordSequence(self, name)
+
+    def materialize(self) -> FiscalTimeSeriesResult:
+        """Materialize for compatibility checks, not bounded production use."""
+        return FiscalTimeSeriesResult(
+            columns=tuple(self.records("columns")),
+            rows=tuple(self.records("rows")),
+            cells=tuple(self.records("cells")),
+            scope=deepcopy(self.scope),
+        )
+
+    def close(self, *, success: bool) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._spill.close(success=success)
+
+
+class _SpilledRecordSequence(Sequence[dict[str, Any]]):
+    def __init__(self, result: FiscalTimeSeriesSpilledResult, name: str) -> None:
+        self._result = result
+        self._name = name
+
+    def __len__(self) -> int:
+        return self._result.counts[self._name]
+
+    def __iter__(self) -> Iterator[dict[str, Any]]:
+        return self._result.records(self._name)
+
+    def __getitem__(self, index: int | slice) -> Any:
+        if isinstance(index, slice):
+            start, stop, step = index.indices(len(self))
+            if step != 1:
+                return tuple(self)[index]
+            return tuple(islice(iter(self), start, stop))
+        normalized = index if index >= 0 else len(self) + index
+        if normalized < 0 or normalized >= len(self):
+            raise IndexError(index)
+        return next(islice(iter(self), normalized, normalized + 1))
+
+
+def _spill_pack(value: Any) -> bytes:
+    """Non-executable typed encoding; never stringify nested provenance."""
+    try:
+        return b"M" + marshal.dumps(value)
+    except ValueError:
+        def encode(item: Any) -> Any:
+            if isinstance(item, dict):
+                return ("dict", [(encode(key), encode(value)) for key, value in item.items()])
+            if isinstance(item, (list, tuple)):
+                return (type(item).__name__, [encode(value) for value in item])
+            if isinstance(item, datetime):
+                return ("datetime", (item.isoformat(), item.fold))
+            if isinstance(item, (date, time, Decimal)):
+                return (type(item).__name__, str(item))
+            if isinstance(item, timedelta):
+                return ("timedelta", (item.days, item.seconds, item.microseconds))
+            return ("scalar", item)
+
+        return b"T" + marshal.dumps(encode(value))
+
+
+def _spill_unpack(payload: bytes) -> Any:
+    if payload[:1] == b"M":
+        return marshal.loads(payload[1:])
+    if payload[:1] != b"T":
+        raise FiscalTimeSeriesError("invalid fiscal time-series spill record")
+
+    def decode(item: Any) -> Any:
+        kind, value = item
+        if kind == "dict":
+            return {decode(key): decode(nested) for key, nested in value}
+        if kind in {"list", "tuple"}:
+            values = [decode(nested) for nested in value]
+            return values if kind == "list" else tuple(values)
+        if kind == "datetime":
+            return datetime.fromisoformat(value[0]).replace(fold=value[1])
+        if kind == "timedelta":
+            return timedelta(days=value[0], seconds=value[1], microseconds=value[2])
+        if kind in {"date", "time", "Decimal"}:
+            return {
+                "date": date.fromisoformat,
+                "time": time.fromisoformat,
+                "Decimal": Decimal,
+            }[kind](value)
+        if kind == "scalar":
+            return value
+        raise FiscalTimeSeriesError("invalid fiscal time-series spill scalar")
+
+    return decode(marshal.loads(payload[1:]))
+
+
+class _FiscalTimeSeriesSpill:
+    """Private typed journal plus disposable disk-backed SQLite index."""
+
+    def __init__(self, root: Path) -> None:
+        root.mkdir(parents=True, exist_ok=True)
+        self.root = root
+        self.root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        self.directory = Path(tempfile.mkdtemp(prefix="fiscal-timeseries-", dir=root))
+        self.directory_fd = os.open(
+            self.directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        )
+        self.path = self.directory / "fiscal-time-series-spill.records"
+        self.fd = os.open(
+            self.path.name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=self.directory_fd,
+        )
+        root_stat = os.fstat(self.root_fd)
+        directory_stat = os.fstat(self.directory_fd)
+        path_stat = os.fstat(self.fd)
+        self._bindings = {
+            "root": (root_stat.st_dev, root_stat.st_ino),
+            "directory": (directory_stat.st_dev, directory_stat.st_ino),
+            "path": (path_stat.st_dev, path_stat.st_ino),
+        }
+        self.db: sqlite3.Connection | None = None
+        try:
+            self.db = sqlite3.connect("")
+            options = {row[0] for row in self.execute("PRAGMA compile_options")}
+            if "TEMP_STORE=3" in options:
+                raise FiscalTimeSeriesError(
+                    "fiscal spill requires SQLite disk-backed temporary storage"
+                )
+            self.execute("PRAGMA temp_store=FILE")
+            if self.execute("PRAGMA temp_store").fetchone() != (1,):
+                raise FiscalTimeSeriesError(
+                    "fiscal spill temporary storage is not FILE"
+                )
+            self.execute("PRAGMA cache_size=-2048")
+            self.execute("PRAGMA mmap_size=0")
+            self.execute("PRAGMA journal_mode=OFF")
+            self.execute(
+                "CREATE TABLE rows ("
+                "row_id TEXT PRIMARY KEY, review INTEGER, label TEXT, record BLOB)"
+            )
+            self.execute(
+                "CREATE TABLE candidates ("
+                "ordinal INTEGER PRIMARY KEY, row_id TEXT, column_id TEXT, "
+                "period BLOB, record BLOB)"
+            )
+            self.execute(
+                "CREATE INDEX candidate_coordinate "
+                "ON candidates(row_id, column_id, ordinal)"
+            )
+            self._append({"event": "OPEN", "version": "fiscal-timeseries-spill-v1"})
+        except BaseException:
+            self.close(success=False)
+            raise
+
+    def check(self) -> None:
+        root_stat = os.fstat(self.root_fd)
+        directory_stat = os.fstat(self.directory_fd)
+        path_stat = os.fstat(self.fd)
+        if (root_stat.st_dev, root_stat.st_ino) != self._bindings["root"]:
+            raise FiscalTimeSeriesError("fiscal spill ownership changed")
+        if (directory_stat.st_dev, directory_stat.st_ino) != self._bindings["directory"]:
+            raise FiscalTimeSeriesError("fiscal spill ownership changed")
+        if (path_stat.st_dev, path_stat.st_ino) != self._bindings["path"]:
+            raise FiscalTimeSeriesError("fiscal spill ownership changed")
+        current_directory = os.stat(
+            self.directory.name, dir_fd=self.root_fd, follow_symlinks=False
+        )
+        current_path = os.stat(
+            self.path.name, dir_fd=self.directory_fd, follow_symlinks=False
+        )
+        if (current_directory.st_dev, current_directory.st_ino) != self._bindings["directory"]:
+            raise FiscalTimeSeriesError("fiscal spill ownership changed")
+        if (current_path.st_dev, current_path.st_ino) != self._bindings["path"]:
+            raise FiscalTimeSeriesError("fiscal spill ownership changed")
+
+    def execute(self, sql: str, parameters: tuple[Any, ...] = ()) -> sqlite3.Cursor:
+        self.check()
+        if self.db is None:
+            raise FiscalTimeSeriesError("fiscal spill is closed")
+        return self.db.execute(sql, parameters)
+
+    def _append(self, event: dict[str, Any]) -> None:
+        self.check()
+        payload = _spill_pack(event)
+        frame = len(payload).to_bytes(8, "big") + hashlib.sha256(payload).digest()
+        for part in (frame, payload):
+            remaining = memoryview(part)
+            while remaining:
+                written = os.write(self.fd, remaining)
+                if written <= 0:
+                    raise OSError("fiscal spill journal short write")
+                remaining = remaining[written:]
+
+    def add_row(self, row_id: str, record: dict[str, Any]) -> None:
+        inserted = self.execute(
+            "INSERT OR IGNORE INTO rows(row_id,review,label,record) VALUES(?,?,?,?)",
+            (
+                row_id,
+                int(bool(record.get("mapping_review_required"))),
+                str(record.get("label") or ""),
+                _spill_pack(record),
+            ),
+        ).rowcount
+        if inserted:
+            self._append({"event": "ROW", "row_id": row_id, "record": record})
+
+    def add_candidate(
+        self,
+        row_id: str,
+        period: tuple[int, int | None, str],
+        definition: Mapping[str, Any],
+        binding: Mapping[str, Any],
+        value: Mapping[str, Any],
+    ) -> None:
+        record = (dict(definition), dict(binding), dict(value))
+        self.execute(
+            "INSERT INTO candidates(row_id,column_id,period,record) VALUES(?,?,?,?)",
+            (
+                row_id,
+                _id("column", period),
+                _spill_pack(period),
+                _spill_pack(record),
+            ),
+        )
+        self._append(
+            {
+                "event": "CANDIDATE",
+                "row_id": row_id,
+                "period": period,
+                "record": record,
+            }
+        )
+
+    def checkpoint(self) -> None:
+        if self.db is None:
+            raise FiscalTimeSeriesError("fiscal spill is closed")
+        self.db.commit()
+        self._append({"event": "CHECKPOINT"})
+        os.fsync(self.fd)
+
+    def row_count(self) -> int:
+        return int(self.execute("SELECT count(*) FROM rows").fetchone()[0])
+
+    def cell_count(self) -> int:
+        return int(
+            self.execute(
+                "SELECT count(*) FROM ("
+                "SELECT 1 FROM candidates GROUP BY row_id,column_id)"
+            ).fetchone()[0]
+        )
+
+    def rows(self) -> Iterator[dict[str, Any]]:
+        for (payload,) in self.execute(
+            "SELECT record FROM rows ORDER BY review,label,row_id"
+        ):
+            yield _spill_unpack(payload)
+
+    def cells(
+        self,
+        columns: Mapping[tuple[int, int | None, str], Mapping[str, Any]],
+    ) -> Iterator[dict[str, Any]]:
+        current: tuple[str, str, tuple[int, int | None, str]] | None = None
+        choices: list[tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = []
+        for row_id, column_id, period_payload, record_payload in self.execute(
+            "SELECT row_id,column_id,period,record FROM candidates "
+            "ORDER BY row_id,column_id,ordinal"
+        ):
+            period = _spill_unpack(period_payload)
+            coordinate = (str(row_id), str(column_id), period)
+            if current is not None and coordinate != current:
+                yield _resolve_cell(current[0], columns[current[2]], choices)
+                choices = []
+            current = coordinate
+            choices.append(_spill_unpack(record_payload))
+        if current is not None:
+            yield _resolve_cell(current[0], columns[current[2]], choices)
+
+    def close(self, *, success: bool) -> None:
+        error: BaseException | None = None
+        if self.db is not None:
+            try:
+                self.db.close()
+            except sqlite3.Error as exc:  # pragma: no cover - platform close failure
+                error = exc
+            self.db = None
+        if success and error is None:
+            try:
+                self.check()
+                os.fsync(self.fd)
+                os.unlink(self.path.name, dir_fd=self.directory_fd)
+                os.rmdir(self.directory.name, dir_fd=self.root_fd)
+            except (OSError, FiscalTimeSeriesError) as exc:
+                error = exc
+        for descriptor in ("fd", "directory_fd", "root_fd"):
+            value = getattr(self, descriptor, None)
+            if value is not None:
+                os.close(value)
+                setattr(self, descriptor, None)
+        if error is not None:
+            raise error
 
 
 class FiscalTimeSeriesQuery:

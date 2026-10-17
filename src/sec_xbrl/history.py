@@ -332,6 +332,55 @@ def _build_fiscal_time_series(
         inputs.clear()
 
 
+def _iter_fiscal_time_series_inputs(
+    *,
+    scoped: Sequence[tuple[Any, ...]],
+    periods: dict[tuple[Any, ...], list[dict[str, Any]]],
+    ledger: Sequence[dict[str, Any]],
+    selector: Any,
+    panel_builder: Any,
+    graph: Any,
+    filing_by_id: dict[str, dict[str, Any]],
+    cik: str,
+    period_class: str,
+    as_of_date: str,
+    view: str,
+    fiscal_input_type: Any,
+) -> Iterator[Any]:
+    """Yield one complete T5 panel and release it before constructing the next."""
+    for _, year, quarter, _ in scoped:
+        selected = selector.select_period(
+            observations=periods[(cik, year, quarter, period_class)],
+            ledger=ledger,
+            cik=cik,
+            fiscal_year=year,
+            fiscal_quarter=quarter,
+            period_class=period_class,
+            as_of_date=as_of_date,
+            view=view,
+        )
+        panel = panel_builder.build(
+            selected_rows=selected.rows,
+            exploration=graph,
+            cik=cik,
+            fiscal_year=year,
+            fiscal_quarter=quarter,
+            period_class=period_class,
+            view=view,
+            as_of_date=as_of_date,
+        )
+        fiscal_ends = {
+            filing_by_id[str(value["source_filing_id"])].get("fiscal_year_end")
+            for value in panel.values
+            if value.get("source_filing_id") in filing_by_id
+        }
+        # DEI day may roll in 52/53-week years. Preserve uncertainty if
+        # distinct reported calendars occur in one selected panel.
+        fiscal_end = next(iter(fiscal_ends)) if len(fiscal_ends) == 1 else None
+        yield fiscal_input_type(panel, fiscal_end)
+        del panel, selected
+
+
 def _validate_intake(intake: dict[str, Any]) -> None:
     expected = {(company["cik"], row["accession"]) for company in intake["plan"]["companies"] for row in company["filings"]}
     actual = [(row["filing"]["cik"], row["filing"]["accession"]) for row in intake["filings"]]
@@ -459,63 +508,59 @@ def build_history(*, intake_manifest: Path, output_root: Path,
         keys = sorted((key for key in periods if key[0] == cik and key[1] is not None), key=repr)
         for view in views:
             for period_class in sorted({key[3] for key in keys}):
-                inputs = []
                 scoped = [key for key in keys if key[3] == period_class]
-                for _, year, quarter, _ in scoped:
-                    selected = selector.select_period(
-                        observations=periods[(cik, year, quarter, period_class)], ledger=ledger,
-                        cik=cik, fiscal_year=year, fiscal_quarter=quarter, period_class=period_class,
-                        as_of_date=plan["as_of_date"], view=view,
-                    )
-                    panel = builder.build(selected_rows=selected.rows, exploration=graph, cik=cik,
-                                          fiscal_year=year, fiscal_quarter=quarter, period_class=period_class,
-                                          view=view, as_of_date=plan["as_of_date"])
-                    fiscal_ends = {filing_by_id[str(v["source_filing_id"])].get("fiscal_year_end")
-                                   for v in panel.values if v.get("source_filing_id") in filing_by_id}
-                    # DEI day may roll in 52/53-week years. Preserve uncertainty
-                    # if distinct reported calendars occur in one selected panel.
-                    fiscal_end = next(iter(fiscal_ends)) if len(fiscal_ends) == 1 else None
-                    inputs.append(FiscalTimeSeriesInput(panel, fiscal_end))
-                if not inputs:
+                if not scoped:
                     continue
                 expected = []
                 if period_class == "QTD_3M":
                     expected = _expected_quarters(coverage_keys)
-                result = _build_fiscal_time_series(
-                    FiscalTimeSeriesBuilder(), inputs, expected
+                result = FiscalTimeSeriesBuilder().build_spilled(
+                    inputs=_iter_fiscal_time_series_inputs(
+                        scoped=scoped,
+                        periods=periods,
+                        ledger=ledger,
+                        selector=selector,
+                        panel_builder=builder,
+                        graph=graph,
+                        filing_by_id=filing_by_id,
+                        cik=cik,
+                        period_class=period_class,
+                        as_of_date=plan["as_of_date"],
+                        view=view,
+                        fiscal_input_type=FiscalTimeSeriesInput,
+                    ),
+                    spill_root=staging / ".chunks",
+                    expected_periods=expected,
                 )
-                # The result owns deep copies of every persisted definition,
-                # binding, value and candidate path.  Do not retain the source
-                # panels or the last selection aliases during serialization.
-                del inputs, selected, panel
                 annual_years = {key[1] for key in coverage_keys if key[3] == "FY"}
-                result = replace(result, columns=tuple(
-                    {**column, "column_status": "UNAVAILABLE", "column_reason": "DERIVATION_NOT_MATERIALIZED",
-                     "comparability_reason": "DERIVATION_NOT_MATERIALIZED"}
-                    if column["column_status"] == "MISSING_HISTORY" and column["fiscal_quarter"] == 4
-                    and column["fiscal_year"] in annual_years and period_class == "QTD_3M" else column
-                    for column in result.columns
-                ))
                 relative = Path(cik) / view / period_class
                 table = {"ticker": ticker, "cik": cik, "view": view, "period_class": period_class,
                          "scope": result.scope, "files": {}}
-                counts = {
-                    name: len(getattr(result, name))
-                    for name in ("columns", "rows", "cells")
-                }
+                counts = result.counts
                 staged_files: dict[str, _StagedRecordWrite] = {}
+                success = False
                 try:
                     for name in ("columns", "rows", "cells"):
                         path = staging / relative / f"{name}.parquet"
+                        records = result.dataset(name)
+                        if name == "columns":
+                            records = tuple(
+                                {
+                                    **column,
+                                    "column_status": "UNAVAILABLE",
+                                    "column_reason": "DERIVATION_NOT_MATERIALIZED",
+                                    "comparability_reason": "DERIVATION_NOT_MATERIALIZED",
+                                }
+                                if column["column_status"] == "MISSING_HISTORY"
+                                and column["fiscal_quarter"] == 4
+                                and column["fiscal_year"] in annual_years
+                                and period_class == "QTD_3M"
+                                else column
+                                for column in records
+                            )
                         staged_files[name] = _stage_records(
-                            path, getattr(result, name)
+                            path, records
                         )
-                    # Each staged write plan owns only schema, counts, paths and
-                    # its TemporaryDirectory.  The source panels and selection
-                    # aliases were released above; now release the result before
-                    # any whole-table native merge.
-                    del result
-                    gc.collect()
                     for name in ("columns", "rows", "cells"):
                         staged = staged_files[name]
                         info = _finalize_staged_records(staged)
@@ -523,9 +568,13 @@ def build_history(*, intake_manifest: Path, output_root: Path,
                             **info,
                             "path": str(relative / staged.path.name),
                         }
+                    success = True
                 finally:
-                    for staged in staged_files.values():
-                        staged.cleanup()
+                    try:
+                        for staged in staged_files.values():
+                            staged.cleanup()
+                    finally:
+                        result.close(success=success)
                 tables.append(table)
                 print(json.dumps({"stage": "PANEL_WRITTEN", "ticker": ticker, "view": view,
                                   "period_class": period_class, "rows": counts["rows"],

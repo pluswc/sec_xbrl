@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import gc
+import sqlite3
+import weakref
 from copy import deepcopy
+from dataclasses import replace
+from datetime import date
+from decimal import Decimal
 
 import pytest
 
@@ -166,3 +172,159 @@ def test_equal_reported_and_derived_numbers_do_not_coalesce():
     cell = FiscalTimeSeriesBuilder().build(inputs=(FiscalTimeSeriesInput(mixed, "--01-28"),)).cells[0]
     assert cell["value_status"] == "UNAVAILABLE"
     assert cell["resolution_reason"] == "CONFLICTING_EQUAL_PRIORITY_FACTS"
+
+
+def _typed_panel(year: int, quarter: int) -> CompanyAnalysisPanelResult:
+    panel = _panel(year, quarter, f"{year - 1}-01-01", f"{year - 1}-03-31")
+    definitions = deepcopy(panel.definitions)
+    bindings = deepcopy(panel.bindings)
+    values = deepcopy(panel.values)
+    definitions[0]["typed_provenance"] = {
+        "tuple": (True, None, b"bytes"),
+        "list": [Decimal("12.3400"), date(2026, 10, 17)],
+    }
+    bindings[0]["ordered_roles"] = (
+        {"role": "first", "depth": 0},
+        {"role": "second", "depth": 1},
+    )
+    values[0]["nested_lineage"] = {
+        "dimensions": (("axis", "member", None, "EXPLICIT", False),),
+        "unit": {"numerator": ["iso4217:USD"], "denominator": []},
+    }
+    return replace(
+        panel,
+        definitions=definitions,
+        bindings=bindings,
+        values=values,
+    )
+
+
+def test_spilled_builder_is_exactly_equal_with_typed_ordered_provenance(tmp_path):
+    inputs = (
+        FiscalTimeSeriesInput(_typed_panel(2024, 1), "--12-31"),
+        FiscalTimeSeriesInput(_typed_panel(2025, 1), "--12-31"),
+    )
+    expected = FiscalTimeSeriesBuilder().build(inputs=inputs)
+    actual = FiscalTimeSeriesBuilder().build_spilled(
+        inputs=iter(inputs), spill_root=tmp_path
+    )
+    diagnostic = actual.diagnostic_path
+    try:
+        assert actual.materialize() == expected
+        nested = actual.materialize().cells[0]["candidate_lineage"][0]["definition"]
+        assert type(nested["typed_provenance"]["tuple"]) is tuple
+        assert type(nested["typed_provenance"]["tuple"][0]) is bool
+        assert type(nested["typed_provenance"]["tuple"][2]) is bytes
+        assert type(nested["typed_provenance"]["list"][0]) is Decimal
+        assert type(nested["typed_provenance"]["list"][1]) is date
+    finally:
+        actual.close(success=True)
+    assert not diagnostic.exists()
+    assert not list(tmp_path.glob("fiscal-timeseries-*"))
+
+
+@pytest.mark.parametrize("count", (8, 128))
+def test_spilled_builder_releases_each_panel_before_requesting_the_next(
+    tmp_path, count
+):
+    class TrackedDict(dict):
+        pass
+
+    released = 0
+
+    def inputs():
+        nonlocal released
+        previous = None
+        for index in range(count):
+            if previous is not None:
+                gc.collect()
+                assert previous() is None
+                released += 1
+            panel = _panel(
+                2024 + index,
+                1,
+                f"{2023 + index}-01-01",
+                f"{2023 + index}-03-31",
+            )
+            tracked = TrackedDict(panel.definitions[0])
+            previous = weakref.ref(tracked)
+            yield FiscalTimeSeriesInput(
+                replace(panel, definitions=(tracked,)), "--12-31"
+            )
+            del tracked, panel
+        gc.collect()
+        assert previous is not None and previous() is None
+        released += 1
+
+    result = FiscalTimeSeriesBuilder().build_spilled(
+        inputs=inputs(), spill_root=tmp_path
+    )
+    try:
+        assert result.counts == {"columns": count, "rows": 1, "cells": count}
+        assert released == count
+    finally:
+        result.close(success=True)
+
+
+def test_spilled_builder_preserves_typed_journal_on_failure(tmp_path):
+    inputs = (
+        FiscalTimeSeriesInput(_typed_panel(2024, 1), "--12-31"),
+        FiscalTimeSeriesInput(
+            _panel(
+                2025,
+                1,
+                "2024-01-01",
+                "2024-03-31",
+                view="AS_FILED",
+            ),
+            "--12-31",
+        ),
+    )
+    with pytest.raises(FiscalTimeSeriesError, match="cannot mix"):
+        FiscalTimeSeriesBuilder().build_spilled(
+            inputs=inputs, spill_root=tmp_path
+        )
+    journals = list(tmp_path.glob("fiscal-timeseries-*/fiscal-time-series-spill.records"))
+    assert len(journals) == 1
+    assert journals[0].stat().st_size > 40
+
+
+def test_spilled_builder_rejects_memory_only_sqlite(tmp_path, monkeypatch):
+    connect = sqlite3.connect
+
+    class Connection:
+        def __init__(self):
+            self.connection = connect("")
+
+        def execute(self, sql, *args):
+            if sql == "PRAGMA compile_options":
+                return [("TEMP_STORE=3",)]
+            pytest.fail("mutating spill initialization before disk-storage check")
+
+        def close(self):
+            self.connection.close()
+
+    monkeypatch.setattr(sqlite3, "connect", lambda filename: Connection())
+    with pytest.raises(FiscalTimeSeriesError, match="disk-backed"):
+        FiscalTimeSeriesBuilder().build_spilled(
+            inputs=(FiscalTimeSeriesInput(_typed_panel(2024, 1), "--12-31"),),
+            spill_root=tmp_path,
+        )
+    assert list(tmp_path.glob("fiscal-timeseries-*/fiscal-time-series-spill.records"))
+
+
+def test_spilled_builder_cleanup_never_removes_a_foreign_replacement(tmp_path):
+    result = FiscalTimeSeriesBuilder().build_spilled(
+        inputs=(FiscalTimeSeriesInput(_typed_panel(2024, 1), "--12-31"),),
+        spill_root=tmp_path / "spill",
+    )
+    journal = result.diagnostic_path
+    retained = journal.with_name("retained-owned-journal")
+    journal.rename(retained)
+    foreign = tmp_path / "foreign"
+    foreign.write_bytes(b"FOREIGN")
+    journal.symlink_to(foreign)
+    with pytest.raises(FiscalTimeSeriesError, match="ownership changed"):
+        result.close(success=True)
+    assert foreign.read_bytes() == b"FOREIGN"
+    assert retained.exists()

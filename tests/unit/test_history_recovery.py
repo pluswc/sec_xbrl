@@ -348,7 +348,41 @@ def test_build_releases_graph_periods_ledgers_before_verify_and_quarter(tmp_path
     monkeypatch.setattr(history, "_company_ledgers", ledgers)
     monkeypatch.setattr(longitudinal, "ReportedObservationSelector", lambda: SimpleNamespace(select_period=lambda **kw: SimpleNamespace(rows=kw["observations"])))
     monkeypatch.setattr(analytics, "CompanyAnalysisPanelBuilder", lambda: SimpleNamespace(build=lambda **kw: SimpleNamespace(values=())))
-    monkeypatch.setattr(analytics, "FiscalTimeSeriesBuilder", lambda: SimpleNamespace(build=lambda **kw: FiscalTimeSeriesResult(columns=({"column_status": "AVAILABLE", "fiscal_quarter": 1, "fiscal_year": 2026},), rows=({"id": "row"},), cells=({"id": "cell"},), scope={})))
+    fiscal_result = FiscalTimeSeriesResult(
+        columns=(
+            {
+                "column_status": "AVAILABLE",
+                "fiscal_quarter": 1,
+                "fiscal_year": 2026,
+            },
+        ),
+        rows=({"id": "row"},),
+        cells=({"id": "cell"},),
+        scope={},
+    )
+
+    class SpilledResult:
+        def __init__(self):
+            self.scope = fiscal_result.scope
+            self.counts = {
+                "columns": len(fiscal_result.columns),
+                "rows": len(fiscal_result.rows),
+                "cells": len(fiscal_result.cells),
+            }
+
+        @staticmethod
+        def dataset(name):
+            return getattr(fiscal_result, name)
+
+        @staticmethod
+        def close(*, success):
+            assert success
+
+    monkeypatch.setattr(
+        analytics,
+        "FiscalTimeSeriesBuilder",
+        lambda: SimpleNamespace(build_spilled=lambda **kw: SpilledResult()),
+    )
     original_verify = history.HistoryPublicationReader.verify_all
     seen = []
 
