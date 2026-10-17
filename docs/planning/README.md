@@ -20,6 +20,14 @@
 [50사 generic metric identity attestation 제안](../implementation/universe50-generic-metric-identity-proposal-20261017.md)에
 기록한다. 이 링크는 해당 제안의 구현이나 데이터 실행을 승인하지 않는다.
 
+2026-10-17 사용자·리드 후속 승인으로 identity 앞단의 별도
+[generic metric Raw 품질 전달 계약](../implementation/universe50-generic-metric-quality-delivery.md)을
+구현 중이다. mixed Raw v5/v6 source binding과 SEC duration·승인 lexical repair의
+전수 conformance만 보증하며 full financial semantic assurance는 명시적으로 제외한다.
+wide exact-50 parent collection 아래 first-five 같은 명시적 부분집합을 허용하지만,
+범위 밖 회사 상태를 PASS로 승격하지 않는다. 현재는 구현 후보·독립 검증 대기이며
+actual first-five/50 실행, 로컬 인수, main 병합은 미수행이다.
+
 ## 읽기 순서와 문서 소유권
 
 | 문서 | 역할 |
@@ -45,6 +53,7 @@
 | [스크리닝 기업 탐색 R2 전달](../implementation/screening-explorer-delivery.md) · [완료·로컬 인수](../implementation/screening-explorer-completion.md) · [사용법](../usage/screening-explorer.md) | 21개 회사 cold-start 탐색, 선택 FY 기준 31개 지표 안내, 독립 회사 프로필·4 FY 흐름·2–4개 비교. **최종 `7e7ec15…` 독립 PASS·`LOCALLY_ACCEPTED`; 직접 walkthrough·원격 미완료** |
 | [명시적 저장·다시 열기 전달](../implementation/screening-explicit-save-delivery.md) · [완료·로컬 운영 반영](../implementation/screening-explicit-save-completion-20261017.md) | preview 무저장, 조건·결과 분리 저장, 명시 불러오기, 결과 이력 재열기와 hidden result backing. **최종 `e84289a…` 독립 404 PASS·기존 21사 UI `LOCALLY_ACCEPTED`·loopback 반영; 원격 미완료** |
 | [50 issuer T3 참조 결함과 확장 중지](../implementation/universe50-t3-reference-hold-20261017.md) | Raw exact-50 수집 상태는 보존하지만 T3 graph 참조 결함으로 CVX actual audit·first-five·50사 `FinancialREADY`는 미수락. **수리·재감사 사용자 승인 전 HOLD** |
+| [50사 generic metric Raw 품질 전달](../implementation/universe50-generic-metric-quality-delivery.md) | mixed v5/v6 Raw source binding과 duration·승인 lexical repair 전수 conformance, exact parent/cohort scope. **APPROVED / IMPLEMENTED CANDIDATE / 독립 검증 대기**; actual 실행·full financial semantic assurance 아님 |
 | [기간 규칙](../implementation/period-rules.md), [Layer 2 연결](../implementation/layer2-longitudinal.md), [공시 발견 계약](../implementation/accession-contract.md) | 표시 계획으로 바꿀 수 없는 의미·입력 경계 |
 
 충돌 시 적용되는 사용자 결정과 승인 범위를 먼저 확인하고, 해당 평면의 계약을
