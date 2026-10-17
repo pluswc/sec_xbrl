@@ -185,8 +185,8 @@ def test_direct_worker_callback_is_rejected_before_history(
 
     monkeypatch.setattr(runner, "validate_go", lambda *args: ({}, {}))
     monkeypatch.setattr(runner.history, "build_history", forbidden, raising=False)
-    with pytest.raises(PermissionError, match="direct worker"):
-        runner.build_worker(tmp_path / "config", "CVX", tmp_path / "go", None)
+    with pytest.raises(PermissionError, match="inherited supervisor"):
+        runner.build_worker(tmp_path / "config", "CVX", tmp_path / "go")
     assert called is False
 
 
@@ -194,12 +194,12 @@ def test_worker_rechecks_bulk_gate_after_supervisor(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(runner, "validate_go", lambda *args: ({}, {}))
+    monkeypatch.setattr(runner, "receive_supervisor", lambda _: None)
     with pytest.raises(ValueError, match="later-45"):
         runner.build_worker(
             tmp_path / "config",
             "AAPL",
             tmp_path / "go",
-            runner._SUPERVISOR_CAPABILITY,
         )
 
 
@@ -210,6 +210,7 @@ def test_supervised_first5_worker_passes_boundary(
         pass
 
     monkeypatch.setattr(runner, "validate_go", lambda *args: ({}, {}))
+    monkeypatch.setattr(runner, "receive_supervisor", lambda _: None)
     monkeypatch.setattr(runner, "candidate_rows", lambda _: {"CVX": {}})
     monkeypatch.setattr(
         runner,
@@ -221,7 +222,6 @@ def test_supervised_first5_worker_passes_boundary(
             tmp_path / "config",
             "CVX",
             tmp_path / "go",
-            runner._SUPERVISOR_CAPABILITY,
         )
 
 
@@ -249,10 +249,7 @@ def test_supervisor_capability_requires_pipe_and_parent_lock(
         "flock",
         lambda *_: (_ for _ in ()).throw(BlockingIOError()),
     )
-    assert (
-        runner.receive_supervisor({"collection_root": str(tmp_path)})
-        is runner._SUPERVISOR_CAPABILITY
-    )
+    assert runner.receive_supervisor({"collection_root": str(tmp_path)}) is None
 
 
 def test_direct_worker_cli_boundary_has_no_capability(

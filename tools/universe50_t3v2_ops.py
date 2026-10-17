@@ -34,7 +34,6 @@ LIMIT_KIB, TIMEOUT = 16 * 1024 * 1024, 10_800
 CONFIG_SCHEMA = "universe50-t3v2-ops-config-v1"
 PREFLIGHT_SCHEMA = "universe50-t3v2-ops-preflight-v1"
 GO_SCHEMA = "universe50-t3v2-stage-go-v1"
-_SUPERVISOR_CAPABILITY = object()
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -516,7 +515,7 @@ def heavy_lock(root: Path) -> Iterator[None]:
         yield
 
 
-def receive_supervisor(config: dict[str, Any]) -> object:
+def receive_supervisor(config: dict[str, Any]) -> None:
     """Consume the one-shot inherited capability and prove the parent owns the heavy lock."""
     try:
         descriptor = int(os.environ["SEC_XBRL_T3V2_SUPERVISOR_FD"])
@@ -549,7 +548,6 @@ def receive_supervisor(config: dict[str, Any]) -> object:
         else:
             fcntl.flock(stream, fcntl.LOCK_UN)
             raise PermissionError("worker requires the parent-held heavy lock")
-    return _SUPERVISOR_CAPABILITY
 
 
 def monitor_process(
@@ -668,13 +666,11 @@ def build_worker(
     config_path: Path,
     ticker: str,
     go_path: Path,
-    supervisor: object | None,
     gate: Path | None = None,
     gate_sha: str | None = None,
 ) -> Path:
     config, preflight = validate_go(config_path, "build-one", (ticker,), go_path)
-    if supervisor is not _SUPERVISOR_CAPABILITY:
-        raise PermissionError("direct worker invocation is unsupported")
+    receive_supervisor(config)
     validate_bulk_gate(ticker, gate, gate_sha)
     if ticker not in candidate_rows(config):
         raise ValueError("worker ticker is outside exact-50")
@@ -853,13 +849,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.command == "status":
         result = scoped_status(args.config, args.scope_ticker)
     else:
-        config, _ = load_config(args.config)
-        supervisor = receive_supervisor(config)
         result = build_worker(
             args.config,
             args.ticker.upper(),
             args.go_file,
-            supervisor,
             args.first5_acceptance,
             args.first5_acceptance_sha256,
         )
