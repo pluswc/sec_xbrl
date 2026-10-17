@@ -19,12 +19,14 @@ from typing import Any
 
 from sec_xbrl.collection_operations import read_universe_status
 from sec_xbrl.filing.sec_inline_transforms import _decimal_duration, _week_duration
+from sec_xbrl.history import HISTORY_VERSION, HistoryPublicationReader
 from sec_xbrl.source_bindings import (
     BINDINGS_NAME,
     DOCUMENTS_NAME,
     KNOWN_PARSER_PROFILES,
     SourceBindingsV2Reader,
     publish_source_bindings_v2,
+    verify_source_bindings_v2_producer_completeness,
     write_source_indexes_v2,
 )
 
@@ -33,6 +35,8 @@ CONFIG_SCHEMA_VERSION = "generic-metric-quality-config-v1"
 MANIFEST_NAME = "generic_metric_quality_manifest.json"
 REPORT_NAME = "raw_transform_conformance_report.json"
 ASSURANCE_SCOPE = "RAW_TRANSFORM_SOURCE_CONFORMANCE_ONLY"
+COLLECTOR_PROVENANCE_ASSURANCE = "CONFIG_DECLARED_NOT_SOURCE_VERIFIED"
+COLLECTOR_PROVENANCE_GRANULARITY = "COMPANY_CONFIG_DECLARATION"
 RULE_VERSIONS = {
     "quality_rule": "generic-metric-raw-transform-quality-v1",
     "duration_transform_rule": "sec-duration-conformance-v1",
@@ -119,7 +123,7 @@ def _preflight_quality_inputs(
     provenance = {
         (row["ticker"], row["cik"]): row for row in config["source_provenance"]
     }
-    _validate_status(
+    readiness = _validate_status(
         collection_manifest=collection_manifest,
         parent_companies=parent,
         expected_companies=companies,
@@ -134,6 +138,8 @@ def _preflight_quality_inputs(
         history_manifests=history_manifests,
         expected_companies=companies,
         provenance=provenance,
+        financial_as_of=config["financial_as_of"],
+        readiness=readiness,
     )
 
 
@@ -184,10 +190,13 @@ def publish_generic_metric_quality(
         history_manifests=history_manifests,
         expected_companies=companies,
         provenance=provenance,
+        financial_as_of=config["financial_as_of"],
+        readiness=readiness,
     )
 
     bindings = SourceBindingsV2Reader(Path(source_binding_publication))
     bindings.verify_all()
+    verify_source_bindings_v2_producer_completeness(bindings)
     binding_collection = bindings.manifest.get("collection")
     if (
         bindings.manifest.get("scope_companies") != list(companies)
@@ -271,6 +280,8 @@ def publish_generic_metric_quality(
             "state": "PASS",
             "assurance_scope": ASSURANCE_SCOPE,
             "full_financial_semantic_assurance": False,
+            "collector_provenance_assurance": COLLECTOR_PROVENANCE_ASSURANCE,
+            "collector_provenance_granularity": COLLECTOR_PROVENANCE_GRANULARITY,
             "producer_revision": producer_revision,
             "financial_as_of": config["financial_as_of"],
             "collection_scope_mode": (
@@ -336,6 +347,10 @@ class GenericMetricQualityReader:
             or self.manifest.get("state") != "PASS"
             or self.manifest.get("assurance_scope") != ASSURANCE_SCOPE
             or self.manifest.get("full_financial_semantic_assurance") is not False
+            or self.manifest.get("collector_provenance_assurance")
+            != COLLECTOR_PROVENANCE_ASSURANCE
+            or self.manifest.get("collector_provenance_granularity")
+            != COLLECTOR_PROVENANCE_GRANULARITY
             or self.manifest.get("rule_versions") != RULE_VERSIONS
         ):
             raise ValueError("generic metric quality proof is invalid")
@@ -401,6 +416,23 @@ class GenericMetricQualityReader:
                 or type(row.get("build_manifest_path")) is not str
                 or not Path(row["build_manifest_path"]).is_absolute()
                 or _SHA256.fullmatch(str(row.get("build_manifest_sha256"))) is None
+                or any(
+                    type(row.get(field)) is not str
+                    or not Path(row[field]).is_absolute()
+                    for field in (
+                        "plan_path",
+                        "intake_manifest_path",
+                        "history_manifest_path",
+                    )
+                )
+                or any(
+                    _SHA256.fullmatch(str(row.get(field))) is None
+                    for field in (
+                        "plan_sha256",
+                        "intake_sha256",
+                        "history_manifest_sha256",
+                    )
+                )
                 for row in readiness
             )
         ):
@@ -571,6 +603,51 @@ class GenericMetricQualityReader:
         )
         if list(readiness) != self.manifest.get("collection_status"):
             raise ValueError("generic metric quality collection status replay differs")
+        config_declaration = evidence.get("config")
+        history_declarations = evidence.get("history_manifests")
+        if not isinstance(config_declaration, dict) or not isinstance(
+            history_declarations, dict
+        ):
+            raise TypeError("generic metric quality history evidence is invalid")
+        config = _load_config(Path(str(config_declaration.get("path"))))
+        if (
+            config["financial_as_of"] != financial_as_of
+            or config["collection_scope_companies"] != list(companies)
+        ):
+            raise ValueError("generic metric quality config replay differs")
+        provenance = {
+            (row["ticker"], row["cik"]): row for row in config["source_provenance"]
+        }
+        for filing in self.manifest["filings"]:
+            declared = provenance[(str(filing["ticker"]), str(filing["cik"]))]
+            if any(
+                filing.get(field) != declared[field]
+                for field in (
+                    "collector_source_commit_sha",
+                    "plan_sha256",
+                    "intake_sha256",
+                )
+            ):
+                raise ValueError("generic metric quality declared provenance replay differs")
+        _validate_source_provenance(
+            collection_manifest=collection_manifest,
+            collection=collection,
+            expected_companies=companies,
+            provenance=provenance,
+        )
+        histories = _validate_histories(
+            history_manifests={
+                ticker: Path(str(declaration.get("path")))
+                for ticker, declaration in history_declarations.items()
+                if isinstance(declaration, dict)
+            },
+            expected_companies=companies,
+            provenance=provenance,
+            financial_as_of=financial_as_of,
+            readiness=readiness,
+        )
+        if histories != history_declarations:
+            raise ValueError("generic metric quality history replay differs")
         source_binding = self.manifest.get("source_binding")
         if not isinstance(source_binding, dict):
             raise TypeError("generic metric quality source binding is invalid")
@@ -741,6 +818,15 @@ def _validate_status(
     parent_companies: tuple[dict[str, str], ...],
     expected_companies: tuple[dict[str, str], ...],
 ) -> tuple[dict[str, Any], ...]:
+    collection = _read_json(collection_manifest)
+    declared_companies = collection.get("companies")
+    if not isinstance(declared_companies, list):
+        raise TypeError("collection company declarations are invalid")
+    collection_index = {
+        (str(item.get("ticker")), str(item.get("cik"))): item
+        for item in declared_companies
+        if isinstance(item, dict)
+    }
     status = read_universe_status(manifest_path=collection_manifest)
     status_parent = tuple(
         sorted(
@@ -769,6 +855,26 @@ def _validate_status(
             / "build_manifest.json",
             "collection build manifest",
         )
+        marker = _read_json(build_manifest)
+        declared = collection_index.get((company["ticker"], company["cik"]))
+        if declared is None:
+            raise ValueError("READY company is absent from collection manifest")
+        plan_path = _regular_file(Path(str(declared.get("plan_path"))), "collection plan")
+        intake_path = _regular_file(
+            Path(str(marker.get("intake_manifest"))), "collection intake"
+        )
+        history_path = _regular_file(
+            Path(str(marker.get("history_manifest"))), "accepted history manifest"
+        )
+        if (
+            marker.get("ticker") != company["ticker"]
+            or marker.get("status") != "READY"
+            or marker.get("plan_sha256") != _sha256(plan_path)
+            or marker.get("plan_sha256") != declared.get("plan_sha256")
+            or marker.get("intake_sha256") != _sha256(intake_path)
+            or marker.get("history_manifest_sha256") != _sha256(history_path)
+        ):
+            raise ValueError("collection READY build provenance differs")
         evidence.append(
             {
                 "ticker": company["ticker"],
@@ -780,6 +886,12 @@ def _validate_status(
                 "failed_filings": row.failed_filings,
                 "build_manifest_path": str(build_manifest),
                 "build_manifest_sha256": _sha256(build_manifest),
+                "plan_path": str(plan_path),
+                "plan_sha256": str(marker["plan_sha256"]),
+                "intake_manifest_path": str(intake_path),
+                "intake_sha256": str(marker["intake_sha256"]),
+                "history_manifest_path": str(history_path),
+                "history_manifest_sha256": str(marker["history_manifest_sha256"]),
             }
         )
     return tuple(evidence)
@@ -818,27 +930,53 @@ def _validate_histories(
     history_manifests: dict[str, Path],
     expected_companies: tuple[dict[str, str], ...],
     provenance: dict[tuple[str, str], dict[str, str]],
+    financial_as_of: str,
+    readiness: tuple[dict[str, Any], ...],
 ) -> dict[str, dict[str, str]]:
     expected_tickers = {row["ticker"] for row in expected_companies}
     if set(history_manifests) != expected_tickers:
         raise ValueError("accepted history manifests differ from quality scope")
+    readiness_index = {row["ticker"]: row for row in readiness}
     result: dict[str, dict[str, str]] = {}
     for company in expected_companies:
         ticker, cik = company["ticker"], company["cik"]
         path = _regular_file(history_manifests[ticker], "accepted history manifest")
         digest = _sha256(path)
-        if digest != provenance[(ticker, cik)]["history_manifest_sha256"]:
-            raise ValueError("accepted history manifest digest differs")
+        ready = readiness_index.get(ticker)
+        if (
+            ready is None
+            or path != Path(str(ready["history_manifest_path"]))
+            or digest != provenance[(ticker, cik)]["history_manifest_sha256"]
+            or digest != ready["history_manifest_sha256"]
+        ):
+            raise ValueError("accepted history manifest differs from READY build")
+        HistoryPublicationReader(path.parent).verify_all()
         payload = _read_json(path)
         plan = payload.get("plan")
         plan_companies = plan.get("companies") if isinstance(plan, dict) else None
+        plan_path = _regular_file(Path(str(ready["plan_path"])), "collection plan")
+        intake_path = _regular_file(
+            Path(str(ready["intake_manifest_path"])), "collection intake"
+        )
+        expected_plan = _read_json(plan_path)
+        intake = _read_json(intake_path)
         if (
-            not isinstance(plan_companies, list)
+            payload.get("version") != HISTORY_VERSION
+            or plan != expected_plan
+            or not isinstance(plan_companies, list)
             or len(plan_companies) != 1
             or plan_companies[0].get("ticker") != ticker
             or str(plan_companies[0].get("cik")) != cik
+            or plan.get("as_of_date") != financial_as_of
+            or payload.get("source_intake") != str(intake_path)
+            or intake.get("complete") is not True
+            or intake.get("plan") != expected_plan
+            or _sha256(plan_path) != provenance[(ticker, cik)]["plan_sha256"]
+            or _sha256(intake_path) != provenance[(ticker, cik)]["intake_sha256"]
+            or _sha256(plan_path) != ready["plan_sha256"]
+            or _sha256(intake_path) != ready["intake_sha256"]
         ):
-            raise ValueError("accepted history manifest company identity differs")
+            raise ValueError("accepted history plan/intake contract differs")
         result[ticker] = {"path": str(path), "sha256": digest}
     return dict(sorted(result.items()))
 
