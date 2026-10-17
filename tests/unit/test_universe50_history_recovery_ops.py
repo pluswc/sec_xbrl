@@ -77,6 +77,7 @@ def _config(tmp_path: Path, *, ticker: str = "JNJ") -> dict:
             "timeout_seconds": runner.TIMEOUT_SECONDS,
         },
         "first5_financial_acceptance": None,
+        "reported_reuse": None,
     }
 
 
@@ -142,7 +143,19 @@ def _materialize_collection_target(
     candidate = _write(Path(collection["candidate"]), {"selection": candidate_rows})
     collection["candidate_sha256"] = runner._sha256(candidate)
     paths = runner._target_paths(config)
-    plan = _write(paths["plan"], {"as_of_date": runner.FINANCIAL_AS_OF})
+    plan = _write(
+        paths["plan"],
+        {
+            "as_of_date": runner.FINANCIAL_AS_OF,
+            "companies": [
+                {
+                    "ticker": config["target"]["ticker"],
+                    "cik": config["target"]["cik"],
+                    "filings": [],
+                }
+            ],
+        },
+    )
     intake = _write(paths["intake"], {"complete": True, "plan": json.loads(plan.read_text())})
     config["target"]["plan_sha256"] = runner._sha256(plan)
     config["target"]["intake_sha256"] = runner._sha256(intake)
@@ -409,6 +422,7 @@ def test_preflight_request_and_go_reopen_exact_snapshot(
         "engine": {"head": config["engine"]["head"]},
         "collection": {"target": {"ticker": "JNJ", "cik": "0000000003"}},
         "first5_financial_acceptance": None,
+        "reported_reuse": {"binding": "exact-reported-stage"},
     }
     monkeypatch.setattr(runner, "_snapshot", lambda _: snapshot)
     preflight = runner.preflight(config_path)
@@ -416,6 +430,8 @@ def test_preflight_request_and_go_reopen_exact_snapshot(
     _, expected_go = runner._expected_go(config_path)
     go = _write(tmp_path / "root-go.json", expected_go)
     assert runner._validate_go(config_path, go)["target"]["ticker"] == "JNJ"
+    assert json.loads(request.read_text())["reported_reuse"] == snapshot["reported_reuse"]
+    assert expected_go["reported_reuse"] == snapshot["reported_reuse"]
 
     changed = json.loads(request.read_text())
     changed["target"]["cik"] = "9999999999"
@@ -423,6 +439,36 @@ def test_preflight_request_and_go_reopen_exact_snapshot(
     with pytest.raises(ValueError, match="request changed"):
         runner._validate_go(config_path, go)
     assert preflight.is_file()
+
+
+def test_cli_preflight_and_request_preserve_optional_reported_reuse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = _config(tmp_path)
+    Path(config["resource_root"]).mkdir()
+    Path(config["target"]["history_parent"]).mkdir()
+    config_path = _write(tmp_path / "config.json", config)
+    reuse = {"mode": "ATTESTED_REPORTED_STAGE", "binding": "synthetic-cli"}
+    monkeypatch.setattr(
+        runner,
+        "_snapshot",
+        lambda _: {
+            "runner": {"head": config["runner"]["head"]},
+            "engine": {"head": config["engine"]["head"]},
+            "collection": {"target": {"ticker": "JNJ", "cik": "0000000003"}},
+            "first5_financial_acceptance": None,
+            "reported_reuse": reuse,
+        },
+    )
+    assert runner.main(["preflight", "--config", str(config_path)]) == 0
+    preflight_output = json.loads(capsys.readouterr().out)
+    assert Path(preflight_output["path"]).is_file()
+    assert runner.main(["request-stage", "--config", str(config_path)]) == 0
+    request_output = json.loads(capsys.readouterr().out)
+    request = json.loads(Path(request_output["path"]).read_text())
+    assert request["reported_reuse"] == reuse
+    _, go = runner._expected_go(config_path)
+    assert go["reported_reuse"] == reuse
 
 
 def test_execute_recovery_uses_public_history_and_writes_typed_receipt(
@@ -461,6 +507,7 @@ def test_execute_recovery_uses_public_history_and_writes_typed_receipt(
             "engine": {"head": config["engine"]["head"], "files": {}},
             "collection": binding,
             "first5_financial_acceptance": None,
+            "reported_reuse": None,
         },
     )
     monkeypatch.setattr(runner.history, "build_history", build_history, raising=False)
@@ -492,6 +539,165 @@ def test_execute_recovery_uses_public_history_and_writes_typed_receipt(
     assert receipt["engine_source"]["head"] == config["engine"]["head"]
     assert receipt["publication"].endswith("/panels")
     assert not paths["old_receipt"].exists()
+
+
+def test_execute_attested_reuse_calls_real_public_recovery_and_retains_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.unit.test_history_recovery import _recovery_fixture
+
+    kwargs, proof = _recovery_fixture(tmp_path / "public", monkeypatch)
+    source_stage = kwargs["staged_publication"]
+    (source_stage / ".chunks").mkdir()
+    clean_stage = tmp_path / "clean-stage"
+    shutil.copytree(source_stage, clean_stage, ignore=shutil.ignore_patterns(".chunks"))
+    Path(kwargs["operational_root"]).mkdir(exist_ok=True)
+    report_path = Path(proof["verification_report"]["path"])
+    report = json.loads(report_path.read_text())
+    proof["generation_source_identity"] = runner.REPORTED_GENERATION_SOURCE_SHA
+    proof["recovery_source_identity"] = runner.REPORTED_RECOVERY_SOURCE_SHA
+    report.update(
+        source_generation_sha=runner.REPORTED_GENERATION_SOURCE_SHA,
+        recovery_source_sha=runner.REPORTED_RECOVERY_SOURCE_SHA,
+    )
+    _write(report_path, report)
+    proof["verification_report"]["sha256"] = runner._sha256(report_path)
+    attestation = kwargs["attestation"]
+    _write(attestation, proof)
+
+    config, _ = _materialize_collection_target(_config(tmp_path / "runner"), monkeypatch)
+    config = runner._validate_shape(config)
+    binding = runner._validate_collection_target(config)
+    paths = runner._target_paths(config)
+    reuse = {
+        "generation_source_head": runner.REPORTED_GENERATION_SOURCE_SHA,
+        "recovery_source_head": runner.REPORTED_RECOVERY_SOURCE_SHA,
+        "clean_stage": {
+            "root": str(clean_stage),
+            "manifest_sha256": runner._sha256(clean_stage / "history_manifest.json"),
+        },
+        "component_report": {
+            "path": str(report_path),
+            "sha256": runner._sha256(report_path),
+        },
+        "root_attestation": {
+            "path": str(attestation),
+            "sha256": runner._sha256(attestation),
+        },
+        "intake": {
+            "path": str(kwargs["intake_manifest"]),
+            "sha256": runner._sha256(kwargs["intake_manifest"]),
+        },
+        "original_operational_root": str(kwargs["operational_root"]),
+    }
+    monkeypatch.setattr(
+        runner,
+        "_snapshot",
+        lambda _: {
+            "runner": {"synthetic_authorization_only": True},
+            "engine": {"synthetic_authorization_only": True},
+            "collection": binding,
+            "first5_financial_acceptance": None,
+            "reported_reuse": reuse,
+        },
+    )
+    marker = {
+        "publication": str(paths["destination"] / "panels"),
+        "history_manifest_sha256": "d" * 64,
+        "declared_files": {"history_manifest.json": "e" * 64},
+    }
+    monkeypatch.setattr(runner.ops, "_create_build_attestation", lambda **_: marker)
+    monkeypatch.setattr(runner.ops, "_validate_build_attestation", lambda *_, **__: None)
+    monkeypatch.setattr(
+        runner.ops,
+        "_write_once_json",
+        lambda path, value, **_: _write(path, value),
+    )
+    monkeypatch.setattr(
+        runner.ops,
+        "read_universe_status",
+        lambda **_: SimpleNamespace(companies=(SimpleNamespace(ticker="JNJ", state="READY"),)),
+    )
+    go = _write(tmp_path / "reuse-go.json", {"authorized_by": "ROOT_LEAD"})
+    receipt_path = runner._execute_recovery(config, go)
+    receipt = json.loads(receipt_path.read_text())
+    public_receipt = json.loads(
+        (paths["destination"] / "reported_recovery_receipt.json").read_text()
+    )
+    assert public_receipt["status"] == "COMPLETE"
+    assert receipt["status"] == "READY"
+    assert receipt["reported_reuse"]["original_operational_root"] == str(
+        kwargs["operational_root"]
+    )
+    assert receipt["public_reported_recovery_receipt"]["sha256"] == runner._sha256(
+        paths["destination"] / "reported_recovery_receipt.json"
+    )
+    runner.history.HistoryPublicationReader(Path(receipt["publication"])).verify_all()
+
+
+def test_attested_reuse_rejects_incomplete_public_receipt_before_ready_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, _ = _materialize_collection_target(_config(tmp_path), monkeypatch)
+    config = runner._validate_shape(config)
+    binding = runner._validate_collection_target(config)
+    paths = runner._target_paths(config)
+    evidence = _write(tmp_path / "component.json", {"synthetic": True})
+    intake = _write(tmp_path / "reuse-intake.json", {"synthetic": True})
+    attestation = _write(tmp_path / "attestation.json", {"synthetic": True})
+    clean = tmp_path / "clean"
+    clean.mkdir()
+    reuse = {
+        "generation_source_head": runner.REPORTED_GENERATION_SOURCE_SHA,
+        "recovery_source_head": runner.REPORTED_RECOVERY_SOURCE_SHA,
+        "clean_stage": {"root": str(clean), "manifest_sha256": "a" * 64},
+        "component_report": {"path": str(evidence), "sha256": runner._sha256(evidence)},
+        "root_attestation": {
+            "path": str(attestation),
+            "sha256": runner._sha256(attestation),
+        },
+        "intake": {"path": str(intake), "sha256": runner._sha256(intake)},
+        "original_operational_root": str(tmp_path / "operational"),
+    }
+    monkeypatch.setattr(
+        runner,
+        "_snapshot",
+        lambda _: {
+            "runner": {},
+            "engine": {},
+            "collection": binding,
+            "first5_financial_acceptance": None,
+            "reported_reuse": reuse,
+        },
+    )
+
+    def recover(**_):
+        publication = paths["destination"] / "panels"
+        _write(publication / "history_manifest.json", {})
+        _write(
+            paths["destination"] / "reported_recovery_receipt.json",
+            {"version": "reported-stage-recovery-v1", "status": "NOT_READY"},
+        )
+        return publication
+
+    class Reader:
+        def __init__(self, _):
+            pass
+
+        def verify_all(self):
+            return None
+
+    monkeypatch.setattr(runner.history, "recover_reported_history", recover)
+    monkeypatch.setattr(runner.history, "HistoryPublicationReader", Reader)
+    monkeypatch.setattr(
+        runner.ops,
+        "_create_build_attestation",
+        lambda **_: pytest.fail("READY marker attempted before public receipt validation"),
+    )
+    with pytest.raises(ValueError, match="public reported recovery receipt identity"):
+        runner._execute_recovery(config, _write(tmp_path / "go.json", {}))
+    assert not paths["marker"].exists()
+    assert not paths["receipt"].exists()
 
 
 def test_clean_runner_and_engine_imports_are_separate_from_financial_modules(
@@ -976,6 +1182,7 @@ def test_real_synthetic_public_history_attestation_ready_and_typed_receipt(tmp_p
             "runner": {"synthetic_authorization_only": True},
             "engine": {"synthetic_authorization_only": True},
             "first5_financial_acceptance": None,
+            "reported_reuse": None,
             "collection": {
                 "manifest": str(manifest),
                 "manifest_sha256": runner._sha256(manifest),
@@ -1308,6 +1515,238 @@ def _prior_recovery_fixture(
         "legacy_witness": legacy_witness,
         "legacy_failed": legacy_failed,
     }
+
+
+def _reported_reuse_fixture(
+    tmp_path,
+    monkeypatch,
+    prior_recovery_checkout,
+    canonical_checkout,
+):
+    config, prior = _prior_recovery_fixture(
+        tmp_path, monkeypatch, prior_recovery_checkout, canonical_checkout
+    )
+    failed = prior["failed"]
+    source_stage = failed / ".panels.partial-reported"
+    (source_stage / ".chunks").mkdir(parents=True)
+    _write(source_stage / "history_manifest.json", {"reported": True})
+    for index in range(36):
+        path = source_stage / f"table-{index // 3:02d}" / f"part-{index:02d}.parquet"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(f"reported-{index}\n".encode())
+    clean_stage = tmp_path / "clean-reported-stage"
+    shutil.copytree(source_stage, clean_stage, ignore=shutil.ignore_patterns(".chunks"))
+    copied_files = [
+        {
+            "path": str(path.relative_to(clean_stage)),
+            "sha256": runner._sha256(path),
+        }
+        for path in sorted(clean_stage.rglob("*"))
+        if path.is_file()
+    ]
+    operational_root = failed / "original-operational"
+    operational_roots = {}
+    for name in ("t1", "t2", "t3", "t4"):
+        root = operational_root / name / operational_root.name
+        manifest = _write(root / "layer2_run_manifest.json", {"stage": name})
+        operational_roots[name] = {
+            "path": str(root),
+            "manifest_sha256": runner._sha256(manifest),
+        }
+    protected = _write(tmp_path / "protected-inventory.json", {"status": "UNCHANGED"})
+    source_log = tmp_path / "source-execution.log"
+    source_log.write_text("synthetic source execution\n", encoding="utf-8")
+    stage_pin = {
+        "root": str(source_stage),
+        "manifest_sha256": runner._sha256(source_stage / "history_manifest.json"),
+    }
+    clean_pin = {
+        "root": str(clean_stage),
+        "manifest_sha256": runner._sha256(clean_stage / "history_manifest.json"),
+    }
+    copy_report = _write(
+        tmp_path / "copy-report.json",
+        {
+            "schema_version": "independent-reported-stage-clean-copy-v1",
+            "status": "PASS_DECLARED_FILES_CLEAN_COPY_ONLY",
+            "fixture_kind": "SYNTHETIC_TEST",
+            "history_ready": False,
+            "source_generation_sha": runner.REPORTED_GENERATION_SOURCE_SHA,
+            "recovery_source_sha": runner.REPORTED_RECOVERY_SOURCE_SHA,
+            "original_failed_output_root": str(failed),
+            "original_operational_root": str(operational_root),
+            "source_stage": stage_pin,
+            "clean_stage": clean_pin,
+            "copied_file_count": 37,
+            "copied_files": copied_files,
+            "original_before_after_equal": True,
+            "strictly_empty_chunks": True,
+            "protected_inventory": {
+                "path": str(protected),
+                "sha256": runner._sha256(protected),
+            },
+        },
+    )
+    copy_pin = {"path": str(copy_report), "sha256": runner._sha256(copy_report)}
+    plan = runner._target_paths(config)["plan"]
+    intake = runner._target_paths(config)["intake"]
+    plan_pin = {"path": str(plan), "sha256": runner._sha256(plan)}
+    intake_pin = {"path": str(intake), "sha256": runner._sha256(intake)}
+    log_pin = {"path": str(source_log), "sha256": runner._sha256(source_log)}
+    component = _write(
+        tmp_path / "component-report.json",
+        {
+            "schema_version": "independent-staged-reported-component-audit-v1",
+            "verdict": "PASS_STAGED_REPORTED_COMPONENT_ONLY",
+            "fixture_kind": "SYNTHETIC_TEST",
+            "verification_level": "FULL_STAGED_REPORTED_PASS",
+            "history_ready": False,
+            "source_generation_sha": runner.REPORTED_GENERATION_SOURCE_SHA,
+            "recovery_source_sha": runner.REPORTED_RECOVERY_SOURCE_SHA,
+            "original_stage": stage_pin,
+            "copy_report": copy_pin,
+            "original_operational_root": str(operational_root),
+            "operational_roots": operational_roots,
+            "stage_manifest": {
+                "path": str(clean_stage / "history_manifest.json"),
+                "sha256": clean_pin["manifest_sha256"],
+            },
+            "source_intake": intake_pin,
+            "plan": plan_pin,
+            "source_execution_log": log_pin,
+            "input_fingerprint": "synthetic-fingerprint",
+        },
+    )
+    component_pin = {"path": str(component), "sha256": runner._sha256(component)}
+    proof = _write(
+        tmp_path / "root-attestation.json",
+        {
+            "version": "reported-stage-recovery-v1",
+            "status": "PASS",
+            "generation_source_identity": runner.REPORTED_GENERATION_SOURCE_SHA,
+            "recovery_source_identity": runner.REPORTED_RECOVERY_SOURCE_SHA,
+            "staged_manifest_sha256": clean_pin["manifest_sha256"],
+            "intake_sha256": intake_pin["sha256"],
+            "plan": json.loads(plan.read_text()),
+            "verification_report": component_pin,
+            "source_execution_log": log_pin,
+            "operational_manifest_sha256": {
+                name: value["manifest_sha256"] for name, value in operational_roots.items()
+            },
+            "input_fingerprint": "synthetic-fingerprint",
+        },
+    )
+    config["engine"]["head"] = runner.REPORTED_RECOVERY_SOURCE_SHA
+    config["reported_reuse"] = {
+        "schema_version": runner.REPORTED_REUSE_VERSION,
+        "mode": "ATTESTED_REPORTED_STAGE",
+        "universe_id": config["collection"]["universe_id"],
+        "cik": config["target"]["cik"],
+        "generation_source_head": runner.REPORTED_GENERATION_SOURCE_SHA,
+        "recovery_source_head": runner.REPORTED_RECOVERY_SOURCE_SHA,
+        "original_failed_output_root": str(failed),
+        "original_operational_root": str(operational_root),
+        "operational_roots": operational_roots,
+        "source_stage": stage_pin,
+        "clean_stage": clean_pin,
+        "copy_report": copy_pin,
+        "component_report": component_pin,
+        "root_attestation": {"path": str(proof), "sha256": runner._sha256(proof)},
+        "source_execution_log": log_pin,
+        "intake": intake_pin,
+        "plan": plan_pin,
+    }
+    return config, prior, {
+        "clean_stage": clean_stage,
+        "copy_report": copy_report,
+        "component": component,
+        "proof": proof,
+        "source_log": source_log,
+    }
+
+
+def test_attested_reported_reuse_binds_exact_r1_witness_and_component(
+    tmp_path, monkeypatch, prior_recovery_checkout, canonical_checkout
+):
+    config, _, _ = _reported_reuse_fixture(
+        tmp_path, monkeypatch, prior_recovery_checkout, canonical_checkout
+    )
+    config = runner._validate_shape(config)
+    collection = runner._validate_collection_target(config)
+    reuse = runner._validate_reported_reuse(config, collection)
+    assert reuse is not None
+    assert reuse["original_failed_output_root"] == next(
+        row["output_root"]
+        for row in collection["target"]["prior_failed_attempts"]
+        if row.get("runner_head") == runner.PRIOR_RECOVERY_SOURCE_SHA
+    )
+    assert reuse["clean_stage"]["manifest_sha256"] == reuse["source_stage"][
+        "manifest_sha256"
+    ]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "foreign_attestation",
+        "changed_file",
+        "foreign_root",
+        "incomplete_copy",
+        "component",
+        "source_execution",
+        "plan",
+        "cik",
+        "universe",
+        "omitted_field",
+    ],
+)
+def test_attested_reported_reuse_rejects_foreign_incomplete_or_omitted_binding(
+    tmp_path, monkeypatch, prior_recovery_checkout, canonical_checkout, mutation
+):
+    config, prior, evidence = _reported_reuse_fixture(
+        tmp_path, monkeypatch, prior_recovery_checkout, canonical_checkout
+    )
+    reuse = config["reported_reuse"]
+    if mutation == "foreign_attestation":
+        proof = json.loads(evidence["proof"].read_text())
+        proof["generation_source_identity"] = "f" * 40
+        _write(evidence["proof"], proof)
+        reuse["root_attestation"]["sha256"] = runner._sha256(evidence["proof"])
+    elif mutation == "changed_file":
+        next(evidence["clean_stage"].glob("**/*.parquet")).write_bytes(b"changed\n")
+    elif mutation == "foreign_root":
+        reuse["original_failed_output_root"] = str(prior["legacy_failed"])
+    elif mutation == "incomplete_copy":
+        report = json.loads(evidence["copy_report"].read_text())
+        report["copied_files"].pop()
+        report["copied_file_count"] = 36
+        _write(evidence["copy_report"], report)
+        reuse["copy_report"]["sha256"] = runner._sha256(evidence["copy_report"])
+    elif mutation == "component":
+        report = json.loads(evidence["component"].read_text())
+        report["history_ready"] = True
+        _write(evidence["component"], report)
+        reuse["component_report"]["sha256"] = runner._sha256(evidence["component"])
+    elif mutation == "source_execution":
+        foreign = tmp_path / "foreign-source.log"
+        foreign.write_text("foreign\n", encoding="utf-8")
+        reuse["source_execution_log"] = {
+            "path": str(foreign),
+            "sha256": runner._sha256(foreign),
+        }
+    elif mutation == "plan":
+        foreign = _write(tmp_path / "foreign-plan.json", {"companies": []})
+        reuse["plan"] = {"path": str(foreign), "sha256": runner._sha256(foreign)}
+    elif mutation == "cik":
+        reuse["cik"] = "9999999999"
+    elif mutation == "universe":
+        reuse["universe_id"] = "foreign-universe"
+    else:
+        reuse.pop("copy_report")
+    with pytest.raises((KeyError, TypeError, ValueError)):
+        shaped = runner._validate_shape(config)
+        collection = runner._validate_collection_target(shaped)
+        runner._validate_reported_reuse(shaped, collection)
 
 
 def test_accepted_a02_recovery_timeout_binds_exact_second_abandoned_root(

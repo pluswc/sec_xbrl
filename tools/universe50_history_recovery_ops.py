@@ -27,6 +27,7 @@ REQUEST_VERSION = "universe50-history-recovery-request-v1"
 GO_VERSION = "universe50-history-recovery-go-v1"
 RECEIPT_VERSION = "universe50-history-recovery-receipt-v1"
 RESOURCE_VERSION = "universe50-history-recovery-resource-run-v1"
+REPORTED_REUSE_VERSION = "universe50-attested-reported-reuse-v1"
 ENGINE_ACCEPTANCE_VERSION = "lead-history-engine-source-acceptance-v1"
 ENGINE_ACCEPTANCE_STATUS = "LOCALLY_ACCEPTED_HISTORY_ENGINE_SOURCE_AND_SYNTHETIC"
 FINANCIAL_ACCEPTANCE_VERSION = "universe50-first5-financial-acceptance-v1"
@@ -34,6 +35,8 @@ FINANCIAL_ACCEPTANCE_STATUS = "LOCALLY_ACCEPTED_FIRST5_FINANCIAL"
 RUNNER_BASE_SHA = "9b6e7ec906382fba92adb5209c5b439fc7d7d6ba"
 ENGINE_BASE_SHA = "8a1b40ab1008fb9109a27b2a5bcea02a257e1694"
 FINANCIAL_SOURCE_SHA = "fd9a17910a7b1cfbb4e71e2ded6f4bc23cda686e"
+REPORTED_GENERATION_SOURCE_SHA = "3a3d7d6492bf7948376cb6795a9ddfe157a8b556"
+REPORTED_RECOVERY_SOURCE_SHA = "f222a8b77aefff2adb877f587e59cfd9ac03bf7d"
 PRIOR_RECOVERY_SOURCE_SHA = "a02c4aef36a28c3673185ddebefc01efaa8fe0ff"
 PRIOR_RECOVERY_SOURCE_TREE = "de682369314a3c74c2e727abfdb68c51c6874f55"
 PRIOR_RECOVERY_PROGRAM_SHA256 = "e18b3157a350f6b70a4563a775fd13aa3114f32b18a695d909ed13c1fca77c33"
@@ -217,8 +220,76 @@ def _validate_companies(value: Any) -> list[dict[str, str]]:
     return result
 
 
+def _validate_reported_reuse_shape(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    expected = {
+        "schema_version",
+        "mode",
+        "universe_id",
+        "cik",
+        "generation_source_head",
+        "recovery_source_head",
+        "original_failed_output_root",
+        "original_operational_root",
+        "operational_roots",
+        "source_stage",
+        "clean_stage",
+        "copy_report",
+        "component_report",
+        "root_attestation",
+        "source_execution_log",
+        "intake",
+        "plan",
+    }
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ValueError("reported reuse declaration shape differs")
+    if (
+        value["schema_version"] != REPORTED_REUSE_VERSION
+        or value["mode"] != "ATTESTED_REPORTED_STAGE"
+        or not isinstance(value["universe_id"], str)
+        or not value["universe_id"]
+        or not isinstance(value["cik"], str)
+        or len(value["cik"]) != 10
+        or not value["cik"].isdigit()
+        or value["generation_source_head"] != REPORTED_GENERATION_SOURCE_SHA
+        or value["recovery_source_head"] != REPORTED_RECOVERY_SOURCE_SHA
+    ):
+        raise ValueError("reported reuse identity differs")
+    for name in ("original_failed_output_root", "original_operational_root"):
+        _absolute(value[name], f"reported reuse {name}")
+    operational = value["operational_roots"]
+    if not isinstance(operational, dict) or set(operational) != {"t1", "t2", "t3", "t4"}:
+        raise ValueError("reported reuse operational root set differs")
+    for name, declaration in operational.items():
+        if not isinstance(declaration, dict) or set(declaration) != {"path", "manifest_sha256"}:
+            raise ValueError(f"reported reuse operational root {name} differs")
+        _absolute(declaration["path"], f"reported reuse operational root {name}")
+        _sha(declaration["manifest_sha256"], f"reported reuse operational root {name}")
+    for name in ("source_stage", "clean_stage"):
+        declaration = value[name]
+        if not isinstance(declaration, dict) or set(declaration) != {"root", "manifest_sha256"}:
+            raise ValueError(f"reported reuse {name} differs")
+        _absolute(declaration["root"], f"reported reuse {name}")
+        _sha(declaration["manifest_sha256"], f"reported reuse {name}")
+    for name in (
+        "copy_report",
+        "component_report",
+        "root_attestation",
+        "source_execution_log",
+        "intake",
+        "plan",
+    ):
+        declaration = value[name]
+        if not isinstance(declaration, dict) or set(declaration) != {"path", "sha256"}:
+            raise ValueError(f"reported reuse {name} requires exact path and SHA-256")
+        _absolute(declaration["path"], f"reported reuse {name}")
+        _sha(declaration["sha256"], f"reported reuse {name}")
+    return value
+
+
 def _validate_shape(value: dict[str, Any]) -> dict[str, Any]:
-    if set(value) != {
+    required = {
         "schema_version",
         "financial_as_of",
         "first5",
@@ -230,7 +301,8 @@ def _validate_shape(value: dict[str, Any]) -> dict[str, Any]:
         "resource_root",
         "limits",
         "first5_financial_acceptance",
-    }:
+    }
+    if set(value) not in (required, required | {"reported_reuse"}):
         raise ValueError("History recovery config shape differs")
     if value.get("schema_version") != CONFIG_VERSION:
         raise ValueError("unsupported History recovery config")
@@ -363,11 +435,20 @@ def _validate_shape(value: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("first-five recovery cannot declare bulk financial acceptance")
     elif not isinstance(acceptance, dict):
         raise ValueError("later-45 recovery requires canonical first-five acceptance")
+    reported_reuse = _validate_reported_reuse_shape(value.get("reported_reuse"))
+    if reported_reuse is not None and (
+        ticker != "JNJ"
+        or reported_reuse["universe_id"] != collection["universe_id"]
+        or reported_reuse["cik"] != cik
+        or engine["head"] != REPORTED_RECOVERY_SOURCE_SHA
+    ):
+        raise ValueError("reported reuse is outside the approved JNJ source scope")
     return {
         **value,
         "collection": {**collection, "companies": companies},
         "execution_root": str(execution_root),
         "resource_root": str(resource_root),
+        "reported_reuse": reported_reuse,
     }
 
 
@@ -1314,13 +1395,232 @@ def _validate_collection_target(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _snapshot(config: dict[str, Any]) -> dict[str, Any]:
+def _validate_reported_reuse(
+    config: dict[str, Any], collection: dict[str, Any]
+) -> dict[str, Any] | None:
+    declaration = config["reported_reuse"]
+    if declaration is None:
+        return None
+    target = config["target"]
+    paths = _target_paths(config)
+    failed_root = _directory(
+        Path(declaration["original_failed_output_root"]),
+        "reported reuse original failed output root",
+    )
+    recovery_failures = [
+        row
+        for row in collection["target"]["prior_failed_attempts"]
+        if row.get("runner_head") == PRIOR_RECOVERY_SOURCE_SHA
+    ]
+    if len(recovery_failures) != 1 or recovery_failures[0].get("output_root") != str(failed_root):
+        raise ValueError("reported reuse does not bind the exact accepted R1 failed root")
+
+    operational_root = _directory(
+        Path(declaration["original_operational_root"]),
+        "reported reuse original operational root",
+    )
+    operational_pins: dict[str, dict[str, str]] = {}
+    for name, item in declaration["operational_roots"].items():
+        root = _directory(Path(item["path"]), f"reported reuse operational root {name}")
+        expected_root = operational_root / name / operational_root.name
+        if root != expected_root:
+            raise ValueError("reported reuse operational root path differs")
+        manifest = _regular(root / "layer2_run_manifest.json", f"reported reuse {name} manifest")
+        digest = _sha256(manifest)
+        if digest != item["manifest_sha256"]:
+            raise ValueError("reported reuse operational manifest hash differs")
+        operational_pins[name] = {"path": str(root), "manifest_sha256": digest}
+
+    source_stage = _directory(
+        Path(declaration["source_stage"]["root"]), "reported reuse source stage"
+    )
+    clean_stage = _directory(
+        Path(declaration["clean_stage"]["root"]), "reported reuse clean stage"
+    )
+    if not source_stage.is_relative_to(failed_root):
+        raise ValueError("reported reuse source stage is outside the accepted R1 failed root")
+    if clean_stage.is_relative_to(failed_root) or failed_root.is_relative_to(clean_stage):
+        raise ValueError("reported reuse clean stage overlaps the immutable failed root")
+    destination = Path(collection["target"]["destination"])
+    execution = Path(config["execution_root"])
+    for immutable in (source_stage, clean_stage, operational_root):
+        if (
+            destination.is_relative_to(immutable)
+            or immutable.is_relative_to(destination)
+            or execution.is_relative_to(immutable)
+            or immutable.is_relative_to(execution)
+        ):
+            raise ValueError("reported reuse source overlaps output or execution evidence")
+    source_manifest = _regular(
+        source_stage / "history_manifest.json", "reported reuse source stage manifest"
+    )
+    clean_manifest = _regular(
+        clean_stage / "history_manifest.json", "reported reuse clean stage manifest"
+    )
+    source_manifest_sha = _sha256(source_manifest)
+    clean_manifest_sha = _sha256(clean_manifest)
+    if (
+        source_manifest_sha != declaration["source_stage"]["manifest_sha256"]
+        or clean_manifest_sha != declaration["clean_stage"]["manifest_sha256"]
+        or source_manifest_sha != clean_manifest_sha
+    ):
+        raise ValueError("reported reuse stage manifest identity differs")
+    chunks = source_stage / ".chunks"
+    if (
+        not chunks.is_dir()
+        or chunks.is_symlink()
+        or chunks != chunks.resolve()
+        or any(chunks.iterdir())
+    ):
+        raise ValueError("reported reuse source .chunks must exist and be strictly empty")
+    if (clean_stage / ".chunks").exists() or (clean_stage / ".chunks").is_symlink():
+        raise ValueError("reported reuse clean stage must contain declared files only")
+
+    pins = {
+        name: _pin(declaration[name], f"reported reuse {name}")
+        for name in (
+            "copy_report",
+            "component_report",
+            "root_attestation",
+            "source_execution_log",
+            "intake",
+            "plan",
+        )
+    }
+    if pins["intake"] != paths["intake"] or pins["plan"] != paths["plan"]:
+        raise ValueError("reported reuse plan or intake path differs from collection target")
+    if (
+        declaration["intake"]["sha256"] != target["intake_sha256"]
+        or declaration["plan"]["sha256"] != target["plan_sha256"]
+    ):
+        raise ValueError("reported reuse plan or intake hash differs from collection target")
+    plan = _read_json(pins["plan"], "reported reuse plan")
+    intake = _read_json(pins["intake"], "reported reuse intake")
+    companies = plan.get("companies")
+    if (
+        intake.get("complete") is not True
+        or intake.get("plan") != plan
+        or not isinstance(companies, list)
+        or len(companies) != 1
+        or companies[0].get("ticker") != target["ticker"]
+        or companies[0].get("cik") != target["cik"]
+    ):
+        raise ValueError("reported reuse plan/intake target identity differs")
+
+    copy_report = _read_json(pins["copy_report"], "reported reuse copy report")
+    required_copy = {
+        "schema_version": "independent-reported-stage-clean-copy-v1",
+        "status": "PASS_DECLARED_FILES_CLEAN_COPY_ONLY",
+        "history_ready": False,
+        "source_generation_sha": REPORTED_GENERATION_SOURCE_SHA,
+        "recovery_source_sha": REPORTED_RECOVERY_SOURCE_SHA,
+        "original_failed_output_root": str(failed_root),
+        "original_operational_root": str(operational_root),
+        "source_stage": {
+            "root": str(source_stage),
+            "manifest_sha256": source_manifest_sha,
+        },
+        "clean_stage": {
+            "root": str(clean_stage),
+            "manifest_sha256": clean_manifest_sha,
+        },
+        "original_before_after_equal": True,
+        "strictly_empty_chunks": True,
+    }
+    if any(copy_report.get(key) != value for key, value in required_copy.items()):
+        raise ValueError("reported reuse clean-copy report identity differs")
+    if copy_report.get("fixture_kind") not in {"ACTUAL", "CACHED_TEST", "SYNTHETIC_TEST"}:
+        raise ValueError("reported reuse clean-copy fixture kind differs")
+    protected_inventory = copy_report.get("protected_inventory")
+    if not isinstance(protected_inventory, dict):
+        raise TypeError("reported reuse clean-copy protected inventory is missing")
+    _pin(protected_inventory, "reported reuse protected inventory")
+    copied_files = copy_report.get("copied_files")
+    if copy_report.get("copied_file_count") != 37 or not isinstance(copied_files, list):
+        raise ValueError("reported reuse clean-copy inventory is incomplete")
+    copied: dict[str, str] = {}
+    for item in copied_files:
+        if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
+            raise ValueError("reported reuse copied file declaration differs")
+        relative = Path(item["path"])
+        digest = _sha(item["sha256"], "reported reuse copied file")
+        if relative.is_absolute() or ".." in relative.parts or str(relative) in copied:
+            raise ValueError("reported reuse copied file path is unsafe or duplicated")
+        copied[str(relative)] = digest
+    if len(copied) != 37 or copied.get("history_manifest.json") != clean_manifest_sha:
+        raise ValueError("reported reuse clean-copy inventory count differs")
+    source_files = {
+        str(path.relative_to(source_stage)): _sha256(_regular(path, "reported reuse source file"))
+        for path in source_stage.rglob("*")
+        if path.is_file()
+    }
+    clean_files = {
+        str(path.relative_to(clean_stage)): _sha256(_regular(path, "reported reuse clean file"))
+        for path in clean_stage.rglob("*")
+        if path.is_file()
+    }
+    if source_files != copied or clean_files != copied:
+        raise ValueError("reported reuse clean copy is incomplete or differs from its source")
+
+    component = _read_json(pins["component_report"], "reported reuse component report")
+    if (
+        component.get("schema_version") != "independent-staged-reported-component-audit-v1"
+        or component.get("verdict") != "PASS_STAGED_REPORTED_COMPONENT_ONLY"
+        or component.get("verification_level") != "FULL_STAGED_REPORTED_PASS"
+        or component.get("history_ready") is not False
+        or component.get("source_generation_sha") != REPORTED_GENERATION_SOURCE_SHA
+        or component.get("recovery_source_sha") != REPORTED_RECOVERY_SOURCE_SHA
+        or component.get("original_stage") != required_copy["source_stage"]
+        or component.get("copy_report") != declaration["copy_report"]
+        or component.get("original_operational_root") != str(operational_root)
+        or component.get("operational_roots") != operational_pins
+        or component.get("stage_manifest")
+        != {"path": str(clean_manifest), "sha256": clean_manifest_sha}
+        or component.get("source_intake") != declaration["intake"]
+        or component.get("plan") != declaration["plan"]
+        or component.get("source_execution_log") != declaration["source_execution_log"]
+    ):
+        raise ValueError("reported reuse component report binding differs")
+
+    proof = _read_json(pins["root_attestation"], "reported reuse root attestation")
+    if (
+        proof.get("version") != "reported-stage-recovery-v1"
+        or proof.get("status") != "PASS"
+        or proof.get("generation_source_identity") != REPORTED_GENERATION_SOURCE_SHA
+        or proof.get("recovery_source_identity") != REPORTED_RECOVERY_SOURCE_SHA
+        or proof.get("staged_manifest_sha256") != clean_manifest_sha
+        or proof.get("intake_sha256") != declaration["intake"]["sha256"]
+        or proof.get("plan") != plan
+        or proof.get("verification_report") != declaration["component_report"]
+        or proof.get("source_execution_log") != declaration["source_execution_log"]
+        or proof.get("operational_manifest_sha256")
+        != {name: item["manifest_sha256"] for name, item in operational_pins.items()}
+    ):
+        raise ValueError("reported reuse root attestation binding differs")
+    if component.get("input_fingerprint") != proof.get("input_fingerprint"):
+        raise ValueError("reported reuse component input fingerprint differs")
     return {
+        **declaration,
+        "original_failed_output_root": str(failed_root),
+        "original_operational_root": str(operational_root),
+        "operational_roots": operational_pins,
+        "source_stage": required_copy["source_stage"],
+        "clean_stage": required_copy["clean_stage"],
+    }
+
+
+def _snapshot(config: dict[str, Any]) -> dict[str, Any]:
+    collection = _validate_collection_target(config)
+    value = {
         "runner": _verify_runner_source(config),
         "engine": _verify_engine_source(config),
-        "collection": _validate_collection_target(config),
+        "collection": collection,
         "first5_financial_acceptance": _verify_financial_acceptance(config),
     }
+    reported_reuse = _validate_reported_reuse(config, collection)
+    if reported_reuse is not None:
+        value["reported_reuse"] = reported_reuse
+    return value
 
 
 def _preflight_path(config: dict[str, Any]) -> Path:
@@ -1391,6 +1691,8 @@ def request_stage(config_path: Path) -> Path:
         "first5_financial_acceptance": preflight_value["snapshot"]["first5_financial_acceptance"],
         "target": preflight_value["snapshot"]["collection"]["target"],
     }
+    if preflight_value["snapshot"].get("reported_reuse") is not None:
+        value["reported_reuse"] = preflight_value["snapshot"]["reported_reuse"]
     return _write_new(_request_path(config), value, "History recovery request")
 
 
@@ -1410,9 +1712,11 @@ def _expected_go(config_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
         "first5_financial_acceptance": preflight_value["snapshot"]["first5_financial_acceptance"],
         "target": preflight_value["snapshot"]["collection"]["target"],
     }
+    if preflight_value["snapshot"].get("reported_reuse") is not None:
+        expected_request["reported_reuse"] = preflight_value["snapshot"]["reported_reuse"]
     if request != expected_request:
         raise ValueError("History recovery request changed")
-    return config, {
+    expected_go = {
         "schema_version": GO_VERSION,
         "status": "GO",
         "authorized_by": "ROOT_LEAD",
@@ -1426,6 +1730,9 @@ def _expected_go(config_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
         "target": preflight_value["snapshot"]["collection"]["target"],
         "first5_financial_acceptance": preflight_value["snapshot"]["first5_financial_acceptance"],
     }
+    if preflight_value["snapshot"].get("reported_reuse") is not None:
+        expected_go["reported_reuse"] = preflight_value["snapshot"]["reported_reuse"]
+    return config, expected_go
 
 
 def _validate_go(config_path: Path, go_path: Path) -> dict[str, Any]:
@@ -1476,10 +1783,49 @@ def _execute_recovery(config: dict[str, Any], go_path: Path) -> Path:
     ticker = config["target"]["ticker"]
     company = next(row for row in run.manifest["companies"] if row["ticker"] == ticker)
     intake = ops._attest_intake(paths["intake"], run.plans[ticker])
-    publication = history.build_history(
-        intake_manifest=paths["intake"], output_root=paths["destination"]
-    )
+    reported_reuse = snapshot.get("reported_reuse")
+    if reported_reuse is None:
+        publication = history.build_history(
+            intake_manifest=paths["intake"], output_root=paths["destination"]
+        )
+    else:
+        publication = history.recover_reported_history(
+            staged_publication=Path(reported_reuse["clean_stage"]["root"]),
+            output_root=paths["destination"],
+            intake_manifest=Path(reported_reuse["intake"]["path"]),
+            operational_root=Path(reported_reuse["original_operational_root"]),
+            attestation=Path(reported_reuse["root_attestation"]["path"]),
+            expected_attestation_sha256=reported_reuse["root_attestation"]["sha256"],
+            trusted_exclusive_parent=True,
+        )
     history.HistoryPublicationReader(publication).verify_all()
+    public_receipt_binding = None
+    if reported_reuse is not None:
+        public_receipt = _regular(
+            paths["destination"] / "reported_recovery_receipt.json",
+            "public reported recovery receipt",
+        )
+        public_value = _read_json(public_receipt, "public reported recovery receipt")
+        if (
+            public_value.get("version") != "reported-stage-recovery-v1"
+            or public_value.get("status") != "COMPLETE"
+            or public_value.get("generation_source_identity")
+            != reported_reuse["generation_source_head"]
+            or public_value.get("recovery_source_identity")
+            != reported_reuse["recovery_source_head"]
+            or public_value.get("source_stage") != reported_reuse["clean_stage"]["root"]
+            or public_value.get("source_manifest_sha256")
+            != reported_reuse["clean_stage"]["manifest_sha256"]
+            or public_value.get("source_intake_sha256") != reported_reuse["intake"]["sha256"]
+            or public_value.get("verification_report_sha256")
+            != reported_reuse["component_report"]["sha256"]
+            or public_value.get("consumer_publication") != str(Path(publication).absolute())
+        ):
+            raise ValueError("public reported recovery receipt identity differs")
+        public_receipt_binding = {
+            "path": str(public_receipt),
+            "sha256": _sha256(public_receipt),
+        }
     marker = ops._create_build_attestation(
         ticker=ticker,
         plan=run.plans[ticker],
@@ -1530,6 +1876,9 @@ def _execute_recovery(config: dict[str, Any], go_path: Path) -> Path:
         "declared_files": marker["declared_files"],
         "financial_as_of": FINANCIAL_AS_OF,
     }
+    if reported_reuse is not None:
+        receipt["reported_reuse"] = reported_reuse
+        receipt["public_reported_recovery_receipt"] = public_receipt_binding
     return _write_new(paths["receipt"], receipt, "History recovery receipt")
 
 

@@ -36,6 +36,11 @@ financial source의 독립 PASS와 리드 인수 뒤, 실패한 JNJ partial을
 root GO는 별도 단계다. 첫 actual JNJ r1은 reported table 완료 뒤 quarter 단계에서
 10,800초 TIMEOUT으로 종료됐고 partial과 운영 증거를 보존했다. 따라서 History 복구 성공과
 financial readiness는 계속 미수행이다.
+2026-10-17 후속 계약은 독립 검증된 completed reported stage를 clean 37-file copy로 재사용하는
+선택 모드의 source/synthetic 구현만 승인했다. exact r1 witness, original/clean stage,
+copy/component/root attestation, plan/intake/operational roots와 generation/recovery source를
+preflight/request/root GO에 모두 결속하고 public recovery receipt COMPLETE 뒤에만 READY를 쓴다.
+actual copy/audit와 실행, full History 감사·인수는 계속 미수행이다.
 후보 `26d1b8a`는 canonical first-five config/output 결속과 prior failure/receipt/root 보존 결함으로
 독립 FAIL했다. 리드가 승인한 R1–R4 좁은 보정은 별도 Astra 단일 writer가 구현했으며
 real-public synthetic History→READY와 별도9b validator child lifecycle을 검사한다.
@@ -126,7 +131,7 @@ Raw adoption과 History build는 별도 stage GO 전에는 실행하지 않는�
 | 50사 재무 확대 후속 상태 | [T3 HOLD 기록](../implementation/universe50-t3-reference-hold-20261017.md) | 결함·상태 문서화만 승인; 수리·CVX actual audit·재생성 미승인 | Raw exact-50 기존 수락 보존; T3 참조 결함 미수리 | cached tiny graph endpoint 무결성 FAIL; actual CVX `NOT_EVALUATED` | **HOLD_FINANCIAL_EXPANSION_PENDING_T3_REFERENCE_DISPOSITION** | 미병합; push·PR 미수행 |
 | 50사 generic metric identity | [제안](../implementation/universe50-generic-metric-identity-proposal-20261017.md) · [승인 전달 계약](../implementation/universe50-generic-metric-identity-delivery-20261017.md) | 권장안 A의 별도 attestation, 명시 source kind와 합성 fresh fixture 구현은 **2026-10-17 APPROVED** | final `6470e0b`; quality final `c70087d` 통합 | **PASS**; 별도 read-only 검증 보고서 SHA-256 `9c27d0b…` | **source/synthetic LOCALLY_ACCEPTED**; actual identity 발행·인수 미수행 | 미병합; push·PR 미수행 |
 | 50사 재무 통합·offline runner | [재무 통합·실행 전달](../implementation/universe50-financial-delivery.md) | **2026-10-17 APPROVED**; 동결 source 통합, quarterly exact identity 결속, public-API-only staged runner와 합성 검증 | **IMPLEMENTED CANDIDATE**; 동결 SHA 확정 전 | 독립 검증 대기 | 미수락; actual first-five/50·native 실행 미수행 | 미병합; push·PR·scheduler 미수행 |
-| 50사 History bounded-memory 복구 | [History 복구 전달](../implementation/universe50-history-recovery-delivery.md) | **2026-10-17 SOURCE/SYNTHETIC ONLY**; r1 TIMEOUT exact witness, complete-failure gate, fd9 canonical gate | f74 독립 FAIL 뒤 **CORRECTION CANDIDATE**; 새 동결 SHA 대기 | mandatory r1 witness 보정 독립 검증·새 engine 인수 대기 | r1 TIMEOUT; actual retry·later-45·financial 미수락 | 미병합; push·PR·scheduler 미수행 |
+| 50사 History bounded-memory 복구 | [History 복구 전달](../implementation/universe50-history-recovery-delivery.md) | **2026-10-17 SOURCE/SYNTHETIC ONLY**; r1 TIMEOUT exact witness, fd9 canonical gate, optional attested reported-stage reuse | **ATTESTED-REUSE IMPLEMENTED CANDIDATE**; 동결 SHA 대기 | source/synthetic 독립 검증 대기; component actual audit 미수행 | r1 TIMEOUT; actual reuse·later-45·financial 미수락 | 미병합; push·PR·scheduler 미수행 |
 
 현재 전달 상태(2026-09-10): U3–U5 누적 이력은
 [PR #63](https://github.com/pluswc/sec_xbrl/pull/63)으로 `main`에 병합됐다. merge

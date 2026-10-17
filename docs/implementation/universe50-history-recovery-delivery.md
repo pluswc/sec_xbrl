@@ -365,3 +365,67 @@ accepted a02 r1의 과거 config는 자기 실행 전 상태이므로 이 후속
 통해 그 config/preflight/request/GO를 검증하면서 과거 의미를 소급 변경하지 않는다. 다른 회사,
 native/legacy witness의 개별 형식 검증, 회계·Raw·engine·fd9 canonical fileset 및 lifecycle
 정책은 바꾸지 않는다. 이 보정도 source/synthetic 전용이며 새 actual retry 권한이 아니다.
+
+## 2026-10-17 independently attested reported-stage 재사용 모드
+
+리드 계약 `lead_attested_reported_reuse_contract.json` SHA-256
+`b262abc225831fa08d5c034bd7cbf09f9aef6db49ba99b8adfdaeacac0631077`은
+JNJ r1이 12개 reported table을 완성한 뒤 quarter spill 중 timeout된 사실에 한해
+선택적 재사용 source/synthetic 구현을 승인했다. 기본값 `reported_reuse: null`은 기존
+`history.build_history` 경로와 receipt 형식을 유지한다. 재사용을 선택하면 config의
+`reported_reuse`는 `universe50-attested-reported-reuse-v1` exact object여야 한다.
+
+```json
+{
+  "schema_version": "universe50-attested-reported-reuse-v1",
+  "mode": "ATTESTED_REPORTED_STAGE",
+  "universe_id": "<exact-parent-universe-id>",
+  "cik": "0000200406",
+  "generation_source_head": "3a3d7d6492bf7948376cb6795a9ddfe157a8b556",
+  "recovery_source_head": "f222a8b77aefff2adb877f587e59cfd9ac03bf7d",
+  "original_failed_output_root": "/absolute/accepted-r1-failed-root",
+  "original_operational_root": "/absolute/original-operational-root",
+  "operational_roots": {
+    "t1": {"path": "/absolute/t1/root", "manifest_sha256": "<64-hex>"},
+    "t2": {"path": "/absolute/t2/root", "manifest_sha256": "<64-hex>"},
+    "t3": {"path": "/absolute/t3/root", "manifest_sha256": "<64-hex>"},
+    "t4": {"path": "/absolute/t4/root", "manifest_sha256": "<64-hex>"}
+  },
+  "source_stage": {"root": "/absolute/original-reported-stage", "manifest_sha256": "<64-hex>"},
+  "clean_stage": {"root": "/absolute/clean-reported-stage", "manifest_sha256": "<64-hex>"},
+  "copy_report": {"path": "/absolute/copy-report.json", "sha256": "<64-hex>"},
+  "component_report": {"path": "/absolute/component-report.json", "sha256": "<64-hex>"},
+  "root_attestation": {"path": "/absolute/root-attestation.json", "sha256": "<64-hex>"},
+  "source_execution_log": {"path": "/absolute/original-execution.log", "sha256": "<64-hex>"},
+  "intake": {"path": "/absolute/history_intake.json", "sha256": "<64-hex>"},
+  "plan": {"path": "/absolute/plan.json", "sha256": "<64-hex>"}
+}
+```
+
+이 object는 universe/CIK, generation `3a3d7d6…`, recovery `f222a8b…`, exact accepted r1
+failed root, 원래 operational root와 t1–t4 manifest, 원본 reported stage, 37개 선언 파일만
+담은 clean stage, copy report, full component report, root attestation, source execution log,
+intake와 plan을 각각 절대 경로와 SHA-256으로 고정한다. 원본 `.chunks`는 존재하면서
+strictly empty여야 하고 clean stage에는 복사하지 않는다. copy report는 원본 전후 동일성,
+37개 파일의 상대 경로·hash 및 protected inventory를 결속한다. component report는
+`FULL_STAGED_REPORTED_PASS`, 모든 record/JSON·physical schema/count/hash, required prefix,
+T1–T4 endpoint/source lineage와 selected provenance 검사를 증명하지만 `history_ready`는
+반드시 false다.
+
+runner는 선언만 신뢰하지 않는다. accepted a02 r1 witness가 도출한 failed root와 다시
+대조하고, collection의 plan/intake/CIK/universe, copy/component/proof/log의 중복 identity,
+원본과 clean file inventory 및 t1–t4 manifest를 모두 재검증한다. normalized 선언 전체는
+preflight snapshot, request와 root GO에 포함된다. 하나라도 누락·변경되거나 foreign root,
+attestation, stage, component, plan 또는 source identity이면 GO가 성립하지 않는다.
+
+worker는 검증된 clean stage만 public `history.recover_reported_history`에 전달한다. 이 공개
+producer가 원래 operational root를 재검증하고 reported copy, quarter companion, full consumer
+reader 및 `reported_recovery_receipt.json` COMPLETE를 마친 다음에만 기존 collection build
+attestation을 만든다. 최종 typed runner receipt는 normalized 재사용 선언과 public recovery
+receipt의 경로/hash를 보존한다. 따라서 원래 operational identity와 public recovery 의미가
+남으며 reported-only 상태를 READY로 조기 표시하지 않는다.
+
+이 모드는 r1 원본·두 실패 witness·두 abandoned root를 수정하거나 지우지 않는다. resource
+정책은 process-tree RSS 16 GiB, timeout 10,800초, Polars 2, one-heavy lock, `RLIMIT_AS` 미사용을
+그대로 적용한다. actual copy/audit, root attestation authoring, actual run, full History 독립 감사,
+local acceptance, financial readiness와 main merge는 별도 단계이며 현재 승인되지 않았다.
