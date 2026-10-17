@@ -1,7 +1,11 @@
 # 50사 generic metric Raw 품질 전달 계약
 
 기준일: **2026-10-17**
-현재 상태: **APPROVED / IMPLEMENTED CANDIDATE / INDEPENDENT VERIFICATION PENDING**
+현재 상태: **APPROVED / `c70087d` INDEPENDENT PASS / SOURCE+SYNTHETIC LOCALLY ACCEPTED**
+
+동결 commit은 `c70087dccd6337268110417da11c11298ddae303`이다. 독립 검증과 리드의
+로컬 수락은 source 검토와 fresh synthetic 범위에 한정된다. actual SEC/재무 payload,
+actual first-five/50 publication과 full financial semantic assurance는 수행·수락하지 않았다.
 
 ## 1. 승인 범위와 주장
 
@@ -145,6 +149,8 @@ legacy universe delivery gate는 변경하지 않는다.
 READY-unbound 위조 history, reader inline-parse sentinel, cutoff, Raw normalized-value mismatch,
 candidate index/binding 동시 누락·self-rehash 거부, 정당한 governed-source 0건,
 fresh failure-no-quality-publication을 포함한다. 실제 SEC/재무 payload 실행과 full
-financial semantic assurance는 이 후보의 수락 증거가 아니다. 구현 commit을 동결한 뒤
-별도 읽기 전용 검증자가 relevant test·Ruff·diff 및 public offline positive path를 다시
-실행하고 리드가 결과를 수락하기 전까지 상태는 `INDEPENDENT VERIFICATION PENDING`이다.
+financial semantic assurance는 이 후보의 수락 증거가 아니다. 동결 `c70087d`는 별도
+읽기 전용 검증자의 relevant test·Ruff·diff 및 public offline positive path 재실행과
+리드 source/synthetic 수락을 통과했다. 독립 보고서와 리드 수락 기록의 SHA-256은
+identity 전달 계약에 보존한다. 이 상태는 actual SEC/재무 payload나 identity 통합
+후보의 수락으로 확대하지 않는다.

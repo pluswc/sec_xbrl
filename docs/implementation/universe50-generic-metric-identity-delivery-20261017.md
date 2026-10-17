@@ -14,11 +14,11 @@
 | 단계 | 현재 상태 |
 | --- | --- |
 | 범위 승인 | **APPROVED** — 권장안 A의 로컬 코드·합성 fresh fixture 구현 |
-| generic identity 구현 | 구현 중; 동결 SHA 미정 |
-| mixed v5/v6 Raw/Quality producer | 별도 단일 작성자 구현 중; 동결 SHA 미정 |
+| generic identity 구현 | **IMPLEMENTED CANDIDATE** — 합성 public chain 자체 검증 완료; 새 동결 SHA 확정 전 |
+| mixed v5/v6 Raw/Quality producer | `c70087dccd6337268110417da11c11298ddae303`; 독립 PASS와 리드 source/synthetic 로컬 수락 완료 |
 | actual first-five/50사 발행 | **NOT_READY / 미승인** |
-| 독립 검증 | 미수행 |
-| 로컬 인수 | 미수행 |
+| 독립 검증 | quality `c70087d` PASS; 이 identity 통합 후보는 대기 |
+| 로컬 인수 | quality source/synthetic만 수락; identity·actual 인수 미수행 |
 | push·PR·main 병합 | 미수행 |
 
 구현 존재, 독립 검증, 리드의 로컬 인수와 main 병합을 서로 대신 쓰지 않는다.
@@ -51,13 +51,14 @@ identity를 바꾸지 않는다. 최종 50사 발행은 `FULL` mode에서만 가
 
 identity producer와 reader는 발행 때와 다시 열 때 다음을 모두 검증한다.
 
-- config에 exact universe ID, scoped CIK/ticker membership, financial cutoff, collection
-  scope mode와 source kind가 있다.
+- config에 exact universe ID, scoped CIK/ticker membership, financial cutoff, 별도
+  `metadata_observation_cutoff`, collection scope mode와 source kind가 있다.
 - `read_universe_status`가 같은 collection manifest를 다시 검증한다. scoped 회사는 모두
   `READY`, `selected == held`, pending/failed 0이다. `SOURCE_READY`와 같은 단일 boolean은
   사용하지 않는다. `FULL`은 parent membership 전체가 scoped membership과 같아야 한다.
-- metadata publication identity와 hash가 일치하고 각 scoped CIK/ticker 관찰이 cutoff
-  이후가 아니다.
+- metadata publication identity와 hash가 일치하고 각 scoped CIK/ticker 관찰 timestamp가
+  timezone offset을 포함한 ISO 8601 형식이며 명시한 `metadata_observation_cutoff` 이후가
+  아니다. `financial_as_of`를 metadata 관측 기준으로 암묵 재사용하지 않는다.
 - 회사별 collection build가 가리키는 history root, build marker hash와 history manifest
   hash가 config와 같고 history reader가 선언한 모든 파일을 검증한다.
 - annual analysis는 exact history 부모, `ANNUAL`, 5개 입력 FY, latest 4개 표시 FY와
@@ -68,7 +69,9 @@ identity producer와 reader는 발행 때와 다시 열 때 다음을 모두 검
 - 별도 `GenericMetricQualityReader`가 exact collection/history/scoped company/cutoff와
   실제 filing별 parser v5/v6, parser/rule/source bytes, source binding과 재현 증거를 확인한
   `PASS`여야 한다. 보증 범위는 `RAW_TRANSFORM_SOURCE_CONFORMANCE_ONLY`이고
-  full financial semantic assurance를 주장하지 않는다.
+  full financial semantic assurance를 주장하지 않는다. 회사 단위
+  `collector_source_commit_sha`는 `CONFIG_DECLARED_NOT_SOURCE_VERIFIED` 선언값으로만
+  보존하며 filing별 authoritative creator 검증으로 해석하지 않는다.
 - config, 모든 root, manifest SHA-256, declared data-file hash, publication ID와 rule/version을
   최종 identity에 고정한다. 어느 하나라도 없어지거나 바뀌면 발행·재열기를 거부한다.
 
@@ -77,6 +80,15 @@ quality publication은 기존 duration 및 supported-lexical transform source-co
 `UniverseDelivery`, `SourceBindingsReader` v1과 parser version 상수는 변경하지 않는다.
 Raw exact-50 수락, 110 numeric 표본, source-only shape 검사를 quality `PASS`나 재무 의미
 전체 `PASS`로 승격하지 않는다.
+
+`financial_as_of=2026-10-10`과 current metadata 관측일 2026-10-13은 서로 다른
+시간축이다. 별도 metadata cutoff 결정은 로컬 운영 기록
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_metadata_observation_decision.json`
+(SHA-256 `3aeb08f12d31b05e3ca744f789c1fbcd3e513707bcfbd185f3f20e0ed1507385`)에
+보존한다. identity는 config, top-level scope와 metadata block에 정규화된 cutoff와 각
+scoped 관측 timestamp를 고정하고 `historical_membership_assurance=false`를 명시한다.
+이 current metadata pin은 2026-10-10 당시 universe membership을 역사적으로 증명하지
+않는다.
 
 ## 허용 변경과 금지 범위
 
@@ -104,3 +116,12 @@ malformed quality proof, source-kind 혼합·fallback과 재열기 후 외부 �
 별도 Astra 읽기 전용 검증자는 동결된 identity와 quality 커밋을 정상 통합한 동일 SHA에서
 위 계약, fresh synthetic publication과 회귀를 독립 실행해 `PASS` 또는 `FAIL`을 보고한다.
 그 전까지 actual first-five/50사 identity와 annual/quarterly dataset은 `NOT_READY`다.
+
+quality `c70087dccd6337268110417da11c11298ddae303`의 독립 PASS 증거는 로컬
+`independent_quality_c70087d/report.json`(SHA-256
+`0fd0942aacf75a52a85462fabfd662a28e89c8873391783f2ddf2cfa7253c3c1`)이고, 리드의
+source/synthetic 로컬 수락은 `lead_quality_source_and_synthetic_acceptance.json`
+(SHA-256 `9558b7c0d577ab41c1c2e9b5cb714afb2cfb8f668c5cb9c67f19608bf20cfaef`)이다.
+두 파일은 위 `resumption_20261017_t3v2` 작업 디렉터리에 있다. 이 증거는 actual
+financial payload, actual first-five/50 발행 또는 새 identity 통합 후보의 독립 PASS를
+대신하지 않는다.
