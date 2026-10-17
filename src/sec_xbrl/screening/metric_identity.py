@@ -150,6 +150,16 @@ class GenericMetricIdentityReader:
         config = _validate_config(read_json(config_path, "generic metric identity source config"))
         if config != self.manifest.get("config"):
             raise ValueError("generic metric identity normalized config changed")
+        expected_scope = {
+            "universe_id": config["universe_id"],
+            "financial_as_of": config["financial_as_of"],
+            "annual_window": config["annual_window"],
+            "global_quarter_spine": config["global_quarter_spine"],
+            "configured_ciks": [row["cik"] for row in config["companies"]],
+            "configured_tickers": [row["ticker"] for row in config["companies"]],
+        }
+        if any(self.manifest.get(key) != value for key, value in expected_scope.items()):
+            raise ValueError("generic metric identity top-level scope changed")
         expected_sources = _verify_configured_sources(config)
         for key, value in expected_sources.items():
             if self.manifest.get(key) != value:

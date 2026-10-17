@@ -24,7 +24,7 @@ from sec_xbrl.metrics.screening import (
     ScreeningMetricReader,
     publish_screening_metrics,
 )
-from sec_xbrl.screening.common import sha256_file, write_json
+from sec_xbrl.screening.common import digest_value, sha256_file, write_json
 from sec_xbrl.screening.dataset import GENERIC_IDENTITY_SOURCE_KIND
 from sec_xbrl.screening.dataset_v2 import (
     EXPLICIT_IDENTITY_CONFIG_VERSION as DATASET_CONFIG_VERSION,
@@ -292,7 +292,14 @@ def test_quality_identity_annual31_dataset_v2_chain_and_subset_stability(
 
 @pytest.mark.parametrize(
     "defect",
-    ("foreign_cik", "stale_cutoff", "future_filing", "quality_proof", "analysis_parent"),
+    (
+        "foreign_cik",
+        "stale_cutoff",
+        "future_filing",
+        "quality_proof",
+        "analysis_parent",
+        "top_scope",
+    ),
 )
 def test_identity_rejects_wrong_scope_and_parent_mutation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, defect: str
@@ -326,10 +333,19 @@ def test_identity_rejects_wrong_scope_and_parent_mutation(
         payload = json.loads(report.read_text(encoding="utf-8"))
         payload["full_financial_semantic_assurance"] = True
         write_json(report, payload)
-    else:
+    elif defect == "analysis_parent":
         manifest = prepared.annual / "analysis_manifest.json"
         payload = json.loads(manifest.read_text(encoding="utf-8"))
         payload["source_manifest_hashes"]["history_manifest_sha256"] = "0" * 64
+        write_json(manifest, payload)
+    else:
+        manifest = prepared.identity.manifest_path
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+        payload["financial_as_of"] = "2026-10-07"
+        identity = {key: value for key, value in payload.items() if key != "publication_id"}
+        payload["publication_id"] = (
+            "generic-metric-identity-" + digest_value(identity)[:24]
+        )
         write_json(manifest, payload)
 
     with pytest.raises(ValueError):
