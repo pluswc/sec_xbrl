@@ -18,14 +18,19 @@ from sec_xbrl.metric_quality import (
     CONFIG_SCHEMA_VERSION,
     GenericMetricQualityReader,
     prepare_generic_metric_quality,
+    publish_generic_metric_quality,
 )
 from sec_xbrl.source_bindings import (
+    BINDINGS_NAME,
     SEC_TRANSFORM_NAMESPACE,
     SourceBindingsReader,
     SourceBindingsV2Reader,
     publish_source_bindings,
     publish_source_bindings_v2,
     write_source_indexes_v2,
+)
+from sec_xbrl.source_bindings import (
+    MANIFEST_NAME as SOURCE_BINDINGS_MANIFEST_NAME,
 )
 
 
@@ -770,6 +775,130 @@ def test_generic_quality_full_mixed_v5_v6_fresh_chain(
         "m2-layer1-v6",
     ]
     assert reader.manifest["filing_count"] == 2
+
+
+def test_quality_publisher_rejects_jointly_omitted_source_indexes_and_bindings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _mixed_v2_fixture(tmp_path)
+    histories = _build_ready_histories(paths, tmp_path, monkeypatch)
+    companies = (
+        {"ticker": "FIVE", "cik": "0000000123"},
+        {"ticker": "SIX", "cik": "0000000456"},
+    )
+    config = _quality_config(
+        paths, histories, tmp_path / "joint-omission-config.json", companies=companies
+    )
+    indexes = write_source_indexes_v2(
+        collection_manifest=Path(paths["collection"]),
+        package_root=Path(paths["packages"]),
+        destination=tmp_path / "joint-omission-indexes",
+    )
+    publication = publish_source_bindings_v2(
+        collection_manifest=Path(paths["collection"]),
+        package_root=Path(paths["packages"]),
+        duration_source_index=indexes.duration_path,
+        correction_source_index=indexes.correction_path,
+        destination=tmp_path / "joint-omission-bindings",
+        producer_revision="e" * 40,
+    )
+
+    duration = json.loads(indexes.duration_path.read_text())
+    duration["duration_facts"] = []
+    duration["format_counts"] = {key: 0 for key in duration["format_counts"]}
+    _write(indexes.duration_path, duration)
+    correction = json.loads(indexes.correction_path.read_text())
+    correction["facts"] = []
+    correction["fact_count"] = 0
+    _write(indexes.correction_path, correction)
+    bindings_path = publication.root / BINDINGS_NAME
+    binding_records = json.loads(bindings_path.read_text())
+    binding_records["bindings"] = []
+    binding_records["binding_count"] = 0
+    _write(bindings_path, binding_records)
+    manifest_path = publication.root / SOURCE_BINDINGS_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text())
+    manifest["candidate_inputs"]["duration_source_index"]["sha256"] = _sha256(
+        indexes.duration_path
+    )
+    manifest["candidate_inputs"]["correction_source_index"]["sha256"] = _sha256(
+        indexes.correction_path
+    )
+    manifest["counts"]["duration_bindings"] = 0
+    manifest["counts"]["approved_transform_corrections"] = 0
+    manifest["files"][BINDINGS_NAME] = {
+        "sha256": _sha256(bindings_path),
+        "size": bindings_path.stat().st_size,
+    }
+    identity = {key: value for key, value in manifest.items() if key != "publication_id"}
+    manifest["publication_id"] = "source-bindings-v2-" + hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, indent=2, sort_keys=True).encode()
+    ).hexdigest()[:24]
+    _write(manifest_path, manifest)
+
+    SourceBindingsV2Reader(publication.root).verify_all()
+    with pytest.raises(ValueError, match="producer completeness scan differs"):
+        publish_generic_metric_quality(
+            config_path=config,
+            collection_manifest=Path(paths["collection"]),
+            source_binding_publication=publication.root,
+            history_manifests=histories,
+            destination=tmp_path / "joint-omission-quality",
+            producer_revision="e" * 40,
+        )
+    assert not (tmp_path / "joint-omission-quality").exists()
+
+
+def test_generic_quality_accepts_legitimate_zero_governed_source_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _mixed_v2_fixture(tmp_path)
+    for fixture_name in ("first", "second"):
+        source = paths[fixture_name]
+        source_package = Path(source["package"])
+        package = Path(paths["packages"]) / source_package.relative_to(
+            Path(source["packages"])
+        )
+        with zipfile.ZipFile(package) as archive:
+            primary = archive.read("test.htm")
+        primary = primary.replace(b"ixt-sec:duryear", b"ixt-sec:datedaymonthyear")
+        primary = primary.replace(b">Nasdaq<", b">Not governed<")
+        with zipfile.ZipFile(package, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("test.htm", primary)
+        snapshot_manifest = Path(source["snapshot"]) / "layer1_manifest.json"
+        snapshot = json.loads(snapshot_manifest.read_text())
+        snapshot["package_sha256"] = _sha256(package)
+        _write(snapshot_manifest, snapshot)
+
+    histories = _build_ready_histories(paths, tmp_path, monkeypatch)
+    companies = (
+        {"ticker": "FIVE", "cik": "0000000123"},
+        {"ticker": "SIX", "cik": "0000000456"},
+    )
+    config = _quality_config(
+        paths, histories, tmp_path / "zero-source-config.json", companies=companies
+    )
+    publication = prepare_generic_metric_quality(
+        config_path=config,
+        collection_manifest=Path(paths["collection"]),
+        package_root=Path(paths["packages"]),
+        history_manifests=histories,
+        source_index_destination=tmp_path / "zero-source-indexes",
+        source_binding_destination=tmp_path / "zero-source-bindings",
+        destination=tmp_path / "zero-source-quality",
+        producer_revision="e" * 40,
+    )
+    report = json.loads(publication.report_path.read_text())
+    assert report["duration_fact_count"] == 0
+    assert report["approved_lexical_repair_count"] == 0
+    assert GenericMetricQualityReader(publication.root).verify_sources(
+        collection_manifest=Path(paths["collection"]),
+        history_manifest_sha256s={
+            ticker: _sha256(path) for ticker, path in histories.items()
+        },
+        financial_as_of="2026-10-08",
+        expected_companies=companies,
+    )["state"] == "PASS"
 
 
 def test_generic_quality_rejects_history_scope_and_publishes_nothing(

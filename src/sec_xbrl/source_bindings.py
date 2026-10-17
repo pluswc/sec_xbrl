@@ -669,6 +669,9 @@ def publish_source_bindings_v2(
             _json(manifest).encode("utf-8")
         ).hexdigest()[:24]
         _write_json(staging / MANIFEST_NAME, manifest)
+        staged_reader = SourceBindingsV2Reader(staging)
+        staged_reader.verify_all()
+        verify_source_bindings_v2_producer_completeness(staged_reader)
         os.replace(staging, destination)
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
@@ -1178,6 +1181,82 @@ class SourceBindingsV2Reader:
             for row in self.bindings
             if row["binding_kind"] == "APPROVED_TRANSFORM_CORRECTION"
         )
+
+
+def verify_source_bindings_v2_producer_completeness(
+    reader: SourceBindingsV2Reader,
+) -> None:
+    """Producer-only: rescan every selected Inline XBRL source before PASS.
+
+    Consumer readers deliberately do not call this function. Offline publishers
+    call it after ``reader.verify_all()`` so self-consistent omitted candidate and
+    binding records cannot establish their own completeness trust root.
+    """
+    collection = reader.manifest.get("collection")
+    scope_rows = reader.manifest.get("scope_companies")
+    if not isinstance(collection, dict) or not isinstance(scope_rows, list):
+        raise TypeError("source-binding v2 producer completeness scope is invalid")
+    collection_manifest = _regular_file(
+        Path(str(collection.get("manifest_path"))), "collection manifest"
+    )
+    _, _, scope, _, scope_companies = _load_collection_scope_v2(
+        collection_manifest, requested=tuple(scope_rows)
+    )
+    if list(scope_companies) != scope_rows:
+        raise ValueError("source-binding v2 producer completeness scope differs")
+    package_root = _real_directory(
+        Path(str(reader.manifest.get("package_root"))), "package root"
+    )
+    documents = _document_index(reader.documents)
+    scope_index = {(row.ticker, row.cik, row.accession): row for row in scope}
+    if set(documents) != set(scope_index):
+        raise ValueError("source-binding v2 producer completeness documents differ")
+    binding_index: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+    for binding in reader.bindings:
+        key = (
+            str(binding.get("ticker")),
+            str(binding.get("cik")),
+            str(binding.get("accession")),
+            str(binding.get("binding_kind")),
+            str(binding.get("source_id")),
+        )
+        if key in binding_index:
+            raise ValueError("source-binding v2 producer completeness identity repeats")
+        binding_index[key] = binding
+
+    observed: set[tuple[str, str, str, str, str]] = set()
+    for key, filing in scope_index.items():
+        document = documents[key]
+        package = _package_path(package_root, filing.cik, filing.accession)
+        primary = _read_primary_member(package, filing.primary_document)
+        if (
+            document.get("package_path") != str(package)
+            or document.get("package_sha256") != _sha256(package)
+            or document.get("primary_sha256") != _sha256_bytes(primary)
+        ):
+            raise ValueError("source-binding v2 producer completeness source changed")
+        source_rows = _extract_source_rows(primary, filing)
+        for source_key, source in source_rows.items():
+            kinds = (
+                (["DURATION"] if source["transform"] in _DURATION_TRANSFORMS else [])
+                + (
+                    ["APPROVED_TRANSFORM_CORRECTION"]
+                    if _is_supported_correction_source(source)
+                    else []
+                )
+            )
+            for kind in kinds:
+                identity = (*source_key[:3], kind, source_key[3])
+                binding = binding_index.get(identity)
+                if binding is None or any(
+                    source.get(name) != binding.get(name) for name in source
+                ):
+                    raise ValueError(
+                        "source-binding v2 producer completeness scan differs"
+                    )
+                observed.add(identity)
+    if observed != set(binding_index):
+        raise ValueError("source-binding v2 producer completeness scan differs")
 
 
 def _select_collection_scope(

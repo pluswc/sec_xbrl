@@ -26,6 +26,7 @@ from sec_xbrl.source_bindings import (
     KNOWN_PARSER_PROFILES,
     SourceBindingsV2Reader,
     publish_source_bindings_v2,
+    verify_source_bindings_v2_producer_completeness,
     write_source_indexes_v2,
 )
 
@@ -195,6 +196,7 @@ def publish_generic_metric_quality(
 
     bindings = SourceBindingsV2Reader(Path(source_binding_publication))
     bindings.verify_all()
+    verify_source_bindings_v2_producer_completeness(bindings)
     binding_collection = bindings.manifest.get("collection")
     if (
         bindings.manifest.get("scope_companies") != list(companies)

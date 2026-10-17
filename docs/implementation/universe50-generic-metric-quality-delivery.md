@@ -94,7 +94,9 @@ binding v2, quality), producer revision이다. 네트워크와 DB를 사용하�
 2. `publish_source_bindings_v2`가 후보를 신뢰하지 않고 모든 planned primary document를
    다시 전수 스캔해 exact source set과 Raw table을 결합한다.
 3. `publish_generic_metric_quality`가 public collection status, accepted histories,
-   v2 reader 재개봉, 모든 normalized value를 검사하고 fresh atomic quality publication을
+   v2 reader 재개봉, 모든 normalized value를 검사한다. 또한 이 offline producer는
+   primary document의 governed source set을 다시 전수 스캔하여 candidate index와 binding을
+   동시에 누락하고 self-rehash한 입력도 거부한 뒤 fresh atomic quality publication을
    만든다. 실패하면 quality destination을 발행하지 않는다.
 
 각 destination은 기존 경로를 덮어쓰지 않는다. 이전 source index나 binding이 성공했고
@@ -141,6 +143,7 @@ legacy universe delivery gate는 변경하지 않는다.
 합성 자체 검증은 mixed v5/v6, full/subset scope, unknown parser, v1/v2 오분류,
 외부 cohort 미승격, 범위 밖 pending/missing intake, history 추가/누락 및 같은 회사의
 READY-unbound 위조 history, reader inline-parse sentinel, cutoff, Raw normalized-value mismatch,
+candidate index/binding 동시 누락·self-rehash 거부, 정당한 governed-source 0건,
 fresh failure-no-quality-publication을 포함한다. 실제 SEC/재무 payload 실행과 full
 financial semantic assurance는 이 후보의 수락 증거가 아니다. 구현 commit을 동결한 뒤
 별도 읽기 전용 검증자가 relevant test·Ruff·diff 및 public offline positive path를 다시
