@@ -11,6 +11,7 @@ import pytest
 from lxml import html as lxml_html
 
 from sec_xbrl import collection_operations as operations
+from sec_xbrl import source_bindings as source_binding_module
 from sec_xbrl.facts.layer1 import _stable_id
 from sec_xbrl.history import HISTORY_VERSION
 from sec_xbrl.metric_quality import (
@@ -641,11 +642,94 @@ def test_generic_quality_subset_pass_reopens_all_source_evidence(
     assert reader.manifest["collection_scope_mode"] == "EXPLICIT_SUBSET"
     assert reader.manifest["assurance_scope"] == "RAW_TRANSFORM_SOURCE_CONFORMANCE_ONLY"
     assert reader.manifest["full_financial_semantic_assurance"] is False
+    assert (
+        reader.manifest["collector_provenance_assurance"]
+        == "CONFIG_DECLARED_NOT_SOURCE_VERIFIED"
+    )
+    assert (
+        reader.manifest["collector_provenance_granularity"]
+        == "COMPANY_CONFIG_DECLARATION"
+    )
     status = operations.read_universe_status(manifest_path=Path(paths["collection"]))
     assert {row.ticker: row.state for row in status.companies} == {
         "FIVE": "READY",
         "SIX": "RAW_COMPLETE",
     }
+
+
+def test_generic_quality_subset_ignores_unselected_missing_intake(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _mixed_v2_fixture(tmp_path)
+    histories = _build_ready_histories(
+        paths, tmp_path, monkeypatch, selected_tickers=("FIVE",)
+    )
+    outside_intake = (
+        Path(paths["collection"]).parent
+        / "companies/SIX/intake/history_intake.json"
+    )
+    outside_intake.unlink()
+    companies = ({"ticker": "FIVE", "cik": "0000000123"},)
+    config = _quality_config(
+        paths, histories, tmp_path / "subset-config.json", companies=companies
+    )
+
+    publication = prepare_generic_metric_quality(
+        config_path=config,
+        collection_manifest=Path(paths["collection"]),
+        package_root=Path(paths["packages"]),
+        history_manifests=histories,
+        source_index_destination=tmp_path / "subset-indexes",
+        source_binding_destination=tmp_path / "subset-bindings",
+        destination=tmp_path / "subset-quality",
+        producer_revision="e" * 40,
+    )
+
+    status = operations.read_universe_status(manifest_path=Path(paths["collection"]))
+    assert {row.ticker: row.state for row in status.companies} == {
+        "FIVE": "READY",
+        "SIX": "PREPARED",
+    }
+    assert GenericMetricQualityReader(publication.root).verify_sources(
+        collection_manifest=Path(paths["collection"]),
+        history_manifest_sha256s={"FIVE": _sha256(histories["FIVE"])},
+        financial_as_of="2026-10-08",
+        expected_companies=companies,
+    )["state"] == "PASS"
+
+
+def test_quality_reader_never_reparses_inline_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _mixed_v2_fixture(tmp_path)
+    histories = _build_ready_histories(
+        paths, tmp_path, monkeypatch, selected_tickers=("FIVE",)
+    )
+    companies = ({"ticker": "FIVE", "cik": "0000000123"},)
+    config = _quality_config(
+        paths, histories, tmp_path / "reader-config.json", companies=companies
+    )
+    publication = prepare_generic_metric_quality(
+        config_path=config,
+        collection_manifest=Path(paths["collection"]),
+        package_root=Path(paths["packages"]),
+        history_manifests=histories,
+        source_index_destination=tmp_path / "reader-indexes",
+        source_binding_destination=tmp_path / "reader-bindings",
+        destination=tmp_path / "reader-quality",
+        producer_revision="e" * 40,
+    )
+
+    def forbidden_reparse(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality reader must not parse SEC inline source")
+
+    monkeypatch.setattr(source_binding_module, "_extract_source_rows", forbidden_reparse)
+    assert GenericMetricQualityReader(publication.root).verify_sources(
+        collection_manifest=Path(paths["collection"]),
+        history_manifest_sha256s={"FIVE": _sha256(histories["FIVE"])},
+        financial_as_of="2026-10-08",
+        expected_companies=companies,
+    )["state"] == "PASS"
 
 
 def test_generic_quality_full_mixed_v5_v6_fresh_chain(
@@ -711,6 +795,43 @@ def test_generic_quality_rejects_history_scope_and_publishes_nothing(
             producer_revision="e" * 40,
         )
     assert not (tmp_path / "failed-quality").exists()
+
+
+def test_generic_quality_rejects_same_company_history_not_attested_by_ready_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _mixed_v2_fixture(tmp_path)
+    histories = _build_ready_histories(
+        paths, tmp_path, monkeypatch, selected_tickers=("FIVE",)
+    )
+    original = json.loads(histories["FIVE"].read_text())
+    forged = _write(
+        tmp_path / "foreign-history/history_manifest.json",
+        {
+            **original,
+            "version": "NOT_A_HISTORY_PUBLICATION",
+            "source_intake": str(tmp_path / "unrelated-intake.json"),
+            "tables": [],
+        },
+    )
+    supplied = {"FIVE": forged}
+    companies = ({"ticker": "FIVE", "cik": "0000000123"},)
+    config = _quality_config(
+        paths, supplied, tmp_path / "forged-config.json", companies=companies
+    )
+
+    with pytest.raises(ValueError, match="differs from READY build"):
+        prepare_generic_metric_quality(
+            config_path=config,
+            collection_manifest=Path(paths["collection"]),
+            package_root=Path(paths["packages"]),
+            history_manifests=supplied,
+            source_index_destination=tmp_path / "forged-indexes",
+            source_binding_destination=tmp_path / "forged-bindings",
+            destination=tmp_path / "forged-quality",
+            producer_revision="e" * 40,
+        )
+    assert not (tmp_path / "forged-quality").exists()
 
 
 def test_generic_quality_rejects_cutoff_before_any_output(tmp_path: Path) -> None:

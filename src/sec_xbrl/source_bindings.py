@@ -359,9 +359,8 @@ def write_source_indexes_v2(
     collection_manifest = _regular_file(collection_manifest, "collection manifest")
     package_root = _real_directory(package_root, "package root")
     destination = _new_destination(destination, "source-index")
-    _, request, all_scope = _load_collection_scope(collection_manifest)
-    scope, _, _ = _select_collection_scope(
-        all_scope, request=request, requested=collection_scope_companies
+    _, _, scope, _, _ = _load_collection_scope_v2(
+        collection_manifest, requested=collection_scope_companies
     )
     documents: list[dict[str, Any]] = []
     duration_facts: list[dict[str, Any]] = []
@@ -508,9 +507,10 @@ def publish_source_bindings_v2(
     )
     destination = _new_destination(destination, "source-binding v2")
 
-    collection, request, all_scope = _load_collection_scope(collection_manifest)
-    scope, parent_companies, scope_companies = _select_collection_scope(
-        all_scope, request=request, requested=collection_scope_companies
+    collection, request, scope, parent_companies, scope_companies = (
+        _load_collection_scope_v2(
+            collection_manifest, requested=collection_scope_companies
+        )
     )
     duration_claims, duration_documents = _load_duration_claims(duration_source_index, scope)
     correction_claims = _load_correction_claims(correction_source_index, scope)
@@ -985,6 +985,8 @@ class SourceBindingsV2Reader:
             path = _regular_file(Path(declaration["path"]), name)
             if declaration.get("sha256") != _sha256(path):
                 raise ValueError("source-binding v2 candidate input digest changed")
+        duration_source_index = Path(candidate_inputs["duration_source_index"]["path"])
+        correction_source_index = Path(candidate_inputs["correction_source_index"]["path"])
         collection = self.manifest.get("collection")
         if not isinstance(collection, dict):
             raise TypeError("source-binding v2 collection declaration is invalid")
@@ -993,13 +995,16 @@ class SourceBindingsV2Reader:
         )
         if collection.get("manifest_sha256") != _sha256(collection_manifest):
             raise ValueError("source-binding v2 collection manifest digest changed")
-        collection_payload, request, all_scope = _load_collection_scope(collection_manifest)
         scope_rows = self.manifest.get("scope_companies")
-        requested_scope = (
-            tuple(scope_rows) if isinstance(scope_rows, list) else None
-        )
-        scope, parent_companies, scope_companies = _select_collection_scope(
-            all_scope, request=request, requested=requested_scope
+        requested_scope = tuple(scope_rows) if isinstance(scope_rows, list) else None
+        (
+            collection_payload,
+            request,
+            scope,
+            parent_companies,
+            scope_companies,
+        ) = _load_collection_scope_v2(
+            collection_manifest, requested=requested_scope
         )
         mode = "FULL" if scope_companies == parent_companies else "EXPLICIT_SUBSET"
         if (
@@ -1017,6 +1022,10 @@ class SourceBindingsV2Reader:
         scope_index = {(row.ticker, row.cik, row.accession): row for row in scope}
         if set(document_index) != set(scope_index):
             raise ValueError("source-binding v2 document scope differs from collection")
+        duration_claims, duration_documents = _load_duration_claims(
+            duration_source_index, scope
+        )
+        correction_claims = _load_correction_claims(correction_source_index, scope)
 
         verified: dict[
             tuple[str, str, str],
@@ -1024,7 +1033,6 @@ class SourceBindingsV2Reader:
                 dict[str, dict[str, Any]],
                 dict[str, dict[str, Any]],
                 set[str],
-                dict[tuple[str, str, str, str], dict[str, Any]],
             ],
         ] = {}
         for key, document in document_index.items():
@@ -1035,6 +1043,8 @@ class SourceBindingsV2Reader:
             primary = _read_primary_member(package, filing.primary_document)
             if document.get("primary_sha256") != _sha256_bytes(primary):
                 raise ValueError("source-binding v2 primary-document bytes changed")
+            if duration_documents[key] != document.get("primary_sha256"):
+                raise ValueError("duration source index primary hash differs")
             if (
                 document.get("primary_document") != filing.primary_document
                 or document.get("snapshot_root") != str(filing.snapshot_root)
@@ -1074,7 +1084,6 @@ class SourceBindingsV2Reader:
                 _unique_index(facts, "fact_id", "Raw Fact"),
                 concepts,
                 contexts,
-                _extract_source_rows(primary, filing),
             )
 
         source_ids: set[tuple[str, str, str, str, str]] = set()
@@ -1096,15 +1105,12 @@ class SourceBindingsV2Reader:
                 raise ValueError("source-binding v2 identity is duplicated")
             source_ids.add(source_identity)
             fact_ids.add(fact_identity)
-            facts, concepts, contexts, source_rows = tables
+            facts, concepts, contexts = tables
             source_key = (*key, str(binding.get("source_id")))
-            source = source_rows.get(source_key)
-            expected_kind = (
-                source is not None
-                and (
-                    (kind == "DURATION" and source["transform"] in _DURATION_TRANSFORMS)
-                    or (kind == "APPROVED_TRANSFORM_CORRECTION" and _is_supported_correction_source(source))
-                )
+            claim = (
+                duration_claims.get(source_key)
+                if kind == "DURATION"
+                else correction_claims.get(source_key)
             )
             fact = facts.get(str(binding.get("fact_id")))
             concept = concepts.get(str(binding.get("raw_concept_id")))
@@ -1117,9 +1123,8 @@ class SourceBindingsV2Reader:
                 "concept", filing_id, binding.get("concept_namespace"), binding.get("concept_local_name")
             )
             if (
-                not expected_kind
-                or source is None
-                or any(source.get(name) != binding.get(name) for name in source)
+                claim is None
+                or not _binding_matches_claim(binding, claim, kind=kind)
                 or fact is None
                 or binding.get("filing_id") != filing_id
                 or binding.get("context_id") != expected_context
@@ -1146,13 +1151,12 @@ class SourceBindingsV2Reader:
             observed_sources.add(source_identity)
             counts[kind] += 1
         expected_sources = {
-            (*key, kind, source["source_id"])
-            for key, tables in verified.items()
-            for source in tables[3].values()
-            for kind in (
-                (["DURATION"] if source["transform"] in _DURATION_TRANSFORMS else [])
-                + (["APPROVED_TRANSFORM_CORRECTION"] if _is_supported_correction_source(source) else [])
+            (*key[:3], kind, key[3])
+            for kind, claims in (
+                ("DURATION", duration_claims),
+                ("APPROVED_TRANSFORM_CORRECTION", correction_claims),
             )
+            for key in claims
         }
         if observed_sources != expected_sources:
             raise ValueError("source-binding v2 does not cover every governed source")
@@ -1186,6 +1190,24 @@ def _select_collection_scope(
     tuple[dict[str, str], ...],
     tuple[dict[str, str], ...],
 ]:
+    parent, selected_companies = _select_collection_membership(
+        request, requested=requested
+    )
+    selected_keys = {(row["ticker"], row["cik"]) for row in selected_companies}
+    selected_scope = tuple(
+        row for row in scope if (row.ticker, row.cik) in selected_keys
+    )
+    represented = {(row.ticker, row.cik) for row in selected_scope}
+    if represented != selected_keys:
+        raise ValueError("explicit collection scope has no complete planned filing scope")
+    return selected_scope, parent, selected_companies
+
+
+def _select_collection_membership(
+    request: dict[str, Any],
+    *,
+    requested: tuple[dict[str, str], ...] | None,
+) -> tuple[tuple[dict[str, str], ...], tuple[dict[str, str], ...]]:
     companies = request.get("companies")
     if not isinstance(companies, list):
         raise TypeError("collection request company scope is malformed")
@@ -1226,14 +1248,7 @@ def _select_collection_scope(
             or not selected_keys.issubset(parent_keys)
         ):
             raise ValueError("explicit collection scope is duplicated or foreign")
-    selected_keys = {(row["ticker"], row["cik"]) for row in selected_companies}
-    selected_scope = tuple(
-        row for row in scope if (row.ticker, row.cik) in selected_keys
-    )
-    represented = {(row.ticker, row.cik) for row in selected_scope}
-    if represented != selected_keys:
-        raise ValueError("explicit collection scope has no complete planned filing scope")
-    return selected_scope, parent, selected_companies
+    return parent, selected_companies
 
 
 def _known_parser_version(
@@ -1276,6 +1291,44 @@ def _source_fact_id(
 def _load_collection_scope(
     collection_manifest: Path,
 ) -> tuple[dict[str, Any], dict[str, Any], tuple[_FilingScope, ...]]:
+    collection, request, companies = _load_collection_header(collection_manifest)
+    return collection, request, _materialize_collection_scope(
+        collection_manifest, companies
+    )
+
+
+def _load_collection_scope_v2(
+    collection_manifest: Path,
+    *,
+    requested: tuple[dict[str, str], ...] | None,
+) -> tuple[
+    dict[str, Any],
+    dict[str, Any],
+    tuple[_FilingScope, ...],
+    tuple[dict[str, str], ...],
+    tuple[dict[str, str], ...],
+]:
+    """Validate the whole parent identity, then materialize only v2's scope."""
+    collection, request, companies = _load_collection_header(collection_manifest)
+    parent, selected = _select_collection_membership(request, requested=requested)
+    selected_keys = {(row["ticker"], row["cik"]) for row in selected}
+    selected_rows = tuple(
+        row
+        for row in companies
+        if (str(row["ticker"]), str(row["cik"])) in selected_keys
+    )
+    if len(selected_rows) != len(selected):
+        raise ValueError("explicit collection scope has no complete company declaration")
+    scope = _materialize_collection_scope(collection_manifest, selected_rows)
+    represented = {(row.ticker, row.cik) for row in scope}
+    if represented != selected_keys:
+        raise ValueError("explicit collection scope has no complete planned filing scope")
+    return collection, request, scope, parent, selected
+
+
+def _load_collection_header(
+    collection_manifest: Path,
+) -> tuple[dict[str, Any], dict[str, Any], tuple[dict[str, Any], ...]]:
     collection = _read_json(collection_manifest)
     request_path = _regular_file(Path(str(collection.get("request_path"))), "collection request")
     if collection.get("request_sha256") != _sha256(request_path):
@@ -1301,6 +1354,20 @@ def _load_collection_scope(
         or manifested != requested
     ):
         raise ValueError("collection membership differs from immutable request")
+    for company in companies:
+        if not isinstance(company, dict):
+            raise TypeError("collection company declaration is malformed")
+        ticker = str(company.get("ticker"))
+        cik = str(company.get("cik"))
+        if _SAFE_TICKER.fullmatch(ticker) is None or _SAFE_CIK.fullmatch(cik) is None:
+            raise ValueError("collection company identity is unsafe")
+    return collection, request, tuple(companies)
+
+
+def _materialize_collection_scope(
+    collection_manifest: Path,
+    companies: tuple[dict[str, Any], ...],
+) -> tuple[_FilingScope, ...]:
     scope: list[_FilingScope] = []
     for company in companies:
         ticker = str(company["ticker"])
@@ -1378,7 +1445,7 @@ def _load_collection_scope(
     identities = {(row.ticker, row.cik, row.accession) for row in scope}
     if len(identities) != len(scope):
         raise ValueError("collection plans repeat a filing identity")
-    return collection, request, tuple(sorted(scope, key=lambda row: (row.ticker, row.accession)))
+    return tuple(sorted(scope, key=lambda row: (row.ticker, row.accession)))
 
 
 def _load_duration_claims(
@@ -1543,6 +1610,47 @@ def _compare_source_claim(
         pairs["source_context_ref"] = "context_ref"
     if any(source[left] != claim.get(right) for left, right in pairs.items()):
         raise ValueError("source claim differs from cached primary document")
+
+
+def _binding_matches_claim(
+    binding: dict[str, Any], claim: dict[str, Any], *, kind: str
+) -> bool:
+    """Match a producer-scanned immutable claim to its persisted Raw binding."""
+    pairs = {
+        "ticker": "ticker",
+        "cik": "cik",
+        "accession": "accession",
+        "primary_document": "primary_document",
+        "source_id": "source_id",
+        "source_lexical": "source_lexical",
+        "format_qname": "format_qname",
+        "format_namespace": "format_namespace",
+        "concept_qname": "concept_qname",
+        "fact_id": "fact_id",
+    }
+    if kind == "DURATION":
+        pairs.update(
+            {
+                "transform": "format",
+                "format_namespace": "namespace",
+                "source_context_ref": "context_ref",
+            }
+        )
+    else:
+        pairs.update(
+            {
+                "source_locator": "source_locator",
+                "source_element_type": "source_element_type",
+                "source_scale": "source_scale",
+                "source_sign": "source_sign",
+                "concept_data_type_qname": "concept_data_type_qname",
+                "primary_sha256": "primary_sha256",
+                "filing_id": "filing_id",
+                "context_id": "context_id",
+                "raw_concept_id": "raw_concept_id",
+            }
+        )
+    return all(binding.get(left) == claim.get(right) for left, right in pairs.items())
 
 
 def _bind_source_row(
