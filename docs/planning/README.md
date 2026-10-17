@@ -7,6 +7,11 @@
 제한된 로컬 구현으로 확대됐고, 2026-09-10 결과는
 [U4 완료·인수](../implementation/u4-completion-and-acceptance.md)에 기록한다.
 
+2026-10-17 재개 후속: 동결 T3v2 source와 tiny 수락 뒤 exact-50을 새 collection에서
+재개하는 fail-closed runner와 실행 경계는
+[50사 T3v2 재개 운영 계약](../implementation/universe50-t3v2-operations.md)에 기록한다.
+Raw adoption과 History build는 별도 stage GO 전에는 실행하지 않는다.
+
 ## 읽기 순서와 문서 소유권
 
 | 문서 | 역할 |
