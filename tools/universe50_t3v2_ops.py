@@ -574,7 +574,15 @@ def terminate_owned_process_group(
     group_id: Any = os.getpgid,
 ) -> int:
     """Terminate and reap only the session-leading process group created by this runner."""
-    if type(process.pid) is not int or process.pid <= 1 or group_id(process.pid) != process.pid:
+    if type(process.pid) is not int or process.pid <= 1:
+        raise RuntimeError("refusing to signal a process group not owned by this supervisor")
+    if process.poll() is not None:
+        return process.wait()
+    try:
+        actual_group = group_id(process.pid)
+    except ProcessLookupError:
+        return process.wait()
+    if actual_group != process.pid:
         raise RuntimeError("refusing to signal a process group not owned by this supervisor")
     if process.poll() is None:
         try:
