@@ -29,6 +29,30 @@
 반환됐다. [재무 통합·실행 전달 계약](../implementation/universe50-financial-delivery.md)은
 승인된 좁은 보정과 합성 재검증 상태를 추적하며 actual financial은 계속 NOT_READY다.
 새 통합 후보의 독립 검증과 actual first-five/50사 발행·로컬 인수·main 병합은 수행하지 않았다.
+financial source의 독립 PASS와 리드 인수 뒤, 실패한 JNJ partial을
+보존하면서 별도 bounded-memory engine으로 새 History를 만드는 범위는
+[50사 History bounded-memory 복구 전달](../implementation/universe50-history-recovery-delivery.md)에
+기록한다. recovery source/synthetic 구현만 승인됐으며 engine source acceptance와 actual
+root GO는 별도 단계다. 첫 actual JNJ r1은 reported table 완료 뒤 quarter 단계에서
+10,800초 TIMEOUT으로 종료됐고 partial과 운영 증거를 보존했다. 따라서 History 복구 성공과
+financial readiness는 계속 미수행이다.
+2026-10-17 후속 계약은 독립 검증된 completed reported stage를 clean 37-file copy로 재사용하는
+선택 모드의 source/synthetic 구현만 승인했다. exact r1 witness, original/clean stage,
+copy/component/root attestation, plan/intake/operational roots와 generation/recovery source를
+preflight/request/root GO에 모두 결속하고 public recovery receipt COMPLETE 뒤에만 READY를 쓴다.
+actual copy/audit와 실행, full History 감사·인수는 계속 미수행이다.
+후보 `26d1b8a`는 canonical first-five config/output 결속과 prior failure/receipt/root 보존 결함으로
+독립 FAIL했다. 리드가 승인한 R1–R4 좁은 보정은 별도 Astra 단일 writer가 구현했으며
+real-public synthetic History→READY와 별도9b validator child lifecycle을 검사한다.
+accepted a02 r1의 TIMEOUT을 기존 old OPS56a와 구분해 exact config/preflight/request/GO/source와
+결속하고, later-45 canonical financial source를 exact `fd9a179…`로 고정하는 좁은 후속 후보는
+`f74defd…`에서 두 번째 실패 선언과 root의 동시 누락을 허용해 독립 FAIL했다. 보정 후보는
+post-r1 JNJ config에 exact a02 r1 witness를 정확히 한 건 요구하며 legacy-only JNJ 재시도를
+거부한다. 새 freeze의 별도 독립 검증·로컬 인수는 대기 중이다. runner ancestry `9b6e7ec…`, full canonical validator,
+17개 manifest와 회계 의미는 보존한다. 이 변경은 actual retry 승인을 포함하지 않는다.
+source/synthetic 검사에서는 unit/screening 내 6개 actual cached 테스트를 명시적으로 제외하고 nonexistent
+corpus 환경, precollection 실제 파일 접근 거부 및 owned RSS guard를 적용한다.
+중단된 plain full-unit 실행은 synthetic 완료 증거로 쓰지 않는다. 세부 재현 규칙은 위 전달 계약에 있다.
 
 2026-10-17 TTM provenance 후속: source `9b6e7ec…`의 synthetic AVAILABLE TTM에서
 준비된 REPORTED 입력 top-level에 검증된 `source_snapshot_id` 전달이 빠져 strict public
@@ -86,6 +110,7 @@ Raw adoption과 History build는 별도 stage GO 전에는 실행하지 않는�
 | [50 issuer T3 참조 결함과 확장 중지](../implementation/universe50-t3-reference-hold-20261017.md) | Raw exact-50 수집 상태는 보존하지만 T3 graph 참조 결함으로 CVX actual audit·first-five·50사 `FinancialREADY`는 미수락. **수리·재감사 사용자 승인 전 HOLD** |
 | [50사 generic metric Raw 품질 전달](../implementation/universe50-generic-metric-quality-delivery.md) | mixed v5/v6 Raw source binding과 duration·승인 lexical repair 전수 conformance, exact parent/cohort scope. **`c70087d` 독립 PASS / source+synthetic 로컬 수락**; actual 실행·full financial semantic assurance 아님 |
 | [50사 재무 통합·실행 전달](../implementation/universe50-financial-delivery.md) | accepted producer·quality·identity·OPS·package view 누적 통합, quarterly exact identity parent 결속과 explicit stage-GO offline runner. **구현 후보 / 독립 검증 대기**; actual financial 실행·인수·native 반영 아님 |
+| [50사 History bounded-memory 복구 전달](../implementation/universe50-history-recovery-delivery.md) | 별도 clean runner/engine source, immutable collection e와 실패 partial 보존, explicit root GO, guarded public History build. **f74 동시누락 FAIL 뒤 mandatory a02 r1 witness 보정 후보 / 독립 검증 대기**; 새 engine·actual retry·financial 미수락 |
 | [기간 규칙](../implementation/period-rules.md), [Layer 2 연결](../implementation/layer2-longitudinal.md), [공시 발견 계약](../implementation/accession-contract.md) | 표시 계획으로 바꿀 수 없는 의미·입력 경계 |
 
 충돌 시 적용되는 사용자 결정과 승인 범위를 먼저 확인하고, 해당 평면의 계약을
@@ -118,6 +143,7 @@ Raw adoption과 History build는 별도 stage GO 전에는 실행하지 않는�
 | 50사 재무 확대 후속 상태 | [T3 HOLD 기록](../implementation/universe50-t3-reference-hold-20261017.md) | 결함·상태 문서화만 승인; 수리·CVX actual audit·재생성 미승인 | Raw exact-50 기존 수락 보존; T3 참조 결함 미수리 | cached tiny graph endpoint 무결성 FAIL; actual CVX `NOT_EVALUATED` | **HOLD_FINANCIAL_EXPANSION_PENDING_T3_REFERENCE_DISPOSITION** | 미병합; push·PR 미수행 |
 | 50사 generic metric identity | [제안](../implementation/universe50-generic-metric-identity-proposal-20261017.md) · [승인 전달 계약](../implementation/universe50-generic-metric-identity-delivery-20261017.md) | 권장안 A의 별도 attestation, 명시 source kind와 합성 fresh fixture 구현은 **2026-10-17 APPROVED** | final `6470e0b`; quality final `c70087d` 통합 | **PASS**; 별도 read-only 검증 보고서 SHA-256 `9c27d0b…` | **source/synthetic LOCALLY_ACCEPTED**; actual identity 발행·인수 미수행 | 미병합; push·PR 미수행 |
 | 50사 재무 통합·offline runner | [재무 통합·실행 전달](../implementation/universe50-financial-delivery.md) | **2026-10-17 APPROVED**; 동결 source 통합, quarterly exact identity 결속, public-API-only staged runner와 합성 검증 | **IMPLEMENTED CANDIDATE**; 동결 SHA 확정 전 | 독립 검증 대기 | 미수락; actual first-five/50·native 실행 미수행 | 미병합; push·PR·scheduler 미수행 |
+| 50사 History bounded-memory 복구 | [History 복구 전달](../implementation/universe50-history-recovery-delivery.md) | **2026-10-17 SOURCE/SYNTHETIC ONLY**; r1 TIMEOUT exact witness, fd9 canonical gate, optional attested reported-stage reuse | **ATTESTED-REUSE IMPLEMENTED CANDIDATE**; 동결 SHA 대기 | source/synthetic 독립 검증 대기; component actual audit 미수행 | r1 TIMEOUT; actual reuse·later-45·financial 미수락 | 미병합; push·PR·scheduler 미수행 |
 
 현재 전달 상태(2026-09-10): U3–U5 누적 이력은
 [PR #63](https://github.com/pluswc/sec_xbrl/pull/63)으로 `main`에 병합됐다. merge
