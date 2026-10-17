@@ -14,11 +14,11 @@
 | 단계 | 현재 상태 |
 | --- | --- |
 | 범위 승인 | **APPROVED** — 권장안 A의 로컬 코드·합성 fresh fixture 구현 |
-| generic identity 구현 | **IMPLEMENTED CANDIDATE** — 합성 public chain 자체 검증 완료; 새 동결 SHA 확정 전 |
+| generic identity 구현 | final `6470e0b8dc30f8df3c2229e511fae79195530f4b` |
 | mixed v5/v6 Raw/Quality producer | `c70087dccd6337268110417da11c11298ddae303`; 독립 PASS와 리드 source/synthetic 로컬 수락 완료 |
 | actual first-five/50사 발행 | **NOT_READY / 미승인** |
-| 독립 검증 | quality `c70087d` PASS; 이 identity 통합 후보는 대기 |
-| 로컬 인수 | quality source/synthetic만 수락; identity·actual 인수 미수행 |
+| 독립 검증 | quality `c70087d`와 identity `6470e0b` 모두 **PASS** |
+| 로컬 인수 | quality·identity source/synthetic 수락; actual 인수 미수행 |
 | push·PR·main 병합 | 미수행 |
 
 구현 존재, 독립 검증, 리드의 로컬 인수와 main 병합을 서로 대신 쓰지 않는다.
@@ -114,8 +114,9 @@ collection 미완료, stale config, parent/cohort 혼합, history/analysis/quali
 malformed quality proof, source-kind 혼합·fallback과 재열기 후 외부 파일 변경이다.
 
 별도 Astra 읽기 전용 검증자는 동결된 identity와 quality 커밋을 정상 통합한 동일 SHA에서
-위 계약, fresh synthetic publication과 회귀를 독립 실행해 `PASS` 또는 `FAIL`을 보고한다.
-그 전까지 actual first-five/50사 identity와 annual/quarterly dataset은 `NOT_READY`다.
+위 계약, fresh synthetic publication과 회귀를 독립 실행했다. identity `6470e0b`는 PASS와
+source/synthetic 로컬 수락을 받았다. 이 결과만으로 actual first-five/50사 identity와
+annual/quarterly dataset은 준비 완료가 되지 않는다.
 
 quality `c70087dccd6337268110417da11c11298ddae303`의 독립 PASS 증거는 로컬
 `independent_quality_c70087d/report.json`(SHA-256
@@ -123,5 +124,11 @@ quality `c70087dccd6337268110417da11c11298ddae303`의 독립 PASS 증거는 로�
 source/synthetic 로컬 수락은 `lead_quality_source_and_synthetic_acceptance.json`
 (SHA-256 `9558b7c0d577ab41c1c2e9b5cb714afb2cfb8f668c5cb9c67f19608bf20cfaef`)이다.
 두 파일은 위 `resumption_20261017_t3v2` 작업 디렉터리에 있다. 이 증거는 actual
-financial payload, actual first-five/50 발행 또는 새 identity 통합 후보의 독립 PASS를
-대신하지 않는다.
+financial payload 또는 actual first-five/50 발행을 대신하지 않는다.
+
+identity `6470e0b`의 독립 PASS 증거는 같은 작업 디렉터리의
+`independent_identity_6470e0b/report.json`(SHA-256
+`9c27d0b20e744bfeea7719a15036d33d7ef0f5c3923ac151fc63dd291809e22f`)이고,
+리드의 source/synthetic 로컬 수락은
+`lead_identity_source_and_synthetic_acceptance.json`(SHA-256
+`0ad31a482176329222dcad631c71145dcbe491fe89766b39bbdb28eca80e0ff8`)이다.

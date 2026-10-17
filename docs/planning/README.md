@@ -21,8 +21,10 @@
 기록한다. 이후 사용자는 2026-10-17 권장안 A의 로컬 코드·합성 fixture 구현을 승인했고,
 [generic metric identity 전달 계약](../implementation/universe50-generic-metric-identity-delivery-20261017.md)이
 승인 범위, identity 구현 후보와 별도 mixed v5/v6 Raw/Quality gate를 기록한다. quality
-`c70087d`는 독립 PASS와 source/synthetic 로컬 수락을 마쳤지만, 새 identity 통합 후보의
-독립 검증과 actual first-five/50사 발행·로컬 인수·main 병합은 수행하지 않았다.
+`c70087d`와 identity `6470e0b`는 각각 독립 PASS와 source/synthetic 로컬 수락을 마쳤다.
+후속 [50사 재무 통합·실행 전달 계약](../implementation/universe50-financial-delivery.md)은
+이 source들과 연차·분기 producer를 누적 통합하고 explicit stage GO runner를 구현한다.
+새 통합 후보의 독립 검증과 actual first-five/50사 발행·로컬 인수·main 병합은 수행하지 않았다.
 
 2026-10-17 사용자·리드 후속 승인으로 identity 앞단의 별도
 [generic metric Raw 품질 전달 계약](../implementation/universe50-generic-metric-quality-delivery.md)을
@@ -69,6 +71,7 @@ Raw adoption과 History build는 별도 stage GO 전에는 실행하지 않는�
 | [명시적 저장·다시 열기 전달](../implementation/screening-explicit-save-delivery.md) · [완료·로컬 운영 반영](../implementation/screening-explicit-save-completion-20261017.md) | preview 무저장, 조건·결과 분리 저장, 명시 불러오기, 결과 이력 재열기와 hidden result backing. **최종 `e84289a…` 독립 404 PASS·기존 21사 UI `LOCALLY_ACCEPTED`·loopback 반영; 원격 미완료** |
 | [50 issuer T3 참조 결함과 확장 중지](../implementation/universe50-t3-reference-hold-20261017.md) | Raw exact-50 수집 상태는 보존하지만 T3 graph 참조 결함으로 CVX actual audit·first-five·50사 `FinancialREADY`는 미수락. **수리·재감사 사용자 승인 전 HOLD** |
 | [50사 generic metric Raw 품질 전달](../implementation/universe50-generic-metric-quality-delivery.md) | mixed v5/v6 Raw source binding과 duration·승인 lexical repair 전수 conformance, exact parent/cohort scope. **`c70087d` 독립 PASS / source+synthetic 로컬 수락**; actual 실행·full financial semantic assurance 아님 |
+| [50사 재무 통합·실행 전달](../implementation/universe50-financial-delivery.md) | accepted producer·quality·identity·OPS·package view 누적 통합, quarterly exact identity parent 결속과 explicit stage-GO offline runner. **구현 후보 / 독립 검증 대기**; actual financial 실행·인수·native 반영 아님 |
 | [기간 규칙](../implementation/period-rules.md), [Layer 2 연결](../implementation/layer2-longitudinal.md), [공시 발견 계약](../implementation/accession-contract.md) | 표시 계획으로 바꿀 수 없는 의미·입력 경계 |
 
 충돌 시 적용되는 사용자 결정과 승인 범위를 먼저 확인하고, 해당 평면의 계약을
@@ -97,7 +100,8 @@ Raw adoption과 History build는 별도 stage GO 전에는 실행하지 않는�
 | 50사 annual window 소비자 호환성 | [연간·분기 소비자 계약](../implementation/screening-quarterly-50-delivery.md), [사용법](../usage/screening-quarterly-50.md) | **2026-10-13 APPROVED**; 인수된 회사별 최대 5 FY 입력·최신 최대 4 FY 표시 schema 검증과 legacy 보존만. 회계·분기·UI 정책 변경 제외 | 로컬 구현 후보; 동결 SHA·독립 검증 대기 | 합성 metric→v2→v3 및 fail-closed 자체 검증 진행 | 미인수; first-five/50 `NOT_READY` | 미병합; push·PR 미수행 |
 | 명시적 저장·다시 열기 | [전달 계약](../implementation/screening-explicit-save-delivery.md) · [완료 기록](../implementation/screening-explicit-save-completion-20261017.md) | 2026-10-17 승인된 기존 21사 UI 저장 동작·로컬 반영; 재무·원격 제외 | final product `e84289a54acae92bee45a9d0224d71133acc13aa` | **PASS**; 404 passed, Chrome 1440/1024/768, 재시작·원자성·legacy 재열기 | **2026-10-17 LOCALLY_ACCEPTED**, loopback 운영 반영·GET-only 41/0 smoke PASS | 미병합; push·PR·remote CI 미수행 |
 | 50사 재무 확대 후속 상태 | [T3 HOLD 기록](../implementation/universe50-t3-reference-hold-20261017.md) | 결함·상태 문서화만 승인; 수리·CVX actual audit·재생성 미승인 | Raw exact-50 기존 수락 보존; T3 참조 결함 미수리 | cached tiny graph endpoint 무결성 FAIL; actual CVX `NOT_EVALUATED` | **HOLD_FINANCIAL_EXPANSION_PENDING_T3_REFERENCE_DISPOSITION** | 미병합; push·PR 미수행 |
-| 50사 generic metric identity | [제안](../implementation/universe50-generic-metric-identity-proposal-20261017.md) · [승인 전달 계약](../implementation/universe50-generic-metric-identity-delivery-20261017.md) | 권장안 A의 별도 attestation, 명시 source kind와 합성 fresh fixture 구현은 **2026-10-17 APPROVED** | identity **IMPLEMENTED CANDIDATE**; quality final `c70087d` 통합 | quality `c70087d` PASS; 새 identity 통합 후보 독립 검증 대기 | quality source/synthetic만 수락; actual identity 발행·인수 미수행 | 미병합; push·PR 미수행 |
+| 50사 generic metric identity | [제안](../implementation/universe50-generic-metric-identity-proposal-20261017.md) · [승인 전달 계약](../implementation/universe50-generic-metric-identity-delivery-20261017.md) | 권장안 A의 별도 attestation, 명시 source kind와 합성 fresh fixture 구현은 **2026-10-17 APPROVED** | final `6470e0b`; quality final `c70087d` 통합 | **PASS**; 별도 read-only 검증 보고서 SHA-256 `9c27d0b…` | **source/synthetic LOCALLY_ACCEPTED**; actual identity 발행·인수 미수행 | 미병합; push·PR 미수행 |
+| 50사 재무 통합·offline runner | [재무 통합·실행 전달](../implementation/universe50-financial-delivery.md) | **2026-10-17 APPROVED**; 동결 source 통합, quarterly exact identity 결속, public-API-only staged runner와 합성 검증 | **IMPLEMENTED CANDIDATE**; 동결 SHA 확정 전 | 독립 검증 대기 | 미수락; actual first-five/50·native 실행 미수행 | 미병합; push·PR·scheduler 미수행 |
 
 현재 전달 상태(2026-09-10): U3–U5 누적 이력은
 [PR #63](https://github.com/pluswc/sec_xbrl/pull/63)으로 `main`에 병합됐다. merge
