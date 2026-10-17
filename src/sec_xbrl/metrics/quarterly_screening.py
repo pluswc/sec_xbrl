@@ -1030,7 +1030,8 @@ def _prepared_observation(
         for field in (
             "accession", "source_id", "source_filing_id", "source_fact_id", "context_id",
             "raw_concept_qname", "raw_concept_namespace_uri", "unit_id",
-            "context_instant_date", "duration_days", "selected_source_ids",
+            "source_snapshot_id", "context_instant_date", "duration_days",
+            "selected_source_ids",
         ):
             record[field] = copy.deepcopy(source_lineage.get(field))
     record["observation_id"] = _observation_id(record)

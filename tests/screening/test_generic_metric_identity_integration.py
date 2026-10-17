@@ -53,8 +53,9 @@ from sec_xbrl.screening.metric_identity import (
     publish_generic_metric_identity,
 )
 from sec_xbrl.screening.quarterly import MANIFEST as QUARTERLY_MANIFEST
+from sec_xbrl.screening.quarterly import QuarterlyScreeningMetricReader
 from tests.screening.test_quarterly_screening_producer import (
-    _one_quarter_inputs,
+    _four_quarter_revenue_inputs,
     _profile_rows,
 )
 from tests.screening.test_screening_metric_publication import _analysis_bundle
@@ -193,7 +194,20 @@ def _quarterly_analysis(
     )
     manifest_path = root / "analysis_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    columns, cells, traces = _one_quarter_inputs()
+    columns, cells, traces = _four_quarter_revenue_inputs()
+    for index, cell in enumerate(cells, 1):
+        for evidence in cell["primary_statement_evidence"]:
+            evidence["cik"] = "0000000123"
+            evidence["accession"] = f"0000000123-25-{index:06d}"
+    for index, trace in enumerate(traces, 1):
+        lineage = trace["value_lineage"]
+        lineage["accession"] = f"0000000123-25-{index:06d}"
+        lineage["source_snapshot_id"] = lineage["source_snapshot_id"].replace(
+            "l1:0000000001:", "l1:0000000123:"
+        )
+        for evidence in lineage["primary_statement_evidence"]:
+            evidence["cik"] = "0000000123"
+            evidence["accession"] = lineage["accession"]
     records = {
         "columns": columns,
         "core_rows": _profile_rows(),
@@ -441,6 +455,18 @@ def test_quality_identity_annual31_dataset_v2_chain_and_subset_stability(
     assert QuarterlyMetricReader(quarterly.root).manifest["annual_parent"][
         "generic_identity"
     ]["publication_id"] == identity.publication_id
+    available_ttm = next(
+        row
+        for row in QuarterlyMetricReader(quarterly.root).observations
+        if row["metric_id"] == "ttm_revenue"
+        and row["availability_status"] == "AVAILABLE"
+    )
+    assert available_ttm["value"] == "1000"
+    assert len(available_ttm["source_lineage"]["derivation_inputs"]) == 4
+    assert all(
+        item["source_snapshot_id"] == item["source_lineage"]["source_snapshot_id"]
+        for item in available_ttm["source_lineage"]["derivation_inputs"]
+    )
 
     dataset_v3_config = tmp_path / "dataset-v3-config.json"
     write_json(
@@ -464,6 +490,39 @@ def test_quality_identity_annual31_dataset_v2_chain_and_subset_stability(
     assert dataset_v3_status["company_count"] == 1
     assert dataset_v3_status["quarter_definition_count"] == 17
     assert dataset_v3_status["quarter_observation_count"] == 136
+    reopened_ttm = next(
+        row
+        for row in ScreeningDatasetV3Reader(dataset_v3).quarter_observations
+        if row["observation_id"] == available_ttm["observation_id"]
+    )
+    assert reopened_ttm == available_ttm
+
+    contradiction = tmp_path / "quarterly-snapshot-contradiction"
+    shutil.copytree(quarterly.root, contradiction)
+    observations_path = contradiction / "quarter_metric_observations.json"
+    observations_payload = json.loads(observations_path.read_text(encoding="utf-8"))
+    contradictory_ttm = next(
+        row
+        for row in observations_payload["records"]
+        if row["observation_id"] == available_ttm["observation_id"]
+    )
+    contradictory_input = contradictory_ttm["source_lineage"]["derivation_inputs"][0]
+    contradictory_input["observation_id"] += ":contradictory-snapshot"
+    contradictory_input["source_snapshot_id"] = "another-immutable-snapshot"
+    write_json(observations_path, observations_payload)
+    contradiction_manifest = contradiction / QUARTERLY_MANIFEST
+    manifest_payload = json.loads(contradiction_manifest.read_text(encoding="utf-8"))
+    manifest_payload["files"][observations_path.name].update(
+        sha256=sha256_file(observations_path),
+        size=observations_path.stat().st_size,
+    )
+    write_json(contradiction_manifest, manifest_payload)
+    (contradiction / "MANIFEST.sha256").write_text(
+        f"{sha256_file(contradiction_manifest)}  {QUARTERLY_MANIFEST}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="raw source identity has contradictory content"):
+        QuarterlyScreeningMetricReader(contradiction)
 
     _install_intake(prepared.paths, "SIX")
     _build_ready_histories(

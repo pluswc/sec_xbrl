@@ -30,6 +30,14 @@
 승인된 좁은 보정과 합성 재검증 상태를 추적하며 actual financial은 계속 NOT_READY다.
 새 통합 후보의 독립 검증과 actual first-five/50사 발행·로컬 인수·main 병합은 수행하지 않았다.
 
+2026-10-17 TTM provenance 후속: source `9b6e7ec…`의 synthetic AVAILABLE TTM에서
+준비된 REPORTED 입력 top-level에 검증된 `source_snapshot_id` 전달이 빠져 strict public
+reader가 동일 원본을 모순으로 거부하는 결함을 확인했다. 좁은 보정 후보는
+[재무 통합·실행 전달 계약](../implementation/universe50-financial-delivery.md)의
+snapshot 보존 회귀만 구현·자체 검증하며 TTM 공식·기간·basis·source kind와 consumer
+identity strictness를 유지한다. 별도 독립 PASS와 리드 수락 전이고 actual financial은 계속
+`NOT_READY`다.
+
 2026-10-17 사용자·리드 후속 승인으로 identity 앞단의 별도
 [generic metric Raw 품질 전달 계약](../implementation/universe50-generic-metric-quality-delivery.md)을
 구현했다. mixed Raw v5/v6 source binding과 SEC duration·승인 lexical repair의

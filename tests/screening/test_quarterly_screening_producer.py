@@ -744,6 +744,104 @@ def _four_quarter_revenue_inputs() -> tuple[list[dict], list[dict], list[dict]]:
     return columns, cells, traces
 
 
+def _four_quarters_with_derived_q4() -> tuple[list[dict], list[dict], list[dict]]:
+    columns, cells, traces = _four_quarter_revenue_inputs()
+    columns, cells, traces = columns[1:], cells[1:], traces[1:]
+    cell, trace = _prepared_input(
+        row_id="revenue",
+        value="300",
+        start="2025-10-01",
+        end="2026-01-01",
+        period_class="QTD_3M",
+        fiscal_quarter=4,
+        suffix="ttm-derived-q4",
+    )
+    cell.update(
+        status="DERIVED",
+        source_fact_id=None,
+        source_filing_ids=["filing-ttm-derived-fy", "filing-ttm-derived-ytd"],
+        basis_version="basis-A",
+        column_id="quarter-derived-q4",
+    )
+    lineage = trace["value_lineage"]
+    lineage.update(
+        accession=None,
+        source_filing_id=None,
+        source_snapshot_id=None,
+        selected_source_fact_id=None,
+        context_id=None,
+        derived_metric_id="derived-quarter-revenue-q4",
+        derivation_rule_version="approved-core-cumulative-difference-v1",
+        formula="FY - YTD_9M",
+        basis_version="basis-A",
+        structural_version="struct-A",
+        recast_version="recast-A",
+        filed_date="2026-02-01",
+        report_date="2025-12-31",
+    )
+    source_inputs = []
+    for suffix, value, period_class, end, filed, report in (
+        ("fy", "1000", "FY", "2026-01-01", "2026-02-01", "2025-12-31"),
+        ("ytd", "700", "YTD_9M", "2025-10-01", "2025-11-01", "2025-09-30"),
+    ):
+        _, source_trace = _prepared_input(
+            row_id="revenue",
+            value=value,
+            start="2025-01-01",
+            end=end,
+            period_class=period_class,
+            fiscal_quarter=4,
+            suffix=f"ttm-derived-{suffix}",
+        )
+        source = source_trace["value_lineage"]
+        source.update(
+            value_numeric=value,
+            basis_version="basis-A",
+            structural_version="struct-A",
+            recast_version="recast-A",
+            filed_date=filed,
+            report_date=report,
+        )
+        source_inputs.append(source)
+    lineage["source_inputs"] = source_inputs
+    columns.append(
+        {
+            "fiscal_time_series_column_id": cell["column_id"],
+            "actual_end_date": "2026-01-01",
+            "actual_instant_date": None,
+        }
+    )
+    cells.append(cell)
+    traces.append(trace)
+    return columns, cells, traces
+
+
+def test_ttm_accepts_eligible_derived_q4_without_changing_formula_or_basis() -> None:
+    columns, cells, traces = _four_quarters_with_derived_q4()
+    observations, _ = build_quarterly_company_records(
+        ticker="TEST", cik=CIK, financial_as_of=AS_OF, columns=columns,
+        rows=_profile_rows(), cells=cells, traces=traces, spine=_quarter_spine(AS_OF),
+    )
+    ttm = next(
+        row
+        for row in observations
+        if row["metric_id"] == "ttm_revenue"
+        and (row["calendar_year"], row["calendar_quarter"]) == (2025, 4)
+    )
+    assert ttm["availability_status"] == "AVAILABLE"
+    assert ttm["value"] == "1200"
+    assert ttm["basis_version"] == "basis-A"
+    inputs = ttm["source_lineage"]["derivation_inputs"]
+    assert [row["source_kind"] for row in inputs] == [
+        "REPORTED", "REPORTED", "REPORTED", "DERIVED_QUARTER",
+    ]
+    assert inputs[-1]["source_lineage"]["formula"] == "FY - YTD_9M"
+    assert all(
+        row["source_snapshot_id"] == row["source_lineage"]["source_snapshot_id"]
+        for row in inputs[:-1]
+    )
+
+
 @pytest.mark.parametrize(
     "mutation",
     ["EMPTY_BASIS", "STRUCTURAL_MISMATCH", "BASIS_BREAK", "STRUCTURAL_BREAK"],

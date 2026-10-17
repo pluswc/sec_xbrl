@@ -384,3 +384,24 @@ source 후보는 최소한 다음을 통과해야 한다.
 그 뒤 별도 검증자가 정확한 clean SHA를 검증해 PASS해야 리드가 actual stage GO 여부를
 판단한다. actual Raw/history payload 읽기, SEC network, production DB, live UI, main 병합,
 push·PR와 scheduler 변경은 이 source 구현·합성 검증 단계에서 수행하지 않는다.
+
+## AVAILABLE TTM source snapshot 보정
+
+2026-10-17 source `9b6e7ec…`의 synthetic public chain에서 AVAILABLE TTM의 REPORTED
+입력은 중첩 `source_lineage`에 검증된 `source_snapshot_id`를 보존하면서도 준비된 입력의
+top-level 필드에는 같은 값을 싣지 않았다. strict quarterly reader는 이 준비된 입력을 원본
+identity로 다시 검증하므로, combined v3 재열기에서 동일 원본을 서로 다른 identity로 판단해
+거부했다. 독립 blocker 보고서 SHA-256은
+`ca6aff664b4e36a95ae07b7d31155c0c53b97d9c39a13cf188935ea7f07f0435`, 좁은 보정
+계약 SHA-256은 `7f2687a2e773f8f5eb2a41df7d00f5008bcb74a38c51824c2d0b757a8d65f921`다.
+
+구현 후보는 REPORTED quarter를 준비할 때 이미 검증된 중첩 snapshot identity를 top-level에도
+복사한다. TTM 공식, 값, 기간·calendar bucket, basis와 null-basis 판단, source kind,
+derived Q4 공식·입력, observation/publication ID 규칙은 바꾸지 않는다. consumer의 전체 raw
+identity 비교도 그대로 유지하므로 실제 snapshot이나 raw anchor가 달라진 입력은 계속
+fail-closed다. synthetic public producer → quarterly reader → combined v3 → v3 reader 양성,
+snapshot 충돌 음성, eligible derived Q4와 null-basis 회귀를 구현자 검사 대상으로 둔다.
+
+이 상태는 source/synthetic 구현 후보이며 독립 검증과 리드의 로컬 수락 전이다. actual Raw,
+History, financial, metadata 실행과 기존 publication 재작성은 승인되지 않았고 계속
+`NOT_READY`다.
