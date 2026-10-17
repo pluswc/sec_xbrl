@@ -51,6 +51,15 @@ CREATE TABLE IF NOT EXISTS screen_revisions (
   created_at TEXT NOT NULL,
   UNIQUE(screen_id, revision_number)
 );
+CREATE TABLE IF NOT EXISTS screen_save_kinds (
+  screen_id TEXT PRIMARY KEY REFERENCES screen_definitions(screen_id),
+  save_kind TEXT NOT NULL CHECK(save_kind IN ('EXPLICIT_CONDITION','RESULT_BACKING'))
+);
+CREATE TABLE IF NOT EXISTS revision_contexts (
+  revision_id TEXT PRIMARY KEY REFERENCES screen_revisions(revision_id),
+  context_json TEXT NOT NULL,
+  context_hash TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS universe_snapshots (
   universe_snapshot_id TEXT PRIMARY KEY,
   dataset_publication_id TEXT NOT NULL,
@@ -101,7 +110,7 @@ class ScreeningStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
-    def create_screen(self, name: str, content: dict[str, Any]) -> dict[str, Any]:
+    def create_screen(self, name: str, content: dict[str, Any], *, context: dict[str, Any] | None = None) -> dict[str, Any]:
         name = require_string(name, "screen name")
         normalized = _revision_content(content)
         screen_id = "screen-" + uuid.uuid4().hex
@@ -124,9 +133,15 @@ class ScreeningStore:
                     created_at,
                 ),
             )
-        return {"screen_id": screen_id, "name": name, **revision, "content": normalized}
+            connection.execute(
+                "INSERT INTO screen_save_kinds VALUES(?,?)",
+                (screen_id, "EXPLICIT_CONDITION"),
+            )
+            if context is not None:
+                _insert_context(connection, revision["revision_id"], context)
+        return {"screen_id": screen_id, "name": name, **revision, "content": normalized, "saved_context": context}
 
-    def revise_screen(self, screen_id: str, content: dict[str, Any]) -> dict[str, Any]:
+    def revise_screen(self, screen_id: str, content: dict[str, Any], *, context: dict[str, Any] | None = None) -> dict[str, Any]:
         screen_id = require_string(screen_id, "screen_id")
         normalized = _revision_content(content)
         created_at = _now()
@@ -139,6 +154,25 @@ class ScreeningStore:
             ).fetchone()
             if current is None:
                 raise ValueError("screen definition does not exist")
+            kind = connection.execute(
+                "SELECT save_kind FROM screen_save_kinds WHERE screen_id=?", (screen_id,)
+            ).fetchone()
+            if kind is not None and kind["save_kind"] != "EXPLICIT_CONDITION":
+                raise ValueError("result-only condition cannot be revised as a saved condition")
+            existing = connection.execute(
+                "SELECT * FROM screen_revisions WHERE revision_id=?", (current["revision_id"],)
+            ).fetchone()
+            previous_context = _read_context(connection, current["revision_id"])
+            if context is None:
+                context = previous_context
+            if existing is not None and existing["content_hash"] == digest_value(normalized) and context == previous_context:
+                return {"saved_context": previous_context, **_screen_row(
+                    connection.execute(
+                        "SELECT d.name,r.* FROM screen_revisions r JOIN screen_definitions d "
+                        "ON d.screen_id=r.screen_id WHERE r.revision_id=?",
+                        (current["revision_id"],),
+                    ).fetchone()
+                )}
             number = int(current["revision_number"]) + 1
             revision = _new_revision(screen_id, current["revision_id"], number, normalized, created_at)
             connection.execute(
@@ -153,7 +187,9 @@ class ScreeningStore:
                     created_at,
                 ),
             )
-        return {"screen_id": screen_id, **revision, "content": normalized}
+            if context is not None:
+                _insert_context(connection, revision["revision_id"], context)
+        return {"screen_id": screen_id, **revision, "content": normalized, "saved_context": context}
 
     def list_screens(self) -> list[dict[str, Any]]:
         with self._connect() as connection:
@@ -161,10 +197,91 @@ class ScreeningStore:
                 "SELECT d.screen_id,d.name,d.created_at,r.revision_id,r.revision_number,"
                 "r.content_json,r.content_hash,r.created_at AS revised_at "
                 "FROM screen_definitions d JOIN screen_revisions r ON r.screen_id=d.screen_id "
-                "WHERE r.revision_number=(SELECT MAX(x.revision_number) FROM screen_revisions x "
+                "LEFT JOIN screen_save_kinds k ON k.screen_id=d.screen_id "
+                "WHERE (k.save_kind IS NULL OR k.save_kind='EXPLICIT_CONDITION') AND "
+                "r.revision_number=(SELECT MAX(x.revision_number) FROM screen_revisions x "
                 "WHERE x.screen_id=d.screen_id) ORDER BY d.name,d.screen_id"
             ).fetchall()
-        return [_screen_row(row) for row in rows]
+        with self._connect() as connection:
+            return [{**_screen_row(row), "saved_context": _read_context(connection, row["revision_id"])} for row in rows]
+
+    def list_saved_revisions(self) -> list[dict[str, Any]]:
+        """Return every explicitly saved condition version; omit result-only backing."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT d.screen_id,d.name,d.created_at,r.revision_id,r.revision_number,"
+                "r.content_json,r.content_hash,r.created_at AS revised_at "
+                "FROM screen_definitions d JOIN screen_revisions r ON r.screen_id=d.screen_id "
+                "LEFT JOIN screen_save_kinds k ON k.screen_id=d.screen_id "
+                "WHERE k.save_kind IS NULL OR k.save_kind='EXPLICIT_CONDITION' "
+                "ORDER BY d.name,d.screen_id,r.revision_number"
+            ).fetchall()
+        with self._connect() as connection:
+            return [{**_screen_row(row), "saved_context": _read_context(connection, row["revision_id"])} for row in rows]
+
+    def save_explicit_result(
+        self,
+        *,
+        name: str,
+        content: dict[str, Any],
+        universe_content: dict[str, Any],
+        payload: dict[str, Any],
+        revision_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically persist one explicit result and any hidden backing records."""
+        name = require_string(name, "result name")
+        normalized_content = _revision_content(content)
+        normalized_universe = json.loads(canonical_json(universe_content))
+        normalized_payload = json.loads(canonical_json(payload))
+        normalized_payload["result_name"] = name
+        created_at = _now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if revision_id is not None:
+                row = connection.execute(
+                    "SELECT * FROM screen_revisions WHERE revision_id=?",
+                    (require_string(revision_id, "revision_id"),),
+                ).fetchone()
+                if row is None or row["content_hash"] != digest_value(normalized_content):
+                    raise ValueError("saved condition differs from the previewed condition")
+            else:
+                screen_id = "screen-" + uuid.uuid4().hex
+                revision = _new_revision(screen_id, None, 1, normalized_content, created_at)
+                revision_id = revision["revision_id"]
+                connection.execute(
+                    "INSERT INTO screen_definitions VALUES(?,?,?)", (screen_id, name, created_at)
+                )
+                connection.execute(
+                    "INSERT INTO screen_revisions VALUES(?,?,?,?,?,?,?)",
+                    (revision_id, screen_id, None, 1, canonical_json(normalized_content), revision["content_hash"], created_at),
+                )
+                connection.execute(
+                    "INSERT INTO screen_save_kinds VALUES(?,?)", (screen_id, "RESULT_BACKING")
+                )
+            universe_hash = digest_value(normalized_universe)
+            universe_id = "universe-" + universe_hash[:24]
+            connection.execute(
+                "INSERT OR IGNORE INTO universe_snapshots VALUES(?,?,?,?,?)",
+                (universe_id, require_string(normalized_universe.get("dataset_publication_id"), "dataset publication"), canonical_json(normalized_universe), universe_hash, created_at),
+            )
+            normalized_payload["revision_id"] = revision_id
+            normalized_payload["universe_snapshot_id"] = universe_id
+            revision_hash = digest_value(normalized_content)
+            normalized_payload["input_hash"] = digest_value({
+                "revision_id": revision_id,
+                "revision_hash": revision_hash,
+                "universe_snapshot_id": universe_id,
+                "dataset_publication_id": normalized_payload["dataset_publication_id"],
+                "versions": normalized_payload["versions"],
+            })
+            normalized_payload["output_hash"] = digest_value(normalized_payload["rows"])
+            _validate_run_rows(normalized_payload, normalized_universe)
+            run_id = "run-" + digest_value({"payload": normalized_payload, "nonce": uuid.uuid4().hex})[:24]
+            connection.execute(
+                "INSERT INTO screen_runs VALUES(?,?,?,?,?,?,?,?,?)",
+                (run_id, revision_id, universe_id, normalized_payload["dataset_publication_id"], normalized_payload["fixture_kind"], normalized_payload["input_hash"], normalized_payload["output_hash"], canonical_json(normalized_payload), created_at),
+            )
+        return {"run_id": run_id, "created_at": created_at, **normalized_payload}
 
     def revision(self, revision_id: str) -> dict[str, Any]:
         with self._connect() as connection:
@@ -177,6 +294,8 @@ class ScreeningStore:
             raise ValueError("screen revision does not exist")
         _validate_revision_record(row)
         result = _screen_row(row)
+        with self._connect() as connection:
+            result["saved_context"] = _read_context(connection, revision_id)
         return result
 
     def save_universe(self, content: dict[str, Any]) -> dict[str, Any]:
@@ -497,9 +616,18 @@ class ScreeningStore:
             universes = list(connection.execute("SELECT * FROM universe_snapshots"))
             run_ids = [row["run_id"] for row in connection.execute("SELECT run_id FROM screen_runs")]
             exports = list(connection.execute("SELECT * FROM export_manifests"))
+            save_kinds = list(connection.execute("SELECT * FROM screen_save_kinds"))
+            for row in connection.execute("SELECT revision_id FROM revision_contexts"):
+                _read_context(connection, row["revision_id"])
         if foreign_key_errors:
             raise ValueError("screening store contains orphaned relational records")
         _validate_revision_graph(definitions, revisions)
+        definition_ids = {row["screen_id"] for row in definitions}
+        seen_kinds: set[str] = set()
+        for row in save_kinds:
+            if row["screen_id"] not in definition_ids or row["screen_id"] in seen_kinds or row["save_kind"] not in {"EXPLICIT_CONDITION", "RESULT_BACKING"}:
+                raise ValueError("screen save-kind integrity mismatch")
+            seen_kinds.add(row["screen_id"])
         for row in universes:
             self.universe(row["universe_snapshot_id"])
         for run_id in run_ids:
@@ -777,3 +905,28 @@ def _validate_run_rows(payload: dict[str, Any], universe: dict[str, Any]) -> Non
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _validate_context(context: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(context, dict) or set(context) != {"dataset_id", "publication_id", "manifest_digest"}:
+        raise ValueError("invalid saved condition context")
+    for key in ("dataset_id", "publication_id"):
+        require_string(context[key], key)
+    if not _digest(context["manifest_digest"]):
+        raise ValueError("invalid saved condition manifest digest")
+    return json.loads(canonical_json(context))
+
+
+def _insert_context(connection: sqlite3.Connection, revision_id: str, context: dict[str, Any]) -> None:
+    normalized = _validate_context(context)
+    connection.execute("INSERT INTO revision_contexts VALUES(?,?,?)", (revision_id, canonical_json(normalized), digest_value(normalized)))
+
+
+def _read_context(connection: sqlite3.Connection, revision_id: str) -> dict[str, Any] | None:
+    row = connection.execute("SELECT * FROM revision_contexts WHERE revision_id=?", (revision_id,)).fetchone()
+    if row is None:
+        return None
+    context = _validate_context(json.loads(row["context_json"]))
+    if digest_value(context) != row["context_hash"]:
+        raise ValueError("saved condition context hash mismatch")
+    return context

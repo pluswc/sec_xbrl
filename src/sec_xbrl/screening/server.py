@@ -83,6 +83,8 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
         def _get(self) -> None:
             parsed = urlparse(self.path)
             query = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
+            if "dataset_publication_id" in query:
+                service.require_publication(query["dataset_id"], query["dataset_publication_id"])
             if parsed.path == "/":
                 self._text(HTML, "text/html; charset=utf-8")
             elif parsed.path == "/app.css":
@@ -95,6 +97,10 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
                 self._json(service.status())
             elif parsed.path == "/api/screens":
                 self._json(service.store.list_screens())
+            elif parsed.path == "/api/screen-revisions":
+                self._json(service.store.list_saved_revisions())
+            elif match := re.fullmatch(rf"/api/saved-conditions/({ID})", parsed.path):
+                self._json(service.saved_condition(match.group(1)))
             elif parsed.path == "/api/runs":
                 self._json(service.store.list_runs(query.get("revision_id")))
             elif parsed.path == "/api/decisions":
@@ -233,15 +239,31 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
             body = self._body()
             if parsed.path == "/api/screens":
                 self._json(
-                    service.create_screen(body.get("name"), body.get("content")), HTTPStatus.CREATED
+                    service.create_screen(body.get("name"), body.get("content"), dataset_id=body.get("dataset_id")), HTTPStatus.CREATED
                 )
             elif match := re.fullmatch(rf"/api/screens/({ID})/revisions", parsed.path):
                 self._json(
-                    service.revise_screen(match.group(1), body.get("content")), HTTPStatus.CREATED
+                    service.revise_screen(match.group(1), body.get("content"), dataset_id=body.get("dataset_id")), HTTPStatus.CREATED
                 )
             elif parsed.path == "/api/runs":
                 self._json(
                     service.execute(body.get("revision_id"), body.get("dataset_id")),
+                    HTTPStatus.CREATED,
+                )
+            elif parsed.path == "/api/preview":
+                self._json(
+                    service.preview(body.get("content"), body.get("dataset_id")),
+                    HTTPStatus.OK,
+                )
+            elif parsed.path == "/api/results":
+                self._json(
+                    service.save_result(
+                        name=body.get("name"),
+                        content=body.get("content"),
+                        dataset_id=body.get("dataset_id"),
+                        preview_hash=body.get("preview_hash"),
+                        revision_id=body.get("revision_id"),
+                    ),
                     HTTPStatus.CREATED,
                 )
             elif parsed.path == "/api/decisions":

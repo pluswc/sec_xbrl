@@ -45,6 +45,21 @@ VISIBLE_COLUMNS = {
 }
 
 
+def _preview_response(
+    content: dict[str, Any], dataset_id: str, evaluated: dict[str, Any]
+) -> dict[str, Any]:
+    frozen = json.loads(canonical_json(content))
+    result = json.loads(canonical_json(evaluated))
+    preview_hash = digest_value({"dataset_id": dataset_id, "content": frozen, "result": result})
+    return {
+        **result,
+        "persistence_state": "PREVIEW",
+        "content": frozen,
+        "condition_hash": digest_value(frozen),
+        "preview_hash": preview_hash,
+    }
+
+
 class ScreeningService:
     """Application service over verified publications and an append-only store."""
 
@@ -478,18 +493,91 @@ class ScreeningService:
             "limitation": "SEC SIC is a current coarse peer-candidate signal, not accounting equivalence.",
         }
 
-    def create_screen(self, name: str, content: dict[str, Any]) -> dict[str, Any]:
-        self._validate_revision(content)
-        return self.store.create_screen(name, content)
+    def _saved_context(self, dataset_id: str) -> dict[str, Any]:
+        reader = self._dataset(dataset_id)
+        return {"dataset_id": dataset_id, "publication_id": reader.publication_id, "manifest_digest": digest_value(reader.manifest)}
 
-    def revise_screen(self, screen_id: str, content: dict[str, Any]) -> dict[str, Any]:
-        self._validate_revision(content)
-        return self.store.revise_screen(screen_id, content)
+    def saved_condition(self, revision_id: str) -> dict[str, Any]:
+        revision = self.store.revision(revision_id)
+        context = revision["saved_context"]
+        if context is not None:
+            if self._saved_context(context["dataset_id"]) != context:
+                raise ValueError("saved condition dataset publication has changed")
+            return {**revision, "context_origin": "SAVED", "open_dataset_id": context["dataset_id"]}
+        runs = self.store.list_runs(revision_id)
+        identities = {(run["dataset_id"], run["dataset_publication_id"]) for run in runs}
+        if len(identities) == 1:
+            dataset_id, publication_id = identities.pop()
+            if self._dataset(dataset_id).publication_id != publication_id:
+                raise ValueError("historical condition dataset publication has changed")
+            return {**revision, "context_origin": "HISTORICAL_RUN", "open_dataset_id": dataset_id}
+        return {**revision, "context_origin": "UNKNOWN", "open_dataset_id": None}
+
+    def create_screen(self, name: str, content: dict[str, Any], *, dataset_id: str | None = None) -> dict[str, Any]:
+        self._validate_revision(content, reader=self._dataset(dataset_id) if dataset_id is not None else None)
+        return self.store.create_screen(name, content, context=self._saved_context(dataset_id) if dataset_id is not None else None)
+
+    def revise_screen(self, screen_id: str, content: dict[str, Any], *, dataset_id: str | None = None) -> dict[str, Any]:
+        self._validate_revision(content, reader=self._dataset(dataset_id) if dataset_id is not None else None)
+        return self.store.revise_screen(screen_id, content, context=self._saved_context(dataset_id) if dataset_id is not None else None)
 
     def execute(self, revision_id: str, dataset_id: str) -> dict[str, Any]:
         reader = self._dataset(dataset_id)
         revision = self.store.revision(revision_id)
         content = revision["content"]
+        evaluated = self._evaluate(content, dataset_id)
+        universe = self.store.save_universe(evaluated.pop("universe"))
+        versions = evaluated["versions"]
+        input_material = {
+            "revision_id": revision_id,
+            "revision_hash": revision["content_hash"],
+            "universe_snapshot_id": universe["universe_snapshot_id"],
+            "dataset_publication_id": reader.publication_id,
+            "versions": versions,
+        }
+        payload = {
+            **evaluated,
+            "revision_id": revision_id,
+            "universe_snapshot_id": universe["universe_snapshot_id"],
+            "input_hash": digest_value(input_material),
+        }
+        return self.store.save_run(payload)
+
+    def preview(self, content: dict[str, Any], dataset_id: str) -> dict[str, Any]:
+        """Evaluate a draft without writing any journal record."""
+        evaluated = self._evaluate(content, dataset_id)
+        evaluated.pop("universe")
+        return _preview_response(content, dataset_id, evaluated)
+
+    def save_result(
+        self,
+        *,
+        name: str,
+        content: dict[str, Any],
+        dataset_id: str,
+        preview_hash: str,
+        revision_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Validate once against the preview digest and persist that same evaluation."""
+        evaluated = self._evaluate(content, dataset_id)
+        universe = evaluated.pop("universe")
+        expected = _preview_response(content, dataset_id, evaluated)
+        if require_string(preview_hash, "preview_hash") != expected["preview_hash"]:
+            raise ValueError("preview is stale; run the preview again before saving")
+        if revision_id is not None:
+            context = self.store.revision(revision_id)["saved_context"]
+            if context is not None and context != self._saved_context(dataset_id):
+                raise ValueError("saved condition dataset differs from the preview")
+        return self.store.save_explicit_result(
+            name=name,
+            content=content,
+            universe_content=universe,
+            payload=evaluated,
+            revision_id=revision_id,
+        )
+
+    def _evaluate(self, content: dict[str, Any], dataset_id: str) -> dict[str, Any]:
+        reader = self._dataset(dataset_id)
         self._validate_revision(content, reader=reader)
         targets = _select_universe(reader, content["universe"])
         universe_payload = {
@@ -498,7 +586,6 @@ class ScreeningService:
             "selector": content["universe"],
             "ciks": [row["cik"] for row in targets],
         }
-        universe = self.store.save_universe(universe_payload)
         rows = [self._evaluate_company(reader, company, content) for company in targets]
         rows = _sort_rows(rows, content["sort"])
         counts = {
@@ -521,30 +608,30 @@ class ScreeningService:
             "predicate_definition_versions": predicate_versions,
             "metadata_publication_id": reader.manifest["sources"]["metadata"]["publication_id"],
         }
-        input_material = {
-            "revision_id": revision_id,
-            "revision_hash": revision["content_hash"],
-            "universe_snapshot_id": universe["universe_snapshot_id"],
-            "dataset_publication_id": reader.publication_id,
-            "versions": versions,
-        }
-        payload = {
-            "revision_id": revision_id,
-            "universe_snapshot_id": universe["universe_snapshot_id"],
+        return {
+            "universe": universe_payload,
             "dataset_id": dataset_id,
             "dataset_publication_id": reader.publication_id,
             "fixture_kind": reader.manifest["fixture_kind"],
             "financial_as_of": reader.manifest["financial_as_of"],
             "period_policy": content["period_policy"],
             "versions": versions,
-            "input_hash": digest_value(input_material),
             "counts": counts,
             "rows": rows,
         }
-        return self.store.save_run(payload)
+
+    def require_publication(self, dataset_id: str, publication_id: str) -> None:
+        """Reject source lookups that would mix a frozen result with newer data."""
+        if self._dataset(dataset_id).publication_id != publication_id:
+            raise ValueError(
+                "dataset publication has changed; 저장 당시 자료가 현재 자료와 다릅니다. "
+                "저장 결과는 보존되며 당시 자료를 복원한 뒤 다시 열 수 있습니다."
+            )
 
     def run(self, run_id: str) -> dict[str, Any]:
-        return self.store.run(run_id)
+        run = self.store.run(run_id)
+        self.require_publication(run["dataset_id"], run["dataset_publication_id"])
+        return run
 
     def trace(self, run_id: str, *, cik: str, metric_id: str) -> dict[str, Any]:
         run = self.store.run(run_id)

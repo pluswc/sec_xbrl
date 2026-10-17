@@ -7,6 +7,8 @@
 제한된 로컬 구현으로 확대됐고, 2026-09-10 결과는
 [U4 완료·인수](../implementation/u4-completion-and-acceptance.md)에 기록한다.
 
+2026-10-17 후속: [명시적 저장·다시 열기](../implementation/screening-explicit-save-delivery.md) — 사용자 승인된 소비자 동작 개선. 구현·자체 검증 완료, 독립 검증·운영 반영·main 병합 미완료.
+
 ## 읽기 순서와 문서 소유권
 
 | 문서 | 역할 |
