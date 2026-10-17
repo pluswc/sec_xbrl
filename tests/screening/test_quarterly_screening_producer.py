@@ -213,6 +213,36 @@ def _one_quarter_inputs() -> tuple[list[dict], list[dict], list[dict]]:
     return columns, cells, traces
 
 
+def _remap_one_quarter(
+    *, fiscal_year: int, fiscal_quarter: int, start: str, end: str
+) -> tuple[list[dict], list[dict], list[dict]]:
+    columns, cells, traces = _one_quarter_inputs()
+    for column in columns:
+        if column["actual_end_date"] is not None:
+            column["actual_end_date"] = end
+        if column["actual_instant_date"] is not None:
+            column["actual_instant_date"] = end
+    for cell in cells:
+        cell["start"] = None if cell["period_class"] == "INSTANT" else start
+        cell["end"] = end
+        cell["fiscal_year"] = fiscal_year
+        cell["fiscal_quarter"] = fiscal_quarter
+    for trace in traces:
+        lineage = trace["value_lineage"]
+        lineage["context_start_date"] = (
+            None if lineage["period_class"] == "INSTANT" else start
+        )
+        lineage["context_end_date"] = (
+            None if lineage["period_class"] == "INSTANT" else end
+        )
+        lineage["context_instant_date"] = (
+            end if lineage["period_class"] == "INSTANT" else None
+        )
+        lineage["report_date"] = date.fromisoformat(end).isoformat()
+        lineage["filed_date"] = "2026-09-01"
+    return columns, cells, traces
+
+
 def test_fixed_spine_keeps_missing_as_unavailable_and_derives_safe_same_period_metrics() -> None:
     columns, cells, traces = _one_quarter_inputs()
     observations, inventory = build_quarterly_company_records(
@@ -886,4 +916,110 @@ def test_immutable_publication_roundtrip_and_payload_tamper(
     with pytest.raises(ValueError, match="payload changed"):
         QuarterlyMetricReader(destination)
     assert (destination / MANIFEST).is_file()
+
+
+@pytest.mark.parametrize(
+    ("annual_end", "fiscal_year", "fiscal_quarter", "start", "end", "bucket"),
+    (
+        (2025, 2026, 1, "2026-01-01", "2026-04-01", (2026, 1)),
+        (2026, 2027, 1, "2026-05-01", "2026-08-01", (2026, 3)),
+    ),
+)
+def test_later_fiscal_year_quarter_survives_public_eight_bucket_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    annual_end: int,
+    fiscal_year: int,
+    fiscal_quarter: int,
+    start: str,
+    end: str,
+    bucket: tuple[int, int],
+) -> None:
+    columns, cells, traces = _remap_one_quarter(
+        fiscal_year=fiscal_year,
+        fiscal_quarter=fiscal_quarter,
+        start=start,
+        end=end,
+    )
+    records = {
+        "columns": columns,
+        "core_rows": _profile_rows(),
+        "core_cells": cells,
+        **{
+            f"trace_{digit}": traces if digit == "0" else []
+            for digit in "0123456789abcdef"
+        },
+    }
+
+    class FakeClient:
+        def _records(self, ticker: str, view: str, name: str) -> list[dict]:
+            assert (ticker, view) == ("TEST", "LATEST_REPORTED")
+            return deepcopy(records[name])
+
+    annual_root = tmp_path / f"annual-through-{annual_end}"
+    annual_root.mkdir()
+    annual_manifest = annual_root / "screening_metric_manifest.json"
+    annual_manifest.write_text("{}\n", encoding="utf-8")
+    annual = SimpleNamespace(
+        manifest={
+            "publication_id": f"annual-metrics-through-{annual_end}",
+            "financial_as_of": AS_OF,
+            "configured_ciks": [CIK],
+        }
+    )
+    monkeypatch.setattr(
+        "sec_xbrl.metrics.quarterly_screening.ScreeningMetricReader", lambda root: annual
+    )
+    monkeypatch.setattr(
+        "sec_xbrl.metrics.quarterly_screening._open_company_source",
+        lambda company, financial_as_of: (
+            FakeClient(),
+            {
+                "kind": "QUARTERLY_ANALYSIS_PUBLICATION",
+                "ticker": "TEST",
+                "cik": CIK,
+                "publication_id": f"quarter-analysis-fy{fiscal_year}",
+                "manifest_sha256": "a" * 64,
+                "declared_files": [],
+            },
+        ),
+    )
+    config = tmp_path / f"config-fy{fiscal_year}.json"
+    config.write_text(
+        json.dumps(
+            {
+                "schema_version": "quarterly-screening-metric-config-v1",
+                "financial_as_of": AS_OF,
+                "source_commit_sha": "b" * 40,
+                "annual_metric_root": str(annual_root),
+                "annual_metric_manifest_sha256": sha256_file(annual_manifest),
+                "companies": [
+                    {
+                        "ticker": "TEST",
+                        "cik": CIK,
+                        "analysis_root": "/unused/by-controlled-source",
+                        "analysis_manifest_sha256": "c" * 64,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    published = publish_quarterly_screening_metrics(
+        config, tmp_path / f"quarterly-fy{fiscal_year}"
+    )
+    reader = QuarterlyMetricReader(published.root)
+    observation = next(
+        row
+        for row in reader.observations
+        if row["metric_id"] == "quarter_revenue"
+        and (row["calendar_year"], row["calendar_quarter"]) == bucket
+    )
+    assert observation["availability_status"] == "AVAILABLE"
+    assert observation["value"] == "100"
+    assert observation["fiscal_year"] == fiscal_year
+    assert observation["fiscal_quarter"] == f"Q{fiscal_quarter}"
+    assert observation["period_start"] == start
+    assert observation["period_end"] == end
+    assert len(reader.period_inventory) == 8
 

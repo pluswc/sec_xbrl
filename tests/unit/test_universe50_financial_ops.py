@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
+import traceback
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +13,12 @@ import pytest
 from tools import universe50_financial_ops as runner
 
 
+def _write_json(path: Path, value: object) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
 def _config(tmp_path: Path) -> dict:
     companies = [
         {
@@ -17,7 +26,13 @@ def _config(tmp_path: Path) -> dict:
             "cik": f"{index:010d}",
             "input_years": [2021, 2022, 2023, 2024, 2025],
             "display_years": [2022, 2023, 2024, 2025],
+            "quarter_input_years": [2021, 2022, 2023, 2024, 2025, 2026],
+            "history_output_root": str(tmp_path / f"history/{ticker}"),
             "history_root": str(tmp_path / f"history/{ticker}"),
+            "build_manifest": str(
+                tmp_path / f"collection/companies/{ticker}/build_manifest.json"
+            ),
+            "build_manifest_sha256": "0" * 64,
             "history_manifest_sha256": "1" * 64,
             "collector_source_commit_sha": "a" * 40,
             "plan_sha256": "2" * 64,
@@ -36,7 +51,7 @@ def _config(tmp_path: Path) -> dict:
         "first5": list(runner.FIRST5),
         "companies": companies,
         "collection": {
-            "manifest": str(tmp_path / "collection_manifest.json"),
+            "manifest": str(tmp_path / "collection/collection_manifest.json"),
             "manifest_sha256": "4" * 64,
             "parent_company_count": 50,
         },
@@ -68,6 +83,91 @@ def _config(tmp_path: Path) -> dict:
     }
 
 
+def _materialize_first5_acceptance(tmp_path: Path) -> dict:
+    first5 = runner._validate_shape(_config(tmp_path))
+    metadata_root = Path(first5["metadata"]["root"])
+    _write_json(metadata_root / runner.company_metadata.MANIFEST_NAME, {"fixture": True})
+    manifests = (
+        ("quality", "quality", runner.metric_quality.MANIFEST_NAME),
+        ("identity", "identity", runner.metric_identity.MANIFEST_NAME),
+        ("annual_metrics", "annual_metrics", runner.screening.MANIFEST),
+        ("annual_dataset_v2", "annual_dataset_v2", runner.dataset_v2.MANIFEST),
+        ("quarterly_metrics", "quarterly_metrics", runner.quarterly_screening.MANIFEST),
+        ("combined_dataset_v3", "combined_dataset_v3", runner.dataset_v3.MANIFEST),
+    )
+    for name, key, filename in manifests:
+        _write_json(Path(first5["outputs"][key]) / filename, {"name": name})
+    for ticker in runner.FIRST5:
+        for key in ("annual_analysis", "quarterly_analysis"):
+            _write_json(
+                Path(first5["outputs"][key]) / ticker / "analysis_manifest.json",
+                {"name": f"{key}:{ticker}"},
+            )
+    for key in ("quality_indexes", "quality_bindings"):
+        _write_json(Path(first5["outputs"][key]) / "fixture.json", {"key": key})
+    first5_path = _write_json(tmp_path / "first5-config.json", first5)
+    stages = list(runner.FIRST5_ACCEPTED_STAGES)
+    receipts = {}
+    for stage in stages:
+        receipt = {
+            "schema_version": runner.RECEIPT_VERSION,
+            "status": "PASS",
+            "stage": stage,
+            "source_head": first5["source"]["head"],
+            "go_sha256": "a" * 64,
+            "outputs": runner._output_receipts(first5, stage),
+        }
+        path = _write_json(tmp_path / f"accepted-receipts/{stage}.json", receipt)
+        receipts[stage] = {"path": str(path), "sha256": runner.sha256_file(path)}
+    acceptance = {
+        "schema_version": runner.FIRST5_ACCEPTANCE_VERSION,
+        "status": runner.FIRST5_ACCEPTANCE_STATUS,
+        "source_head": first5["source"]["head"],
+        "financial_as_of": runner.FINANCIAL_AS_OF,
+        "metadata_observation_cutoff": runner.METADATA_CUTOFF,
+        "collection": first5["collection"],
+        "companies": runner._first5_companies(first5),
+        "first5_config": {
+            "path": str(first5_path),
+            "sha256": runner.sha256_file(first5_path),
+        },
+        "stage_receipts": receipts,
+        "publication_manifests": runner._expected_publication_manifests(first5),
+    }
+    acceptance_path = _write_json(tmp_path / "first5-acceptance.json", acceptance)
+    full = _config(tmp_path)
+    full["collection_scope_mode"] = "FULL"
+    for index in range(6, 51):
+        ticker = f"X{index:02d}"
+        full["companies"].append(
+            {
+                "ticker": ticker,
+                "cik": f"{index:010d}",
+                "input_years": [2021, 2022, 2023, 2024, 2025],
+                "display_years": [2022, 2023, 2024, 2025],
+                "quarter_input_years": [2021, 2022, 2023, 2024, 2025, 2026],
+                "history_output_root": str(tmp_path / f"history/{ticker}"),
+                "history_root": str(tmp_path / f"history/{ticker}/panels"),
+                "build_manifest": str(
+                    tmp_path / f"collection/companies/{ticker}/build_manifest.json"
+                ),
+                "build_manifest_sha256": "0" * 64,
+                "history_manifest_sha256": "1" * 64,
+                "collector_source_commit_sha": "a" * 40,
+                "plan_sha256": "2" * 64,
+                "intake_sha256": "3" * 64,
+            }
+        )
+    full["outputs"] = {
+        key: str(tmp_path / "full-outputs" / key) for key in full["outputs"]
+    }
+    full["first5_financial_acceptance"] = {
+        "path": str(acceptance_path),
+        "sha256": runner.sha256_file(acceptance_path),
+    }
+    return runner._validate_shape(full)
+
+
 def test_config_requires_explicit_first5_cutoffs_and_all_module_pins(
     tmp_path: Path,
 ) -> None:
@@ -88,6 +188,101 @@ def test_config_requires_explicit_first5_cutoffs_and_all_module_pins(
         mutate(changed)
         with pytest.raises(ValueError, match=match):
             runner._validate_shape(changed)
+
+
+@pytest.mark.parametrize(
+    "quarter_years",
+    (
+        None,
+        [],
+        [2022, 2023, 2024, 2025, 2026],
+        [2021, 2022, 2024, 2025, 2026],
+        [2021, 2022, 2023, 2024],
+        [2021, 2022, True, 2024, 2025, 2026],
+    ),
+)
+def test_config_rejects_implicit_or_incomplete_quarter_fiscal_window(
+    tmp_path: Path, quarter_years: object
+) -> None:
+    value = _config(tmp_path)
+    value["companies"][0]["quarter_input_years"] = quarter_years
+    with pytest.raises(ValueError, match="quarterly window"):
+        runner._validate_shape(value)
+
+
+def test_full_scope_requires_exact_immutable_first5_financial_acceptance(
+    tmp_path: Path,
+) -> None:
+    full = _materialize_first5_acceptance(tmp_path)
+    binding = runner._validate_first5_acceptance(full)
+    assert binding is not None
+    assert binding["status"] == runner.FIRST5_ACCEPTANCE_STATUS
+    assert set(binding["stage_receipts"]) == set(runner.FIRST5_ACCEPTED_STAGES)
+
+    missing = _config(tmp_path / "missing")
+    missing["collection_scope_mode"] = "FULL"
+    missing["companies"] = full["companies"]
+    with pytest.raises(ValueError, match="requires first-five"):
+        runner._validate_shape(missing)
+
+    acceptance_path = Path(full["first5_financial_acceptance"]["path"])
+    acceptance = json.loads(acceptance_path.read_text(encoding="utf-8"))
+    acceptance["source_head"] = "c" * 40
+    _write_json(acceptance_path, acceptance)
+    with pytest.raises(ValueError, match="hash differs"):
+        runner._validate_first5_acceptance(full)
+
+
+@pytest.mark.parametrize(
+    ("defect", "match"),
+    (
+        ("source", "scope differs"),
+        ("cohort", "scope differs"),
+        ("parent", "scope differs"),
+        ("receipt_set", "receipt set differs"),
+        ("publication", "publication manifests differ"),
+    ),
+)
+def test_full_acceptance_rejects_rehashed_wrong_scope_or_partial_evidence(
+    tmp_path: Path, defect: str, match: str
+) -> None:
+    full = _materialize_first5_acceptance(tmp_path)
+    acceptance_path = Path(full["first5_financial_acceptance"]["path"])
+    acceptance = json.loads(acceptance_path.read_text(encoding="utf-8"))
+    if defect == "source":
+        acceptance["source_head"] = "c" * 40
+    elif defect == "cohort":
+        acceptance["companies"] = list(reversed(acceptance["companies"]))
+    elif defect == "parent":
+        acceptance["collection"]["parent_company_count"] = 49
+    elif defect == "receipt_set":
+        acceptance["stage_receipts"].pop("quality")
+    else:
+        acceptance["publication_manifests"][0]["manifest_sha256"] = "0" * 64
+    acceptance_path.write_text(
+        json.dumps(acceptance, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    full["first5_financial_acceptance"]["sha256"] = runner.sha256_file(
+        acceptance_path
+    )
+    with pytest.raises(ValueError, match=match):
+        runner._validate_first5_acceptance(full)
+
+
+def test_full_request_rechecks_first5_acceptance_even_after_mocked_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    full = _materialize_first5_acceptance(tmp_path)
+    preflight = _write_json(Path(full["execution_root"]) / "preflight.json", {})
+    monkeypatch.setattr(
+        runner,
+        "_validated_preflight",
+        lambda _: (full, "d" * 64, preflight),
+    )
+    acceptance_path = Path(full["first5_financial_acceptance"]["path"])
+    acceptance_path.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="hash differs"):
+        runner.request_stage(tmp_path / "config.json", "annual-analysis")
 
 
 def test_fresh_metadata_requires_exact50_and_pinned_kdp_acquisition(
@@ -134,6 +329,50 @@ def test_fresh_metadata_must_match_exact50_collection_identity() -> None:
         runner._verify_exact50_metadata_membership(metadata, collection)
 
 
+def test_selected_history_must_match_exact_ready_build_marker(tmp_path: Path) -> None:
+    value = _config(tmp_path)
+    company = value["companies"][0]
+    ticker = company["ticker"]
+    output_root = tmp_path / f"history-output/{ticker}"
+    publication = output_root / "panels"
+    history_manifest = _write_json(
+        publication / "history_manifest.json",
+        {"plan": {"as_of_date": runner.FINANCIAL_AS_OF}},
+    )
+    company["history_output_root"] = str(output_root)
+    company["history_root"] = str(publication)
+    company["history_manifest_sha256"] = runner.sha256_file(history_manifest)
+    marker_path = Path(company["build_manifest"])
+    marker = {
+        "status": "READY",
+        "ticker": ticker,
+        "output_root": str(output_root),
+        "publication": str(publication),
+        "history_manifest": str(history_manifest),
+        "history_manifest_sha256": company["history_manifest_sha256"],
+        "plan_sha256": company["plan_sha256"],
+        "intake_sha256": company["intake_sha256"],
+    }
+    _write_json(marker_path, marker)
+    company["build_manifest_sha256"] = runner.sha256_file(marker_path)
+    config = runner._validate_shape(value)
+    bound = runner._validate_history_build_binding(config, config["companies"][0])
+    assert bound["history_root"] == str(publication)
+    assert bound["history_output_root"] == str(output_root)
+
+    unrelated = tmp_path / f"unrelated/{ticker}/panels"
+    unrelated_manifest = _write_json(
+        unrelated / "history_manifest.json",
+        {"plan": {"as_of_date": runner.FINANCIAL_AS_OF}},
+    )
+    config["companies"][0]["history_root"] = str(unrelated)
+    config["companies"][0]["history_manifest_sha256"] = runner.sha256_file(
+        unrelated_manifest
+    )
+    with pytest.raises(ValueError, match="differs from READY build marker"):
+        runner._validate_history_build_binding(config, config["companies"][0])
+
+
 def test_kdp_acquisition_evidence_binds_prepare_completion_and_root_path(
     tmp_path: Path,
 ) -> None:
@@ -177,6 +416,7 @@ def test_stage_go_exactly_binds_request_scope_parents_and_outputs(
             {"ticker": row["ticker"], "cik": row["cik"]}
             for row in config["companies"]
         ],
+        "first5_financial_acceptance": None,
         "parent_receipts": [],
         "outputs": [str(Path(config["outputs"]["annual_analysis"]).absolute())],
     }
@@ -203,11 +443,73 @@ def test_direct_worker_is_rejected_before_producer_call(
 
     config = _config(tmp_path)
     monkeypatch.setattr(runner, "_validate_go", lambda *args: config)
-    monkeypatch.setattr(runner.resource_ops, "install_parent_death_guard", lambda: None)
     monkeypatch.setitem(runner.STAGE_HANDLERS, "annual-analysis", producer)
-    with pytest.raises(PermissionError, match="supervisor capability"):
+    monkeypatch.delenv("SEC_XBRL_T3V2_SUPERVISOR_PID", raising=False)
+    with pytest.raises(PermissionError, match="supervisor"):
         runner._worker(tmp_path / "config", "annual-analysis", tmp_path / "go")
     assert called is False
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux operations contract")
+def test_real_supervised_financial_child_reaches_producer_without_guard_mock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = runner._validate_shape(_config(tmp_path))
+    Path(config["resource_root"]).mkdir()
+
+    def producer(value: dict) -> None:
+        output = Path(value["outputs"]["annual_analysis"])
+        output.mkdir(parents=True)
+        (output / "producer-reached.json").write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setattr(runner, "_validate_go", lambda *args: config)
+    monkeypatch.setitem(runner.STAGE_HANDLERS, "annual-analysis", producer)
+    go_file = _write_json(tmp_path / "go", {"status": "GO"})
+    token = os.urandom(32)
+    token_read, token_write = os.pipe()
+    result_read, result_write = os.pipe()
+    with runner.resource_ops.heavy_lock(Path(config["resource_root"])):
+        pid = os.fork()
+        if pid == 0:
+            try:
+                os.close(token_write)
+                os.close(result_read)
+                parent = str(os.getppid())
+                os.environ.update(
+                    SEC_XBRL_FINANCIAL_SUPERVISOR_FD=str(token_read),
+                    SEC_XBRL_FINANCIAL_SUPERVISOR_PID=parent,
+                    SEC_XBRL_FINANCIAL_SUPERVISOR_SHA256=runner.hashlib.sha256(
+                        token
+                    ).hexdigest(),
+                    SEC_XBRL_T3V2_SUPERVISOR_PID=parent,
+                    POLARS_MAX_THREADS="2",
+                )
+                receipt = runner._worker(
+                    tmp_path / "config", "annual-analysis", go_file
+                )
+                os.write(result_write, str(receipt).encode())
+                os._exit(0)
+            except Exception as exc:  # noqa: BLE001 - child must return diagnostics
+                os.write(result_write, (repr(exc) + "\n" + traceback.format_exc()).encode())
+                os._exit(70)
+        os.close(token_read)
+        os.close(result_write)
+        os.write(token_write, token)
+        os.close(token_write)
+        result = os.read(result_read, 4096)
+        os.close(result_read)
+        _, status = os.waitpid(pid, 0)
+    assert os.waitstatus_to_exitcode(status) == 0, result.decode()
+    receipt = Path(result.decode())
+    assert json.loads(receipt.read_text(encoding="utf-8"))["status"] == "PASS"
+    assert (Path(config["outputs"]["annual_analysis"]) / "producer-reached.json").is_file()
+
+
+def test_financial_supervisor_exports_ops_parent_guard_namespace() -> None:
+    env = runner._worker_environment(read_fd=17, token=b"x" * 32)
+    assert env["SEC_XBRL_FINANCIAL_SUPERVISOR_PID"] == str(os.getpid())
+    assert env["SEC_XBRL_T3V2_SUPERVISOR_PID"] == str(os.getpid())
+    assert env["SEC_XBRL_FINANCIAL_SUPERVISOR_FD"] == "17"
 
 
 def test_analysis_stage_uses_public_api_with_approved_flags(
@@ -226,13 +528,22 @@ def test_analysis_stage_uses_public_api_with_approved_flags(
     assert all(call["period_mode"] == "ANNUAL" for call in calls)
     assert all(call["include_year_end_balances"] is True for call in calls)
     assert all(call["include_quarter_source_evidence"] is False for call in calls)
+    assert {(call["fiscal_start"], call["fiscal_end"]) for call in calls} == {
+        (2021, 2025)
+    }
 
     calls.clear()
+    config["companies"][0]["quarter_input_years"].append(2027)
     runner._run_analysis(config, quarterly=True)
     assert len(calls) == 5
     assert all(call["period_mode"] == "QUARTERLY" for call in calls)
     assert all(call["include_quarter_source_evidence"] is True for call in calls)
     assert all(call["include_year_end_balances"] is False for call in calls)
+    assert calls[0]["fiscal_start"] == 2021
+    assert calls[0]["fiscal_end"] == 2027
+    assert {(call["fiscal_start"], call["fiscal_end"]) for call in calls[1:]} == {
+        (2021, 2026)
+    }
 
 
 def test_worker_requires_parent_held_shared_lock(

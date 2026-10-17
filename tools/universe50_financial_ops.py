@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -30,6 +31,8 @@ REQUEST_VERSION = "universe50-financial-stage-request-v1"
 GO_VERSION = "universe50-financial-stage-go-v1"
 RECEIPT_VERSION = "universe50-financial-stage-receipt-v1"
 RESOURCE_VERSION = "universe50-financial-resource-run-v1"
+FIRST5_ACCEPTANCE_VERSION = "universe50-first5-financial-acceptance-v1"
+FIRST5_ACCEPTANCE_STATUS = "LOCALLY_ACCEPTED_FIRST5_FINANCIAL"
 FINANCIAL_AS_OF = "2026-10-10"
 METADATA_CUTOFF = "2026-10-13T23:59:59Z"
 KDP_ACQUISITION_COMPLETED_AT = "2026-10-13T14:45:00.965796Z"
@@ -58,6 +61,7 @@ STAGES = (
     "quarterly-metrics",
     "combined-dataset-v3",
 )
+FIRST5_ACCEPTED_STAGES = tuple(stage for stage in STAGES if stage != "metadata")
 DEPENDENCIES = {
     "metadata": (),
     "annual-analysis": (),
@@ -192,14 +196,41 @@ def _companies(value: Any) -> list[dict[str, Any]]:
             or display != years[-4:]
         ):
             raise ValueError(f"{ticker}: annual window must be 5 input / 4 display")
+        quarter_years = row.get("quarter_input_years")
+        if (
+            not isinstance(quarter_years, list)
+            or not quarter_years
+            or any(type(year) is not int for year in quarter_years)
+            or quarter_years != list(range(quarter_years[0], quarter_years[-1] + 1))
+            or quarter_years[0] != years[0]
+            or quarter_years[-1] < years[-1]
+        ):
+            raise ValueError(
+                f"{ticker}: quarterly window must be explicit, consecutive, start "
+                "with the annual input window, and include its final fiscal year"
+            )
         result.append(
             {
                 "ticker": ticker,
                 "cik": cik,
                 "input_years": years,
                 "display_years": display,
+                "quarter_input_years": quarter_years,
+                "history_output_root": str(
+                    _absolute_path(
+                        row.get("history_output_root"), f"{ticker} history output root"
+                    )
+                ),
                 "history_root": str(
                     _absolute_path(row.get("history_root"), f"{ticker} history root")
+                ),
+                "build_manifest": str(
+                    _absolute_path(
+                        row.get("build_manifest"), f"{ticker} build manifest"
+                    )
+                ),
+                "build_manifest_sha256": _sha(
+                    row.get("build_manifest_sha256"), f"{ticker} build manifest"
                 ),
                 "history_manifest_sha256": _sha(
                     row.get("history_manifest_sha256"), f"{ticker} history manifest"
@@ -240,6 +271,14 @@ def _validate_shape(value: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("collection scope mode must be explicit")
     if value.get("first5") != list(FIRST5):
         raise ValueError("approved first-five order differs")
+    acceptance = value.get("first5_financial_acceptance")
+    if mode == "FULL":
+        if not isinstance(acceptance, dict) or set(acceptance) != {"path", "sha256"}:
+            raise ValueError("FULL scope requires first-five financial acceptance")
+        _absolute_path(acceptance.get("path"), "first-five financial acceptance")
+        _sha(acceptance.get("sha256"), "first-five financial acceptance")
+    elif acceptance is not None:
+        raise ValueError("subset scope cannot declare bulk financial acceptance")
     limits = value.get("limits")
     if limits != {
         "process_tree_rss_kib": LIMIT_KIB,
@@ -388,6 +427,222 @@ def _metadata_root(config: dict[str, Any]) -> Path:
     return _directory(Path(config["outputs"]["metadata"]), "fresh metadata publication")
 
 
+def _first5_companies(config: dict[str, Any]) -> list[dict[str, str]]:
+    by_ticker = {row["ticker"]: row for row in config["companies"]}
+    if not set(FIRST5) <= set(by_ticker):
+        raise ValueError("financial config lacks the exact approved first-five companies")
+    return [
+        {"ticker": ticker, "cik": by_ticker[ticker]["cik"]} for ticker in FIRST5
+    ]
+
+
+def _expected_publication_manifests(config: dict[str, Any]) -> list[dict[str, str]]:
+    metadata_root = (
+        Path(config["metadata"]["root"])
+        if config["metadata"]["mode"] == "EXISTING_PUBLICATION"
+        else Path(config["outputs"]["metadata"])
+    )
+    values = [
+        ("metadata", metadata_root, company_metadata.MANIFEST_NAME),
+        ("quality", Path(config["outputs"]["quality"]), metric_quality.MANIFEST_NAME),
+        ("identity", Path(config["outputs"]["identity"]), metric_identity.MANIFEST_NAME),
+        ("annual_metrics", Path(config["outputs"]["annual_metrics"]), screening.MANIFEST),
+        (
+            "annual_dataset_v2",
+            Path(config["outputs"]["annual_dataset_v2"]),
+            dataset_v2.MANIFEST,
+        ),
+        (
+            "quarterly_metrics",
+            Path(config["outputs"]["quarterly_metrics"]),
+            quarterly_screening.MANIFEST,
+        ),
+        (
+            "combined_dataset_v3",
+            Path(config["outputs"]["combined_dataset_v3"]),
+            dataset_v3.MANIFEST,
+        ),
+    ]
+    for ticker in FIRST5:
+        values.extend(
+            (
+                (
+                    f"annual_analysis:{ticker}",
+                    _analysis_root(config, "annual_analysis", ticker),
+                    "analysis_manifest.json",
+                ),
+                (
+                    f"quarterly_analysis:{ticker}",
+                    _analysis_root(config, "quarterly_analysis", ticker),
+                    "analysis_manifest.json",
+                ),
+            )
+        )
+    return [
+        {
+            "name": name,
+            "root": str(root),
+            "manifest": str(root / filename),
+            "manifest_sha256": sha256_file(
+                _regular(root / filename, f"accepted {name} manifest")
+            ),
+        }
+        for name, root, filename in values
+    ]
+
+
+def _validate_first5_acceptance(config: dict[str, Any]) -> dict[str, Any] | None:
+    if config["collection_scope_mode"] != "FULL":
+        if config.get("first5_financial_acceptance") is not None:
+            raise ValueError("subset scope cannot declare bulk financial acceptance")
+        return None
+    declaration = config.get("first5_financial_acceptance") or {}
+    if not isinstance(declaration, dict) or set(declaration) != {"path", "sha256"}:
+        raise ValueError("FULL scope requires first-five financial acceptance")
+    path = _pin(
+        declaration.get("path"),
+        declaration.get("sha256"),
+        "first-five financial acceptance",
+    )
+    acceptance = _read_json(path, "first-five financial acceptance")
+    expected_keys = {
+        "schema_version",
+        "status",
+        "source_head",
+        "financial_as_of",
+        "metadata_observation_cutoff",
+        "collection",
+        "companies",
+        "first5_config",
+        "stage_receipts",
+        "publication_manifests",
+    }
+    if set(acceptance) != expected_keys:
+        raise ValueError("first-five financial acceptance shape differs")
+    if (
+        acceptance.get("schema_version") != FIRST5_ACCEPTANCE_VERSION
+        or acceptance.get("status") != FIRST5_ACCEPTANCE_STATUS
+        or acceptance.get("source_head") != config["source"]["head"]
+        or acceptance.get("financial_as_of") != FINANCIAL_AS_OF
+        or acceptance.get("metadata_observation_cutoff") != METADATA_CUTOFF
+        or acceptance.get("collection") != config["collection"]
+        or acceptance.get("companies") != _first5_companies(config)
+    ):
+        raise ValueError("first-five financial acceptance scope differs")
+    first5_declaration = acceptance.get("first5_config") or {}
+    first5_path = _pin(
+        first5_declaration.get("path"),
+        first5_declaration.get("sha256"),
+        "accepted first-five financial config",
+    )
+    first5 = _validate_shape(_read_json(first5_path, "accepted first-five config"))
+    current_first5 = {
+        row["ticker"]: row for row in config["companies"] if row["ticker"] in FIRST5
+    }
+    accepted_first5 = {row["ticker"]: row for row in first5["companies"]}
+    if (
+        first5["collection_scope_mode"] != "EXPLICIT_SUBSET"
+        or _first5_companies(first5) != acceptance["companies"]
+        or accepted_first5 != current_first5
+        or first5["universe_id"] != config["universe_id"]
+        or first5["collection"] != config["collection"]
+        or first5["metadata"] != config["metadata"]
+        or first5["source"] != config["source"]
+        or first5["financial_as_of"] != FINANCIAL_AS_OF
+        or first5["metadata_observation_cutoff"] != METADATA_CUTOFF
+    ):
+        raise ValueError("accepted first-five config differs from FULL execution")
+    stages = list(FIRST5_ACCEPTED_STAGES)
+    if first5["metadata"]["mode"] == "PUBLISH_EXACT50":
+        stages.insert(0, "metadata")
+    receipts = acceptance.get("stage_receipts")
+    if not isinstance(receipts, dict) or set(receipts) != set(stages):
+        raise ValueError("first-five financial stage receipt set differs")
+    for stage in stages:
+        declaration = receipts[stage]
+        if not isinstance(declaration, dict) or set(declaration) != {"path", "sha256"}:
+            raise ValueError("first-five financial stage receipt declaration differs")
+        receipt_path = _pin(
+            declaration["path"], declaration["sha256"], f"accepted {stage} receipt"
+        )
+        receipt = _read_json(receipt_path, f"accepted {stage} receipt")
+        if (
+            receipt.get("schema_version") != RECEIPT_VERSION
+            or receipt.get("status") != "PASS"
+            or receipt.get("stage") != stage
+            or receipt.get("source_head") != config["source"]["head"]
+            or not isinstance(receipt.get("go_sha256"), str)
+            or SHA256.fullmatch(receipt["go_sha256"]) is None
+        ):
+            raise ValueError(f"accepted {stage} receipt identity differs")
+        _verify_output_receipt(receipt, stage)
+        if [row.get("root") for row in receipt["outputs"]] != [
+            str(root) for root in _output_paths(first5, stage)
+        ]:
+            raise ValueError(f"accepted {stage} receipt output roots differ")
+    expected_manifests = _expected_publication_manifests(first5)
+    if acceptance.get("publication_manifests") != expected_manifests:
+        raise ValueError("first-five accepted publication manifests differ")
+    return {
+        "path": str(path),
+        "sha256": sha256_file(path),
+        "status": FIRST5_ACCEPTANCE_STATUS,
+        "first5_config": {
+            "path": str(first5_path),
+            "sha256": sha256_file(first5_path),
+        },
+        "stage_receipts": copy.deepcopy(receipts),
+        "publication_manifests": expected_manifests,
+    }
+
+
+def _validate_history_build_binding(
+    config: dict[str, Any], company: dict[str, Any]
+) -> dict[str, str]:
+    ticker = company["ticker"]
+    collection = Path(config["collection"]["manifest"])
+    expected_marker = collection.parent / "companies" / ticker / "build_manifest.json"
+    configured_marker = Path(company["build_manifest"])
+    if configured_marker != expected_marker:
+        raise ValueError(f"{ticker}: configured build marker path differs")
+    marker_path = _pin(
+        configured_marker,
+        company["build_manifest_sha256"],
+        f"{ticker} READY build marker",
+    )
+    marker = _read_json(marker_path, f"{ticker} READY build marker")
+    history_root = Path(company["history_root"])
+    history_manifest = _regular(
+        history_root / "history_manifest.json", f"{ticker} history manifest"
+    )
+    history = _read_json(history_manifest, f"{ticker} history manifest")
+    plan = history.get("plan") or {}
+    if (
+        marker.get("status") != "READY"
+        or marker.get("ticker") != ticker
+        or marker.get("output_root") != company["history_output_root"]
+        or marker.get("publication") != str(history_root)
+        or marker.get("history_manifest") != str(history_manifest)
+        or marker.get("history_manifest_sha256")
+        != company["history_manifest_sha256"]
+        or marker.get("plan_sha256") != company["plan_sha256"]
+        or marker.get("intake_sha256") != company["intake_sha256"]
+        or sha256_file(history_manifest) != company["history_manifest_sha256"]
+        or plan.get("as_of_date") != FINANCIAL_AS_OF
+    ):
+        raise ValueError(f"{ticker}: configured history differs from READY build marker")
+    return {
+        "build_manifest": str(marker_path),
+        "build_manifest_sha256": sha256_file(marker_path),
+        "history_output_root": company["history_output_root"],
+        "history_root": str(history_root),
+        "history_manifest": str(history_manifest),
+        "history_manifest_sha256": sha256_file(history_manifest),
+        "plan_sha256": company["plan_sha256"],
+        "intake_sha256": company["intake_sha256"],
+    }
+
+
 def _validate_external_inputs(config: dict[str, Any]) -> dict[str, Any]:
     collection = _pin(
         config["collection"]["manifest"],
@@ -395,7 +650,7 @@ def _validate_external_inputs(config: dict[str, Any]) -> dict[str, Any]:
         "collection manifest",
     )
     status = collection_ops.read_universe_status(manifest_path=collection)
-    if status.requested_companies != 50:
+    if status.requested_companies != 50 or status.as_of_date != FINANCIAL_AS_OF:
         raise ValueError("collection is not an exact-50 parent")
     expected = {(row["ticker"], row["cik"]) for row in config["companies"]}
     actual = {(row.ticker, row.cik) for row in status.companies}
@@ -422,7 +677,11 @@ def _validate_external_inputs(config: dict[str, Any]) -> dict[str, Any]:
     if package_manifest.get("company_count") != 50:
         raise ValueError("package view is not exact-50")
     histories = {}
+    history_builds = {}
     for company in config["companies"]:
+        history_builds[company["ticker"]] = _validate_history_build_binding(
+            config, company
+        )
         root = _directory(Path(company["history_root"]), f"{company['ticker']} history")
         manifest = _manifest_path(root, "history_manifest.json")
         if sha256_file(manifest) != company["history_manifest_sha256"]:
@@ -432,6 +691,8 @@ def _validate_external_inputs(config: dict[str, Any]) -> dict[str, Any]:
         "collection_manifest": str(collection),
         "package_view": str(package_root),
         "history_manifests": histories,
+        "history_builds": history_builds,
+        "first5_financial_acceptance": _validate_first5_acceptance(config),
     }
 
 
@@ -534,6 +795,7 @@ def request_stage(config_path: Path, stage: str) -> Path:
     if stage not in STAGES:
         raise ValueError("unsupported financial stage")
     config, config_sha, preflight_file = _validated_preflight(config_path)
+    acceptance = _validate_first5_acceptance(config)
     if stage == "metadata" and config["metadata"]["mode"] != "PUBLISH_EXACT50":
         raise ValueError("existing metadata publication does not require a stage")
     if _summary_path(config, stage).exists() or _receipt_path(config, stage).exists():
@@ -552,6 +814,7 @@ def request_stage(config_path: Path, stage: str) -> Path:
             {"ticker": row["ticker"], "cik": row["cik"]}
             for row in config["companies"]
         ],
+        "first5_financial_acceptance": acceptance,
         "parent_receipts": _parent_receipts(config, stage),
         "outputs": [str(path) for path in outputs],
     }
@@ -559,6 +822,7 @@ def request_stage(config_path: Path, stage: str) -> Path:
 
 
 def _expected_go(config: dict[str, Any], config_sha: str, stage: str) -> dict[str, Any]:
+    acceptance = _validate_first5_acceptance(config)
     request_path = _regular(_request_path(config, stage), "financial stage request")
     request = _read_json(request_path, "financial stage request")
     expected_request = {
@@ -572,6 +836,7 @@ def _expected_go(config: dict[str, Any], config_sha: str, stage: str) -> dict[st
             {"ticker": row["ticker"], "cik": row["cik"]}
             for row in config["companies"]
         ],
+        "first5_financial_acceptance": acceptance,
         "parent_receipts": _parent_receipts(config, stage),
         "outputs": [str(path) for path in _output_paths(config, stage)],
     }
@@ -585,6 +850,7 @@ def _expected_go(config: dict[str, Any], config_sha: str, stage: str) -> dict[st
         "config_sha256": config_sha,
         "request_sha256": sha256_file(request_path),
         "scope_companies": request.get("scope_companies"),
+        "first5_financial_acceptance": acceptance,
         "parent_receipts": _parent_receipts(config, stage),
         "outputs": [str(path) for path in _output_paths(config, stage)],
     }
@@ -592,6 +858,7 @@ def _expected_go(config: dict[str, Any], config_sha: str, stage: str) -> dict[st
 
 def _validate_go(config_path: Path, stage: str, go_file: Path) -> dict[str, Any]:
     config, config_sha, _ = _validated_preflight(config_path)
+    _validate_first5_acceptance(config)
     if _read_json(go_file, "financial stage GO") != _expected_go(
         config, config_sha, stage
     ):
@@ -681,6 +948,9 @@ def _run_analysis(config: dict[str, Any], *, quarterly: bool) -> None:
     parent = Path(config["outputs"][key])
     parent.mkdir(parents=True)
     for company in config["companies"]:
+        years = (
+            company["quarter_input_years"] if quarterly else company["input_years"]
+        )
         analysis.prepare_analysis(
             publication=Path(company["history_root"]),
             destination=parent / company["ticker"],
@@ -690,8 +960,8 @@ def _run_analysis(config: dict[str, Any], *, quarterly: bool) -> None:
                 if quarterly
                 else {company["ticker"]: {"core_rows": screening.expanded_analysis_profile()}}
             ),
-            fiscal_start=company["input_years"][0],
-            fiscal_end=company["input_years"][-1],
+            fiscal_start=years[0],
+            fiscal_end=years[-1],
             period_mode="QUARTERLY" if quarterly else "ANNUAL",
             include_year_end_balances=not quarterly,
             include_quarter_source_evidence=quarterly,
@@ -1049,6 +1319,7 @@ def _receive_supervisor(config: dict[str, Any]) -> None:
 
 def _worker(config_path: Path, stage: str, go_file: Path) -> Path:
     config = _validate_go(config_path, stage, go_file)
+    _validate_first5_acceptance(config)
     resource_ops.install_parent_death_guard()
     _receive_supervisor(config)
     STAGE_HANDLERS[stage](config)
@@ -1062,6 +1333,23 @@ def _worker(config_path: Path, stage: str, go_file: Path) -> Path:
         "outputs": outputs,
     }
     return _write_new(_receipt_path(config, stage), receipt, "financial stage receipt")
+
+
+def _worker_environment(*, read_fd: int, token: bytes) -> dict[str, str]:
+    parent = str(os.getpid())
+    env = os.environ.copy()
+    env.update(
+        POLARS_MAX_THREADS=str(POLARS_THREADS),
+        OMP_NUM_THREADS="1",
+        OPENBLAS_NUM_THREADS="1",
+        MKL_NUM_THREADS="1",
+        NUMEXPR_NUM_THREADS="1",
+        SEC_XBRL_FINANCIAL_SUPERVISOR_FD=str(read_fd),
+        SEC_XBRL_FINANCIAL_SUPERVISOR_PID=parent,
+        SEC_XBRL_FINANCIAL_SUPERVISOR_SHA256=hashlib.sha256(token).hexdigest(),
+        SEC_XBRL_T3V2_SUPERVISOR_PID=parent,
+    )
+    return env
 
 
 def run_stage(config_path: Path, stage: str, go_file: Path) -> Path:
@@ -1084,21 +1372,9 @@ def run_stage(config_path: Path, stage: str, go_file: Path) -> Path:
         "--go-file",
         str(Path(go_file).absolute()),
     ]
-    env = os.environ.copy()
-    env.update(
-        POLARS_MAX_THREADS=str(POLARS_THREADS),
-        OMP_NUM_THREADS="1",
-        OPENBLAS_NUM_THREADS="1",
-        MKL_NUM_THREADS="1",
-        NUMEXPR_NUM_THREADS="1",
-    )
     token = os.urandom(32)
     read_fd, write_fd = os.pipe()
-    env.update(
-        SEC_XBRL_FINANCIAL_SUPERVISOR_FD=str(read_fd),
-        SEC_XBRL_FINANCIAL_SUPERVISOR_PID=str(os.getpid()),
-        SEC_XBRL_FINANCIAL_SUPERVISOR_SHA256=hashlib.sha256(token).hexdigest(),
-    )
+    env = _worker_environment(read_fd=read_fd, token=token)
     process = None
     started = time.monotonic()
     try:
