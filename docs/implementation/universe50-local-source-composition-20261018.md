@@ -30,6 +30,34 @@ SHA-256은 `7f0420fd5a6b979fcfacd5602ceb30cb93dc43766c7e471c82b2324b9c3626f8`다
 source composition은 component의 actual-data acceptance가 아니다. component별 기존
 source/synthetic 인수도 새 merge commit에 자동 승계되지 않는다.
 
+## 2026-10-18 accepted shared-lease recovery R4 composition
+
+리드의 R4 계약은 source/owned-synthetic locally accepted composition
+`7e153659237091bf02f48bbf6b9acfca22fe2f4c`에 source/root-accepted recovery resource
+layer `1f777ca2cac138436658892f2d3a111c00f42bdd`를 ordinary `--no-ff` merge하는 범위만
+승인한다. R4 계약 SHA-256은
+`692534ed7c31c8af2fb0750293a681331232678035c48116b5b38e2157700713`이고,
+`1f777ca…` source acceptance record SHA-256은
+`158cb49f2d43dfa9042816c326a1a2f9c05b03df3605b8026910f9058d3dd01c`다.
+
+`1f777ca…`는 accepted `d714f5a…` runner에 optional shared C open-file-description
+lease를 추가한다. 기존 internal lock mode, worker 동작, canonical first-five 8 receipt와
+17 manifest gate, financial source pin은 유지한다. 이 resource component는 별도 독립
+181 PASS와 source/owned-synthetic local acceptance를 받았다. 현재 operational mapping은
+canonical financial `4357c83…`, bounded History engine `f222a8b…`, recovery resource
+source `1f777ca…`이며, composition HEAD를 이 component 중 하나로 relabel하지 않는다.
+explicit-save consumer source와 기존 live 21사 동작도 변경하지 않는다.
+
+R4 merge는 product/test conflict 없이 적용됐고 `docs/planning/README.md`의 additive
+history conflict만 양쪽 최신 기록을 보존해 해결했다. 이 composition의 구현자 guarded
+검증과 별도 독립 read-only 검증, 리드의 composition acceptance는 서로 분리한다.
+
+현재 actual first-five R3는 **6/8 PASS**이고 quarterly metrics가 **RUNNING**이다.
+canonical first-five data readiness, later-45, FULL50 publication과 native UI rollout은
+완료되지 않았다. 과거 `02226c9…`/`cab253d…`/`d714f5a…` mapping은 날짜가 붙은 역사적
+snapshot으로만 보존하며 현재 resource mapping을 대신하지 않는다. main merge, push,
+PR, actual 실행 또는 새 GO는 이 composition 범위에 포함되지 않는다.
+
 ## 2026-10-18 accepted 4357/d714 source refresh
 
 clean accepted composition `9e43c8467170a2662fef076f96b8b88736f91168`에서 다음 순서로
