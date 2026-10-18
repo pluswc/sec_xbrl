@@ -405,3 +405,14 @@ snapshot 충돌 음성, eligible derived Q4와 null-basis 회귀를 구현자 �
 이 상태는 source/synthetic 구현 후보이며 독립 검증과 리드의 로컬 수락 전이다. actual Raw,
 History, financial, metadata 실행과 기존 publication 재작성은 승인되지 않았고 계속
 `NOT_READY`다.
+
+## 2026-10-18 current snapshot correction
+
+위 후보·FAIL·RUNNING 기록은 발생 당시 상태로 보존한다. 현재 original financial source
+`4357c83…`의 first-five 8 stages와 17 manifests는 PASS다. R8 actual H5는 semantic
+annual 620·quarter 680 records까지 PASS했으며 public annual·quarter·v2·v3와 seal은
+**PENDING**이다. 따라서 canonical first-five financial acceptance, later-45, FULL50와
+live rollout은 아직 없다. R8은 auditor `dir_fd` boundary만 수리했고 R9는 기존 accepted
+FULL50 107-manifest helper로 plan routing만 고쳤다. 둘 다 producer 4357, 회계 공식,
+period·unit·manual-Q4 의미를 바꾸지 않는다. 다음 gate와 운영 순서는
+[2026-10-18 재개 상태](universe50-resumption-20261018.md)에 둔다.

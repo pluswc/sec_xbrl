@@ -429,3 +429,12 @@ receipt의 경로/hash를 보존한다. 따라서 원래 operational identity와
 정책은 process-tree RSS 16 GiB, timeout 10,800초, Polars 2, one-heavy lock, `RLIMIT_AS` 미사용을
 그대로 적용한다. actual copy/audit, root attestation authoring, actual run, full History 독립 감사,
 local acceptance, financial readiness와 main merge는 별도 단계이며 현재 승인되지 않았다.
+
+## 2026-10-18 current History boundary
+
+과거 JNJ TIMEOUT·FAIL 기록은 그대로 보존한다. 현재 actual History local acceptance 범위는
+`TXN, HD, JNJ, CVX, NEE` 5사다. later-45 actual build는 시작하지 않았고, canonical
+first-five financial/H5 all-six acceptance 뒤 protected baseline을 만든 다음 한 회사씩
+build·audit·governed FY/QTD inventory·ROOT acceptance를 수행해야 한다. source `1f777ca…`와
+shared-C/L4/keeper 준비의 acceptance만으로 actual later-45 권한이 생기지 않는다. 상세 현재
+순서는 [2026-10-18 재개 상태](universe50-resumption-20261018.md)를 따른다.

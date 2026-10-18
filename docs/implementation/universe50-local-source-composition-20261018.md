@@ -297,3 +297,13 @@ journal 또는 catalog를 변경하지 않았다.
 actual Raw/History/financial/journal/catalog, SEC/network, live UI, scheduler, heavy lock과
 진행 중인 actual run은 사용하지 않는다. 구현자 결과는 독립 검증이나 리드 인수를
 대신하지 않는다.
+
+## 2026-10-18 현재 delivery snapshot 연결
+
+이 문서의 과거 6/8·RUNNING 표기는 해당 시점의 snapshot으로 보존한다. 현재 상태는
+[50사 재무 스크리닝 재개 상태](universe50-resumption-20261018.md)를 따른다. composition
+`237a56c…`는 별도 159 fresh guarded PASS와 prior 483 mapping 재사용 검증 뒤
+**LOCALLY_ACCEPTED_SOURCE_AND_SYNTHETIC_ONLY**다. 이는 actual data·UAT·live rollout이나
+main 병합이 아니다. original `4357c83…` first-five financial 8 stages는 PASS했고 R8 H5
+semantic phase도 annual 620·quarter 680 records PASS지만 public 4 phases와 seal, canonical
+first-five acceptance는 대기한다.

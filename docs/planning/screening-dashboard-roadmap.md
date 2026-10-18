@@ -191,3 +191,15 @@ quality block, narrow desktop 상태가 기본 화면과 함께 설계되어야 
 quality block 처리의 회계적 확대, 매수 기준, 역사적 cohort membership 주장이다.
 그 외 시각 배치와 접근성 세부는 이 계약 안에서 구현 단계가 검증 가능한 선택을
 제안할 수 있다.
+
+## 2026-10-18 exact-50 재개 snapshot
+
+기존 21사 live source `e84289a…`와 explicit-save journal은 유지한다. exact-50 consumer
+source composition `237a56c…`는 source/synthetic local acceptance를 받았지만 50사 UI나
+live rollout acceptance가 아니다. Raw 50·metadata 50·first-five History 5와 original
+first-five financial 8 stages는 accepted/PASS 범위가 서로 분리돼 있다. R8 H5는 semantic
+annual 620·quarter 680 records만 PASS했고 public 4 phases와 seal이 남았다. canonical
+first-five acceptance 뒤 later-45, FULL50 fresh 8 stages·107-manifest H5, private-journal
+visual/keyboard/restart/save/reopen UAT를 완료하기 전 P7 controlled live rollout은
+**NOT_READY**다. [dated resumption status](../implementation/universe50-resumption-20261018.md)가
+현재 순서와 완료 artifact를 기록한다.
