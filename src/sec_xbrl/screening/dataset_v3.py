@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import shutil
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +21,13 @@ from sec_xbrl.screening.common import (
 from sec_xbrl.screening.dataset_v2 import MANIFEST, ScreeningDatasetV2Reader
 from sec_xbrl.screening.quarterly import MANIFEST as QUARTER_MANIFEST
 from sec_xbrl.screening.quarterly import QuarterlyScreeningMetricReader
+from sec_xbrl.screening.verified_source_closure import (
+    _discard as _discard_verified_source_closure,
+)
+from sec_xbrl.screening.verified_source_closure import (
+    _publish_v3 as _publish_verified_v3,
+)
+from sec_xbrl.screening.verified_source_closure import _verify_v3_sources_once
 
 VERSION = "screening-dataset-v3"
 CONFIG_VERSION = "screening-prepare-config-v3"
@@ -45,8 +54,29 @@ def publish_screening_dataset_v3(config_path: Path | str, destination: Path | st
         "quarterly_manifest_sha256"
     ):
         raise ValueError("screening v3 parent differs from pinned manifest")
-    annual = ScreeningDatasetV2Reader(annual_root)
-    quarter = QuarterlyScreeningMetricReader(quarter_root, manifest_sha256=quarter_hash)
+    annual_manifest = read_json(
+        regular_file(annual_root / MANIFEST, "annual v2 manifest"),
+        "annual v2 manifest",
+    )
+    explicit_identity = (annual_manifest.get("config") or {}).get("identity_source")
+    generic_single_pass = (
+        isinstance(explicit_identity, dict)
+        and explicit_identity.get("kind") == "GENERIC_METRIC_IDENTITY_ATTESTATION"
+    )
+    source_closure = None
+    if generic_single_pass:
+        annual, quarter, source_closure = _verify_v3_sources_once(
+            config_path=config_file,
+            config=config,
+            annual_root=annual_root,
+            quarter_root=quarter_root,
+            destination=destination_path,
+        )
+    else:
+        annual = ScreeningDatasetV2Reader(annual_root)
+        quarter = QuarterlyScreeningMetricReader(
+            quarter_root, manifest_sha256=quarter_hash
+        )
     _verify_parent_binding(annual, quarter)
     if [row["cik"] for row in annual.companies] != quarter.manifest["universe"]["ciks"]:
         raise ValueError("annual and quarterly company membership differ")
@@ -84,9 +114,27 @@ def publish_screening_dataset_v3(config_path: Path | str, destination: Path | st
             },
         },
     }
-    destination_path.mkdir(parents=True)
-    write_json(destination_path / MANIFEST, manifest)
-    ScreeningDatasetV3Reader(destination_path)
+    if not generic_single_pass:
+        destination_path.mkdir(parents=True)
+        write_json(destination_path / MANIFEST, manifest)
+        ScreeningDatasetV3Reader(destination_path)
+        return destination_path
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    staging = destination_path.parent / f".{destination_path.name}.partial-{uuid.uuid4().hex}"
+    staging.mkdir()
+    assert source_closure is not None
+    try:
+        write_json(staging / MANIFEST, manifest)
+        _publish_verified_v3(
+            source_closure,
+            staging=staging,
+            destination=destination_path,
+        )
+    except Exception:
+        _discard_verified_source_closure(source_closure)
+        if staging.exists():
+            shutil.rmtree(staging)
+        raise
     return destination_path
 
 

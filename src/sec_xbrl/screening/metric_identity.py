@@ -22,7 +22,6 @@ from sec_xbrl.company_metadata import MANIFEST_NAME as METADATA_MANIFEST
 from sec_xbrl.company_metadata import CompanyMetadataReader
 from sec_xbrl.history import HistoryPublicationReader
 from sec_xbrl.screening.common import (
-    atomic_replace,
     contained_file,
     digest_value,
     read_json,
@@ -34,6 +33,15 @@ from sec_xbrl.screening.common import (
     safe_new_destination,
     sha256_file,
     write_json,
+)
+from sec_xbrl.screening.verified_source_closure import (
+    _discard as _discard_verified_source_closure,
+)
+from sec_xbrl.screening.verified_source_closure import (
+    _publish_identity as _publish_verified_identity,
+)
+from sec_xbrl.screening.verified_source_closure import (
+    _verify_identity_sources_once,
 )
 
 VERSION = "generic-metric-identity-attestation-v1"
@@ -66,7 +74,11 @@ def publish_generic_metric_identity(
     config_file = regular_file(Path(config_path), "generic metric identity config")
     config = _validate_config(read_json(config_file, "generic metric identity config"))
     destination_path = safe_new_destination(Path(destination), "generic metric identity")
-    sources = _verify_configured_sources(config)
+    sources, source_closure = _verify_identity_sources_once(
+        config_path=config_file,
+        config=config,
+        destination=destination_path,
+    )
     identity = {
         "schema_version": VERSION,
         "source_kind": SOURCE_KIND,
@@ -90,9 +102,13 @@ def publish_generic_metric_identity(
     staging.mkdir()
     try:
         write_json(staging / MANIFEST_NAME, manifest)
-        GenericMetricIdentityReader(staging, allow_staging=True).verify_all()
-        atomic_replace(staging, destination_path)
+        _publish_verified_identity(
+            source_closure,
+            staging=staging,
+            destination=destination_path,
+        )
     except Exception:
+        _discard_verified_source_closure(source_closure)
         if staging.exists():
             shutil.rmtree(staging)
         raise

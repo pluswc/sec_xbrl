@@ -546,6 +546,52 @@ def test_analysis_stage_uses_public_api_with_approved_flags(
     }
 
 
+def test_quarterly_stage_adapts_completed_bucket_spine_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = runner._validate_shape(_config(tmp_path))
+    captured: dict[str, object] = {}
+
+    def capture_config(
+        _config: dict, name: str, value: dict[str, object]
+    ) -> Path:
+        assert name == "quarterly-metrics"
+        captured.update(value)
+        return tmp_path / "quarterly-metrics.json"
+
+    monkeypatch.setattr(runner, "_config_file", capture_config)
+    monkeypatch.setattr(runner, "sha256_file", lambda _path: "8" * 64)
+    monkeypatch.setattr(
+        runner.quarterly_screening,
+        "publish_quarterly_screening_metrics",
+        lambda _config_path, _destination: None,
+    )
+
+    runner._run_quarterly_metrics(config)
+    normalized = runner.quarterly_screening._validate_config(captured)
+    assert normalized["global_quarter_spine"] == [
+        {
+            "calendar_year": year,
+            "calendar_quarter": quarter,
+            "status": "COMPLETED_BUCKET",
+        }
+        for year, quarter in runner.GLOBAL_QUARTER_SPINE
+    ]
+    assert runner._global_quarter_spine() == [
+        {"calendar_year": year, "calendar_quarter": quarter}
+        for year, quarter in runner.GLOBAL_QUARTER_SPINE
+    ]
+
+    for mutate in (
+        lambda spine: spine[0].update(status="BUILDING"),
+        lambda spine: spine[0].update(calendar_year=2023),
+    ):
+        changed = json.loads(json.dumps(captured))
+        mutate(changed["global_quarter_spine"])
+        with pytest.raises(ValueError, match="completed cutoff buckets"):
+            runner.quarterly_screening._validate_config(changed)
+
+
 def test_worker_requires_parent_held_shared_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
