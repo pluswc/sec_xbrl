@@ -9,11 +9,13 @@ import importlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -70,6 +72,12 @@ FIRST5 = ("TXN", "HD", "JNJ", "CVX", "NEE")
 LIMIT_KIB = 16 * 1024 * 1024
 POLARS_THREADS = 2
 TIMEOUT_SECONDS = 10_800
+SHARED_C_LEASE_VERSION = "universe50-history-recovery-shared-c-lease-v1"
+SHARED_C_LEASE_ENV = {
+    "lease_fd": "SEC_XBRL_RECOVERY_SHARED_C_FD",
+    "capability_fd": "SEC_XBRL_RECOVERY_SHARED_C_CAP_FD",
+    "parent_pid": "SEC_XBRL_RECOVERY_SHARED_C_PARENT_PID",
+}
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 GIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 RUN_VERSION = re.compile(r"^[a-z0-9][a-z0-9._-]{5,79}$")
@@ -1742,6 +1750,150 @@ def _validate_go(config_path: Path, go_path: Path) -> dict[str, Any]:
     return config
 
 
+def _process_birth_ticks(pid: int) -> int:
+    try:
+        fields = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").split(") ", 1)[1].split()
+        return int(fields[19])
+    except (FileNotFoundError, ProcessLookupError, PermissionError, ValueError, IndexError) as exc:
+        raise PermissionError("shared C lease parent identity is unavailable") from exc
+
+
+def _parent_holds_flock(parent_pid: int, descriptor_stat: os.stat_result) -> bool:
+    device = (os.major(descriptor_stat.st_dev), os.minor(descriptor_stat.st_dev))
+    try:
+        lines = Path("/proc/locks").read_text(encoding="utf-8").splitlines()
+    except (FileNotFoundError, PermissionError) as exc:
+        raise PermissionError("shared C lease lock state is unavailable") from exc
+    for line in lines:
+        fields = line.split()
+        if len(fields) < 6 or fields[1:4] != ["FLOCK", "ADVISORY", "WRITE"]:
+            continue
+        try:
+            owner = int(fields[4])
+            major_hex, minor_hex, inode_decimal = fields[5].split(":")
+            major = int(major_hex, 16)
+            minor = int(minor_hex, 16)
+            inode = int(inode_decimal)
+        except (ValueError, IndexError):
+            continue
+        if owner == parent_pid and (major, minor) == device and inode == descriptor_stat.st_ino:
+            return True
+    return False
+
+
+def _descriptor_carries_parent_flock(
+    descriptor: int,
+    parent_pid: int,
+    descriptor_stat: os.stat_result,
+) -> bool:
+    device = (os.major(descriptor_stat.st_dev), os.minor(descriptor_stat.st_dev))
+    try:
+        lines = Path(f"/proc/self/fdinfo/{descriptor}").read_text(encoding="utf-8").splitlines()
+    except (FileNotFoundError, PermissionError) as exc:
+        raise PermissionError("shared C lease descriptor lock state is unavailable") from exc
+    for line in lines:
+        fields = line.split()
+        if len(fields) < 7 or fields[0] != "lock:" or fields[2:5] != ["FLOCK", "ADVISORY", "WRITE"]:
+            continue
+        try:
+            owner = int(fields[5])
+            major_hex, minor_hex, inode_decimal = fields[6].split(":")
+            major = int(major_hex, 16)
+            minor = int(minor_hex, 16)
+            inode = int(inode_decimal)
+        except (ValueError, IndexError):
+            continue
+        if owner == parent_pid and (major, minor) == device and inode == descriptor_stat.st_ino:
+            return True
+    return False
+
+
+@contextmanager
+def _borrowed_c_lease(config_path: Path, go_path: Path) -> Iterator[int | None]:
+    present = {name: os.environ.get(variable) for name, variable in SHARED_C_LEASE_ENV.items()}
+    if all(value is None for value in present.values()):
+        yield None
+        return
+    if any(value is None for value in present.values()):
+        raise PermissionError("shared C lease environment is incomplete")
+    try:
+        lease_fd = int(present["lease_fd"] or "")
+        capability_fd = int(present["capability_fd"] or "")
+        parent_pid = int(present["parent_pid"] or "")
+    except ValueError as exc:
+        raise PermissionError("shared C lease descriptors or parent are invalid") from exc
+    if lease_fd < 0 or capability_fd < 0 or lease_fd == capability_fd:
+        raise PermissionError("shared C lease descriptors are invalid")
+    if os.getppid() != parent_pid:
+        raise PermissionError("shared C lease parent PID differs")
+    try:
+        with os.fdopen(capability_fd, "rb", closefd=True) as stream:
+            capability_stat = os.fstat(stream.fileno())
+            if not stat.S_ISFIFO(capability_stat.st_mode):
+                raise PermissionError("shared C lease capability must be a pipe")
+            encoded = stream.read(65_537)
+    except PermissionError:
+        raise
+    except OSError as exc:
+        raise PermissionError("shared C lease capability is unavailable") from exc
+    if not encoded or len(encoded) > 65_536:
+        raise PermissionError("shared C lease capability size differs")
+    try:
+        capability = json.loads(encoded)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PermissionError("shared C lease capability is invalid JSON") from exc
+    expected_fields = {"schema_version", "operation", "parent", "config", "go", "lease"}
+    if not isinstance(capability, dict) or set(capability) != expected_fields:
+        raise PermissionError("shared C lease capability shape differs")
+    parent = capability["parent"]
+    if not isinstance(parent, dict) or set(parent) != {"pid", "birth_ticks"}:
+        raise PermissionError("shared C lease parent shape differs")
+    parent_birth = _process_birth_ticks(parent_pid)
+    if parent != {"pid": parent_pid, "birth_ticks": parent_birth}:
+        raise PermissionError("shared C lease parent identity differs")
+    if capability["schema_version"] != SHARED_C_LEASE_VERSION or capability["operation"] != "recover-history-one":
+        raise PermissionError("shared C lease operation differs")
+    config_path = _regular(Path(config_path).absolute(), "shared C lease config")
+    go_path = _regular(Path(go_path).absolute(), "shared C lease GO")
+    expected_config = {"path": str(config_path), "sha256": _sha256(config_path)}
+    expected_go = {"path": str(go_path), "sha256": _sha256(go_path)}
+    if capability["config"] != expected_config or capability["go"] != expected_go:
+        raise PermissionError("shared C lease config or GO binding differs")
+    control_config = _read_json(config_path, "shared C lease config")
+    resource_root = _absolute(control_config.get("resource_root"), "shared C lease resource root")
+    if resource_root.is_symlink() or not resource_root.is_dir() or resource_root.resolve() != resource_root:
+        raise PermissionError("shared C lease resource root is not canonical")
+    lock_path = resource_root / ".one-heavy.lock"
+    if lock_path.is_symlink() or not lock_path.is_file() or lock_path.resolve() != lock_path:
+        raise PermissionError("shared C lease path is not canonical")
+    try:
+        descriptor_stat = os.fstat(lease_fd)
+        path_stat = lock_path.stat()
+    except OSError as exc:
+        raise PermissionError("shared C lease descriptor is unavailable") from exc
+    if not stat.S_ISREG(descriptor_stat.st_mode):
+        raise PermissionError("shared C lease descriptor is not a regular file")
+    expected_lease = {
+        "path": str(lock_path),
+        "device": descriptor_stat.st_dev,
+        "inode": descriptor_stat.st_ino,
+        "mode": descriptor_stat.st_mode,
+    }
+    if (
+        capability["lease"] != expected_lease
+        or (path_stat.st_dev, path_stat.st_ino, path_stat.st_mode)
+        != (descriptor_stat.st_dev, descriptor_stat.st_ino, descriptor_stat.st_mode)
+    ):
+        raise PermissionError("shared C lease file identity differs")
+    if not _parent_holds_flock(parent_pid, descriptor_stat):
+        raise PermissionError("shared C lease is not held by the declared parent")
+    if not _descriptor_carries_parent_flock(lease_fd, parent_pid, descriptor_stat):
+        raise PermissionError("shared C descriptor is not the parent-held lock description")
+    if os.getppid() != parent_pid or _process_birth_ticks(parent_pid) != parent_birth:
+        raise PermissionError("shared C lease parent changed during validation")
+    yield lease_fd
+
+
 def _receive_supervisor(config: dict[str, Any]) -> None:
     try:
         descriptor = int(os.environ["SEC_XBRL_T3V2_SUPERVISOR_FD"])
@@ -1897,6 +2049,8 @@ def _worker_environment(config: dict[str, Any], read_fd: int, token: bytes) -> d
     runner = str(Path(config["runner"]["checkout"]).resolve())
     engine = str((Path(config["engine"]["checkout"]) / "src").resolve())
     env = os.environ.copy()
+    for variable in SHARED_C_LEASE_ENV.values():
+        env.pop(variable, None)
     env.update(
         PYTHONPATH=os.pathsep.join((engine, runner)),
         POLARS_MAX_THREADS="2",
@@ -1912,95 +2066,102 @@ def _worker_environment(config: dict[str, Any], read_fd: int, token: bytes) -> d
 
 
 def run_stage(config_path: Path, go_path: Path) -> Path:
-    config = _validate_go(config_path, go_path)
-    summary = _summary_path(config)
-    paths = _target_paths(config)
-    if summary.exists() or paths["receipt"].exists() or paths["marker"].exists():
-        raise ValueError("History recovery cannot retry or overwrite an attempted target")
-    if paths["destination"].exists() or paths["destination"].is_symlink():
-        raise FileExistsError("History recovery destination is not fresh")
-    summary.parent.mkdir(parents=True, exist_ok=True)
-    log, samples = summary.with_suffix(".log"), summary.with_suffix(".rss.jsonl")
-    command = [
-        sys.executable,
-        str(Path(__file__).resolve()),
-        "_worker",
-        "--config",
-        str(Path(config_path).absolute()),
-        "--go-file",
-        str(Path(go_path).absolute()),
-    ]
-    token = os.urandom(32)
-    read_fd, write_fd = os.pipe()
-    env = _worker_environment(config, read_fd, token)
-    process = None
-    started = time.monotonic()
-    try:
-        with (
-            resource_ops.heavy_lock(Path(config["resource_root"])),
-            log.open("x", encoding="utf-8") as output,
-            samples.open("x", encoding="utf-8") as rss,
-        ):
-            try:
-                process = subprocess.Popen(
-                    command,
-                    stdout=output,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True,
-                    env=env,
-                    pass_fds=(read_fd,),
-                )
-            finally:
-                os.close(read_fd)
-            try:
-                os.write(write_fd, token)
-            finally:
-                os.close(write_fd)
-            code, peak, stopped, elapsed = resource_ops.supervise_owned_process(
-                process,
-                rss,
-                limit_kib=LIMIT_KIB,
-                timeout_seconds=TIMEOUT_SECONDS,
-            )
-    except BaseException as exc:
-        for descriptor in (read_fd, write_fd):
-            try:
-                os.close(descriptor)
-            except OSError:
-                pass
-        if process is not None and process.poll() is None:
-            resource_ops.terminate_owned_process_group(process)
-        _write_new(
-            summary,
-            {
-                "schema_version": RESOURCE_VERSION,
-                "status": "SUPERVISOR_INTERRUPTED",
-                "error_type": type(exc).__name__,
-                "error": str(exc),
-                "elapsed_seconds": round(time.monotonic() - started, 3),
-                "child_reaped": process is None or process.poll() is not None,
-                "log": str(log),
-                "samples": str(samples),
-            },
-            "History recovery failure summary",
+    with _borrowed_c_lease(config_path, go_path) as borrowed_c_fd:
+        config = _validate_go(config_path, go_path)
+        summary = _summary_path(config)
+        paths = _target_paths(config)
+        if summary.exists() or paths["receipt"].exists() or paths["marker"].exists():
+            raise ValueError("History recovery cannot retry or overwrite an attempted target")
+        if paths["destination"].exists() or paths["destination"].is_symlink():
+            raise FileExistsError("History recovery destination is not fresh")
+        summary.parent.mkdir(parents=True, exist_ok=True)
+        log, samples = summary.with_suffix(".log"), summary.with_suffix(".rss.jsonl")
+        command = [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "_worker",
+            "--config",
+            str(Path(config_path).absolute()),
+            "--go-file",
+            str(Path(go_path).absolute()),
+        ]
+        token = os.urandom(32)
+        read_fd, write_fd = os.pipe()
+        env = _worker_environment(config, read_fd, token)
+        process = None
+        started = time.monotonic()
+        lock_context = (
+            resource_ops.heavy_lock(Path(config["resource_root"]))
+            if borrowed_c_fd is None
+            else nullcontext()
         )
-        raise
-    result = {
-        "schema_version": RESOURCE_VERSION,
-        "status": stopped or ("PASS" if code == 0 else "FAIL"),
-        "returncode": code,
-        "elapsed_seconds": round(elapsed, 3),
-        "peak_process_tree_rss_kib": peak,
-        "limit_kib": LIMIT_KIB,
-        "timeout_seconds": TIMEOUT_SECONDS,
-        "command": command,
-        "log": str(log),
-        "samples": str(samples),
-    }
-    _write_new(summary, result, "History recovery resource summary")
-    if result["status"] != "PASS":
-        raise RuntimeError(f"History recovery failed: {result['status']}")
-    return _regular(paths["receipt"], "History recovery receipt")
+        try:
+            with (
+                lock_context,
+                log.open("x", encoding="utf-8") as output,
+                samples.open("x", encoding="utf-8") as rss,
+            ):
+                try:
+                    pass_fds = (read_fd,) if borrowed_c_fd is None else (read_fd, borrowed_c_fd)
+                    process = subprocess.Popen(
+                        command,
+                        stdout=output,
+                        stderr=subprocess.STDOUT,
+                        start_new_session=True,
+                        env=env,
+                        pass_fds=pass_fds,
+                    )
+                finally:
+                    os.close(read_fd)
+                try:
+                    os.write(write_fd, token)
+                finally:
+                    os.close(write_fd)
+                code, peak, stopped, elapsed = resource_ops.supervise_owned_process(
+                    process,
+                    rss,
+                    limit_kib=LIMIT_KIB,
+                    timeout_seconds=TIMEOUT_SECONDS,
+                )
+        except BaseException as exc:
+            for descriptor in (read_fd, write_fd):
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+            if process is not None and process.poll() is None:
+                resource_ops.terminate_owned_process_group(process)
+            _write_new(
+                summary,
+                {
+                    "schema_version": RESOURCE_VERSION,
+                    "status": "SUPERVISOR_INTERRUPTED",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "elapsed_seconds": round(time.monotonic() - started, 3),
+                    "child_reaped": process is None or process.poll() is not None,
+                    "log": str(log),
+                    "samples": str(samples),
+                },
+                "History recovery failure summary",
+            )
+            raise
+        result = {
+            "schema_version": RESOURCE_VERSION,
+            "status": stopped or ("PASS" if code == 0 else "FAIL"),
+            "returncode": code,
+            "elapsed_seconds": round(elapsed, 3),
+            "peak_process_tree_rss_kib": peak,
+            "limit_kib": LIMIT_KIB,
+            "timeout_seconds": TIMEOUT_SECONDS,
+            "command": command,
+            "log": str(log),
+            "samples": str(samples),
+        }
+        _write_new(summary, result, "History recovery resource summary")
+        if result["status"] != "PASS":
+            raise RuntimeError(f"History recovery failed: {result['status']}")
+        return _regular(paths["receipt"], "History recovery receipt")
 
 
 def parser() -> argparse.ArgumentParser:

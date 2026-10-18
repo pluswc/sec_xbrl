@@ -62,6 +62,13 @@ source/synthetic locally accepted이지만 이 repin은 독립 검증·리드 �
 R3와 audit도 아직 없으므로 actual financial·later-45 실행 권한은
 계속 **NOT_READY**다.
 
+2026-10-18 resource-only 후속 후보:
+[History recovery shared C lease 전달](../implementation/history-recovery-shared-lease-delivery.md)은
+accepted `d714f5a…` runner의 legacy internal C 경로를 보존하면서, 고정 outer keeper가 넘긴
+parent/birth·config/GO·canonical C open-file-description 결속을 검증하고 같은 FD를 worker까지
+유지하는 private external mode만 추가한다. source/owned-synthetic 구현 후보이며 독립 검증·리드
+인수 전이다. actual payload·실제 C·later-45·L3 실행 권한은 없고 L3 resource entry 보정은 별도다.
+
 2026-10-17 사용자·리드 후속 승인으로 identity 앞단의 별도
 [generic metric Raw 품질 전달 계약](../implementation/universe50-generic-metric-quality-delivery.md)을
 구현했다. mixed Raw v5/v6 source binding과 SEC duration·승인 lexical repair의
@@ -111,6 +118,7 @@ Raw adoption과 History build는 별도 stage GO 전에는 실행하지 않는�
 | [50사 History bounded-memory 복구 전달](../implementation/universe50-history-recovery-delivery.md) | 별도 clean runner/engine source, immutable collection e와 실패 partial 보존, explicit root GO, guarded public History build. **f74 동시누락 FAIL 뒤 mandatory a02 r1 witness 보정 후보 / 독립 검증 대기**; 새 engine·actual retry·financial 미수락 |
 | [History runner financial validator pin refresh](../implementation/history-runner-financial-pin-refresh-delivery.md) | later-45의 strict canonical first-five gate를 locally accepted `02226c9…` source에만 갱신한 구현 후보. accounting·8 receipt·17 manifest·fresh/reuse 계약은 불변이며 독립 검증 대기; actual first-five readiness와 later-45 실행 승인은 여전히 false |
 | [History recovery financial source pin R3](../implementation/history-recovery-financial-source-pin-r3.md) | strict later-45 pin을 source/synthetic locally accepted `4357c83…`에 갱신한 source/tiny 후보. 이전 `5af1ef0…`·`e56c148…`·`a37763e…` 독립 FAIL은 보존하며 **recovery repin은 독립 검증·인수 전**이다. fresh first-five R3 8 receipts·17 manifests와 actual audit 전에는 실행 불가 |
+| [History recovery shared C lease](../implementation/history-recovery-shared-lease-delivery.md) | accepted `d714f5a…` runner에 optional parent/birth·config/GO·canonical locked open-file-description capability를 추가한 resource-only source/owned-synthetic 후보. legacy internal lock·worker·8+17 gate·receipt schema는 불변이며 독립 검증·인수 및 L3 phase-two 전에는 actual 실행 권한이 없다. |
 | [기간 규칙](../implementation/period-rules.md), [Layer 2 연결](../implementation/layer2-longitudinal.md), [공시 발견 계약](../implementation/accession-contract.md) | 표시 계획으로 바꿀 수 없는 의미·입력 경계 |
 
 충돌 시 적용되는 사용자 결정과 승인 범위를 먼저 확인하고, 해당 평면의 계약을
@@ -143,6 +151,7 @@ Raw adoption과 History build는 별도 stage GO 전에는 실행하지 않는�
 | 50사 재무 통합·offline runner | [재무 통합·실행 전달](../implementation/universe50-financial-delivery.md) | **2026-10-17 APPROVED**; 동결 source 통합, quarterly exact identity 결속, public-API-only staged runner와 합성 검증 | **IMPLEMENTED CANDIDATE**; 동결 SHA 확정 전 | 독립 검증 대기 | 미수락; actual first-five/50·native 실행 미수행 | 미병합; push·PR·scheduler 미수행 |
 | 50사 History bounded-memory 복구 | [History 복구 전달](../implementation/universe50-history-recovery-delivery.md) | **2026-10-17 SOURCE/SYNTHETIC ONLY**; r1 TIMEOUT exact witness, fd9 canonical gate, optional attested reported-stage reuse | **ATTESTED-REUSE IMPLEMENTED CANDIDATE**; 동결 SHA 대기 | source/synthetic 독립 검증 대기; component actual audit 미수행 | r1 TIMEOUT; actual reuse·later-45·financial 미수락 | 미병합; push·PR·scheduler 미수행 |
 | History recovery financial source pin R3 | [source pin 전달](../implementation/history-recovery-financial-source-pin-r3.md) | **2026-10-18 SOURCE/TINY R3 CANDIDATE ONLY**; literal `a37763e…`→source-accepted `4357c83…`, strict 8+17 gate 불변 | **R3 LOCAL CANDIDATE**; 새 frozen SHA 대기 | 이전 `5af1ef0…`·`e56c148…`·`a37763e…` 독립 FAIL 보존; financial source accepted, repin 독립 검증·리드 인수 없음 | 미수락; first-five R3·later-45 실행 미수락 | 미병합; push·PR 미수행 |
+| History recovery shared C lease | [resource-only 전달](../implementation/history-recovery-shared-lease-delivery.md) | **2026-10-18 SOURCE/OWNED-SYNTHETIC ONLY**; optional inherited canonical C descriptor, one-shot capability, legacy internal mode 보존 | **IMPLEMENTED CANDIDATE**; exact frozen SHA는 writer evidence에 기록 | 별도 독립 검증 대기 | 미수락; actual C·later-45·L3 실행 미승인 | 미병합; push·PR 미수행 |
 
 현재 전달 상태(2026-09-10): U3–U5 누적 이력은
 [PR #63](https://github.com/pluswc/sec_xbrl/pull/63)으로 `main`에 병합됐다. merge
