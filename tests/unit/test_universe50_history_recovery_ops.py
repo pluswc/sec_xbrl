@@ -381,7 +381,7 @@ def test_later45_gate_requires_canonical_object_cohort_receipts_and_publications
     binding = runner._verify_financial_acceptance(runner._validate_shape(config))
     assert binding is not None
     assert runner.RUNNER_BASE_SHA == "9b6e7ec906382fba92adb5209c5b439fc7d7d6ba"
-    assert runner.FINANCIAL_SOURCE_SHA == "fd9a17910a7b1cfbb4e71e2ded6f4bc23cda686e"
+    assert runner.FINANCIAL_SOURCE_SHA == "02226c91f36b5907f9e4d701c2b788747ef94c0a"
     assert runner.FINANCIAL_SOURCE_SHA != runner.RUNNER_BASE_SHA
     assert binding["source_head"] == runner.FINANCIAL_SOURCE_SHA
     assert len(binding["publication_manifests"]) == 17
@@ -394,20 +394,35 @@ def test_later45_gate_requires_canonical_object_cohort_receipts_and_publications
         runner._verify_financial_acceptance(runner._validate_shape(config))
 
 
-def test_later45_gate_rejects_old_9b_financial_source(
+@pytest.mark.parametrize(
+    "unaccepted_source",
+    [
+        "fd9a17910a7b1cfbb4e71e2ded6f4bc23cda686e",
+        "0" * 40,
+    ],
+)
+def test_later45_gate_rejects_unaccepted_financial_source(
     tmp_path: Path,
     canonical_checkout: Path,
+    unaccepted_source: str,
 ) -> None:
     config = _config(tmp_path, ticker="X06")
     manifest = _write(Path(config["collection"]["manifest"]), {})
     config["collection"]["manifest_sha256"] = runner._sha256(manifest)
     acceptance = _materialize_financial_acceptance(config, tmp_path, canonical_checkout)
     payload = json.loads(acceptance.read_text())
-    payload["source_head"] = runner.RUNNER_BASE_SHA
+    payload["source_head"] = unaccepted_source
     _write(acceptance, payload)
     config["first5_financial_acceptance"]["sha256"] = runner._sha256(acceptance)
     with pytest.raises(ValueError, match="scope differs"):
         runner._verify_financial_acceptance(runner._validate_shape(config))
+
+
+def test_later45_gate_rejects_missing_financial_acceptance(tmp_path: Path) -> None:
+    config = _config(tmp_path, ticker="X06")
+    config["first5_financial_acceptance"] = None
+    with pytest.raises(ValueError, match="requires canonical first-five acceptance"):
+        runner._validate_shape(config)
 
 
 def test_preflight_request_and_go_reopen_exact_snapshot(
