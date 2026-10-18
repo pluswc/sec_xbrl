@@ -12,19 +12,20 @@ exact component 두 개의 ordinary local merge, 추적 문서와 guarded synthe
 승인했다. actual 데이터 실행·인수, merged HEAD의 운영 source relabel, live UI 반영,
 push·PR·main 병합은 승인하지 않았다.
 
-현재 4357/d714 refresh 계약 `lead_local_source_composition_4357_d714_contract.json`의
-SHA-256은 `7f0420fd5a6b979fcfacd5602ceb30cb93dc43766c7e471c82b2324b9c3626f8`다.
-이 계약은 source/synthetic locally accepted financial `4357c83…`과 recovery runner
-`d714f5a…`를 accepted composition `9e43c84…`에 ordinary merge하는 범위만 승인한다.
+현재 R4 계약 `lead_local_source_composition_recovery_r4_contract.json`의 SHA-256은
+`692534ed7c31c8af2fb0750293a681331232678035c48116b5b38e2157700713`이다.
+이 계약은 source/owned-synthetic locally accepted recovery resource source
+`1f777ca…`를 accepted consumer composition `7e15365…`에 ordinary merge하는 범위만
+승인한다. 이 consumer composition은 operational producer identity가 아니다.
 
 | 단계 | 상태 |
 | --- | --- |
-| 제안 | accepted `9e43c84…` composition에 exact `4357c83…` financial source와 exact `d714f5a…` recovery pin을 추가 |
+| 제안 | accepted `7e15365…` consumer composition에 exact `1f777ca…` recovery resource source를 추가 |
 | 범위 승인 | **APPROVED — SOURCE AND OWNED TINY ONLY** |
-| 구현 | exact `4357c83…` merge `b1c8106…`, 이어 exact `d714f5a…` merge `1cddedd…`; product/test conflict 없음 |
-| 구현자 검증 | **PASS WITH DISCLOSED GROUP SPLITS** — original composition 423 + new financial/source-closure 158 passed, 3 deselected; targeted Ruff PASS |
-| 독립 검증 | 새 동결 source에 대한 별도 Astra read-only 검증 대기 |
-| 로컬 인수 | 새 composition은 미수락; 이전 `9e43c84…`의 source/synthetic 인수만 유효 |
+| 구현 | exact `1f777ca…`를 ordinary `--no-ff` merge한 `78d5c18…`; product/test conflict 없음 |
+| 구현자 검증 | **PASS** — recovery 94 + canonical 35 + focused 30, 합계 159 passed; 과거 483은 exact unchanged input/code mapping으로만 재사용 표시 |
+| 독립 검증 | `78d5c18…` source/tests **PASS**, 문서의 stale current mapping 때문에 **FAIL**; 이 문서-only successor 별도 검증 대기 |
+| 로컬 인수 | base `7e15365…` consumer composition과 recovery source `1f777ca…`의 각 인수만 유효; 새 composition 인수 대기 |
 | main 병합 | 미수행; push·PR·remote CI도 미수행 |
 
 source composition은 component의 actual-data acceptance가 아니다. component별 기존
@@ -83,9 +84,10 @@ strict canonical first-five financial source literal만 exact `4357c83…`으로
 독립 검증 129 PASS 뒤 source/synthetic local acceptance를 받았고 acceptance record
 SHA-256은 `4b569e9d51e7833513933c2ae82475fe5b6686839194d890979574fe6ba6dd42`다.
 
-현재 composition의 입력 선언은 exact `4357c83…` financial, exact `f222a8b…` bounded
-History engine, exact `d714f5a…` recovery runner와 `9e43c84…`에 이미 포함된 explicit-save
-source다. 이 merged HEAD는 이 ancestry를 검증하는 consumer/source integration 후보이며
+이 2026-10-18 당시 composition의 입력 선언은 exact `4357c83…` financial, exact
+`f222a8b…` bounded History engine, exact `d714f5a…` recovery runner와 `9e43c84…`에
+이미 포함된 explicit-save source였다. 그 merged HEAD는 이 ancestry를 검증하는
+consumer/source integration 후보였으며
 세 operational component identity 중 어느 것으로도 relabel하지 않는다.
 
 구현자 검증은 기존 composition 범위 423개와 새 financial/source-closure 범위 158개를
@@ -192,15 +194,16 @@ snapshot이다. 표의 `022`/`CAB`는 그 시점의 current component였으며 �
 | `02226c9…` | `9e43` 역사적 canonical financial/screening source와 bounded consumer History stream | `fd9`·`e842` ancestry, ordinary READY-only lazy cell stream, exact source revalidation |
 | `cab253d…` | `9e43` 역사적 fail-closed History recovery runner | `c9` ancestry와 exact `02226c9…` financial validator pin; merged HEAD 허용 없음 |
 
-현재 composition mapping은 canonical financial source `4357c83…`, History recovery
-runner `d714f5a…`, bounded History engine `f222a8b…`를 서로 다른 operational
-identity로 유지한다. `d714`는 strict canonical first-five validator를 exact `4357`에
-고정하며, merged HEAD를 어느 component로도 relabel하지 않는다.
+현재 R4 composition mapping은 canonical financial source `4357c83…`, bounded History
+engine `f222a8b…`, recovery resource source `1f777ca…`를 서로 다른 operational
+identity로 유지한다. `1f777`은 `d714` ancestry의 strict canonical first-five validator
+pin과 shared C lease를 함께 보존하며, merged consumer composition HEAD를 어느
+component로도 relabel하지 않는다.
 
 `src/sec_xbrl/metrics/quarterly_screening.py`와 기존 fd9 screening mapping은 그대로다.
 022에서 보존한 `src/sec_xbrl/analysis.py`와 scoped-read test, f222의
 `src/sec_xbrl/analytics/history_quarters.py`와 quarter-spill test는 각 accepted component와
-byte-for-byte 같다. 현재 recovery tool/test는 accepted `d714`와 byte-for-byte 같고,
+byte-for-byte 같다. 현재 recovery tool/test는 accepted `1f777`과 byte-for-byte 같고,
 financial 변경 파일은 accepted `4357` mapping과 같다. `src/sec_xbrl/history.py`는 의도적인 함수
 composition이다. f222의 `_stage_records`, `build_history`, `_iter_fiscal_time_series_inputs`,
 `_iter_record_batches`와 022의 `HistoryCellStream`, `HistoryPublicationReader.__init__`,
@@ -210,24 +213,24 @@ mapping을 기록한다.
 
 ## 운영 source identity와 재현 순서
 
-이 merged HEAD는 추적 가능한 source handoff다. recovery runner가 허용하는
-operational runner/engine/financial checkout identity는 아니다. merged HEAD를 d714, f222
-또는 4357로 relabel하는 gate는 없다.
+이 merged HEAD는 추적 가능한 consumer source handoff다. recovery resource source,
+engine 또는 financial producer checkout identity는 아니다. merged HEAD를 `1f777`,
+`f222` 또는 `4357`로 relabel하는 gate는 없다.
 
-현재 인수된 program entry를 재현할 때는 다음 세 clean historical checkout을 그대로
+현재 source 관계를 재현할 때는 다음 세 clean historical checkout을 서로 다른 identity로
 사용한다.
 
-1. runner: exact `d714f5a679670e12ba53dbb023e1201c3bc64f80`
+1. recovery resource source: exact `1f777ca2cac138436658892f2d3a111c00f42bdd`
 2. bounded History engine: exact `f222a8b…`
 3. canonical financial validator와 screening source: exact
    `4357c838722da281d2474bfc881b3a4a2ed4e988`
 
-그 상태에서 기존
-[History 복구 전달 계약](universe50-history-recovery-delivery.md)의 순서대로
-source-only preflight, stage request, 리드의 request 검토와 exact root GO, guarded stage
-실행을 진행한다. 이 문서는 새 GO를 만들거나 actual stage를 승인하지 않는다. merged
-checkout을 component 중 하나로 대신 넣거나 source gate를 우회하면 안 된다. 미래에 한
-checkout 실행이 필요하면 별도 승인된 composition gate 설계·구현·독립 검증이 먼저다.
+이 source 관계만으로 actual later-45를 실행할 수 없다. 기존
+[History 복구 전달 계약](universe50-history-recovery-delivery.md)과 shared-lease 전달 계약에
+따라 accepted outer keeper, L4 source/proof binding, canonical first-five 5사 acceptance와
+해당 단계의 exact root GO가 모두 먼저 필요하다. 이 문서는 새 GO를 만들거나 actual stage를
+승인하지 않는다. merged checkout을 component 중 하나로 대신 넣거나 unguarded direct
+runner로 source/resource gate를 우회하면 안 된다.
 
 ## 보존하는 데이터·회계·화면 계약
 
@@ -250,15 +253,15 @@ checkout 실행이 필요하면 별도 승인된 composition gate 설계·구현
   dataset context와 hidden result backing을 유지한다.
 
 이 composition은 parser, recast selection, period classification, quarterly arithmetic,
-metric formula 또는 UI/store policy를 새로 바꾸지 않는다. 현재 source delta는 accepted
-financial producer 검증 pass 축소와 quarterly config adapter, 그리고 recovery runner의
-exact `4357c83…` validator pin이다.
+metric formula 또는 UI/store policy를 새로 바꾸지 않는다. 현재 R4 source delta는 accepted
+`d714` recovery ancestry 위 shared C lease resource mode이며 financial `4357`과 History
+engine `f222`, explicit-save consumer 의미는 변경하지 않는다.
 
 ## 현재 actual 상태와 다음 gate
 
 현재 리드 상태는 exact-50 Raw와 metadata 50사, first-five History 5사를 인수했다.
-새 first-five R3 financial은 annual-analysis와 quarterly-analysis가 PASS해 **2/8 PASS**이고
-quality가 **RUNNING**이다. canonical first-five financial acceptance는 아직
+새 first-five R3 financial은 **6/8 PASS**이고 quarterly metrics가 **RUNNING**이다.
+canonical first-five financial acceptance는 아직
 없다. later-45, FULL50 publication과 native UI는 계속 **PENDING / NOT_READY**다. 기존
 21사 live explicit-save 상태는 그대로 유지한다.
 이 문서는 actual payload, process 또는 결과를 읽거나 검증하지 않았고 live server,
@@ -266,9 +269,9 @@ journal 또는 catalog를 변경하지 않았다.
 
 다음 순서를 건너뛰지 않는다.
 
-1. 새 4357/d714 composition 동결 source에 대한 별도 Astra read-only 검증
-2. 리드의 새 source composition 로컬 인수 판단
-3. 진행 중인 quality와 나머지 6개 financial stage의 별도 완료·독립 검증·인수
+1. 새 `1f777` R4 consumer composition 동결 source에 대한 별도 Astra read-only 검증
+2. 리드의 새 consumer source composition 로컬 인수 판단
+3. 진행 중인 quarterly metrics와 나머지 financial stage의 별도 완료·독립 검증·인수
 4. canonical first-five acceptance 뒤 later-45 History/financial과 FULL50 publication
 5. final catalog/journal 보존 검증과 native UI/UAT
 
@@ -280,7 +283,7 @@ journal 또는 catalog를 변경하지 않았다.
 
 구현자 검증은 다음으로 제한한다.
 
-- merged product/test bytes와 현재 exact 4357/f222/d714 checkout의 file/function mapping,
+- merged product/test bytes와 현재 exact 4357/f222/1f777 checkout의 file/function mapping,
   그리고 composition에 보존된 022 scoped-read mapping 비교
 - bounded History/Fiscal/quarter serialization, recovery runner, quarterly/TTM,
   screening explicit-save/v3 reader의 기존 synthetic tests
