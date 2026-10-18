@@ -12,18 +12,53 @@ exact component 두 개의 ordinary local merge, 추적 문서와 guarded synthe
 승인했다. actual 데이터 실행·인수, merged HEAD의 운영 source relabel, live UI 반영,
 push·PR·main 병합은 승인하지 않았다.
 
+현재 4357/d714 refresh 계약 `lead_local_source_composition_4357_d714_contract.json`의
+SHA-256은 `7f0420fd5a6b979fcfacd5602ceb30cb93dc43766c7e471c82b2324b9c3626f8`다.
+이 계약은 source/synthetic locally accepted financial `4357c83…`과 recovery runner
+`d714f5a…`를 accepted composition `9e43c84…`에 ordinary merge하는 범위만 승인한다.
+
 | 단계 | 상태 |
 | --- | --- |
-| 제안 | 기존 accepted composition에 exact `02226c9…` consumer stream과 exact `cab253d…` runner pin refresh를 추가 |
+| 제안 | accepted `9e43c84…` composition에 exact `4357c83…` financial source와 exact `d714f5a…` recovery pin을 추가 |
 | 범위 승인 | **APPROVED — SOURCE AND OWNED TINY ONLY** |
-| 구현 | exact `02226c9…` merge `e9b939d…`, 이어 exact `cab253d…` merge `a020b00…`; product/test conflict 없음 |
-| 구현자 검증 | **PASS WITH DISCLOSED DESELECTIONS** — guarded synthetic 423 passed, 3 deselected; targeted Ruff PASS |
+| 구현 | exact `4357c83…` merge `b1c8106…`, 이어 exact `d714f5a…` merge `1cddedd…`; product/test conflict 없음 |
+| 구현자 검증 | 새 4357/d714 composition의 bounded regression과 mapping 증거 준비 중 |
 | 독립 검증 | 새 동결 source에 대한 별도 Astra read-only 검증 대기 |
-| 로컬 인수 | 새 composition은 미수락; 이전 `135d49b…`의 source/synthetic 인수만 역사적으로 유효 |
+| 로컬 인수 | 새 composition은 미수락; 이전 `9e43c84…`의 source/synthetic 인수만 유효 |
 | main 병합 | 미수행; push·PR·remote CI도 미수행 |
 
 source composition은 component의 actual-data acceptance가 아니다. component별 기존
 source/synthetic 인수도 새 merge commit에 자동 승계되지 않는다.
+
+## 2026-10-18 accepted 4357/d714 source refresh
+
+clean accepted composition `9e43c8467170a2662fef076f96b8b88736f91168`에서 다음 순서로
+ordinary merge했다.
+
+1. exact financial source `4357c838722da281d2474bfc881b3a4a2ed4e988`를 `--no-ff`
+   merge해 `b1c8106c28f35e2f1ae3c31b70309898357fd6e8`를 만들었다.
+2. exact recovery runner `d714f5a679670e12ba53dbb023e1201c3bc64f80`를 `--no-ff`
+   merge해 `1cddeddcfd3688cdcfa42662003d579e60d2a1bd`를 만들었다.
+3. 두 merge의 conflict는 `docs/planning/README.md`의 additive status/history뿐이었다.
+   양쪽 기록을 보존했으며 product/test conflict나 구현자 product edit는 없었다.
+
+financial `4357c83…`은 identity producer의 deep source verification 3→1, combined v3의
+2→1을 구현하되 full package-byte closure, 세 시점 freshness, private single-use
+capability와 fixed-operation finalizer를 유지한다. quarterly config 전용 global spine
+adapter도 포함한다. 별도 독립 검증 263 PASS 뒤 source/synthetic local acceptance를 받았고
+acceptance record SHA-256은
+`bdd454bdb7750f429bf1d90e3a44197a8ce987df4fb84751f7170044ce3e999e`다.
+
+recovery `d714f5a…`은 accepted recovery ancestry와 41개 product function을 보존하면서
+strict canonical first-five financial source literal만 exact `4357c83…`으로 바꾼다.
+8 receipt, 17 publication manifest, fresh/reuse와 failure/resource gate는 그대로다. 별도
+독립 검증 129 PASS 뒤 source/synthetic local acceptance를 받았고 acceptance record
+SHA-256은 `4b569e9d51e7833513933c2ae82475fe5b6686839194d890979574fe6ba6dd42`다.
+
+현재 composition의 입력 선언은 exact `4357c83…` financial, exact `f222a8b…` bounded
+History engine, exact `d714f5a…` recovery runner와 `9e43c84…`에 이미 포함된 explicit-save
+source다. 이 merged HEAD는 이 ancestry를 검증하는 consumer/source integration 후보이며
+세 operational component identity 중 어느 것으로도 relabel하지 않는다.
 
 ## 2026-10-18 022/CAB source refresh
 
@@ -132,16 +167,16 @@ mapping을 기록한다.
 ## 운영 source identity와 재현 순서
 
 이 merged HEAD는 추적 가능한 source handoff다. recovery runner가 허용하는
-operational runner/engine/financial checkout identity는 아니다. CAB가 financial source
-pin을 exact 022로 갱신했지만 merged HEAD를 CAB, f222 또는 022로 relabel하는 gate는 없다.
+operational runner/engine/financial checkout identity는 아니다. merged HEAD를 d714, f222
+또는 4357로 relabel하는 gate는 없다.
 
 현재 인수된 program entry를 재현할 때는 다음 세 clean historical checkout을 그대로
 사용한다.
 
-1. runner: exact `cab253dc24e00a68714e0b5d0277e3020d329deb`
+1. runner: exact `d714f5a679670e12ba53dbb023e1201c3bc64f80`
 2. bounded History engine: exact `f222a8b…`
 3. canonical financial validator와 screening source: exact
-   `02226c91f36b5907f9e4d701c2b788747ef94c0a`
+   `4357c838722da281d2474bfc881b3a4a2ed4e988`
 
 그 상태에서 기존
 [History 복구 전달 계약](universe50-history-recovery-delivery.md)의 순서대로
@@ -171,23 +206,25 @@ checkout 실행이 필요하면 별도 승인된 composition gate 설계·구현
   dataset context와 hidden result backing을 유지한다.
 
 이 composition은 parser, recast selection, period classification, quarterly arithmetic,
-metric formula 또는 UI/store policy를 새로 바꾸지 않는다. source gate 변경은 CAB의
-exact `fd9a179…` → exact `02226c9…` financial validator pin refresh 하나뿐이다.
+metric formula 또는 UI/store policy를 새로 바꾸지 않는다. 현재 source delta는 accepted
+financial producer 검증 pass 축소와 quarterly config adapter, 그리고 recovery runner의
+exact `4357c83…` validator pin이다.
 
 ## 현재 actual 상태와 다음 gate
 
 현재 리드 상태는 exact-50 Raw와 metadata 50사, first-five History 5사를 인수했다.
-first-five financial은 quality를 통과한 뒤 identity stage가 **RUNNING**이지만 canonical
-first-five financial acceptance는 아직 없다. later-45, FULL50 publication과 native UI는
-계속 **PENDING / NOT_READY**다. 기존 21사 live explicit-save 상태는 그대로 유지한다.
+새 first-five R3 financial은 annual-analysis 1개 stage가 PASS해 **1/8 PASS**이고
+quarterly-analysis가 **RUNNING**이다. canonical first-five financial acceptance는 아직
+없다. later-45, FULL50 publication과 native UI는 계속 **PENDING / NOT_READY**다. 기존
+21사 live explicit-save 상태는 그대로 유지한다.
 이 문서는 actual payload, process 또는 결과를 읽거나 검증하지 않았고 live server,
 journal 또는 catalog를 변경하지 않았다.
 
 다음 순서를 건너뛰지 않는다.
 
-1. 새 022/CAB composition 동결 source에 대한 별도 Astra read-only 검증
+1. 새 4357/d714 composition 동결 source에 대한 별도 Astra read-only 검증
 2. 리드의 새 source composition 로컬 인수 판단
-3. 진행 중인 first-five identity와 나머지 financial stage의 별도 완료·독립 검증·인수
+3. 진행 중인 quarterly-analysis와 나머지 7개 financial stage의 별도 완료·독립 검증·인수
 4. canonical first-five acceptance 뒤 later-45 History/financial과 FULL50 publication
 5. final catalog/journal 보존 검증과 native UI/UAT
 
