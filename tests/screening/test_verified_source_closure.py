@@ -13,15 +13,25 @@ from types import SimpleNamespace
 import pytest
 
 import sec_xbrl
-from sec_xbrl import history
+from sec_xbrl import collection_operations, history
+from sec_xbrl.metrics.quarterly_screening import publish_quarterly_screening_metrics
+from sec_xbrl.metrics.screening import MANIFEST as METRIC_MANIFEST
+from sec_xbrl.metrics.screening import publish_screening_metrics
 from sec_xbrl.screening import dataset_v3, metric_identity
 from sec_xbrl.screening import verified_source_closure as closure
 from sec_xbrl.screening.common import canonical_json, digest_value, sha256_file
+from sec_xbrl.screening.dataset import GENERIC_IDENTITY_SOURCE_KIND
+from sec_xbrl.screening.dataset_v2 import (
+    EXPLICIT_IDENTITY_CONFIG_VERSION,
+    publish_screening_dataset_v2,
+)
+from sec_xbrl.screening.quarterly import MANIFEST as QUARTERLY_MANIFEST
+from tests.screening import test_generic_metric_identity_integration as identity_fixture
 from tests.screening.test_generic_metric_identity_integration import (
     _install_intake,
     _publish_identity_inputs,
 )
-from tests.unit.test_history_recovery import _recovery_fixture
+from tests.unit.test_history_recovery import _full_report, _recovery_fixture
 from tests.unit.test_source_bindings import _build_ready_histories
 
 
@@ -60,86 +70,149 @@ def _owned_package_imports(
     return root, package, module
 
 
-def _install_synthetic_v3_capability_fixture(
+def _write_json(path: Path, payload: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(canonical_json(payload) + "\n", encoding="utf-8")
+
+
+def _prepare_real_v3_inputs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, destination_name: str
-) -> tuple[Path, Path, closure._Snapshot]:
-    annual_root = tmp_path / "v3-annual"
-    quarter_root = tmp_path / "v3-quarter"
-    annual_root.mkdir()
-    quarter_root.mkdir()
-    annual_manifest_path = annual_root / "screening_dataset_manifest.json"
-    quarter_manifest_path = quarter_root / "quarterly_screening_metric_manifest.json"
-    annual_manifest_path.write_text(
-        canonical_json(
-            {
-                "config": {
-                    "identity_source": {
-                        "kind": "GENERIC_METRIC_IDENTITY_ATTESTATION"
-                    }
+) -> SimpleNamespace:
+    prepared = _publish_identity_inputs(tmp_path, monkeypatch)
+    metric_config = tmp_path / "metric-config.json"
+    _write_json(
+        metric_config,
+        {
+            "schema_version": "screening-metric-config-v2",
+            "financial_as_of": "2026-10-10",
+            "identity_source": {
+                "kind": GENERIC_IDENTITY_SOURCE_KIND,
+                "root": str(prepared.identity.root),
+                "manifest_sha256": sha256_file(prepared.identity.manifest_path),
+            },
+            "companies": [
+                {
+                    "ticker": "FIVE",
+                    "cik": "0000000123",
+                    "analysis_root": str(prepared.annual),
+                    "analysis_manifest_sha256": sha256_file(
+                        prepared.annual / "analysis_manifest.json"
+                    ),
+                    "input_years": [2021, 2022, 2023, 2024, 2025],
+                    "display_years": [2022, 2023, 2024, 2025],
                 }
-            }
-        )
-        + "\n",
-        encoding="utf-8",
+            ],
+        },
     )
-    quarter_manifest_path.write_text("{}\n", encoding="utf-8")
+    metrics = publish_screening_metrics(metric_config, tmp_path / "metrics")
+    annual_config = tmp_path / "annual-v2-config.json"
+    _write_json(
+        annual_config,
+        {
+            "schema_version": EXPLICIT_IDENTITY_CONFIG_VERSION,
+            "dataset_id": "single-pass-v3-fixture",
+            "fixture_kind": "SYNTHETIC_ERROR_FIXTURE",
+            "financial_as_of": "2026-10-10",
+            "metric_root": str(metrics.root),
+            "metric_manifest_sha256": sha256_file(metrics.root / METRIC_MANIFEST),
+            "identity_source": {
+                "kind": GENERIC_IDENTITY_SOURCE_KIND,
+                "root": str(prepared.identity.root),
+                "manifest_sha256": sha256_file(prepared.identity.manifest_path),
+            },
+        },
+    )
+    annual = publish_screening_dataset_v2(annual_config, tmp_path / "annual-v2")
+    quarter_config = tmp_path / "quarter-config.json"
+    _write_json(
+        quarter_config,
+        {
+            "schema_version": "quarterly-screening-metric-config-v1",
+            "financial_as_of": "2026-10-10",
+            "source_commit_sha": "f" * 40,
+            "annual_metric_root": str(metrics.root),
+            "annual_metric_manifest_sha256": sha256_file(
+                metrics.root / METRIC_MANIFEST
+            ),
+            "companies": [
+                {
+                    "ticker": "FIVE",
+                    "cik": "0000000123",
+                    "analysis_root": str(prepared.quarterly),
+                    "analysis_manifest_sha256": sha256_file(
+                        prepared.quarterly / "analysis_manifest.json"
+                    ),
+                }
+            ],
+        },
+    )
+    quarter = publish_quarterly_screening_metrics(
+        quarter_config, tmp_path / "quarter-metrics"
+    )
     config_path = tmp_path / f"{destination_name}-config.json"
     config = {
         "schema_version": dataset_v3.CONFIG_VERSION,
         "dataset_id": "synthetic-v3-source-closure",
         "fixture_kind": "SYNTHETIC_ERROR_FIXTURE",
-        "annual_dataset_root": str(annual_root),
-        "annual_manifest_sha256": sha256_file(annual_manifest_path),
-        "quarterly_metric_root": str(quarter_root),
-        "quarterly_manifest_sha256": sha256_file(quarter_manifest_path),
+        "annual_dataset_root": str(annual.root),
+        "annual_manifest_sha256": sha256_file(annual.manifest_path),
+        "quarterly_metric_root": str(quarter.root),
+        "quarterly_manifest_sha256": sha256_file(
+            quarter.root / QUARTERLY_MANIFEST
+        ),
     }
-    config_path.write_text(canonical_json(config) + "\n", encoding="utf-8")
-    annual = SimpleNamespace(
-        root=annual_root,
-        publication_id="synthetic-annual-v2",
-        companies=[{"ticker": "FIVE", "cik": "0000000123"}],
-        manifest={"sources": {"metadata": {"publication_id": "synthetic-metadata"}}},
-        metadata=[],
-        metric_definitions=[],
-        metric_support=[],
-        observations=[],
+    _write_json(config_path, config)
+    return SimpleNamespace(
+        config_path=config_path,
+        config=config,
+        annual_root=annual.root,
+        quarter_root=quarter.root,
+        destination=tmp_path / destination_name,
     )
-    quarter = SimpleNamespace(
-        root=quarter_root,
-        publication_id="synthetic-quarterly",
-        manifest={
-            "financial_as_of": "2026-10-10",
-            "universe": {"ciks": ["0000000123"]},
-        },
-        definitions=[],
-        support=[],
-        observations=[],
-        period_inventory=[],
-    )
-    snapshot = closure._Snapshot((), (), (), {})
 
-    def issue_capability(
-        *,
-        config_path: Path,
-        config: dict[str, object],
-        annual_root: Path,
-        quarter_root: Path,
-        destination: Path,
-    ):
-        capability = closure._issue(
-            operation=closure._V3,
-            destination=destination,
-            config_path=config_path,
-            config=config,
-            expected_payload={},
-            parent_payload=closure._v3_parent_payload(annual, quarter),
-            snapshot=snapshot,
+
+def _build_fifty_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> SimpleNamespace:
+    original = identity_fixture._mixed_v2_fixture_at_financial_cutoff
+
+    def fifty(root: Path) -> dict[str, object]:
+        paths = original(root)
+        payload = json.loads((root / "mixed-config.json").read_text(encoding="utf-8"))
+        plans = {
+            ticker: root / "plans" / f"{ticker}.json" for ticker in ("FIVE", "SIX")
+        }
+        template = (root / "plans/SIX.json").read_text(encoding="utf-8")
+        for index in range(48):
+            ticker = f"OWN{index:02d}"
+            cik = f"{1000 + index:010d}"
+            plan = root / "plans" / f"{ticker}.json"
+            plan.write_text(
+                template.replace("SIX", ticker).replace("0000000456", cik),
+                encoding="utf-8",
+            )
+            plans[ticker] = plan
+            payload["companies"].append(
+                {"ticker": ticker, "cik": cik, "groups": ["fixture"]}
+            )
+        config = root / "fifty-config.json"
+        _write_json(config, payload)
+        collection = collection_operations.prepare_universe(
+            config_path=config,
+            run_root=root / "fifty-run",
+            existing_plans=plans,
         )
-        return annual, quarter, capability
+        paths["collection"] = collection
+        _install_intake(paths, "FIVE")
+        _install_intake(paths, "SIX")
+        _build_ready_histories(paths, root, monkeypatch, selected_tickers=("SIX",))
+        return paths
 
-    monkeypatch.setattr(dataset_v3, "_verify_v3_sources_once", issue_capability)
-    monkeypatch.setattr(dataset_v3, "_verify_parent_binding", lambda *_: None)
-    return config_path, tmp_path / destination_name, snapshot
+    with monkeypatch.context() as context:
+        context.setattr(
+            identity_fixture, "_mixed_v2_fixture_at_financial_cutoff", fifty
+        )
+        return identity_fixture._publish_identity_inputs(tmp_path, monkeypatch)
 
 
 def test_collector_rejects_path_role_inventory_and_byte_mutations(
@@ -203,20 +276,18 @@ def test_collector_rejects_path_role_inventory_and_byte_mutations(
 
 
 def test_capability_is_process_local_single_use_and_unserializable(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config_path = tmp_path / "config.json"
-    config_path.write_text("{}\n", encoding="utf-8")
+    prepared = _publish_identity_inputs(tmp_path, monkeypatch)
+    config_path = prepared.identity_config
+    config = metric_identity._validate_config(
+        json.loads(config_path.read_text(encoding="utf-8"))
+    )
     destination = tmp_path / "published"
-    snapshot = closure._Snapshot((), (), (), {})
-    capability = closure._issue(
-        operation=closure._IDENTITY,
+    _sources, capability = closure._verify_identity_sources_once(
         destination=destination,
         config_path=config_path,
-        config={},
-        expected_payload={},
-        parent_payload=None,
-        snapshot=snapshot,
+        config=config,
     )
     with pytest.raises(TypeError, match="issuer-only"):
         closure._VerifiedSourceClosure(object(), "nonce", closure._IDENTITY)
@@ -263,9 +334,8 @@ def test_capability_is_process_local_single_use_and_unserializable(
     assert child_result == b"REJECTED"
 
     staging = tmp_path / "staging"
-    staging.mkdir()
-    record = closure._lookup(capability, closure._IDENTITY, destination)
-    closure._consume_and_rename(capability, record, staging, destination)
+    shutil.copytree(prepared.identity.root, staging)
+    closure._publish_identity(capability, staging=staging, destination=destination)
     with pytest.raises(ValueError, match="already consumed"):
         closure._lookup(capability, closure._IDENTITY, destination)
 
@@ -350,6 +420,206 @@ def test_integrated_recovery_gate_before_any_history_private_read(
     assert private_history_reads == []
 
 
+def test_status_only_recovered_history_pins_complete_receipt_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    kwargs, _proof = _recovery_fixture(tmp_path, monkeypatch)
+    publication = history.recover_reported_history(**kwargs)
+    manifest_path = publication / "history_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    build = {
+        "status": "READY",
+        "publication": str(publication),
+        "history_manifest": str(manifest_path),
+        "declared_files": closure._history_declarations(manifest),
+    }
+    first = closure._Collector()
+    closure._add_status_history(first, build, "STATUS_HISTORY:NONSCOPED")
+    receipt = publication.parent / "reported_recovery_receipt.json"
+    receipt.write_bytes(receipt.read_bytes() + b"\n")
+    history._check_recovery_access(publication)
+    second = closure._Collector()
+    closure._add_status_history(second, build, "STATUS_HISTORY:NONSCOPED")
+    assert first.snapshot().fingerprint != second.snapshot().fingerprint
+
+
+def test_integrated_fifty_parent_status_recovery_receipt_mutation_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepared = _build_fifty_identity(tmp_path / "inputs", monkeypatch)
+    collection = Path(prepared.paths["collection"])
+    company_root = collection.parent / "companies/SIX"
+    plan = json.loads((company_root / "plan.json").read_text(encoding="utf-8"))
+    intake = company_root / "intake/history_intake.json"
+    with monkeypatch.context() as context:
+        kwargs, proof = _recovery_fixture(tmp_path / "recovery", context)
+        stage = kwargs["staged_publication"]
+        manifest_path = stage / "history_manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        old_cik = manifest["tables"][0]["cik"]
+        new_cik = plan["companies"][0]["cik"]
+        for tables in (manifest["tables"], proof["tables"]):
+            for table in tables:
+                table["cik"] = new_cik
+                table["ticker"] = "SIX"
+                for info in table["files"].values():
+                    info["path"] = info["path"].replace(old_cik, new_cik)
+        (stage / old_cik).rename(stage / new_cik)
+        execution_log = Path(proof["source_execution_log"]["path"])
+        execution_log.write_text(
+            execution_log.read_text(encoding="utf-8").replace("EXAMPLE", "SIX"),
+            encoding="utf-8",
+        )
+        proof["source_execution_log"]["sha256"] = history._sha256_file(
+            execution_log
+        )
+        manifest["plan"] = plan
+        manifest["source_intake"] = str(intake)
+        history._write_json(manifest_path, manifest)
+        proof["plan"] = plan
+        proof["staged_manifest_sha256"] = history._sha256_file(manifest_path)
+        proof["intake_sha256"] = history._sha256_file(intake)
+        report = Path(proof["verification_report"]["path"])
+        history._write_json(report, _full_report(proof, stage))
+        proof["verification_report"]["sha256"] = history._sha256_file(report)
+        history._write_json(kwargs["attestation"], proof)
+        kwargs["intake_manifest"] = intake
+        kwargs["expected_attestation_sha256"] = history._sha256_file(
+            kwargs["attestation"]
+        )
+        publication = history.recover_reported_history(**kwargs)
+
+    marker = company_root / "build_manifest.json"
+    build = json.loads(marker.read_text(encoding="utf-8"))
+    recovered_manifest = publication / "history_manifest.json"
+    recovered_payload = json.loads(recovered_manifest.read_text(encoding="utf-8"))
+    build.update(
+        views=recovered_payload["views"],
+        output_root=str(publication.parent),
+        publication=str(publication),
+        history_manifest=str(recovered_manifest),
+        history_manifest_sha256=history._sha256_file(recovered_manifest),
+        declared_files=closure._history_declarations(recovered_payload),
+    )
+    _write_json(marker, build)
+    status = collection_operations.read_universe_status(manifest_path=collection)
+    states = {row.ticker: row.state for row in status.companies}
+    assert len(states) == 50
+    assert states["SIX"] == "READY"
+    history._check_recovery_access(publication)
+    config = metric_identity._validate_config(
+        json.loads(prepared.identity_config.read_text(encoding="utf-8"))
+    )
+    metric_identity._verify_configured_sources(config)
+    receipt = publication.parent / "reported_recovery_receipt.json"
+    original_verify = metric_identity._verify_configured_sources
+
+    def verify_then_mutate(*args: object, **kwargs: object):
+        result = original_verify(*args, **kwargs)
+        receipt.write_bytes(receipt.read_bytes() + b"\n")
+        history._check_recovery_access(publication)
+        return result
+
+    monkeypatch.setattr(
+        metric_identity, "_verify_configured_sources", verify_then_mutate
+    )
+    destination = tmp_path / "rejected-receipt-change"
+    with pytest.raises(ValueError, match="post-verification source closure changed"):
+        metric_identity.publish_generic_metric_identity(
+            prepared.identity_config, destination
+        )
+    assert not destination.exists()
+
+
+def test_unverified_record_constructor_cannot_mint_publish_capability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "config.json"
+    _write_json(config_path, {})
+    destination = tmp_path / "forged"
+    deep_calls = 0
+    original_verify = metric_identity._verify_configured_sources
+
+    def counted_verify(*args: object, **kwargs: object):
+        nonlocal deep_calls
+        deep_calls += 1
+        return original_verify(*args, **kwargs)
+
+    monkeypatch.setattr(metric_identity, "_verify_configured_sources", counted_verify)
+    before = dict(closure._REGISTRY)
+    nonce, capability, _record = closure._unregistered_record(
+        operation=closure._IDENTITY,
+        destination=destination,
+        config_path=config_path,
+        config={},
+        expected_payload={"metadata": {"publication_id": "FORGED_NOT_DEEP_VERIFIED"}},
+        parent_payload=None,
+        snapshot=closure._Snapshot((), (), (), {}),
+    )
+    assert nonce not in closure._REGISTRY
+    assert closure._REGISTRY == before
+    assert not hasattr(closure, "_issue")
+    assert not hasattr(closure, "_consume_and_rename")
+    staging = tmp_path / "stage"
+    staging.mkdir()
+    with pytest.raises(ValueError, match="invalid or already consumed"):
+        closure._publish_identity(
+            capability, staging=staging, destination=destination
+        )
+    assert deep_calls == 0
+    assert not destination.exists()
+
+
+def test_identity_capability_cannot_publish_arbitrary_staged_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepared = _publish_identity_inputs(tmp_path, monkeypatch)
+    config = metric_identity._validate_config(
+        json.loads(prepared.identity_config.read_text(encoding="utf-8"))
+    )
+    destination = tmp_path / "bad-identity-output"
+    _sources, capability = closure._verify_identity_sources_once(
+        config_path=prepared.identity_config,
+        config=config,
+        destination=destination,
+    )
+    staging = tmp_path / "bad-identity-stage"
+    staging.mkdir()
+    _write_json(staging / metric_identity.MANIFEST_NAME, {"forged": True})
+    with pytest.raises(ValueError, match="staged publication bytes differ"):
+        closure._publish_identity(
+            capability, staging=staging, destination=destination
+        )
+    with pytest.raises(ValueError, match="already consumed"):
+        closure._lookup(capability, closure._IDENTITY, destination)
+    assert not destination.exists()
+
+
+def test_v3_capability_cannot_publish_arbitrary_staged_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepared = _prepare_real_v3_inputs(
+        tmp_path, monkeypatch, destination_name="bad-v3-output"
+    )
+    _annual, _quarter, capability = closure._verify_v3_sources_once(
+        config_path=prepared.config_path,
+        config=prepared.config,
+        annual_root=prepared.annual_root,
+        quarter_root=prepared.quarter_root,
+        destination=prepared.destination,
+    )
+    staging = tmp_path / "bad-v3-stage"
+    staging.mkdir()
+    _write_json(staging / dataset_v3.MANIFEST, {"forged": True})
+    with pytest.raises(ValueError, match="staged publication bytes differ"):
+        closure._publish_v3(
+            capability, staging=staging, destination=prepared.destination
+        )
+    with pytest.raises(ValueError, match="already consumed"):
+        closure._lookup(capability, closure._V3, prepared.destination)
+    assert not prepared.destination.exists()
+
+
 def test_stage_mutation_during_final_source_rehash_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -382,22 +652,33 @@ def test_stage_mutation_during_final_source_rehash_rejected(
 def test_v3_stage_mutation_during_final_source_rehash_rejected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config_path, destination, snapshot = _install_synthetic_v3_capability_fixture(
+    prepared = _prepare_real_v3_inputs(
         tmp_path, monkeypatch, destination_name="late-v3-stage"
     )
+    original_snapshot = closure._v3_snapshot
+    snapshots = 0
 
-    def mutate_stage_then_return_snapshot(*_args: object, **_kwargs: object):
-        staging = next(tmp_path.glob(".late-v3-stage.partial-*"))
-        manifest_path = staging / dataset_v3.MANIFEST
-        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-        payload["dataset_id"] = "FORGED_AFTER_STAGE_CHECK"
-        manifest_path.write_text(canonical_json(payload) + "\n", encoding="utf-8")
-        return snapshot
+    def snapshot_then_mutate(*args: object, **kwargs: object):
+        nonlocal snapshots
+        result = original_snapshot(*args, **kwargs)
+        snapshots += 1
+        if snapshots == 4:
+            staging = next(tmp_path.glob(".late-v3-stage.partial-*"))
+            manifest_path = staging / dataset_v3.MANIFEST
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+            payload["dataset_id"] = "FORGED_AFTER_STAGE_CHECK"
+            manifest_path.write_text(
+                canonical_json(payload) + "\n", encoding="utf-8"
+            )
+        return result
 
-    monkeypatch.setattr(closure, "_v3_snapshot", mutate_stage_then_return_snapshot)
+    monkeypatch.setattr(closure, "_v3_snapshot", snapshot_then_mutate)
     with pytest.raises(ValueError, match="staged publication bytes differ"):
-        dataset_v3.publish_screening_dataset_v3(config_path, destination)
-    assert not destination.exists()
+        dataset_v3.publish_screening_dataset_v3(
+            prepared.config_path, prepared.destination
+        )
+    assert snapshots == 4
+    assert not prepared.destination.exists()
 
 
 def test_identity_capability_discarded_when_stage_creation_fails(
@@ -423,7 +704,7 @@ def test_identity_capability_discarded_when_stage_creation_fails(
 def test_v3_capability_discarded_when_stage_creation_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config_path, destination, _snapshot = _install_synthetic_v3_capability_fixture(
+    prepared = _prepare_real_v3_inputs(
         tmp_path, monkeypatch, destination_name="failed-v3-stage"
     )
     original_mkdir = Path.mkdir
@@ -436,7 +717,9 @@ def test_v3_capability_discarded_when_stage_creation_fails(
 
     monkeypatch.setattr(Path, "mkdir", fail_stage)
     with pytest.raises(OSError, match="v3 stage mkdir failure"):
-        dataset_v3.publish_screening_dataset_v3(config_path, destination)
+        dataset_v3.publish_screening_dataset_v3(
+            prepared.config_path, prepared.destination
+        )
     assert set(closure._REGISTRY) == old_registry
 
 

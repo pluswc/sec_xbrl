@@ -301,7 +301,7 @@ def _verify_identity_sources_once(
     sources = module._verify_configured_sources(config)
     post = _identity_snapshot(config_path, config)
     _require_same_snapshot(initial, post, "identity post-verification")
-    capability = _issue(
+    nonce, capability, record = _unregistered_record(
         operation=_IDENTITY,
         destination=destination,
         config_path=config_path,
@@ -310,6 +310,7 @@ def _verify_identity_sources_once(
         parent_payload=None,
         snapshot=initial,
     )
+    _REGISTRY[nonce] = record
     return copy.deepcopy(sources), capability
 
 
@@ -336,7 +337,7 @@ def _verify_v3_sources_once(
     parent_payload = _v3_parent_payload(annual, quarter)
     post = _v3_snapshot(config_path, config, annual_root, quarter_root)
     _require_same_snapshot(initial, post, "v3 post-verification")
-    capability = _issue(
+    nonce, capability, record = _unregistered_record(
         operation=_V3,
         destination=destination,
         config_path=config_path,
@@ -345,10 +346,21 @@ def _verify_v3_sources_once(
         parent_payload=parent_payload,
         snapshot=initial,
     )
+    _REGISTRY[nonce] = record
     return annual, quarter, capability
 
 
 def _publish_identity(
+    capability: _VerifiedSourceClosure, *, staging: Path, destination: Path
+) -> None:
+    try:
+        _finalize_identity(capability, staging=staging, destination=destination)
+    except BaseException:
+        _discard(capability)
+        raise
+
+
+def _finalize_identity(
     capability: _VerifiedSourceClosure, *, staging: Path, destination: Path
 ) -> None:
     record = _lookup(capability, _IDENTITY, destination)
@@ -378,10 +390,29 @@ def _publish_identity(
     fresh = _identity_snapshot(config_path, config)
     _require_same_snapshot(record.snapshot, fresh, "identity pre-publication")
     _require_exact_output(staging, module.MANIFEST_NAME, manifest)
-    _consume_and_rename(capability, record, staging, destination)
+    nonce = capability._VerifiedSourceClosure__nonce
+    record.state = "FINALIZING"
+    try:
+        os.rename(staging, destination)
+    except BaseException:
+        record.state = "INVALID"
+        _REGISTRY.pop(nonce, None)
+        raise
+    record.state = "CONSUMED"
+    _REGISTRY.pop(nonce, None)
 
 
 def _publish_v3(
+    capability: _VerifiedSourceClosure, *, staging: Path, destination: Path
+) -> None:
+    try:
+        _finalize_v3(capability, staging=staging, destination=destination)
+    except BaseException:
+        _discard(capability)
+        raise
+
+
+def _finalize_v3(
     capability: _VerifiedSourceClosure, *, staging: Path, destination: Path
 ) -> None:
     record = _lookup(capability, _V3, destination)
@@ -436,7 +467,16 @@ def _publish_v3(
     )
     _require_same_snapshot(record.snapshot, fresh, "v3 pre-publication")
     _require_exact_output(staging, module.MANIFEST, manifest)
-    _consume_and_rename(capability, record, staging, destination)
+    nonce = capability._VerifiedSourceClosure__nonce
+    record.state = "FINALIZING"
+    try:
+        os.rename(staging, destination)
+    except BaseException:
+        record.state = "INVALID"
+        _REGISTRY.pop(nonce, None)
+        raise
+    record.state = "CONSUMED"
+    _REGISTRY.pop(nonce, None)
 
 
 def _discard(capability: _VerifiedSourceClosure) -> None:
@@ -445,7 +485,7 @@ def _discard(capability: _VerifiedSourceClosure) -> None:
         _REGISTRY.pop(nonce, None)
 
 
-def _issue(
+def _unregistered_record(
     *,
     operation: str,
     destination: Path,
@@ -454,10 +494,10 @@ def _issue(
     expected_payload: dict[str, Any],
     parent_payload: dict[str, Any] | None,
     snapshot: _Snapshot,
-) -> _VerifiedSourceClosure:
+) -> tuple[str, _VerifiedSourceClosure, _RegistryRecord]:
     nonce = secrets.token_hex(32)
     capability = _VerifiedSourceClosure(_ISSUER, nonce, operation)
-    _REGISTRY[nonce] = _RegistryRecord(
+    record = _RegistryRecord(
         capability=capability,
         operation=operation,
         pid=os.getpid(),
@@ -472,7 +512,7 @@ def _issue(
         ),
         snapshot=snapshot,
     )
-    return capability
+    return nonce, capability, record
 
 
 def _lookup(
@@ -494,24 +534,6 @@ def _lookup(
     ):
         raise ValueError("verified source closure is invalid or already consumed")
     return record
-
-
-def _consume_and_rename(
-    capability: _VerifiedSourceClosure,
-    record: _RegistryRecord,
-    staging: Path,
-    destination: Path,
-) -> None:
-    nonce = capability._VerifiedSourceClosure__nonce
-    record.state = "FINALIZING"
-    try:
-        os.rename(staging, destination)
-    except BaseException:
-        record.state = "INVALID"
-        _REGISTRY.pop(nonce, None)
-        raise
-    record.state = "CONSUMED"
-    _REGISTRY.pop(nonce, None)
 
 
 def _require_exact_output(root: Path, manifest_name: str, expected: dict[str, Any]) -> None:
@@ -798,6 +820,7 @@ def _add_status_history(collector: _Collector, build: dict[str, Any], role: str)
     publication = Path(str(build.get("publication", "")))
     history = importlib.import_module("sec_xbrl.history")
     history._check_recovery_access(publication)
+    _add_recovery_gate_files(collector, publication, role)
     manifest_path = Path(str(build.get("history_manifest", "")))
     manifest = collector.json(manifest_path, f"{role}:MANIFEST")
     declared = _history_declarations(manifest)

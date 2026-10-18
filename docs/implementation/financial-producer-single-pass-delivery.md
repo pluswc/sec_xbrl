@@ -336,3 +336,35 @@ gate는 그대로 둔다. 독립 source/synthetic PASS와 lead local acceptance 
 first-five R3의 원래 8 stage receipts와 17 publication manifests를 다시 생성·검증하고 actual
 audit를 통과해야 FULL50가 가능하다. 이 설계나 향후 single-pass 구현만으로 actual50 readiness,
 duration 또는 acceptance를 주장하지 않는다.
+
+## R2 독립 FAIL 뒤 R3 source 보정
+
+R2 동결 후보 `e56c148…`는 독립 검증에서 249개 검사를 통과했지만 두 source-closure
+경계 검사에 실패했다. 첫째, status-only READY History가 recovery access gate를 실행하면서도
+그 gate가 선택한 control과 receipt bytes를 source snapshot에 넣지 않았다. R3는 동일한 real
+gate를 먼저 통과한 뒤 기존 recovery gate collector를 그대로 호출하므로, non-scoped READY
+History도 selector, control, receipt와 evidence의 exact path/role/bytes를 initial, post-deep,
+pre-publication snapshot에 포함한다. financial parent scope, failed sibling History, unselected Raw와
+History payload는 추가하지 않는다.
+
+둘째, 기존 generic registry issuer는 caller가 만든 expected payload와 snapshot으로 live
+capability를 등록할 수 있었다. R3에서는 identity와 combined v3의 operation-specific verifier만
+실제 deep verification과 post-deep closure equality 뒤 registry entry를 등록한다. 공통 helper는
+아직 등록되지 않은 immutable record만 만들며 standalone issuer API는 없다. generic
+consume/rename helper도 제거했고 두 operation의 fixed finalizer가 expected staged bytes, final
+source snapshot과 destination binding을 모두 다시 확인한 뒤에만 rename하고 token을 소비한다.
+실패 경로는 token을 폐기하고 기존 producer cleanup이 partial stage를 제거한다. 이 경계는
+trusted pinned Python process 안에서 copy, serialization, PID, operation, config, destination과
+replay를 거부한다. private registry를 직접 변조하는 hostile Python이나 native memory에 대한
+sandbox라고 주장하지 않는다.
+
+새 회귀는 real recovery helper의 COMPLETE receipt newline 뒤 fingerprint 변화, synthetic
+50-parent의 non-scoped `SIX` READY receipt가 deep verification 뒤 바뀌었을 때 publication 거부,
+generic unverified record의 zero-deep 발행 거부, 그리고 legitimate identity/v3 capability가
+arbitrary staged manifest를 publish하지 못함을 확인한다. 실제 operation paths의 one-deep-pass와
+byte-identical output, public reader freshness, 112-file local package code closure 및 기존 mutation
+matrix는 유지한다. guarded 관련 묶음은 **157 PASS**(1 warning), 80.71초, peak tree RSS
+142,245,888 bytes였고 1 GiB/120초, PDEATHSIG, subreaper/reaping, no `RLIMIT_AS`, import 전
+actual/cache/network denial을 모두 통과했다. focused closure 묶음은 **48 PASS**, 67.08초,
+peak 121,712,640 bytes였다. 이 수치는 writer source/tiny 후보 증거이며 독립 재검증과 lead local
+acceptance 전에는 source가 수락되거나 actual 실행이 허가된 상태가 아니다.
