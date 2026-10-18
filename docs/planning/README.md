@@ -14,6 +14,13 @@
 [T3 참조 결함과 확장 중지](../implementation/universe50-t3-reference-hold-20261017.md)에
 따라 **HOLD_FINANCIAL_EXPANSION_PENDING_T3_REFERENCE_DISPOSITION**다.
 
+2026-10-18 후속: first-five `annual-analysis`의 16 GiB RSS stop 뒤 승인된
+[consumer analysis bounded History read 전달](../implementation/consumer-analysis-bounded-read-delivery.md)은
+ordinary History cell을 기존 전수 verifier로 단일 pass 소비하는 source/tiny 구현 후보를
+기록한다. Raw 검증·회계·선택·graph 의미와 reviewed overlay는 유지한다. actual payload는
+읽지 않았고 새 actual 실행, 독립 검증, 로컬 인수, dashboard 반영과 main 병합은 아직
+`NOT_READY`다.
+
 2026-10-17 추가 후속: T3 참조 결함 수리·재감사 뒤 확장 재개는 사용자가 별도로
 승인해 수리 중이다. generic producer를 기존 manual reviewed-Q4 completion으로
 표현할 수 없는 별도 계약 공백과 리드의 범위 판단 항목은
@@ -84,6 +91,7 @@ Raw adoption과 History build는 별도 stage GO 전에는 실행하지 않는�
 | [50 issuer T3 참조 결함과 확장 중지](../implementation/universe50-t3-reference-hold-20261017.md) | Raw exact-50 수집 상태는 보존하지만 T3 graph 참조 결함으로 CVX actual audit·first-five·50사 `FinancialREADY`는 미수락. **수리·재감사 사용자 승인 전 HOLD** |
 | [50사 generic metric Raw 품질 전달](../implementation/universe50-generic-metric-quality-delivery.md) | mixed v5/v6 Raw source binding과 duration·승인 lexical repair 전수 conformance, exact parent/cohort scope. **`c70087d` 독립 PASS / source+synthetic 로컬 수락**; actual 실행·full financial semantic assurance 아님 |
 | [50사 재무 통합·실행 전달](../implementation/universe50-financial-delivery.md) | accepted producer·quality·identity·OPS·package view 누적 통합, quarterly exact identity parent 결속과 explicit stage-GO offline runner. **구현 후보 / 독립 검증 대기**; actual financial 실행·인수·native 반영 아님 |
+| [Consumer analysis bounded History read 전달](../implementation/consumer-analysis-bounded-read-delivery.md) | ordinary History cell 전수 hash/schema/count/JSON 검증을 유지하면서 consumer 준비가 source cell을 lazy single pass로 변환하는 source/tiny 구현 후보. **독립 검증·actual 재실행 전 / actual financial NOT_READY** |
 | [기간 규칙](../implementation/period-rules.md), [Layer 2 연결](../implementation/layer2-longitudinal.md), [공시 발견 계약](../implementation/accession-contract.md) | 표시 계획으로 바꿀 수 없는 의미·입력 경계 |
 
 충돌 시 적용되는 사용자 결정과 승인 범위를 먼저 확인하고, 해당 평면의 계약을

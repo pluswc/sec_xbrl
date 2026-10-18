@@ -875,6 +875,16 @@ def open_history_publication(root: Path):
     return HistoryPublicationReader(root)
 
 
+@dataclass(frozen=True, slots=True)
+class HistoryCellStream:
+    """Canonical History headers plus a lazy, single-pass source-cell stream."""
+
+    columns: tuple[dict[str, Any], ...]
+    rows: tuple[dict[str, Any], ...]
+    cells: Iterator[dict[str, Any]]
+    scope: dict[str, Any]
+
+
 class HistoryPublicationReader:
     """Reload persisted fiscal tables only: no SEC, Arelle, selection or build."""
 
@@ -898,6 +908,38 @@ class HistoryPublicationReader:
             raise ValueError("history dataset row count mismatch")
         return tuple({key: json.loads(value) if key in info["json_fields"] and value is not None else value
                       for key, value in row.items()} for row in records)
+
+    def stream_cells(
+        self,
+        *,
+        ticker: str,
+        period_class: str = "QTD_3M",
+        view: str = "LATEST_REPORTED",
+    ) -> HistoryCellStream:
+        """Load table headers and lazily verify/decode every source cell once.
+
+        The iterator is deliberately unfiltered.  Consumers may discard a cell
+        after inspecting it, but successful consumption still validates every
+        persisted cell, including records outside a requested display window.
+        """
+        matches = [
+            table
+            for table in self.manifest["tables"]
+            if table["ticker"] == ticker.upper()
+            and table["period_class"] == period_class
+            and table["view"] == view
+        ]
+        if len(matches) != 1:
+            raise ValueError("requested ticker/period class/view is not published")
+        table = matches[0]
+        cell_info = table["files"]["cells"]
+        cell_path = _history_dataset_path(self.root, cell_info)
+        return HistoryCellStream(
+            columns=self._records(table["files"]["columns"]),
+            rows=self._records(table["files"]["rows"]),
+            cells=_iter_history_records(cell_path, cell_info),
+            scope=table["scope"],
+        )
 
     def verify_all(self) -> None:
         _check_recovery_access(self.root, getattr(self, "_recovery_access", None))
