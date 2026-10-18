@@ -119,9 +119,15 @@ component별 역할은 다음과 같다.
 | `02226c9…` | 현재 canonical financial/screening source와 bounded consumer History stream | `fd9`·`e842` ancestry, ordinary READY-only lazy cell stream, exact source revalidation |
 | `cab253d…` | 현재 fail-closed History recovery runner | `c9` ancestry와 exact `02226c9…` financial validator pin; merged HEAD 허용 없음 |
 
-`src/sec_xbrl/metrics/quarterly_screening.py`와 관련 fd9 tests, f222의 세 product
-module과 네 tests, c9의 recovery tool/test는 각각 accepted component와 byte-for-byte
-같아야 한다. 최종 handoff evidence가 그 hash mapping을 기록한다.
+`src/sec_xbrl/metrics/quarterly_screening.py`와 기존 fd9 screening mapping은 그대로다.
+022의 `src/sec_xbrl/analysis.py`와 scoped-read test, f222의
+`src/sec_xbrl/analytics/history_quarters.py`와 quarter-spill test, CAB의 recovery tool/test는
+각 accepted component와 byte-for-byte 같다. `src/sec_xbrl/history.py`는 의도적인 함수
+composition이다. f222의 `_stage_records`, `build_history`, `_iter_fiscal_time_series_inputs`,
+`_iter_record_batches`와 022의 `HistoryCellStream`, `HistoryPublicationReader.__init__`,
+`HistoryPublicationReader.stream_cells`가 각각 accepted component AST와 같고, 양쪽의 다른
+공유 definition은 변경되지 않았다. 최종 handoff evidence가 exact file/function hash
+mapping을 기록한다.
 
 ## 운영 source identity와 재현 순서
 
