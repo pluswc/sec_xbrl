@@ -16,12 +16,14 @@
 
 2026-10-18 후속: first-five `annual-analysis`의 16 GiB RSS stop 뒤 승인된
 [consumer analysis bounded History read 전달](../implementation/consumer-analysis-bounded-read-delivery.md)은
-ordinary History cell을 기존 전수 verifier로 단일 pass 소비하는 source/tiny 구현 후보를
-기록한다. 최초 동결 `4f26108…`은 recovery-private deferred access 결함으로 독립
-`FAIL`이며 보존한다. 새 child repair는 stream을 ordinary READY publication 전용으로
-제한한다. Raw 검증·회계·선택·graph 의미와 reviewed overlay는 유지한다. actual payload는
-읽지 않았고 새 repair 독립 검증, actual 실행, 로컬 인수, dashboard 반영과 main 병합은
-아직 `NOT_READY`다.
+ordinary History cell을 기존 전수 verifier로 단일 pass 소비한다. 최초 동결
+`4f26108…`은 recovery-private deferred access 결함으로 독립 `FAIL`이며 보존한다. repair
+`02226c9…`는 stream을 ordinary READY publication 전용으로 제한하고 별도 Astra PASS와
+source/synthetic 로컬 인수를 마쳤다. Raw 검증·회계·선택·graph 의미와 reviewed overlay는
+유지한다. actual readiness, dashboard 반영과 main 병합은 이 source 인수와 별도다.
+History runner의 후속 exact `cab253d…`도 별도 Astra PASS와 source/synthetic 인수를
+마쳤으며 canonical first-five financial validator pin만 exact `02226c9…`로 갱신한다.
+actual first-five acceptance와 later-45 실행 승인은 이 component 인수로 생기지 않는다.
 
 2026-10-17 추가 후속: T3 참조 결함 수리·재감사 뒤 확장 재개는 사용자가 별도로
 승인해 수리 중이다. generic producer를 기존 manual reviewed-Q4 completion으로
@@ -73,6 +75,16 @@ exact `fd9a179…`에서 exact `f222a8b…`, 그 다음 exact `c9e1316…`를 or
 sandbox가 막은 HTTP 2개는 environment-deselected로 분리했다. merged HEAD는 기존
 recovery runner의 accepted operational component HEAD가 아니고, actual
 JNJ·first-five·later-45·UI 인수나 main 병합을 뜻하지 않는다.
+
+같은 날 승인된 source refresh는 exact `02226c9…`와 exact `cab253d…`를 차례로 ordinary
+merge했다. source merge `a020b00…`은 022의 ordinary READY-only bounded History stream,
+f222의 private History spill/ownership, CAB의 exact-022 financial validator pin을 함께
+보존한다. 구현자 guarded synthetic 423개와 targeted Ruff는 통과했고 loopback HTTP 2개와
+환경 `/proc` TOCTOU 1개를 명시적으로 deselect했다. 새 동결 source는 별도 Astra 검증과
+리드 인수 전이다. 운영 재현은 clean exact `cab253d…` runner, `f222a8b…` engine,
+`02226c9…` financial checkout을 사용하며 merged HEAD를 운영 component로 relabel하지 않는다.
+현재 actual은 Raw50·metadata50·first-five History가 인수됐고 first-five financial identity가
+실행 중이다. later-45·FULL50·native UI는 대기하며 기존 live 21사는 유지된다.
 
 2026-10-17 TTM provenance 후속: source `9b6e7ec…`의 synthetic AVAILABLE TTM에서
 준비된 REPORTED 입력 top-level에 검증된 `source_snapshot_id` 전달이 빠져 strict public
@@ -131,9 +143,9 @@ Raw adoption과 History build는 별도 stage GO 전에는 실행하지 않는�
 | [50사 generic metric Raw 품질 전달](../implementation/universe50-generic-metric-quality-delivery.md) | mixed v5/v6 Raw source binding과 duration·승인 lexical repair 전수 conformance, exact parent/cohort scope. **`c70087d` 독립 PASS / source+synthetic 로컬 수락**; actual 실행·full financial semantic assurance 아님 |
 | [50사 재무 통합·실행 전달](../implementation/universe50-financial-delivery.md) | accepted producer·quality·identity·OPS·package view 누적 통합, quarterly exact identity parent 결속과 explicit stage-GO offline runner. **구현 후보 / 독립 검증 대기**; actual financial 실행·인수·native 반영 아님 |
 | [50사 History bounded-memory 복구 전달](../implementation/universe50-history-recovery-delivery.md) | 별도 clean runner/engine source, immutable collection e와 실패 partial 보존, explicit root GO, guarded public History build. **f74 동시누락 FAIL 뒤 mandatory a02 r1 witness 보정 후보 / 독립 검증 대기**; 새 engine·actual retry·financial 미수락 |
-| [50사 로컬 source composition 전달](../implementation/universe50-local-source-composition-20261018.md) | exact `fd9 + f222 + c9` 이력을 ordinary merge한 tracked local handoff. exact `135d49b…`는 독립 410 PASS 뒤 **LOCALLY_ACCEPTED_SOURCE_AND_SYNTHETIC_ONLY**. accepted operational reproduction은 clean 세 historical checkout을 계속 사용하며 merged HEAD는 actual runner/data/UI acceptance나 main 병합이 아니다. |
-| [Consumer analysis bounded History read 전달](../implementation/consumer-analysis-bounded-read-delivery.md) | ordinary READY History cell 전수 hash/schema/count/JSON 검증을 유지하면서 consumer 준비가 source cell을 lazy single pass로 변환한다. 최초 `4f26108…` recovery access 독립 **FAIL** 보존, 새 child repair 독립 검증 전. **actual financial NOT_READY** |
-| [History runner financial validator pin refresh](../implementation/history-runner-financial-pin-refresh-delivery.md) | later-45의 strict canonical first-five gate를 locally accepted `02226c9…` source에만 갱신한 구현 후보. accounting·8 receipt·17 manifest·fresh/reuse 계약은 불변이며 독립 검증 대기; actual first-five readiness와 later-45 실행 승인은 여전히 false |
+| [50사 로컬 source composition 전달](../implementation/universe50-local-source-composition-20261018.md) | 기존 exact `fd9 + f222 + c9`의 `135d49b…` source-only 인수를 보존한다. 후속 exact `022 + CAB` source merge `a020b00…`은 guarded 423 PASS 뒤 **INDEPENDENT_VERIFICATION_PENDING / NOT_LOCALLY_ACCEPTED**. 운영은 clean exact CAB/f222/022 세 checkout을 사용하며 merged HEAD는 actual runner/data/UI acceptance나 main 병합이 아니다. |
+| [Consumer analysis bounded History read 전달](../implementation/consumer-analysis-bounded-read-delivery.md) | ordinary READY History cell 전수 hash/schema/count/JSON 검증을 유지하면서 consumer 준비가 source cell을 lazy single pass로 변환한다. 최초 `4f26108…` recovery access 독립 **FAIL** 보존, repair `02226c9…` 별도 Astra PASS·**SOURCE/SYNTHETIC LOCALLY_ACCEPTED**. actual readiness는 별도 |
+| [History runner financial validator pin refresh](../implementation/history-runner-financial-pin-refresh-delivery.md) | later-45의 strict canonical first-five gate를 locally accepted `02226c9…` source에만 갱신한 exact `cab253d…`. 별도 Astra PASS·**SOURCE/SYNTHETIC LOCALLY_ACCEPTED**; accounting·8 receipt·17 manifest·fresh/reuse 계약 불변, actual first-five acceptance와 later-45 실행 승인은 여전히 false |
 | [기간 규칙](../implementation/period-rules.md), [Layer 2 연결](../implementation/layer2-longitudinal.md), [공시 발견 계약](../implementation/accession-contract.md) | 표시 계획으로 바꿀 수 없는 의미·입력 경계 |
 
 충돌 시 적용되는 사용자 결정과 승인 범위를 먼저 확인하고, 해당 평면의 계약을
@@ -167,7 +179,7 @@ Raw adoption과 History build는 별도 stage GO 전에는 실행하지 않는�
 | 50사 generic metric identity | [제안](../implementation/universe50-generic-metric-identity-proposal-20261017.md) · [승인 전달 계약](../implementation/universe50-generic-metric-identity-delivery-20261017.md) | 권장안 A의 별도 attestation, 명시 source kind와 합성 fresh fixture 구현은 **2026-10-17 APPROVED** | final `6470e0b`; quality final `c70087d` 통합 | **PASS**; 별도 read-only 검증 보고서 SHA-256 `9c27d0b…` | **source/synthetic LOCALLY_ACCEPTED**; actual identity 발행·인수 미수행 | 미병합; push·PR 미수행 |
 | 50사 재무 통합·offline runner | [재무 통합·실행 전달](../implementation/universe50-financial-delivery.md) | **2026-10-17 APPROVED**; 동결 source 통합, quarterly exact identity 결속, public-API-only staged runner와 합성 검증 | **IMPLEMENTED CANDIDATE**; 동결 SHA 확정 전 | 독립 검증 대기 | 미수락; actual first-five/50·native 실행 미수행 | 미병합; push·PR·scheduler 미수행 |
 | 50사 History bounded-memory 복구 | [History 복구 전달](../implementation/universe50-history-recovery-delivery.md) | **2026-10-17 SOURCE/SYNTHETIC ONLY**; r1 TIMEOUT exact witness, fd9 canonical gate, optional attested reported-stage reuse | **ATTESTED-REUSE IMPLEMENTED CANDIDATE**; 동결 SHA 대기 | source/synthetic 독립 검증 대기; component actual audit 미수행 | r1 TIMEOUT; actual reuse·later-45·financial 미수락 | 미병합; push·PR·scheduler 미수행 |
-| 50사 로컬 source composition | [2026-10-18 전달](../implementation/universe50-local-source-composition-20261018.md) | **APPROVED LOCAL SOURCE/SYNTHETIC COMPOSITION ONLY**; exact component ordinary merge와 tracked handoff docs | source merge `155fb3d…`; verified source/docs `135d49b…`, tree `5ab9f79…` | **PASS**; 282 non-doc exact mapping, 410 passed, HTTP 2 environment-deselected; report SHA-256 `34b5b06d…` | **LOCALLY_ACCEPTED_SOURCE_AND_SYNTHETIC_ONLY**; actual JNJ·first-five·later-45·native UI 상태와 분리 | 미병합; push·PR·remote CI·scheduler 미수행 |
+| 50사 로컬 source composition | [2026-10-18 전달](../implementation/universe50-local-source-composition-20261018.md) | 기존 `fd9 + f222 + c9` 및 후속 exact `022 + CAB` ordinary local merge와 tracked handoff 승인; actual·remote 제외 | 기존 verified `135d49b…`; refresh merge `e9b939d…` → `a020b00…`; product/test conflict 없음 | 기존 source PASS 보존. refresh 구현자 guarded 423 passed / 3 deselected, Ruff PASS; 별도 Astra 대기 | 기존 `135d49b…`만 source/synthetic 인수. refresh 미수락; actual Raw50·metadata50·History5 인수, first-five identity RUNNING, later-45·FULL50·UI 대기 | 미병합; push·PR·remote CI·scheduler 미수행 |
 
 현재 전달 상태(2026-09-10): U3–U5 누적 이력은
 [PR #63](https://github.com/pluswc/sec_xbrl/pull/63)으로 `main`에 병합됐다. merge

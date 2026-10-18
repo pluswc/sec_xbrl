@@ -2,26 +2,67 @@
 
 ## 결정과 상태
 
-이 문서는 이미 source/synthetic 범위에서 인수된 세 component 이력을 한 로컬 Git
-history에 보존하는 전달 기록이다. 리드 계약
+이 문서는 source/synthetic 범위에서 인수된 component 이력을 한 로컬 Git history에
+보존하고 후속 source를 정확한 ancestry로 추가하는 전달 기록이다. 최초 리드 계약
 `lead_local_source_composition_contract.json`의 SHA-256은
-`5989906186349511375cad7180bf69d2553830dddfd3f714f36d1f1975b0c891`이다.
-이 계약은 로컬 source merge와 추적 문서만 승인했다. actual 데이터 실행·인수, runner
-gate 변경, live UI 반영, push·PR·main 병합은 승인하지 않았다.
+`5989906186349511375cad7180bf69d2553830dddfd3f714f36d1f1975b0c891`이다. 후속 022/CAB
+refresh 계약 `lead_local_source_composition_022_cab_contract.json`의 SHA-256은
+`70ef46fb724eea1c345ff8158ca4c401082be2ab33cec6025a88c95a87b3c652`다. 후속 계약은
+exact component 두 개의 ordinary local merge, 추적 문서와 guarded synthetic evidence만
+승인했다. actual 데이터 실행·인수, merged HEAD의 운영 source relabel, live UI 반영,
+push·PR·main 병합은 승인하지 않았다.
 
 | 단계 | 상태 |
 | --- | --- |
-| 제안 | 기존 source inventory에서 `fd9 + f222 + c9` tracked handoff를 권고 |
-| 범위 승인 | **APPROVED — LOCAL SOURCE/SYNTHETIC COMPOSITION ONLY** |
-| 구현 | exact `fd9`에서 ordinary merge로 exact `f222`, 그 다음 exact `c9`를 통합한 `135d49b…` |
-| 독립 검증 | **PASS** — exact `135d49b…`, 410 passed, HTTP 2개 environment-deselected |
-| 로컬 인수 | **LOCALLY_ACCEPTED_SOURCE_AND_SYNTHETIC_ONLY** — 2026-10-18 KST root lead |
+| 제안 | 기존 accepted composition에 exact `02226c9…` consumer stream과 exact `cab253d…` runner pin refresh를 추가 |
+| 범위 승인 | **APPROVED — SOURCE AND OWNED TINY ONLY** |
+| 구현 | exact `02226c9…` merge `e9b939d…`, 이어 exact `cab253d…` merge `a020b00…`; product/test conflict 없음 |
+| 구현자 검증 | **PASS WITH DISCLOSED DESELECTIONS** — guarded synthetic 423 passed, 3 deselected; targeted Ruff PASS |
+| 독립 검증 | 새 동결 source에 대한 별도 Astra read-only 검증 대기 |
+| 로컬 인수 | 새 composition은 미수락; 이전 `135d49b…`의 source/synthetic 인수만 역사적으로 유효 |
 | main 병합 | 미수행; push·PR·remote CI도 미수행 |
 
 source composition은 component의 actual-data acceptance가 아니다. component별 기존
 source/synthetic 인수도 새 merge commit에 자동 승계되지 않는다.
 
-## 2026-10-18 독립 검증과 로컬 source 인수
+## 2026-10-18 022/CAB source refresh
+
+후속 구현은 clean `d4a998e1b49d6f25e5d8293df05fa85a3b6e8a84`에서 다음 순서로만
+진행했다.
+
+1. exact `02226c91f36b5907f9e4d701c2b788747ef94c0a`를 ordinary `--no-ff`
+   merge해 `e9b939d5d7aba9ace59bfe442dae9f40a877493f`를 만들었다.
+2. exact `cab253dc24e00a68714e0b5d0277e3020d329deb`를 ordinary `--no-ff`
+   merge해 source merge `a020b004aaa25b1030fc6cefb65494e9b725e483`를 만들었다.
+3. 두 merge의 유일한 conflict는 `docs/planning/README.md`였고 양쪽 history를 모두
+   보존했다. product/test conflict나 구현자 product edit는 없었다.
+
+`02226c9…`는 accepted `fd9a179…`와 `e84289a…` ancestry를 포함하며 ordinary READY
+History publication의 cell을 lazy single pass로 전수 검증·소비하는 API를 추가한다.
+recovery-private와 staging reader는 이 stream을 쓸 수 없고 기존 eager recovery API를
+계속 사용한다. deferred consumption 직전 public readiness와 exact cell bytes를 다시
+확인한다. `cab253d…`는 accepted `c9e1316…` recovery ancestry를 포함하고 later-45의
+canonical first-five financial validator pin만 exact `02226c9…`로 바꾼다. accounting,
+8 receipt, 17 manifest, fresh/reuse, failure와 resource 계약은 유지한다.
+
+AST mapping은 `src/sec_xbrl/history.py`에서 f222의 `_stage_records`, `build_history`,
+`_iter_fiscal_time_series_inputs`, `_iter_record_batches`를 그대로 보존하고 022의
+`HistoryCellStream`, `HistoryPublicationReader.__init__`, `stream_cells`만 additive하게
+결합했음을 확인했다. f222와 공유하는 나머지 73개 definition은 변경되지 않았고 022와
+공유하는 나머지 73개 definition도 변경되지 않았다. CAB runner/tool/test와 022
+analysis/test, f222 quarter-spill product/test는 각 accepted component object와 정확히 같다.
+
+구현자 guarded synthetic 검증은 History stream/spill/Fiscal 249개, recovery runner 94개,
+quarterly/TTM·v3·explicit-save 80개, 합계 423개를 통과했다. no-network 정책 때문에
+loopback HTTP 2개를 deselect했고, abrupt-parent test 한 개는 child가
+`/proc/<pid>/stat`의 `exists()`와 `read_text()` 사이에 종료되는 환경 TOCTOU를 두 번
+재현해 deselect했다. 외부 supervisor가 각 성공 실행에서 PDEATHSIG, child reaping과
+process-group 소멸을 별도로 확인했다. 최초 잘못된 editable import와 dirfd guard
+false-positive도 실패 harness로 보존하며 PASS에 포함하지 않는다. 모든 성공 worker는
+1 GiB/120초 이내였고 최대 tree RSS는 241,352,704 bytes였다. 새 동결 source의 별도 Astra
+검증과 리드 인수는 이 결과로 대체하지 않는다.
+
+## 기존 2026-10-18 독립 검증과 로컬 source 인수
 
 구현 후보 `135d49bfbd97f77cbd5018efa82ec56a3650c58d`, tree
 `5ab9f797cf319233d91edce0ca9c700cc964f1fb`를 별도 Astra가 read-only로 검증해
@@ -75,6 +116,8 @@ component별 역할은 다음과 같다.
 | `fd9a179…` | canonical financial source, quarterly/TTM provenance, screening v2/v3 reader·service·store·UI | prepared REPORTED `source_snapshot_id`, explicit-save ancestry, immutable dataset identity |
 | `f222a8b…` | bounded History/Fiscal/quarter spill engine | batching, typed spill integrity, ownership·cleanup; 회계·기간·선택 의미 불변 |
 | `c9e1316…` | fail-closed History recovery orchestration | exact failed-root witness, attested reported-stage reuse, root GO와 component source pin |
+| `02226c9…` | 현재 canonical financial/screening source와 bounded consumer History stream | `fd9`·`e842` ancestry, ordinary READY-only lazy cell stream, exact source revalidation |
+| `cab253d…` | 현재 fail-closed History recovery runner | `c9` ancestry와 exact `02226c9…` financial validator pin; merged HEAD 허용 없음 |
 
 `src/sec_xbrl/metrics/quarterly_screening.py`와 관련 fd9 tests, f222의 세 product
 module과 네 tests, c9의 recovery tool/test는 각각 accepted component와 byte-for-byte
@@ -82,16 +125,17 @@ module과 네 tests, c9의 recovery tool/test는 각각 accepted component와 by
 
 ## 운영 source identity와 재현 순서
 
-이 merged HEAD는 추적 가능한 source handoff다. 기존 recovery runner가 허용하는
-operational runner/engine/financial checkout identity는 아니다. 그 gate는 의도적으로
-변경하지 않았다.
+이 merged HEAD는 추적 가능한 source handoff다. recovery runner가 허용하는
+operational runner/engine/financial checkout identity는 아니다. CAB가 financial source
+pin을 exact 022로 갱신했지만 merged HEAD를 CAB, f222 또는 022로 relabel하는 gate는 없다.
 
 현재 인수된 program entry를 재현할 때는 다음 세 clean historical checkout을 그대로
 사용한다.
 
-1. runner: exact `c9e1316…`
+1. runner: exact `cab253dc24e00a68714e0b5d0277e3020d329deb`
 2. bounded History engine: exact `f222a8b…`
-3. canonical financial validator와 screening source: exact `fd9a179…`
+3. canonical financial validator와 screening source: exact
+   `02226c91f36b5907f9e4d701c2b788747ef94c0a`
 
 그 상태에서 기존
 [History 복구 전달 계약](universe50-history-recovery-delivery.md)의 순서대로
@@ -121,24 +165,25 @@ checkout 실행이 필요하면 별도 승인된 composition gate 설계·구현
   dataset context와 hidden result backing을 유지한다.
 
 이 composition은 parser, recast selection, period classification, quarterly arithmetic,
-metric formula, UI/store policy 또는 source gate를 새로 바꾸지 않는다.
+metric formula 또는 UI/store policy를 새로 바꾸지 않는다. source gate 변경은 CAB의
+exact `fd9a179…` → exact `02226c9…` financial validator pin refresh 하나뿐이다.
 
 ## 현재 actual 상태와 다음 gate
 
-리드 계약 시점에 exact-50 Raw와 metadata는 인수됐고 History 네 회사가 인수됐다.
-JNJ v3 actual run은 `RUNNING`으로 보고됐으며 참조 값은 `90986`이다. 이 문서는 그
-payload, process 또는 결과를 읽거나 검증하지 않았다. first-five와 later-45 financial은
-모두 **NOT_READY**다. 기존 21사 live explicit-save 상태는 그대로 유지하며 이 branch가
-live server, journal 또는 catalog를 변경하지 않는다.
+현재 리드 상태는 exact-50 Raw와 metadata 50사, first-five History 5사를 인수했다.
+first-five financial은 quality를 통과한 뒤 identity stage가 **RUNNING**이지만 canonical
+first-five financial acceptance는 아직 없다. later-45, FULL50 publication과 native UI는
+계속 **PENDING / NOT_READY**다. 기존 21사 live explicit-save 상태는 그대로 유지한다.
+이 문서는 actual payload, process 또는 결과를 읽거나 검증하지 않았고 live server,
+journal 또는 catalog를 변경하지 않았다.
 
 다음 순서를 건너뛰지 않는다.
 
-1. 이 clean source composition 후보에 대한 별도 Astra read-only 검증 — **PASS 완료**
-2. 리드의 source composition 로컬 인수 판단 — **SOURCE/SYNTHETIC ONLY 완료**
-3. 진행 중인 actual JNJ의 별도 완료·독립 audit·리드 인수
-4. accepted History를 부모로 한 first-five financial 실행·독립 검증·로컬 인수
-5. first-five acceptance 뒤 later-45 History/financial과 exact-50 publication
-6. final catalog/journal 보존 검증과 native UI/UAT
+1. 새 022/CAB composition 동결 source에 대한 별도 Astra read-only 검증
+2. 리드의 새 source composition 로컬 인수 판단
+3. 진행 중인 first-five identity와 나머지 financial stage의 별도 완료·독립 검증·인수
+4. canonical first-five acceptance 뒤 later-45 History/financial과 FULL50 publication
+5. final catalog/journal 보존 검증과 native UI/UAT
 
 각 actual 단계에는 해당 계약의 config, preflight, request와 exact root GO가 별도로
 필요하다. source merge, synthetic PASS 또는 현재 process 상태는 다음 actual gate를
@@ -148,7 +193,7 @@ live server, journal 또는 catalog를 변경하지 않는다.
 
 구현자 검증은 다음으로 제한한다.
 
-- merged product/test bytes와 세 historical accepted checkout의 hash 비교
+- merged product/test bytes와 exact 022/f222/CAB checkout의 file/function mapping 비교
 - bounded History/Fiscal/quarter serialization, recovery runner, quarterly/TTM,
   screening explicit-save/v3 reader의 기존 synthetic tests
 - import/collection 전 actual `data`/`work`/corpus와 network 거부, nonexistent corpus
