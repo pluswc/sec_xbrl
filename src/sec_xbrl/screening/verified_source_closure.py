@@ -14,6 +14,7 @@ import json
 import os
 import secrets
 import stat
+import sys
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -376,6 +377,7 @@ def _publish_identity(
     _require_exact_output(staging, module.MANIFEST_NAME, manifest)
     fresh = _identity_snapshot(config_path, config)
     _require_same_snapshot(record.snapshot, fresh, "identity pre-publication")
+    _require_exact_output(staging, module.MANIFEST_NAME, manifest)
     _consume_and_rename(capability, record, staging, destination)
 
 
@@ -433,6 +435,7 @@ def _publish_v3(
         Path(parents["quarterly"]["root"]),
     )
     _require_same_snapshot(record.snapshot, fresh, "v3 pre-publication")
+    _require_exact_output(staging, module.MANIFEST, manifest)
     _consume_and_rename(capability, record, staging, destination)
 
 
@@ -792,9 +795,11 @@ def _discover_identity(
 def _add_status_history(collector: _Collector, build: dict[str, Any], role: str) -> None:
     if build.get("status") != "READY":
         return
+    publication = Path(str(build.get("publication", "")))
+    history = importlib.import_module("sec_xbrl.history")
+    history._check_recovery_access(publication)
     manifest_path = Path(str(build.get("history_manifest", "")))
     manifest = collector.json(manifest_path, f"{role}:MANIFEST")
-    publication = Path(str(build.get("publication", "")))
     declared = _history_declarations(manifest)
     if build.get("declared_files") != declared:
         raise ValueError("status-only History declaration differs")
@@ -1134,7 +1139,9 @@ def _identity_source_modules() -> tuple[str, ...]:
         "sec_xbrl.history",
         "sec_xbrl.analysis",
         "sec_xbrl.metric_quality",
+        "sec_xbrl.filing.sec_inline_transforms",
         "sec_xbrl.source_bindings",
+        "sec_xbrl.facts.layer1",
     )
 
 
@@ -1153,12 +1160,112 @@ def _v3_source_modules() -> tuple[str, ...]:
 def _add_source_code(
     collector: _Collector, module_names: tuple[str, ...], prefix: str
 ) -> None:
+    package_root = _loaded_package_root()
+    first = _local_python_files(package_root)
+    expected: dict[str, tuple[str, int]] = {}
+    for relative, path in first:
+        _data, digest, size, _identity = _read_stable(path, retain=False)
+        expected[relative] = (digest, size)
+        collector.file(
+            path,
+            f"{prefix}_LOCAL_PACKAGE_SOURCE_CODE:{relative}",
+            expected_sha256=digest,
+            expected_size=size,
+        )
+
+    second = _local_python_files(package_root)
+    if tuple(relative for relative, _path in first) != tuple(
+        relative for relative, _path in second
+    ):
+        raise ValueError("local Python source file set changed during discovery")
+    for relative, path in second:
+        _data, digest, size, _identity = _read_stable(path, retain=False)
+        if (digest, size) != expected[relative]:
+            raise ValueError("local Python source bytes changed during discovery")
+
     for name in dict.fromkeys(module_names):
         module = importlib.import_module(name)
         path = getattr(module, "__file__", None)
-        if not isinstance(path, str) or not path.endswith(".py"):
+        spec = getattr(module, "__spec__", None)
+        origin = getattr(spec, "origin", None)
+        expected_path = package_root.joinpath(*name.split(".")[1:]).with_suffix(".py")
+        if (
+            not isinstance(path, str)
+            or not isinstance(origin, str)
+            or Path(path) != expected_path
+            or Path(origin) != expected_path
+        ):
             raise ValueError(f"source closure module path is unavailable: {name}")
-        collector.file(Path(path), f"{prefix}_VERIFIER_SOURCE_CODE:{name}")
+        collector.file(expected_path, f"{prefix}_VERIFIER_SOURCE_CODE:{name}")
+    _validate_loaded_package_modules(package_root)
+
+
+def _loaded_package_root() -> Path:
+    package = importlib.import_module("sec_xbrl")
+    path = getattr(package, "__file__", None)
+    spec = getattr(package, "__spec__", None)
+    origin = getattr(spec, "origin", None)
+    if not isinstance(path, str) or not isinstance(origin, str):
+        raise TypeError("sec_xbrl package source origin is unavailable")
+    package_file = _absolute_file(Path(path))
+    if package_file.name != "__init__.py" or Path(origin) != package_file:
+        raise ValueError("sec_xbrl package source origin differs")
+    return _absolute_directory(package_file.parent)
+
+
+def _local_python_files(root: Path) -> tuple[tuple[str, Path], ...]:
+    result: list[tuple[str, Path]] = []
+
+    def visit(directory: Path) -> None:
+        with os.scandir(directory) as entries:
+            for entry in sorted(entries, key=lambda item: item.name):
+                path = Path(entry.path)
+                if entry.is_symlink():
+                    raise ValueError(f"local package path traverses a symlink: {path}")
+                if entry.is_dir(follow_symlinks=False):
+                    visit(path)
+                elif entry.name.endswith(".py"):
+                    if not entry.is_file(follow_symlinks=False):
+                        raise ValueError(f"local Python source is not a regular file: {path}")
+                    relative = path.relative_to(root).as_posix()
+                    result.append((relative, path))
+
+    visit(root)
+    return tuple(sorted(result))
+
+
+def _loaded_package_modules() -> tuple[tuple[str, Any], ...]:
+    return tuple(
+        (name, module)
+        for name, module in sorted(sys.modules.items())
+        if name == "sec_xbrl" or name.startswith("sec_xbrl.")
+    )
+
+
+def _validate_loaded_package_modules(root: Path) -> None:
+    for name, module in _loaded_package_modules():
+        if module is None:
+            raise ValueError(f"loaded sec_xbrl module is unavailable: {name}")
+        parts = name.split(".")[1:]
+        if any(not part.isidentifier() for part in parts):
+            raise ValueError(f"loaded sec_xbrl module name is invalid: {name}")
+        module_path = root.joinpath(*parts).with_suffix(".py")
+        package_path = root.joinpath(*parts, "__init__.py")
+        path = getattr(module, "__file__", None)
+        spec = getattr(module, "__spec__", None)
+        origin = getattr(spec, "origin", None)
+        if isinstance(path, str) and isinstance(origin, str):
+            if Path(path) not in (module_path, package_path) or Path(origin) != Path(path):
+                raise ValueError(f"loaded sec_xbrl module origin differs: {name}")
+            _absolute_file(Path(path))
+            continue
+        namespace = getattr(module, "__path__", None)
+        expected_directory = root.joinpath(*parts)
+        if path is None and origin is None and namespace is not None:
+            directories = tuple(_absolute_directory(Path(value)) for value in namespace)
+            if directories == (expected_directory,):
+                continue
+        raise ValueError(f"loaded sec_xbrl module source origin is unavailable: {name}")
 
 
 def _require_same_snapshot(expected: _Snapshot, actual: _Snapshot, label: str) -> None:
@@ -1237,4 +1344,3 @@ def _read_stable(
 
 def _sha256(path: Path) -> str:
     return _read_stable(_absolute_file(path), retain=False)[1]
-

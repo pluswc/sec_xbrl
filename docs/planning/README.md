@@ -35,6 +35,11 @@ identity/closure 46, quarterly producer/consumer 63, runner 27 PASS다. 아직 �
 acceptance 전이며 actual은 미실행이다. 새 source는 first-five R3 8 receipts·17 manifests와 actual
 audit를 다시 수행해야 한다. FULL50 시간 추정은 민감도 분석이며 실측이 아니다.
 
+초기 동결 `5af1ef0…`의 독립 검증은 recovery gate 순서, final source rehash 중 staged-byte
+변조, staging 생성 실패 capability 정리와 base-to-HEAD EOF diff에서 FAIL했다. 승인된 R2 source
+보정 후보는 해당 경계와 finite local `sec_xbrl/**/*.py` code freshness closure를 고치며, 새 guarded
+검사와 독립 재검증·lead local acceptance 전이다. actual first-five R3/FULL50 권한은 없다.
+
 2026-10-17 추가 후속: T3 참조 결함 수리·재감사 뒤 확장 재개는 사용자가 별도로
 승인해 수리 중이다. generic producer를 기존 manual reviewed-Q4 completion으로
 표현할 수 없는 별도 계약 공백과 리드의 범위 판단 항목은
@@ -137,7 +142,7 @@ Raw adoption과 History build는 별도 stage GO 전에는 실행하지 않는�
 | 50사 재무 확대 후속 상태 | [T3 HOLD 기록](../implementation/universe50-t3-reference-hold-20261017.md) | 결함·상태 문서화만 승인; 수리·CVX actual audit·재생성 미승인 | Raw exact-50 기존 수락 보존; T3 참조 결함 미수리 | cached tiny graph endpoint 무결성 FAIL; actual CVX `NOT_EVALUATED` | **HOLD_FINANCIAL_EXPANSION_PENDING_T3_REFERENCE_DISPOSITION** | 미병합; push·PR 미수행 |
 | 50사 generic metric identity | [제안](../implementation/universe50-generic-metric-identity-proposal-20261017.md) · [승인 전달 계약](../implementation/universe50-generic-metric-identity-delivery-20261017.md) | 권장안 A의 별도 attestation, 명시 source kind와 합성 fresh fixture 구현은 **2026-10-17 APPROVED** | final `6470e0b`; quality final `c70087d` 통합 | **PASS**; 별도 read-only 검증 보고서 SHA-256 `9c27d0b…` | **source/synthetic LOCALLY_ACCEPTED**; actual identity 발행·인수 미수행 | 미병합; push·PR 미수행 |
 | 50사 재무 통합·offline runner | [재무 통합·실행 전달](../implementation/universe50-financial-delivery.md) | **2026-10-17 APPROVED**; 동결 source 통합, quarterly exact identity 결속, public-API-only staged runner와 합성 검증 | **IMPLEMENTED CANDIDATE**; 동결 SHA 확정 전 | 독립 검증 대기 | 미수락; actual first-five/50·native 실행 미수행 | 미병합; push·PR·scheduler 미수행 |
-| 재무 producer 단일 source 검증 pass | [source 전달](../implementation/financial-producer-single-pass-delivery.md) | **2026-10-18 SOURCE/TINY IMPLEMENTATION APPROVED**; identity 3→1, combined v3 2→1, full closure/private finalizer와 quarterly spine adapter | **FROZEN LOCAL CANDIDATE**; exact SHA/tree는 owned evidence 참조 | guarded 46+63+27 PASS; 독립 Astra 대기 | 미수락; actual first-five R3/FULL50 미수행 | 미병합; push·PR 미수행 |
+| 재무 producer 단일 source 검증 pass | [source 전달](../implementation/financial-producer-single-pass-delivery.md) | **2026-10-18 SOURCE/TINY IMPLEMENTATION + R2 REPAIR APPROVED**; identity 3→1, combined v3 2→1, full closure/private finalizer와 quarterly spine adapter | `5af1ef0…` 독립 FAIL 뒤 **R2 IMPLEMENTED CANDIDATE**; 새 frozen SHA 대기 | guarded 152 PASS; local Python code closure 포함, 독립 Astra 재검증 대기 | 미수락; actual first-five R3/FULL50 미수행 | 미병합; push·PR 미수행 |
 
 현재 전달 상태(2026-09-10): U3–U5 누적 이력은
 [PR #63](https://github.com/pluswc/sec_xbrl/pull/63)으로 `main`에 병합됐다. merge

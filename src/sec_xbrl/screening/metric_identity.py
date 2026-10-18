@@ -79,38 +79,42 @@ def publish_generic_metric_identity(
         config=config,
         destination=destination_path,
     )
-    identity = {
-        "schema_version": VERSION,
-        "source_kind": SOURCE_KIND,
-        "readiness": "READY",
-        "universe_id": config["universe_id"],
-        "financial_as_of": config["financial_as_of"],
-        "metadata_observation_cutoff": config["metadata_observation_cutoff"],
-        "annual_window": copy.deepcopy(config["annual_window"]),
-        "global_quarter_spine": copy.deepcopy(config["global_quarter_spine"]),
-        "configured_ciks": [row["cik"] for row in config["companies"]],
-        "configured_tickers": [row["ticker"] for row in config["companies"]],
-        "config": copy.deepcopy(config),
-        "config_path": str(config_file),
-        "config_sha256": sha256_file(config_file),
-        **sources,
-    }
-    publication_id = "generic-metric-identity-" + digest_value(identity)[:24]
-    manifest = {**identity, "publication_id": publication_id}
-    destination_path.parent.mkdir(parents=True, exist_ok=True)
-    staging = destination_path.parent / f".{destination_path.name}.partial-{uuid.uuid4().hex}"
-    staging.mkdir()
+    staging: Path | None = None
     try:
+        identity = {
+            "schema_version": VERSION,
+            "source_kind": SOURCE_KIND,
+            "readiness": "READY",
+            "universe_id": config["universe_id"],
+            "financial_as_of": config["financial_as_of"],
+            "metadata_observation_cutoff": config["metadata_observation_cutoff"],
+            "annual_window": copy.deepcopy(config["annual_window"]),
+            "global_quarter_spine": copy.deepcopy(config["global_quarter_spine"]),
+            "configured_ciks": [row["cik"] for row in config["companies"]],
+            "configured_tickers": [row["ticker"] for row in config["companies"]],
+            "config": copy.deepcopy(config),
+            "config_path": str(config_file),
+            "config_sha256": sha256_file(config_file),
+            **sources,
+        }
+        publication_id = "generic-metric-identity-" + digest_value(identity)[:24]
+        manifest = {**identity, "publication_id": publication_id}
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        staging = (
+            destination_path.parent
+            / f".{destination_path.name}.partial-{uuid.uuid4().hex}"
+        )
+        staging.mkdir()
         write_json(staging / MANIFEST_NAME, manifest)
         _publish_verified_identity(
             source_closure,
             staging=staging,
             destination=destination_path,
         )
-    except Exception:
+    except BaseException:
         _discard_verified_source_closure(source_closure)
-        if staging.exists():
-            shutil.rmtree(staging)
+        if staging is not None:
+            shutil.rmtree(staging, ignore_errors=True)
         raise
     return GenericMetricIdentityPublication(
         destination_path, publication_id, destination_path / MANIFEST_NAME

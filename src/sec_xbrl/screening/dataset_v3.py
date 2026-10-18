@@ -77,63 +77,68 @@ def publish_screening_dataset_v3(config_path: Path | str, destination: Path | st
         quarter = QuarterlyScreeningMetricReader(
             quarter_root, manifest_sha256=quarter_hash
         )
-    _verify_parent_binding(annual, quarter)
-    if [row["cik"] for row in annual.companies] != quarter.manifest["universe"]["ciks"]:
-        raise ValueError("annual and quarterly company membership differ")
-    identity = {
-        "config_path": str(config_file),
-        "config_sha256": sha256_file(config_file),
-        "config": config,
-        "annual_publication_id": annual.publication_id,
-        "quarterly_publication_id": quarter.publication_id,
-    }
-    manifest = {
-        "schema_version": VERSION,
-        "publication_id": "screening-dataset-" + digest_value(identity)[:24],
-        "dataset_id": require_string(config.get("dataset_id"), "dataset_id"),
-        "fixture_kind": config.get("fixture_kind", "ACTUAL_PREPARED"),
-        "financial_as_of": quarter.manifest["financial_as_of"],
-        "config_path": str(config_file),
-        "config_sha256": sha256_file(config_file),
-        "config": config,
-        "sources": {"metadata": copy.deepcopy(annual.manifest["sources"]["metadata"])},
-        "versions": {
+    staging: Path | None = None
+    try:
+        _verify_parent_binding(annual, quarter)
+        if [row["cik"] for row in annual.companies] != quarter.manifest["universe"]["ciks"]:
+            raise ValueError("annual and quarterly company membership differ")
+        identity = {
+            "config_path": str(config_file),
+            "config_sha256": sha256_file(config_file),
+            "config": config,
             "annual_publication_id": annual.publication_id,
             "quarterly_publication_id": quarter.publication_id,
-        },
-        "parents": {
-            "annual": {
-                "root": str(annual_root),
-                "publication_id": annual.publication_id,
-                "manifest_sha256": annual_hash,
+        }
+        manifest = {
+            "schema_version": VERSION,
+            "publication_id": "screening-dataset-" + digest_value(identity)[:24],
+            "dataset_id": require_string(config.get("dataset_id"), "dataset_id"),
+            "fixture_kind": config.get("fixture_kind", "ACTUAL_PREPARED"),
+            "financial_as_of": quarter.manifest["financial_as_of"],
+            "config_path": str(config_file),
+            "config_sha256": sha256_file(config_file),
+            "config": config,
+            "sources": {"metadata": copy.deepcopy(annual.manifest["sources"]["metadata"])},
+            "versions": {
+                "annual_publication_id": annual.publication_id,
+                "quarterly_publication_id": quarter.publication_id,
             },
-            "quarterly": {
-                "root": str(quarter_root),
-                "publication_id": quarter.publication_id,
-                "manifest_sha256": quarter_hash,
+            "parents": {
+                "annual": {
+                    "root": str(annual_root),
+                    "publication_id": annual.publication_id,
+                    "manifest_sha256": annual_hash,
+                },
+                "quarterly": {
+                    "root": str(quarter_root),
+                    "publication_id": quarter.publication_id,
+                    "manifest_sha256": quarter_hash,
+                },
             },
-        },
-    }
-    if not generic_single_pass:
-        destination_path.mkdir(parents=True)
-        write_json(destination_path / MANIFEST, manifest)
-        ScreeningDatasetV3Reader(destination_path)
-        return destination_path
-    destination_path.parent.mkdir(parents=True, exist_ok=True)
-    staging = destination_path.parent / f".{destination_path.name}.partial-{uuid.uuid4().hex}"
-    staging.mkdir()
-    assert source_closure is not None
-    try:
+        }
+        if not generic_single_pass:
+            destination_path.mkdir(parents=True)
+            write_json(destination_path / MANIFEST, manifest)
+            ScreeningDatasetV3Reader(destination_path)
+            return destination_path
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        staging = (
+            destination_path.parent
+            / f".{destination_path.name}.partial-{uuid.uuid4().hex}"
+        )
+        staging.mkdir()
+        assert source_closure is not None
         write_json(staging / MANIFEST, manifest)
         _publish_verified_v3(
             source_closure,
             staging=staging,
             destination=destination_path,
         )
-    except Exception:
-        _discard_verified_source_closure(source_closure)
-        if staging.exists():
-            shutil.rmtree(staging)
+    except BaseException:
+        if source_closure is not None:
+            _discard_verified_source_closure(source_closure)
+        if staging is not None:
+            shutil.rmtree(staging, ignore_errors=True)
         raise
     return destination_path
 

@@ -296,6 +296,38 @@ manifest/data 밖 retained physical file 8개(6 chunk, 1 quarter-spill record, 1
 있었고 모두 별도 byte-freshness role로 hash됐다. actual payload, actual hash walk, network 또는 C
 lock은 사용하지 않았다. 독립 Astra 검증과 lead local acceptance는 아직 남아 있다.
 
+## 독립 FAIL 뒤 R2 source 보정
+
+초기 동결 후보 `5af1ef0…`는 별도 독립 검증에서 FAIL했다. R2는 그 보고서의 재현 가능한
+source 결함만 보정한다. status-only READY History에도 기존 recovery access gate를 private
+History byte read보다 먼저 적용하고, identity와 combined v3 finalizer는 final input closure
+rehash 뒤 staged manifest를 다시 exact-byte 검증한 직후 rename한다. capability 발급 뒤의
+payload 구성, parent 확인, destination/staging 준비, write와 finalization 전체는 실패 시
+registry token을 폐기하고 partial stage를 정리하며 원래 예외를 다시 발생시킨다.
+
+추가 회귀는 scoped와 status-only History gate 선행, 두 producer의 final rehash 중 staged-byte
+변조 거부, 두 producer의 staging mkdir 실패 뒤 live capability 부재를 public producer 경로로
+검증한다. 기존 136개 관련 검사를 유지한 guarded R2 묶음은 새 6개를 포함해 142 PASS다.
+worker peak tree RSS는 142,651,392 bytes, 경과 시간은 33.282초였고 1 GiB/120초 한도,
+PDEATHSIG, subreaper/reaping, `RLIMIT_AS` 미사용과 import 전 actual/cache/network denial을
+확인했다. 이 결과는 writer source/tiny 증거이며 새 독립 재검증과 lead local acceptance는
+아직 남아 있다.
+
+수동 verifier module 목록만으로는 조건부 검증 경로의 Python source 의존성을 완전하게
+열거할 수 없으므로, R2 후보는 실제로 load된 `sec_xbrl.__file__`과 spec origin에 canonical
+package root를 결속하고 그 root 아래의 exact `**/*.py` 상대 경로 집합과 각 regular file의
+SHA-256·size를 initial, post-deep, pre-publication closure에 포함한다. 각 boundary에서는 같은
+집합을 재탐색하고 no-follow full-byte hash를 반복하여 discovery 중 pathset·byte 변경도
+거부한다. 명시 core verifier module은 예상 package-relative path와 loaded `__file__`/spec
+origin이 모두 일치해야 한다. core import 뒤 현재 load된 다른 `sec_xbrl.*` Python module도
+expected module/package path와 같은 root의 origin인지 검증하되, 동적 loaded-name 집합 자체를
+fingerprint에는 넣지 않는다. 따라서 뒤늦은 정상 import는 허용하면서 outside-path swap은
+거부한다. 이 검사는 module을 모두 import하지 않으며 Raw/data/cache나 sibling package를
+탐색하지 않는다. local Python source freshness와 origin을 증명하지만 loaded bytecode가 현재
+source bytes와 동일하다는 주장이나 표준 라이브러리·native dependency 전체 coverage 주장은
+하지 않는다. 이 추가 검사까지 포함한 최종 guarded 수치와 frozen SHA는 owned evidence에
+기록한다.
+
 ## source 변경 뒤 actual gate
 
 구현이 source HEAD 또는 pinned module hash를 바꾸므로 existing first-five R2 acceptance를 새
@@ -304,4 +336,3 @@ gate는 그대로 둔다. 독립 source/synthetic PASS와 lead local acceptance 
 first-five R3의 원래 8 stage receipts와 17 publication manifests를 다시 생성·검증하고 actual
 audit를 통과해야 FULL50가 가능하다. 이 설계나 향후 single-pass 구현만으로 actual50 readiness,
 duration 또는 acceptance를 주장하지 않는다.
-
