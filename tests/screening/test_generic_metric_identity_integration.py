@@ -30,7 +30,8 @@ from sec_xbrl.metrics.screening import (
     ScreeningMetricReader,
     publish_screening_metrics,
 )
-from sec_xbrl.screening.common import digest_value, sha256_file, write_json
+from sec_xbrl.screening import metric_identity as metric_identity_module
+from sec_xbrl.screening.common import canonical_json, digest_value, sha256_file, write_json
 from sec_xbrl.screening.dataset import GENERIC_IDENTITY_SOURCE_KIND
 from sec_xbrl.screening.dataset_v2 import (
     EXPLICIT_IDENTITY_CONFIG_VERSION as DATASET_CONFIG_VERSION,
@@ -318,9 +319,21 @@ def _publish_identity_inputs(
             ],
         },
     )
-    identity = publish_generic_metric_identity(
-        identity_config, tmp_path / "identity"
-    )
+    deep_calls = 0
+    original_verify = metric_identity_module._verify_configured_sources
+
+    def counted_verify(config: dict[str, object]) -> dict[str, object]:
+        nonlocal deep_calls
+        deep_calls += 1
+        return original_verify(config)
+
+    with monkeypatch.context() as context:
+        context.setattr(
+            metric_identity_module, "_verify_configured_sources", counted_verify
+        )
+        identity = publish_generic_metric_identity(
+            identity_config, tmp_path / "identity"
+        )
     return SimpleNamespace(
         paths=paths,
         histories=histories,
@@ -330,6 +343,7 @@ def _publish_identity_inputs(
         metadata=metadata,
         identity_config=identity_config,
         identity=identity,
+        identity_deep_calls=deep_calls,
     )
 
 
@@ -337,6 +351,7 @@ def test_quality_identity_annual31_dataset_v2_chain_and_subset_stability(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     prepared = _publish_identity_inputs(tmp_path, monkeypatch)
+    assert prepared.identity_deep_calls == 1
     identity = GenericMetricIdentityReader(
         prepared.identity.root,
         manifest_sha256=sha256_file(prepared.identity.manifest_path),
@@ -483,10 +498,73 @@ def test_quality_identity_annual31_dataset_v2_chain_and_subset_stability(
             ),
         },
     )
-    dataset_v3 = publish_screening_dataset_v3(
-        dataset_v3_config, tmp_path / "dataset-v3"
-    )
-    dataset_v3_status = ScreeningDatasetV3Reader(dataset_v3).verify_all()
+    annual_deep_calls = 0
+    original_annual_init = ScreeningDatasetV2Reader.__init__
+
+    def counted_annual_init(self: object, *args: object, **kwargs: object) -> None:
+        nonlocal annual_deep_calls
+        annual_deep_calls += 1
+        original_annual_init(self, *args, **kwargs)
+
+    with monkeypatch.context() as context:
+        context.setattr(ScreeningDatasetV2Reader, "__init__", counted_annual_init)
+        dataset_v3 = publish_screening_dataset_v3(
+            dataset_v3_config, tmp_path / "dataset-v3"
+        )
+    assert annual_deep_calls == 1
+    annual_parent = ScreeningDatasetV2Reader(dataset.root)
+    quarterly_parent = QuarterlyScreeningMetricReader(quarterly.root)
+    v3_config = json.loads(dataset_v3_config.read_text(encoding="utf-8"))
+    v3_identity = {
+        "config_path": str(dataset_v3_config),
+        "config_sha256": sha256_file(dataset_v3_config),
+        "config": v3_config,
+        "annual_publication_id": annual_parent.publication_id,
+        "quarterly_publication_id": quarterly_parent.publication_id,
+    }
+    expected_v3_manifest = {
+        "schema_version": "screening-dataset-v3",
+        "publication_id": "screening-dataset-" + digest_value(v3_identity)[:24],
+        "dataset_id": v3_config["dataset_id"],
+        "fixture_kind": v3_config["fixture_kind"],
+        "financial_as_of": quarterly_parent.manifest["financial_as_of"],
+        "config_path": str(dataset_v3_config),
+        "config_sha256": sha256_file(dataset_v3_config),
+        "config": v3_config,
+        "sources": {"metadata": annual_parent.manifest["sources"]["metadata"]},
+        "versions": {
+            "annual_publication_id": annual_parent.publication_id,
+            "quarterly_publication_id": quarterly_parent.publication_id,
+        },
+        "parents": {
+            "annual": {
+                "root": str(dataset.root),
+                "publication_id": annual_parent.publication_id,
+                "manifest_sha256": sha256_file(dataset.manifest_path),
+            },
+            "quarterly": {
+                "root": str(quarterly.root),
+                "publication_id": quarterly_parent.publication_id,
+                "manifest_sha256": sha256_file(
+                    quarterly.root / QUARTERLY_MANIFEST
+                ),
+            },
+        },
+    }
+    assert (dataset_v3 / "screening_dataset_manifest.json").read_bytes() == (
+        canonical_json(expected_v3_manifest) + "\n"
+    ).encode("utf-8")
+    reopened_v3 = ScreeningDatasetV3Reader(dataset_v3)
+    dataset_v3_status = reopened_v3.verify_all()
+    assert reopened_v3.companies == annual_parent.companies
+    assert reopened_v3.metadata == annual_parent.metadata
+    assert reopened_v3.metric_definitions == annual_parent.metric_definitions
+    assert reopened_v3.metric_support == annual_parent.metric_support
+    assert reopened_v3.observations == annual_parent.observations
+    assert reopened_v3.quarter_definitions == quarterly_parent.definitions
+    assert reopened_v3.quarter_support == quarterly_parent.support
+    assert reopened_v3.quarter_observations == quarterly_parent.observations
+    assert reopened_v3.quarter_period_inventory == quarterly_parent.period_inventory
     assert dataset_v3_status["company_count"] == 1
     assert dataset_v3_status["quarter_definition_count"] == 17
     assert dataset_v3_status["quarter_observation_count"] == 136

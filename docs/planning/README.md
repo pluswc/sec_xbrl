@@ -25,6 +25,23 @@ History runner의 후속 exact `cab253d…`도 별도 Astra PASS와 source/synth
 마쳤으며 canonical first-five financial validator pin만 exact `02226c9…`로 갱신한다.
 actual first-five acceptance와 later-45 실행 승인은 이 component 인수로 생기지 않는다.
 
+2026-10-18 source 검증 scaling 후속: first-five control timing과 frozen source call graph를
+검토한 결과 generic identity producer가 같은 transitive source를 3회, combined v3 producer가
+같은 annual parent를 2회 deep 검증한다. 리드는
+[재무 producer 단일 source 검증 pass 설계](../implementation/financial-producer-single-pass-delivery.md)의
+최소 방향(identity 3→1, combined v3 2→1)을 승인했고 source/tiny 구현 후보가 완료됐다. 전체
+file-role closure, 3시점 full-byte freshness와 private single-use capability를 사용하며 ordinary
+public reader와 strict first-five gate는 유지한다. R2 stage 7에서 발견된 quarterly spine adapter
+불일치도 quarterly config에만 `COMPLETED_BUCKET`을 붙이도록 보정했다. guarded source/tiny 검증은
+identity/closure 46, quarterly producer/consumer 63, runner 27 PASS다. 아직 독립 검증·lead local
+acceptance 전이며 actual은 미실행이다. 새 source는 first-five R3 8 receipts·17 manifests와 actual
+audit를 다시 수행해야 한다. FULL50 시간 추정은 민감도 분석이며 실측이 아니다.
+
+초기 동결 `5af1ef0…`의 독립 검증은 recovery gate 순서, final source rehash 중 staged-byte
+변조, staging 생성 실패 capability 정리와 base-to-HEAD EOF diff에서 FAIL했다. 승인된 R2 source
+보정 후보는 해당 경계와 finite local `sec_xbrl/**/*.py` code freshness closure를 고치며, 새 guarded
+검사와 독립 재검증·lead local acceptance 전이다. actual first-five R3/FULL50 권한은 없다.
+
 2026-10-17 추가 후속: T3 참조 결함 수리·재감사 뒤 확장 재개는 사용자가 별도로
 승인해 수리 중이다. generic producer를 기존 manual reviewed-Q4 completion으로
 표현할 수 없는 별도 계약 공백과 리드의 범위 판단 항목은
@@ -146,6 +163,7 @@ Raw adoption과 History build는 별도 stage GO 전에는 실행하지 않는�
 | [50사 로컬 source composition 전달](../implementation/universe50-local-source-composition-20261018.md) | 기존 exact `fd9 + f222 + c9`의 `135d49b…` source-only 인수를 보존한다. 후속 exact `022 + CAB` source merge `a020b00…`은 guarded 423 PASS 뒤 **INDEPENDENT_VERIFICATION_PENDING / NOT_LOCALLY_ACCEPTED**. 운영은 clean exact CAB/f222/022 세 checkout을 사용하며 merged HEAD는 actual runner/data/UI acceptance나 main 병합이 아니다. |
 | [Consumer analysis bounded History read 전달](../implementation/consumer-analysis-bounded-read-delivery.md) | ordinary READY History cell 전수 hash/schema/count/JSON 검증을 유지하면서 consumer 준비가 source cell을 lazy single pass로 변환한다. 최초 `4f26108…` recovery access 독립 **FAIL** 보존, repair `02226c9…` 별도 Astra PASS·**SOURCE/SYNTHETIC LOCALLY_ACCEPTED**. actual readiness는 별도 |
 | [History runner financial validator pin refresh](../implementation/history-runner-financial-pin-refresh-delivery.md) | later-45의 strict canonical first-five gate를 locally accepted `02226c9…` source에만 갱신한 exact `cab253d…`. 별도 Astra PASS·**SOURCE/SYNTHETIC LOCALLY_ACCEPTED**; accounting·8 receipt·17 manifest·fresh/reuse 계약 불변, actual first-five acceptance와 later-45 실행 승인은 여전히 false |
+| [재무 producer 단일 source 검증 pass 전달](../implementation/financial-producer-single-pass-delivery.md) | identity producer 3→1 및 combined v3 producer 2→1 deep pass의 source-closure/capability/finalizer와 quarterly config 전용 spine adapter. **IMPLEMENTED SOURCE CANDIDATE / 독립 검증 대기**; guarded 46+63+27 PASS, public reader와 strict first-five same-source gate 유지. 새 source는 first-five R3 8 receipts·17 manifests와 actual audit 재수행 필요 |
 | [기간 규칙](../implementation/period-rules.md), [Layer 2 연결](../implementation/layer2-longitudinal.md), [공시 발견 계약](../implementation/accession-contract.md) | 표시 계획으로 바꿀 수 없는 의미·입력 경계 |
 
 충돌 시 적용되는 사용자 결정과 승인 범위를 먼저 확인하고, 해당 평면의 계약을
@@ -180,6 +198,7 @@ Raw adoption과 History build는 별도 stage GO 전에는 실행하지 않는�
 | 50사 재무 통합·offline runner | [재무 통합·실행 전달](../implementation/universe50-financial-delivery.md) | **2026-10-17 APPROVED**; 동결 source 통합, quarterly exact identity 결속, public-API-only staged runner와 합성 검증 | **IMPLEMENTED CANDIDATE**; 동결 SHA 확정 전 | 독립 검증 대기 | 미수락; actual first-five/50·native 실행 미수행 | 미병합; push·PR·scheduler 미수행 |
 | 50사 History bounded-memory 복구 | [History 복구 전달](../implementation/universe50-history-recovery-delivery.md) | **2026-10-17 SOURCE/SYNTHETIC ONLY**; r1 TIMEOUT exact witness, fd9 canonical gate, optional attested reported-stage reuse | **ATTESTED-REUSE IMPLEMENTED CANDIDATE**; 동결 SHA 대기 | source/synthetic 독립 검증 대기; component actual audit 미수행 | r1 TIMEOUT; actual reuse·later-45·financial 미수락 | 미병합; push·PR·scheduler 미수행 |
 | 50사 로컬 source composition | [2026-10-18 전달](../implementation/universe50-local-source-composition-20261018.md) | 기존 `fd9 + f222 + c9` 및 후속 exact `022 + CAB` ordinary local merge와 tracked handoff 승인; actual·remote 제외 | 기존 verified `135d49b…`; refresh merge `e9b939d…` → `a020b00…`; product/test conflict 없음 | 기존 source PASS 보존. refresh 구현자 guarded 423 passed / 3 deselected, Ruff PASS; 별도 Astra 대기 | 기존 `135d49b…`만 source/synthetic 인수. refresh 미수락; actual Raw50·metadata50·History5 인수, first-five identity RUNNING, later-45·FULL50·UI 대기 | 미병합; push·PR·remote CI·scheduler 미수행 |
+| 재무 producer 단일 source 검증 pass | [source 전달](../implementation/financial-producer-single-pass-delivery.md) | **2026-10-18 SOURCE/TINY IMPLEMENTATION + R4 REPAIR APPROVED**; identity 3→1, combined v3 2→1, full closure/private finalizer와 quarterly spine adapter | `5af1ef0…`, `e56c148…`, `a37763e…` 독립 FAIL 이력 보존; **R4 IMPLEMENTED CANDIDATE**, 새 frozen SHA 대기 | guarded 158 PASS; standalone finalizer 제거와 failure invalidation 보정, 독립 Astra 재검증 대기 | 미수락; actual first-five R3/FULL50 미수행 | 미병합; push·PR 미수행 |
 
 현재 전달 상태(2026-09-10): U3–U5 누적 이력은
 [PR #63](https://github.com/pluswc/sec_xbrl/pull/63)으로 `main`에 병합됐다. merge

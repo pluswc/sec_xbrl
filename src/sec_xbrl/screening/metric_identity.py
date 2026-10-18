@@ -22,7 +22,6 @@ from sec_xbrl.company_metadata import MANIFEST_NAME as METADATA_MANIFEST
 from sec_xbrl.company_metadata import CompanyMetadataReader
 from sec_xbrl.history import HistoryPublicationReader
 from sec_xbrl.screening.common import (
-    atomic_replace,
     contained_file,
     digest_value,
     read_json,
@@ -34,6 +33,15 @@ from sec_xbrl.screening.common import (
     safe_new_destination,
     sha256_file,
     write_json,
+)
+from sec_xbrl.screening.verified_source_closure import (
+    _discard as _discard_verified_source_closure,
+)
+from sec_xbrl.screening.verified_source_closure import (
+    _publish_identity as _publish_verified_identity,
+)
+from sec_xbrl.screening.verified_source_closure import (
+    _verify_identity_sources_once,
 )
 
 VERSION = "generic-metric-identity-attestation-v1"
@@ -66,35 +74,47 @@ def publish_generic_metric_identity(
     config_file = regular_file(Path(config_path), "generic metric identity config")
     config = _validate_config(read_json(config_file, "generic metric identity config"))
     destination_path = safe_new_destination(Path(destination), "generic metric identity")
-    sources = _verify_configured_sources(config)
-    identity = {
-        "schema_version": VERSION,
-        "source_kind": SOURCE_KIND,
-        "readiness": "READY",
-        "universe_id": config["universe_id"],
-        "financial_as_of": config["financial_as_of"],
-        "metadata_observation_cutoff": config["metadata_observation_cutoff"],
-        "annual_window": copy.deepcopy(config["annual_window"]),
-        "global_quarter_spine": copy.deepcopy(config["global_quarter_spine"]),
-        "configured_ciks": [row["cik"] for row in config["companies"]],
-        "configured_tickers": [row["ticker"] for row in config["companies"]],
-        "config": copy.deepcopy(config),
-        "config_path": str(config_file),
-        "config_sha256": sha256_file(config_file),
-        **sources,
-    }
-    publication_id = "generic-metric-identity-" + digest_value(identity)[:24]
-    manifest = {**identity, "publication_id": publication_id}
-    destination_path.parent.mkdir(parents=True, exist_ok=True)
-    staging = destination_path.parent / f".{destination_path.name}.partial-{uuid.uuid4().hex}"
-    staging.mkdir()
+    sources, source_closure = _verify_identity_sources_once(
+        config_path=config_file,
+        config=config,
+        destination=destination_path,
+    )
+    staging: Path | None = None
     try:
+        identity = {
+            "schema_version": VERSION,
+            "source_kind": SOURCE_KIND,
+            "readiness": "READY",
+            "universe_id": config["universe_id"],
+            "financial_as_of": config["financial_as_of"],
+            "metadata_observation_cutoff": config["metadata_observation_cutoff"],
+            "annual_window": copy.deepcopy(config["annual_window"]),
+            "global_quarter_spine": copy.deepcopy(config["global_quarter_spine"]),
+            "configured_ciks": [row["cik"] for row in config["companies"]],
+            "configured_tickers": [row["ticker"] for row in config["companies"]],
+            "config": copy.deepcopy(config),
+            "config_path": str(config_file),
+            "config_sha256": sha256_file(config_file),
+            **sources,
+        }
+        publication_id = "generic-metric-identity-" + digest_value(identity)[:24]
+        manifest = {**identity, "publication_id": publication_id}
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        staging = (
+            destination_path.parent
+            / f".{destination_path.name}.partial-{uuid.uuid4().hex}"
+        )
+        staging.mkdir()
         write_json(staging / MANIFEST_NAME, manifest)
-        GenericMetricIdentityReader(staging, allow_staging=True).verify_all()
-        atomic_replace(staging, destination_path)
-    except Exception:
-        if staging.exists():
-            shutil.rmtree(staging)
+        _publish_verified_identity(
+            source_closure,
+            staging=staging,
+            destination=destination_path,
+        )
+    except BaseException:
+        _discard_verified_source_closure(source_closure)
+        if staging is not None:
+            shutil.rmtree(staging, ignore_errors=True)
         raise
     return GenericMetricIdentityPublication(
         destination_path, publication_id, destination_path / MANIFEST_NAME

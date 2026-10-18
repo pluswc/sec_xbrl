@@ -885,6 +885,13 @@ def _global_quarter_spine() -> list[dict[str, int]]:
     ]
 
 
+def _quarterly_global_quarter_spine() -> list[dict[str, int | str]]:
+    return [
+        {**bucket, "status": "COMPLETED_BUCKET"}
+        for bucket in _global_quarter_spine()
+    ]
+
+
 def _run_metadata(config: dict[str, Any]) -> None:
     metadata = config["metadata"]
     if metadata["mode"] != "PUBLISH_EXACT50":
@@ -1156,7 +1163,7 @@ def _run_quarterly_metrics(config: dict[str, Any]) -> None:
             "annual_metric_manifest_sha256": sha256_file(
                 annual_root / screening.MANIFEST
             ),
-            "global_quarter_spine": _global_quarter_spine(),
+            "global_quarter_spine": _quarterly_global_quarter_spine(),
             "companies": [
                 {
                     "ticker": row["ticker"],
