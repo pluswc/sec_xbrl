@@ -64,6 +64,103 @@ def test_ordinary_history_cells_are_lazy_single_pass_and_complete(tmp_path: Path
     assert list(streamed.cells) == []
 
 
+def test_stream_refuses_private_reader_before_dataset_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    public = _publication(tmp_path)
+    pending = tmp_path / "pending"
+    pending.mkdir()
+    root = pending / "panels"
+    public.rename(root)
+    (pending / ".history-recovery-tiny").mkdir()
+    capability = SimpleNamespace(root=pending)
+    token = history._RECOVERY_OUTPUT.set(capability)
+    try:
+        reader = history.HistoryPublicationReader(root, _recovery_access=capability)
+        hashes = []
+        original = history._sha256_file
+
+        def traced(path: Path) -> str:
+            hashes.append(path)
+            return original(path)
+
+        monkeypatch.setattr(history, "_sha256_file", traced)
+        with pytest.raises(ValueError, match="ordinary READY"):
+            reader.stream_cells(ticker="TEST", period_class="FY", view="LATEST_REPORTED")
+        assert hashes == []
+        # The approved boundary leaves the private eager API unchanged.
+        assert len(reader.load(ticker="TEST", period_class="FY").cells) == 65
+    finally:
+        history._RECOVERY_OUTPUT.reset(token)
+
+
+def test_stream_refuses_explicit_staging_reader_before_dataset_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    public = _publication(tmp_path)
+    staging = tmp_path / ".partial-history"
+    public.rename(staging)
+    reader = history.HistoryPublicationReader(staging, allow_staging=True)
+    hashes = []
+    monkeypatch.setattr(history, "_sha256_file", lambda path: hashes.append(path))
+
+    with pytest.raises(ValueError, match="ordinary READY"):
+        reader.stream_cells(ticker="TEST", period_class="FY", view="LATEST_REPORTED")
+    assert hashes == []
+
+
+def test_deferred_stream_rechecks_public_readiness_before_cell_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _publication(tmp_path)
+    streamed = history.HistoryPublicationReader(root).stream_cells(
+        ticker="TEST", period_class="FY", view="LATEST_REPORTED"
+    )
+    (tmp_path / ".history-recovery-became-pending").mkdir()
+    hashes = []
+    original = history._sha256_file
+
+    def traced(path: Path) -> str:
+        hashes.append(path)
+        return original(path)
+
+    monkeypatch.setattr(history, "_sha256_file", traced)
+    with pytest.raises(ValueError, match="NOT_READY"):
+        next(streamed.cells)
+    assert hashes == []
+
+
+def test_stream_creation_checks_public_readiness_before_cell_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _publication(tmp_path)
+    reader = history.HistoryPublicationReader(root)
+    (tmp_path / ".history-recovery-became-pending").mkdir()
+    hashes = []
+    original = history._sha256_file
+
+    def traced(path: Path) -> str:
+        hashes.append(path)
+        return original(path)
+
+    monkeypatch.setattr(history, "_sha256_file", traced)
+    with pytest.raises(ValueError, match="NOT_READY"):
+        reader.stream_cells(ticker="TEST", period_class="FY", view="LATEST_REPORTED")
+    assert hashes == []
+
+
+def test_deferred_stream_rehashes_exact_pinned_cell_dataset(tmp_path: Path) -> None:
+    root = _publication(tmp_path)
+    reader = history.HistoryPublicationReader(root)
+    streamed = reader.stream_cells(ticker="TEST", period_class="FY", view="LATEST_REPORTED")
+    info = reader.manifest["tables"][0]["files"]["cells"]
+    path = root / info["path"]
+    path.write_bytes(path.read_bytes() + b"changed-after-stream-creation")
+
+    with pytest.raises(ValueError, match="integrity"):
+        next(streamed.cells)
+
+
 @pytest.mark.parametrize("failure", ["hash", "count", "schema", "malformed"])
 def test_stream_fails_closed_for_invalid_out_of_scope_cells(
     tmp_path: Path, failure: str
