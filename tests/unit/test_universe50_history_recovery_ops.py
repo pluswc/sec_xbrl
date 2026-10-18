@@ -381,7 +381,7 @@ def test_later45_gate_requires_canonical_object_cohort_receipts_and_publications
     binding = runner._verify_financial_acceptance(runner._validate_shape(config))
     assert binding is not None
     assert runner.RUNNER_BASE_SHA == "9b6e7ec906382fba92adb5209c5b439fc7d7d6ba"
-    assert runner.FINANCIAL_SOURCE_SHA == "02226c91f36b5907f9e4d701c2b788747ef94c0a"
+    assert runner.FINANCIAL_SOURCE_SHA == "4357c838722da281d2474bfc881b3a4a2ed4e988"
     assert runner.FINANCIAL_SOURCE_SHA != runner.RUNNER_BASE_SHA
     assert binding["source_head"] == runner.FINANCIAL_SOURCE_SHA
     assert len(binding["publication_manifests"]) == 17
