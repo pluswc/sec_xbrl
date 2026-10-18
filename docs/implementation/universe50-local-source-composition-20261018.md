@@ -22,7 +22,7 @@ SHA-256은 `7f0420fd5a6b979fcfacd5602ceb30cb93dc43766c7e471c82b2324b9c3626f8`다
 | 제안 | accepted `9e43c84…` composition에 exact `4357c83…` financial source와 exact `d714f5a…` recovery pin을 추가 |
 | 범위 승인 | **APPROVED — SOURCE AND OWNED TINY ONLY** |
 | 구현 | exact `4357c83…` merge `b1c8106…`, 이어 exact `d714f5a…` merge `1cddedd…`; product/test conflict 없음 |
-| 구현자 검증 | 새 4357/d714 composition의 bounded regression과 mapping 증거 준비 중 |
+| 구현자 검증 | **PASS WITH DISCLOSED GROUP SPLITS** — original composition 423 + new financial/source-closure 158 passed, 3 deselected; targeted Ruff PASS |
 | 독립 검증 | 새 동결 source에 대한 별도 Astra read-only 검증 대기 |
 | 로컬 인수 | 새 composition은 미수락; 이전 `9e43c84…`의 source/synthetic 인수만 유효 |
 | main 병합 | 미수행; push·PR·remote CI도 미수행 |
@@ -59,6 +59,14 @@ SHA-256은 `4b569e9d51e7833513933c2ae82475fe5b6686839194d890979574fe6ba6dd42`다
 History engine, exact `d714f5a…` recovery runner와 `9e43c84…`에 이미 포함된 explicit-save
 source다. 이 merged HEAD는 이 ancestry를 검증하는 consumer/source integration 후보이며
 세 operational component identity 중 어느 것으로도 relabel하지 않는다.
+
+구현자 검증은 기존 composition 범위 423개와 새 financial/source-closure 범위 158개를
+모두 통과했다. HTTP 2개는 no-network guard 때문에, abrupt-parent 1개는 같은 worker의
+resource report를 보존할 수 없기 때문에 기존 사유대로 deselect했다. 249개 History 묶음은
+현재 host 부하에서 120초 cap에 도달해 동일 node를 더 작은 worker로 나눴고 최종 합계는
+96 + 56 + 34 + 62 + 1 = 249 PASS다. cap을 늘리거나 node를 제외하지 않았다. 모든 성공
+worker는 1 GiB/120초, pre-import actual/cache/network denial, PDEATHSIG, subreaper,
+whole-owned-forest cleanup과 `RLIMIT_AS` 미설정을 사용했다. targeted Ruff도 통과했다.
 
 ## 2026-10-18 022/CAB source refresh
 
@@ -213,8 +221,8 @@ exact `4357c83…` validator pin이다.
 ## 현재 actual 상태와 다음 gate
 
 현재 리드 상태는 exact-50 Raw와 metadata 50사, first-five History 5사를 인수했다.
-새 first-five R3 financial은 annual-analysis 1개 stage가 PASS해 **1/8 PASS**이고
-quarterly-analysis가 **RUNNING**이다. canonical first-five financial acceptance는 아직
+새 first-five R3 financial은 annual-analysis와 quarterly-analysis가 PASS해 **2/8 PASS**이고
+quality가 **RUNNING**이다. canonical first-five financial acceptance는 아직
 없다. later-45, FULL50 publication과 native UI는 계속 **PENDING / NOT_READY**다. 기존
 21사 live explicit-save 상태는 그대로 유지한다.
 이 문서는 actual payload, process 또는 결과를 읽거나 검증하지 않았고 live server,
@@ -224,7 +232,7 @@ journal 또는 catalog를 변경하지 않았다.
 
 1. 새 4357/d714 composition 동결 source에 대한 별도 Astra read-only 검증
 2. 리드의 새 source composition 로컬 인수 판단
-3. 진행 중인 quarterly-analysis와 나머지 7개 financial stage의 별도 완료·독립 검증·인수
+3. 진행 중인 quality와 나머지 6개 financial stage의 별도 완료·독립 검증·인수
 4. canonical first-five acceptance 뒤 later-45 History/financial과 FULL50 publication
 5. final catalog/journal 보존 검증과 native UI/UAT
 
