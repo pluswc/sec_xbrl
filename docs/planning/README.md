@@ -55,10 +55,11 @@ corpus 환경, precollection 실제 파일 접근 거부 및 owned RSS guard를 
 중단된 plain full-unit 실행은 synthetic 완료 증거로 쓰지 않는다. 세부 재현 규칙은 위 전달 계약에 있다.
 
 2026-10-18 후속 source-only 후보: [History recovery financial source pin R3](../implementation/history-recovery-financial-source-pin-r3.md)는
-later-45 runner의 exact financial source literal을 frozen R3 `a37763e…` 후보에 맞춘다.
+later-45 runner의 exact financial source literal을 source/synthetic locally accepted R3 `4357c83…`에 맞춘다.
 runner 41개 function body와 canonical first-five 8 receipt·17 manifest gate는 그대로다. 이전
-`5af1ef0…`와 `e56c148…` 독립 검증 FAIL은 역사로 보존하며, `a37763e…`와 이 repin은 독립 검증·리드 인수
-전이다. 새 actual first-five R3와 audit도 아직 없으므로 actual financial·later-45 실행 권한은
+`5af1ef0…`, `e56c148…`, `a37763e…` 독립 검증 FAIL은 역사로 보존한다. financial source `4357c83…`은
+source/synthetic locally accepted이지만 이 repin은 독립 검증·리드 인수 전이다. 새 actual first-five
+R3와 audit도 아직 없으므로 actual financial·later-45 실행 권한은
 계속 **NOT_READY**다.
 
 2026-10-17 사용자·리드 후속 승인으로 identity 앞단의 별도
@@ -109,7 +110,7 @@ Raw adoption과 History build는 별도 stage GO 전에는 실행하지 않는�
 | [50사 재무 통합·실행 전달](../implementation/universe50-financial-delivery.md) | accepted producer·quality·identity·OPS·package view 누적 통합, quarterly exact identity parent 결속과 explicit stage-GO offline runner. **구현 후보 / 독립 검증 대기**; actual financial 실행·인수·native 반영 아님 |
 | [50사 History bounded-memory 복구 전달](../implementation/universe50-history-recovery-delivery.md) | 별도 clean runner/engine source, immutable collection e와 실패 partial 보존, explicit root GO, guarded public History build. **f74 동시누락 FAIL 뒤 mandatory a02 r1 witness 보정 후보 / 독립 검증 대기**; 새 engine·actual retry·financial 미수락 |
 | [History runner financial validator pin refresh](../implementation/history-runner-financial-pin-refresh-delivery.md) | later-45의 strict canonical first-five gate를 locally accepted `02226c9…` source에만 갱신한 구현 후보. accounting·8 receipt·17 manifest·fresh/reuse 계약은 불변이며 독립 검증 대기; actual first-five readiness와 later-45 실행 승인은 여전히 false |
-| [History recovery financial source pin R3](../implementation/history-recovery-financial-source-pin-r3.md) | strict later-45 pin을 frozen `a37763e…` R3 source 후보로만 갱신한 source/tiny 후보. 이전 `5af1ef0…`·`e56c148…` 독립 FAIL은 보존하며 **새 source와 repin 모두 독립 검증·인수 전**이다. fresh first-five R3 8 receipts·17 manifests와 actual audit 전에는 실행 불가 |
+| [History recovery financial source pin R3](../implementation/history-recovery-financial-source-pin-r3.md) | strict later-45 pin을 source/synthetic locally accepted `4357c83…`에 갱신한 source/tiny 후보. 이전 `5af1ef0…`·`e56c148…`·`a37763e…` 독립 FAIL은 보존하며 **recovery repin은 독립 검증·인수 전**이다. fresh first-five R3 8 receipts·17 manifests와 actual audit 전에는 실행 불가 |
 | [기간 규칙](../implementation/period-rules.md), [Layer 2 연결](../implementation/layer2-longitudinal.md), [공시 발견 계약](../implementation/accession-contract.md) | 표시 계획으로 바꿀 수 없는 의미·입력 경계 |
 
 충돌 시 적용되는 사용자 결정과 승인 범위를 먼저 확인하고, 해당 평면의 계약을
@@ -141,7 +142,7 @@ Raw adoption과 History build는 별도 stage GO 전에는 실행하지 않는�
 | 50사 generic metric identity | [제안](../implementation/universe50-generic-metric-identity-proposal-20261017.md) · [승인 전달 계약](../implementation/universe50-generic-metric-identity-delivery-20261017.md) | 권장안 A의 별도 attestation, 명시 source kind와 합성 fresh fixture 구현은 **2026-10-17 APPROVED** | final `6470e0b`; quality final `c70087d` 통합 | **PASS**; 별도 read-only 검증 보고서 SHA-256 `9c27d0b…` | **source/synthetic LOCALLY_ACCEPTED**; actual identity 발행·인수 미수행 | 미병합; push·PR 미수행 |
 | 50사 재무 통합·offline runner | [재무 통합·실행 전달](../implementation/universe50-financial-delivery.md) | **2026-10-17 APPROVED**; 동결 source 통합, quarterly exact identity 결속, public-API-only staged runner와 합성 검증 | **IMPLEMENTED CANDIDATE**; 동결 SHA 확정 전 | 독립 검증 대기 | 미수락; actual first-five/50·native 실행 미수행 | 미병합; push·PR·scheduler 미수행 |
 | 50사 History bounded-memory 복구 | [History 복구 전달](../implementation/universe50-history-recovery-delivery.md) | **2026-10-17 SOURCE/SYNTHETIC ONLY**; r1 TIMEOUT exact witness, fd9 canonical gate, optional attested reported-stage reuse | **ATTESTED-REUSE IMPLEMENTED CANDIDATE**; 동결 SHA 대기 | source/synthetic 독립 검증 대기; component actual audit 미수행 | r1 TIMEOUT; actual reuse·later-45·financial 미수락 | 미병합; push·PR·scheduler 미수행 |
-| History recovery financial source pin R3 | [source pin 전달](../implementation/history-recovery-financial-source-pin-r3.md) | **2026-10-18 SOURCE/TINY R3 CANDIDATE ONLY**; literal `e56c148…`→frozen `a37763e…`, strict 8+17 gate 불변 | **R3 LOCAL CANDIDATE**; 새 frozen SHA 대기 | 이전 `5af1ef0…`·`e56c148…` 독립 FAIL 보존; 새 source와 repin 독립 검증·리드 인수 없음 | 미수락; first-five R3·later-45 실행 미수락 | 미병합; push·PR 미수행 |
+| History recovery financial source pin R3 | [source pin 전달](../implementation/history-recovery-financial-source-pin-r3.md) | **2026-10-18 SOURCE/TINY R3 CANDIDATE ONLY**; literal `a37763e…`→source-accepted `4357c83…`, strict 8+17 gate 불변 | **R3 LOCAL CANDIDATE**; 새 frozen SHA 대기 | 이전 `5af1ef0…`·`e56c148…`·`a37763e…` 독립 FAIL 보존; financial source accepted, repin 독립 검증·리드 인수 없음 | 미수락; first-five R3·later-45 실행 미수락 | 미병합; push·PR 미수행 |
 
 현재 전달 상태(2026-09-10): U3–U5 누적 이력은
 [PR #63](https://github.com/pluswc/sec_xbrl/pull/63)으로 `main`에 병합됐다. merge
