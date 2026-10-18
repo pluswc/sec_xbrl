@@ -152,20 +152,28 @@ root lead는 이 exact source/tree를
    `e84289a54acae92bee45a9d0224d71133acc13aa`는 `fd9`의 ancestor이므로 다시
    merge하거나 replay하지 않았다.
 
-component별 역할은 다음과 같다.
+다음 표는 accepted `9e43c84…` 시점의 초기 component 역할을 기록한 역사적
+snapshot이다. 표의 `022`/`CAB`는 그 시점의 current component였으며 후속
+`4357`/`d714` composition의 현재 identity를 뜻하지 않는다.
 
 | Component | 역할 | composition에서 보존한 주요 경계 |
 | --- | --- | --- |
 | `fd9a179…` | canonical financial source, quarterly/TTM provenance, screening v2/v3 reader·service·store·UI | prepared REPORTED `source_snapshot_id`, explicit-save ancestry, immutable dataset identity |
 | `f222a8b…` | bounded History/Fiscal/quarter spill engine | batching, typed spill integrity, ownership·cleanup; 회계·기간·선택 의미 불변 |
 | `c9e1316…` | fail-closed History recovery orchestration | exact failed-root witness, attested reported-stage reuse, root GO와 component source pin |
-| `02226c9…` | 현재 canonical financial/screening source와 bounded consumer History stream | `fd9`·`e842` ancestry, ordinary READY-only lazy cell stream, exact source revalidation |
-| `cab253d…` | 현재 fail-closed History recovery runner | `c9` ancestry와 exact `02226c9…` financial validator pin; merged HEAD 허용 없음 |
+| `02226c9…` | `9e43` 역사적 canonical financial/screening source와 bounded consumer History stream | `fd9`·`e842` ancestry, ordinary READY-only lazy cell stream, exact source revalidation |
+| `cab253d…` | `9e43` 역사적 fail-closed History recovery runner | `c9` ancestry와 exact `02226c9…` financial validator pin; merged HEAD 허용 없음 |
+
+현재 composition mapping은 canonical financial source `4357c83…`, History recovery
+runner `d714f5a…`, bounded History engine `f222a8b…`를 서로 다른 operational
+identity로 유지한다. `d714`는 strict canonical first-five validator를 exact `4357`에
+고정하며, merged HEAD를 어느 component로도 relabel하지 않는다.
 
 `src/sec_xbrl/metrics/quarterly_screening.py`와 기존 fd9 screening mapping은 그대로다.
-022의 `src/sec_xbrl/analysis.py`와 scoped-read test, f222의
-`src/sec_xbrl/analytics/history_quarters.py`와 quarter-spill test, CAB의 recovery tool/test는
-각 accepted component와 byte-for-byte 같다. `src/sec_xbrl/history.py`는 의도적인 함수
+022에서 보존한 `src/sec_xbrl/analysis.py`와 scoped-read test, f222의
+`src/sec_xbrl/analytics/history_quarters.py`와 quarter-spill test는 각 accepted component와
+byte-for-byte 같다. 현재 recovery tool/test는 accepted `d714`와 byte-for-byte 같고,
+financial 변경 파일은 accepted `4357` mapping과 같다. `src/sec_xbrl/history.py`는 의도적인 함수
 composition이다. f222의 `_stage_records`, `build_history`, `_iter_fiscal_time_series_inputs`,
 `_iter_record_batches`와 022의 `HistoryCellStream`, `HistoryPublicationReader.__init__`,
 `HistoryPublicationReader.stream_cells`가 각각 accepted component AST와 같고, 양쪽의 다른
@@ -244,7 +252,8 @@ journal 또는 catalog를 변경하지 않았다.
 
 구현자 검증은 다음으로 제한한다.
 
-- merged product/test bytes와 exact 022/f222/CAB checkout의 file/function mapping 비교
+- merged product/test bytes와 현재 exact 4357/f222/d714 checkout의 file/function mapping,
+  그리고 composition에 보존된 022 scoped-read mapping 비교
 - bounded History/Fiscal/quarter serialization, recovery runner, quarterly/TTM,
   screening explicit-save/v3 reader의 기존 synthetic tests
 - import/collection 전 actual `data`/`work`/corpus와 network 거부, nonexistent corpus
