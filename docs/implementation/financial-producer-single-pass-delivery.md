@@ -284,7 +284,7 @@ targeted tests는 기존
 | capability | construction/forgery/copy/pickle/cross-process/replay/wrong producer/wrong destination/second consume 거부 |
 | staged output | extra/missing/output mutation, source payload, publication ID, cohort/rule/version mismatch 거부 |
 | differential | identity old formula oracle와 새 publication bytes exact equality 확인; v3 public reopen과 publication ID/parent payload regression 통과 |
-| public regression | public constructor와 explicit `verify_all()`가 발행 후 source mutation을 계속 검출 |
+| public regression | identity public constructor와 explicit `verify_all()`는 발행 후 source mutation을 계속 검출한다. 기존 v3 `verify_all()` 회귀는 membership을 확인하며 source freshness 전체를 보증한다고 확대 해석하지 않는다. |
 | unchanged producers | annual metrics/v2/quarter producer와 quality pass count·output unchanged |
 
 검증 worker는 worker당 RSS 1 GiB 이하와 120초 이내, parent-death signal 및 자식 reaping을
@@ -362,9 +362,31 @@ sandbox라고 주장하지 않는다.
 50-parent의 non-scoped `SIX` READY receipt가 deep verification 뒤 바뀌었을 때 publication 거부,
 generic unverified record의 zero-deep 발행 거부, 그리고 legitimate identity/v3 capability가
 arbitrary staged manifest를 publish하지 못함을 확인한다. 실제 operation paths의 one-deep-pass와
-byte-identical output, public reader freshness, 112-file local package code closure 및 기존 mutation
+byte-identical output, identity public-reader freshness, v3 membership 회귀, 112-file local package code closure 및 기존 mutation
 matrix는 유지한다. guarded 관련 묶음은 **157 PASS**(1 warning), 80.71초, peak tree RSS
 142,245,888 bytes였고 1 GiB/120초, PDEATHSIG, subreaper/reaping, no `RLIMIT_AS`, import 전
 actual/cache/network denial을 모두 통과했다. focused closure 묶음은 **48 PASS**, 67.08초,
 peak 121,712,640 bytes였다. 이 수치는 writer source/tiny 후보 증거이며 독립 재검증과 lead local
 acceptance 전에는 source가 수락되거나 actual 실행이 허가된 상태가 아니다.
+
+## R3 독립 FAIL 뒤 R4 finalization lifecycle 보정
+
+R3 동결 후보 `a37763e…`는 독립 검증에서 임의 staged output 발행 우회 없이 262개 검사를
+통과했지만, 별도로 호출할 수 있던 `_finalize_identity`와 `_finalize_v3`가 검증 실패 뒤 genuine
+capability를 registry에 남기는 lifecycle 결함으로 FAIL했다. R4는 각 thin `_publish_*` wrapper와
+해당 finalizer body를 하나의 fixed-operation 함수로 합쳤다. 이제 lookup부터 staged output의 두
+번 exact-byte 확인, final source snapshot, rename과 consume까지 어느 지점에서 예외가 나도 같은
+함수가 capability를 폐기한다. 별도 `_finalize_*` callable은 남지 않으며 callback, call-stack
+authentication 또는 새 security framework를 추가하지 않는다.
+
+두 producer의 legitimate capability에 forged staged manifest를 넣는 회귀는 첫 호출의 output
+거부, registry invalidation, 같은 capability의 lookup과 publish retry 거부를 모두 확인한다.
+success consume-once, identity/v3 one-deep-pass, 112-file code closure, status-only recovery control,
+50-parent status closure와 public API/schema/accounting output은 그대로다. v3의 기존
+`verify_all()`은 membership 회귀만 확인하며, identity public constructor와 명시적
+`verify_all()`의 source freshness 증명과 혼동하지 않는다. R4는 source/synthetic 후보일 뿐이며
+별도 독립 검증과 lead local acceptance, fresh first-five R3 및 actual audit 전에는 실행 권한이
+없다. 최종 guarded 관련 묶음은 **158 PASS**(1 warning), 82.35초, peak tree RSS
+143,126,528 bytes였고 focused closure 묶음은 **49 PASS**, 67.61초, peak 120,754,176
+bytes였다. 두 worker 모두 1 GiB/120초, PDEATHSIG, subreaper/reaping, no `RLIMIT_AS`, import 전
+actual/cache/network denial을 통과했고 Ruff는 cache 없이 PASS했다.

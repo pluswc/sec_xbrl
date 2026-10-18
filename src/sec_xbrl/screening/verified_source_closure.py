@@ -354,129 +354,119 @@ def _publish_identity(
     capability: _VerifiedSourceClosure, *, staging: Path, destination: Path
 ) -> None:
     try:
-        _finalize_identity(capability, staging=staging, destination=destination)
+        record = _lookup(capability, _IDENTITY, destination)
+        module = importlib.import_module("sec_xbrl.screening.metric_identity")
+        config = json.loads(record.config_bytes)
+        sources = json.loads(record.expected_payload_bytes)
+        config_path = Path(record.config_path)
+        identity = {
+            "schema_version": module.VERSION,
+            "source_kind": module.SOURCE_KIND,
+            "readiness": "READY",
+            "universe_id": config["universe_id"],
+            "financial_as_of": config["financial_as_of"],
+            "metadata_observation_cutoff": config["metadata_observation_cutoff"],
+            "annual_window": copy.deepcopy(config["annual_window"]),
+            "global_quarter_spine": copy.deepcopy(config["global_quarter_spine"]),
+            "configured_ciks": [row["cik"] for row in config["companies"]],
+            "configured_tickers": [row["ticker"] for row in config["companies"]],
+            "config": copy.deepcopy(config),
+            "config_path": str(config_path),
+            "config_sha256": _sha256(config_path),
+            **sources,
+        }
+        publication_id = "generic-metric-identity-" + digest_value(identity)[:24]
+        manifest = {**identity, "publication_id": publication_id}
+        _require_exact_output(staging, module.MANIFEST_NAME, manifest)
+        fresh = _identity_snapshot(config_path, config)
+        _require_same_snapshot(record.snapshot, fresh, "identity pre-publication")
+        _require_exact_output(staging, module.MANIFEST_NAME, manifest)
+        nonce = capability._VerifiedSourceClosure__nonce
+        record.state = "FINALIZING"
+        try:
+            os.rename(staging, destination)
+        except BaseException:
+            record.state = "INVALID"
+            _REGISTRY.pop(nonce, None)
+            raise
+        record.state = "CONSUMED"
+        _REGISTRY.pop(nonce, None)
     except BaseException:
         _discard(capability)
         raise
-
-
-def _finalize_identity(
-    capability: _VerifiedSourceClosure, *, staging: Path, destination: Path
-) -> None:
-    record = _lookup(capability, _IDENTITY, destination)
-    module = importlib.import_module("sec_xbrl.screening.metric_identity")
-    config = json.loads(record.config_bytes)
-    sources = json.loads(record.expected_payload_bytes)
-    config_path = Path(record.config_path)
-    identity = {
-        "schema_version": module.VERSION,
-        "source_kind": module.SOURCE_KIND,
-        "readiness": "READY",
-        "universe_id": config["universe_id"],
-        "financial_as_of": config["financial_as_of"],
-        "metadata_observation_cutoff": config["metadata_observation_cutoff"],
-        "annual_window": copy.deepcopy(config["annual_window"]),
-        "global_quarter_spine": copy.deepcopy(config["global_quarter_spine"]),
-        "configured_ciks": [row["cik"] for row in config["companies"]],
-        "configured_tickers": [row["ticker"] for row in config["companies"]],
-        "config": copy.deepcopy(config),
-        "config_path": str(config_path),
-        "config_sha256": _sha256(config_path),
-        **sources,
-    }
-    publication_id = "generic-metric-identity-" + digest_value(identity)[:24]
-    manifest = {**identity, "publication_id": publication_id}
-    _require_exact_output(staging, module.MANIFEST_NAME, manifest)
-    fresh = _identity_snapshot(config_path, config)
-    _require_same_snapshot(record.snapshot, fresh, "identity pre-publication")
-    _require_exact_output(staging, module.MANIFEST_NAME, manifest)
-    nonce = capability._VerifiedSourceClosure__nonce
-    record.state = "FINALIZING"
-    try:
-        os.rename(staging, destination)
-    except BaseException:
-        record.state = "INVALID"
-        _REGISTRY.pop(nonce, None)
-        raise
-    record.state = "CONSUMED"
-    _REGISTRY.pop(nonce, None)
 
 
 def _publish_v3(
     capability: _VerifiedSourceClosure, *, staging: Path, destination: Path
 ) -> None:
     try:
-        _finalize_v3(capability, staging=staging, destination=destination)
+        record = _lookup(capability, _V3, destination)
+        module = importlib.import_module("sec_xbrl.screening.dataset_v3")
+        config = json.loads(record.config_bytes)
+        parents = json.loads(record.parent_bytes or b"null")
+        config_path = Path(record.config_path)
+        identity = {
+            "config_path": str(config_path),
+            "config_sha256": _sha256(config_path),
+            "config": config,
+            "annual_publication_id": parents["annual"]["publication_id"],
+            "quarterly_publication_id": parents["quarterly"]["publication_id"],
+        }
+        manifest = {
+            "schema_version": module.VERSION,
+            "publication_id": "screening-dataset-" + digest_value(identity)[:24],
+            "dataset_id": config["dataset_id"],
+            "fixture_kind": config.get("fixture_kind", "ACTUAL_PREPARED"),
+            "financial_as_of": parents["quarterly"]["manifest"]["financial_as_of"],
+            "config_path": str(config_path),
+            "config_sha256": _sha256(config_path),
+            "config": config,
+            "sources": {
+                "metadata": copy.deepcopy(
+                    parents["annual"]["manifest"]["sources"]["metadata"]
+                )
+            },
+            "versions": {
+                "annual_publication_id": parents["annual"]["publication_id"],
+                "quarterly_publication_id": parents["quarterly"]["publication_id"],
+            },
+            "parents": {
+                "annual": {
+                    "root": parents["annual"]["root"],
+                    "publication_id": parents["annual"]["publication_id"],
+                    "manifest_sha256": parents["annual"]["manifest_sha256"],
+                },
+                "quarterly": {
+                    "root": parents["quarterly"]["root"],
+                    "publication_id": parents["quarterly"]["publication_id"],
+                    "manifest_sha256": parents["quarterly"]["manifest_sha256"],
+                },
+            },
+        }
+        if parents["annual"]["company_ciks"] != parents["quarterly"]["company_ciks"]:
+            raise ValueError("verified v3 parent membership changed")
+        _require_exact_output(staging, module.MANIFEST, manifest)
+        fresh = _v3_snapshot(
+            config_path,
+            config,
+            Path(parents["annual"]["root"]),
+            Path(parents["quarterly"]["root"]),
+        )
+        _require_same_snapshot(record.snapshot, fresh, "v3 pre-publication")
+        _require_exact_output(staging, module.MANIFEST, manifest)
+        nonce = capability._VerifiedSourceClosure__nonce
+        record.state = "FINALIZING"
+        try:
+            os.rename(staging, destination)
+        except BaseException:
+            record.state = "INVALID"
+            _REGISTRY.pop(nonce, None)
+            raise
+        record.state = "CONSUMED"
+        _REGISTRY.pop(nonce, None)
     except BaseException:
         _discard(capability)
         raise
-
-
-def _finalize_v3(
-    capability: _VerifiedSourceClosure, *, staging: Path, destination: Path
-) -> None:
-    record = _lookup(capability, _V3, destination)
-    module = importlib.import_module("sec_xbrl.screening.dataset_v3")
-    config = json.loads(record.config_bytes)
-    parents = json.loads(record.parent_bytes or b"null")
-    config_path = Path(record.config_path)
-    identity = {
-        "config_path": str(config_path),
-        "config_sha256": _sha256(config_path),
-        "config": config,
-        "annual_publication_id": parents["annual"]["publication_id"],
-        "quarterly_publication_id": parents["quarterly"]["publication_id"],
-    }
-    manifest = {
-        "schema_version": module.VERSION,
-        "publication_id": "screening-dataset-" + digest_value(identity)[:24],
-        "dataset_id": config["dataset_id"],
-        "fixture_kind": config.get("fixture_kind", "ACTUAL_PREPARED"),
-        "financial_as_of": parents["quarterly"]["manifest"]["financial_as_of"],
-        "config_path": str(config_path),
-        "config_sha256": _sha256(config_path),
-        "config": config,
-        "sources": {
-            "metadata": copy.deepcopy(parents["annual"]["manifest"]["sources"]["metadata"])
-        },
-        "versions": {
-            "annual_publication_id": parents["annual"]["publication_id"],
-            "quarterly_publication_id": parents["quarterly"]["publication_id"],
-        },
-        "parents": {
-            "annual": {
-                "root": parents["annual"]["root"],
-                "publication_id": parents["annual"]["publication_id"],
-                "manifest_sha256": parents["annual"]["manifest_sha256"],
-            },
-            "quarterly": {
-                "root": parents["quarterly"]["root"],
-                "publication_id": parents["quarterly"]["publication_id"],
-                "manifest_sha256": parents["quarterly"]["manifest_sha256"],
-            },
-        },
-    }
-    if parents["annual"]["company_ciks"] != parents["quarterly"]["company_ciks"]:
-        raise ValueError("verified v3 parent membership changed")
-    _require_exact_output(staging, module.MANIFEST, manifest)
-    fresh = _v3_snapshot(
-        config_path,
-        config,
-        Path(parents["annual"]["root"]),
-        Path(parents["quarterly"]["root"]),
-    )
-    _require_same_snapshot(record.snapshot, fresh, "v3 pre-publication")
-    _require_exact_output(staging, module.MANIFEST, manifest)
-    nonce = capability._VerifiedSourceClosure__nonce
-    record.state = "FINALIZING"
-    try:
-        os.rename(staging, destination)
-    except BaseException:
-        record.state = "INVALID"
-        _REGISTRY.pop(nonce, None)
-        raise
-    record.state = "CONSUMED"
-    _REGISTRY.pop(nonce, None)
 
 
 def _discard(capability: _VerifiedSourceClosure) -> None:

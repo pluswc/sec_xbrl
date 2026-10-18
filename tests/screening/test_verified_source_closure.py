@@ -560,6 +560,8 @@ def test_unverified_record_constructor_cannot_mint_publish_capability(
     assert closure._REGISTRY == before
     assert not hasattr(closure, "_issue")
     assert not hasattr(closure, "_consume_and_rename")
+    assert not hasattr(closure, "_finalize_identity")
+    assert not hasattr(closure, "_finalize_v3")
     staging = tmp_path / "stage"
     staging.mkdir()
     with pytest.raises(ValueError, match="invalid or already consumed"):
@@ -568,6 +570,13 @@ def test_unverified_record_constructor_cannot_mint_publish_capability(
         )
     assert deep_calls == 0
     assert not destination.exists()
+
+
+def test_fixed_operation_publishers_are_sole_finalization_boundaries() -> None:
+    assert not hasattr(closure, "_finalize_identity")
+    assert not hasattr(closure, "_finalize_v3")
+    assert callable(closure._publish_identity)
+    assert callable(closure._publish_v3)
 
 
 def test_identity_capability_cannot_publish_arbitrary_staged_output(
@@ -592,6 +601,10 @@ def test_identity_capability_cannot_publish_arbitrary_staged_output(
         )
     with pytest.raises(ValueError, match="already consumed"):
         closure._lookup(capability, closure._IDENTITY, destination)
+    with pytest.raises(ValueError, match="already consumed"):
+        closure._publish_identity(
+            capability, staging=staging, destination=destination
+        )
     assert not destination.exists()
 
 
@@ -617,6 +630,10 @@ def test_v3_capability_cannot_publish_arbitrary_staged_output(
         )
     with pytest.raises(ValueError, match="already consumed"):
         closure._lookup(capability, closure._V3, prepared.destination)
+    with pytest.raises(ValueError, match="already consumed"):
+        closure._publish_v3(
+            capability, staging=staging, destination=prepared.destination
+        )
     assert not prepared.destination.exists()
 
 
