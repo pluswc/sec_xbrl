@@ -159,3 +159,33 @@ bounded History build가 실행 중이다. AAPL History, 감사, period inventor
 아직 수락되지 않았다. 회사별 source-only test 재실행, 자동 retry 또는 자동 acceptance는
 하지 않으며 실패·운영 보정 증거는 모두 보존한다. 현재 21사 live UI, catalog와 원래
 journal/records는 중단하거나 교체하지 않고 계속 보존한다.
+
+## 2026-10-22 INTC 감사 중단과 nullable binding 교정
+
+collection 순서에 따른 단일 회사 실행을 계속해 AMD, AAPL, MSFT, AMZN, NVDA, NFLX,
+TSLA, META, GOOGL, AVGO의 History와 governed period inventory를 ROOT가 local
+acceptance했다. 기존 first-five를 포함해 History와 period-readiness가 수락된 범위는 현재
+15사다. 이는 FULL50 financial-ready 또는 live rollout acceptance가 아니다.
+
+INTC History build는 accepted engine `6c1d9de66d8d9b58c8d9bbed9b64571e694f6553`와
+runner `07d0999ee2666b970bdfdb3cbb8aee8c849c3565`로 PASS했지만, R5 L4 감사의 source
+eligibility phase에서 중단됐다. 감사 대상 AS_FILED/INSTANT cell 5,700개 중 5,698개는
+REPORTED binding과 lineage를 가졌고, 2개는 ambiguous actual-period boundary로 인해
+producer 계약대로 `UNAVAILABLE`과 null binding/lineage를 보존했다. auditor가
+`value_status`를 확인하기 전에 binding evidence를 읽어 `AttributeError`를 낸 것이 원인이며,
+History나 accounting meaning의 불일치는 아니다. 실패 attempt, output과 observer SHA-256
+`c36164a7a6f406cd699716bf77300d432a89ccf2a5b5d0b20dbfda54e434c028`는 그대로
+보존하고 INTC build를 반복하지 않는다.
+
+R6 auditor 후보는 non-REPORTED cell을 먼저 ineligible로 판정하고, REPORTED cell에는
+mapping lineage와 binding, mapping 원소의 evidence list를 fail-closed로 요구한다. 기존
+source, namespace, unit, canonical mapping, statement evidence, Q2/Q3/Q4, continuity, recast,
+filed-date와 Decimal arithmetic 조건 및 source/consumer full-record equality는 유지한다.
+focused synthetic 검증은 19 PASS와 Ruff PASS이며 17개 script 중 checker만 바뀌고 나머지
+16개와 protected baseline hints는 byte-identical이다. 이 후보는 아직 독립 검토와 ROOT
+acceptance 전이며, 새 INTC audit GO나 actual dispatch 권한을 만들지 않는다.
+
+다음 회사 MU의 build는 기존 accepted R5 runtime과 R4 launcher로 별도 bounded 실행 중이며
+nullable-auditor 변경과 무관하다. MU와 INTC 모두 각자의 semantic acceptance 전에는 accepted
+15사 집계에 포함하지 않는다. 21사 live UI, catalog, journal과 원래 records는 계속 보존하며,
+회사 하나와 heavy stage 하나씩만 실행하고 자동 retry, cleanup 또는 acceptance를 하지 않는다.
