@@ -267,3 +267,36 @@ manifest·6개 phase 검증, 독립 acceptance, private-journal UAT와 controlle
 필요하다. original first-five proof와 nullable auditor의 writer·independent 19+19 PASS source
 evidence는 변경하거나 반복하지 않고 재사용한다. 기존 21사 live runtime, catalog, journal과
 원래 records도 변경 없이 보존한다.
+
+## 2026-10-22 CRM fiscal-focus contradiction and expansion stop
+
+현재 local acceptance 범위는 History 33사, governed period input 32사다. CRM History는
+112-guard actual audit를 통과해 SHA-256
+`fa56d5a1dba8ba141be2254c4d722cc0dd95dbbecbe26c1e44bb8ccffc33882d`로 수락됐지만,
+period inventory는 annual input이 2022–2025 네 해뿐이어서 strict five-year gate에서
+중단됐다. 따라서 CRM은 financial-ready가 아니며, 이 차이를 해결할 ROOT 결정 전까지
+실제 expansion을 중단하고 ADBE를 dispatch하지 않는다.
+
+원본 cache를 128 KiB prefix로 제한해 확인한 결과, accession
+`0001108524-26-000060`의 primary member `crm-20260131.htm`은 실제 inline tag
+`<ix:nonNumeric contextRef="c-1" name="dei:DocumentFiscalYearFocus" id="f-36">2025</ix:nonNumeric>`와
+`DocumentFiscalPeriodFocus=FY`를 포함한다. context `c-1`은 2025-02-01부터
+2026-01-31까지다. cache manifest SHA-256은
+`097fdd83464cd8deff6491dd11da23bfc38ab6fce031e3a9ed931cb5106e0cbc`이고, 그 manifest가
+고정한 original XBRL ZIP SHA-256은
+`ac8c422770e833578a05fc4ce7312ebb5b388aa8442890ef5103bb9c77df6a47`다.
+
+Layer 1 snapshot manifest SHA-256
+`9f3d28a4415306406964d36d231ac60c657cc1380ef8f12988d8fa144268ce20`과 filing table
+SHA-256 `1afe9fe88cb54d215f70ad1548ba9013b4e0d28ff2cebec8e70c8958e3907898`도 이 값을
+그대로 보존했다. 따라서 `2025`는 Layer 1 변환 오류가 아니라 원본 inline metadata다.
+동시에 같은 [SEC 10-K 본문](https://www.sec.gov/Archives/edgar/data/1108524/000110852426000060/crm-20260131.htm)은
+fiscal 2026을 2026-01-31에 끝나는 회계연도로 명시하고, [Salesforce FY2026 실적 발표](https://investor.salesforce.com/news/news-details/2026/Salesforce-Delivers-Record-Fourth-Quarter-Fiscal-2026-Results/default.aspx)도
+2026-01-31 종료 full fiscal year로 설명한다. 원본 inline DEI fiscal-year focus와 원본
+filing narrative가 충돌하는 source-level contradiction이다.
+
+기존 규칙대로 calendar endpoint에서 fiscal year를 추론하거나 five-year gate를 완화하지
+않는다. CRM History build/audit, failed inventory와 모든 proof는 그대로 보존하며 ROOT의
+명시적 처리 결정 전에는 correction, rebuild 또는 retry를 하지 않는다. 기존 first-five proof와
+nullable auditor 19+19 PASS evidence를 계속 재사용하고, 21사 live runtime, catalog, journal과
+원래 records도 변경하지 않는다. FULL50 financial, H5와 UI readiness는 아직 성립하지 않는다.
