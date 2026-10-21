@@ -93,3 +93,38 @@ rollback/restore 증거가 필요하다.
 이 기록은 local operational status다. source 구현, 테스트, main 병합, push, PR, remote
 CI 또는 controlled live rollout 완료를 뜻하지 않는다. 구현 source identity와 runtime
 bytes는 기존 accepted pin을 유지하며, 이번 handoff는 문서만 갱신한다.
+
+## 2026-10-21 후속 승인과 source 교정 상태
+
+앞 절의 “사용자 결정 대기”는 그 checkpoint 당시 상태를 보존한 기록이다. 사용자는 이후
+original candidate와 adopted collection intake의 identity를 분리해 검증하는 최소 수정을
+승인했다. runner commit `07d0999ee2666b970bdfdb3cbb8aee8c849c3565`는 adopted
+intake hash를 target identity로 계속 검증하면서 original candidate path와 그 자체 hash를
+별도로 고정한다. 다른 JSON 의미가 동일한 경우에만 `INGESTED`에서 `REUSED`로의 adoption을
+허용하며 plan, CIK, accession, period, source와 기존 complete/attestation 검증은 유지한다.
+focused 검증은 110 tests PASS와 Ruff PASS였고, local source acceptance locator는
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_history_recovery_source_acceptance_07d0999.json`,
+SHA-256 `0152fecacb57955cebb5e3c0dd7d2eb12d1623f7a19efa3253b7cf7a1ba0502a`다.
+이 수정은 Raw, filing metadata 또는 회계 의미를 바꾸지 않는다.
+
+서로 다른 physical source root가 우연히 같은 leaf 이름 `intake`를 사용하는 경우의 false
+collision도 별도 engine compatibility 수정으로 해소했다. engine commit
+`6c1d9de66d8d9b58c8d9bbed9b64571e694f6553`는 기존 directory, top-level symlink와
+`root.name == run_id` 검증 뒤 resolved physical root로 중복을 판정한다. 서로 다른 root의
+같은 leaf 이름은 허용하지만 동일 physical root의 alias/repeat는 거부하며 snapshot
+identity·integrity와 output fingerprint 의미는 유지한다. focused corpus/history 검증은
+222 PASS, 1 SKIP였고 별도 독립 검토 뒤 local source acceptance locator는
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_history_engine_source_acceptance_6c1d9de.json`,
+SHA-256 `dc9b04d9e00db310b969a9905e7e25505b57995d68ba8fd571924a2656b063b9`다.
+
+later-45 runtime은 이 두 accepted source identity에 다시 결속했다. 기존 protected baseline
+`081720ff…`는 canonical first-five `c96bc368…`와 원래 capture authority를 정확히 고정한
+좁은 compatibility 검증을 거쳐 재사용했으며 baseline capture나 first-five build/audit를
+반복하지 않았다. AMD fresh build는 bounded keeper 안에서 operational exit 0과 닫힌
+resource/process 증거를 냈다. 그러나 이는 semantic acceptance가 아니며, 현재 L4 R4 AMD
+감사가 한 번 실행 중이다. AMD History와 exact-50 전체는 아직 local acceptance 또는
+financial-ready 상태가 아니다. 앞선 실패 root와 로그는 그대로 보존한다.
+
+현재 21사 live UI, catalog와 원래 journal/records는 이 source 수정 및 later-45 작업과
+분리해 계속 보존한다. 남은 회사도 collection 순서대로 회사 하나, heavy stage 하나씩
+ROOT의 별도 request와 GO로만 진행하며 자동 재시도나 자동 acceptance를 하지 않는다.
