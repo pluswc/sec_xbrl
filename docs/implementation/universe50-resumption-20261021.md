@@ -244,3 +244,26 @@ manifest·6개 phase 검증, 독립 acceptance, private-journal UAT와 controlle
 있다. original first-five acceptance proof와 nullable auditor의 writer·independent 19+19 PASS
 source evidence는 변경하거나 반복하지 않고 재사용한다. 기존 21사 live runtime, catalog,
 journal과 원래 records도 변경 없이 보존한다.
+
+## 2026-10-22 25/50 History·period input readiness
+
+TGT, CAT, DE, PCAR와 PG의 History proof와 governed period inventory를 ROOT가 각각 local
+acceptance했다. exact readiness acceptance는 다음과 같다.
+
+- TGT: `work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_later45_TGT_history_period_readiness_acceptance_20261022.json`, SHA-256 `8636e59bab788181b832dfee4dbc7ea4889796b9bf63dbde911d8228ea56d3b0`
+- CAT: `work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_later45_CAT_history_period_readiness_acceptance_20261022.json`, SHA-256 `916cac8e08afdfe08d4a06055c70c71bd25fac8dc3dc78ed7a79a5f0a35e72a6`
+- DE: `work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_later45_DE_history_period_readiness_acceptance_20261022.json`, SHA-256 `8eaa7b8d400608768289958d0f57bef86e6406cba74498337d01e94a5c6d097c`
+- PCAR: `work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_later45_PCAR_history_period_readiness_acceptance_20261022.json`, SHA-256 `f67a157fae83ff3a83720a24ef6c986fe5965f55e8348a844768c4eca95be565`
+- PG: `work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_later45_PG_history_period_readiness_acceptance_20261022.json`, SHA-256 `e2b270388d01fde92dfe0397ce4cc1c20a0c0ca3af5d056c71edae94021f78b8`
+
+이 다섯 회사와 앞서 수락한 20사를 합쳐 exact-50 collection의 절반인 25사가 History와
+governed period input ready 상태다. 나머지 25사에는 현재 build session 58068에서 실행 중인
+KO가 포함되며, KO는 아직 accepted 집계에 포함하지 않는다. 남은 회사의 metadata preflight,
+request와 build GO는 ROOT가 이미 실제 execution root에 작성했으므로 반복 생성하지 않는다.
+
+이 halfway checkpoint는 FULL50 financial, H5 또는 UI ready 상태가 아니다. 남은 25사의
+History·period readiness 뒤 final FULL50 config와 고정 8개 financial stage, H5 107개
+manifest·6개 phase 검증, 독립 acceptance, private-journal UAT와 controlled rollout이 여전히
+필요하다. original first-five proof와 nullable auditor의 writer·independent 19+19 PASS source
+evidence는 변경하거나 반복하지 않고 재사용한다. 기존 21사 live runtime, catalog, journal과
+원래 records도 변경 없이 보존한다.
