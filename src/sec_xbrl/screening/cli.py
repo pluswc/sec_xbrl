@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +26,17 @@ from sec_xbrl.screening.dataset_v3 import publish_screening_dataset_v3
 from sec_xbrl.screening.metric_identity import publish_generic_metric_identity
 from sec_xbrl.screening.server import serve
 from sec_xbrl.screening.service import ScreeningService
-from sec_xbrl.screening.store import ScreeningStore, backup_store, restore_store
+from sec_xbrl.screening.store import STORE_VERSION, ScreeningStore, backup_store, restore_store
+
+_CORE_STORE_TABLES = {
+    "store_meta",
+    "screen_definitions",
+    "screen_revisions",
+    "universe_snapshots",
+    "screen_runs",
+    "decision_events",
+    "export_manifests",
+}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -70,6 +82,11 @@ def _parser() -> argparse.ArgumentParser:
     server.add_argument("--port", type=int, default=8765)
     server.add_argument("--descriptions", type=Path)
     server.add_argument("--descriptions-manifest-sha256")
+    server.add_argument(
+        "--require-existing-store",
+        action="store_true",
+        help="fail before journal initialization unless --store is an existing valid journal",
+    )
     backup = commands.add_parser("backup", help="create a consistent journal backup")
     backup.add_argument("--store", type=Path, required=True)
     backup.add_argument("--destination", type=Path, required=True)
@@ -120,10 +137,24 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "serve":
         catalog = _catalog(args.catalog)
         descriptions = _serve_descriptions(args, catalog)
+        if args.require_existing_store:
+            _validate_existing_store(args.store)
         service = ScreeningService(
             catalog,
             ScreeningStore(args.store),
             company_descriptions=descriptions,
+        )
+        _print(
+            {
+                "event": "screening_service_startup",
+                "python": str(Path(sys.executable).absolute()),
+                "module": str(Path(__file__).resolve()),
+                "catalog": str(args.catalog.absolute()),
+                "store": str(args.store.absolute()),
+                "exports": str(args.exports.absolute()),
+                "require_existing_store": args.require_existing_store,
+                "dataset_ids": sorted(catalog),
+            }
         )
         serve(service, export_root=args.exports, host=args.host, port=args.port)
     elif args.command == "backup":
@@ -154,6 +185,37 @@ def _catalog(path: Path) -> dict[str, Path]:
     return result
 
 
+def _validate_existing_store(path: Path) -> None:
+    """Validate an existing screening journal without creating or migrating it."""
+    absolute = path.absolute()
+    for candidate in (absolute, *absolute.parents):
+        if candidate.is_symlink():
+            raise ValueError("screening store path traverses a symlink")
+    if not absolute.is_file():
+        raise ValueError("required screening store does not exist as a regular file")
+    try:
+        with sqlite3.connect(f"{absolute.as_uri()}?mode=ro", uri=True) as connection:
+            result = connection.execute("PRAGMA integrity_check").fetchone()
+            if result is None or result[0] != "ok":
+                detail = result[0] if result else "no result"
+                raise ValueError(f"SQLite integrity check failed: {detail}")
+            row = connection.execute(
+                "SELECT value FROM store_meta WHERE key='version'"
+            ).fetchone()
+            if row is None or row[0] != STORE_VERSION:
+                raise ValueError("unsupported screening store version")
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            if not _CORE_STORE_TABLES <= tables:
+                raise ValueError("required screening store is missing core journal tables")
+    except sqlite3.Error as exc:
+        raise ValueError("required screening store is not a valid screening journal") from exc
+
+
 def _serve_descriptions(
     args: argparse.Namespace, catalog: dict[str, Path]
 ) -> CompanyDescriptionReader | None:
@@ -177,4 +239,4 @@ def _serve_descriptions(
 
 
 def _print(value: Any) -> None:
-    print(json.dumps(value, ensure_ascii=False, indent=2, default=str))
+    print(json.dumps(value, ensure_ascii=False, indent=2, default=str), flush=True)

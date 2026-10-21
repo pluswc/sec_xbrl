@@ -14,6 +14,12 @@
 [T3 참조 결함과 확장 중지](../implementation/universe50-t3-reference-hold-20261017.md)에
 따라 **HOLD_FINANCIAL_EXPANSION_PENDING_T3_REFERENCE_DISPOSITION**다.
 
+2026-10-21 후속: [21사 runtime 안정화 전달](../implementation/screening21-runtime-stability-delivery-20261021.md)은
+기존 journal을 요구하는 fail-before-write 시작 옵션, runtime source/path 식별과
+private journal 재시작 UAT를 승인 범위로 삼는다. 구현·자체 검증 뒤 독립 검증과
+lead 수락 전에는 live source를 바꾸지 않는다. `main`과 원격 상태, 50사 확대 HOLD는
+그대로 분리한다.
+
 2026-10-18 후속: first-five `annual-analysis`의 16 GiB RSS stop 뒤 승인된
 [consumer analysis bounded History read 전달](../implementation/consumer-analysis-bounded-read-delivery.md)은
 ordinary History cell을 기존 전수 verifier로 단일 pass 소비한다. 최초 동결

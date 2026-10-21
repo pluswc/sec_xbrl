@@ -152,8 +152,15 @@ PYTHONPATH="$PWD/src" .venv/bin/python -m sec_xbrl.screening serve \
   --catalog /absolute/run/catalog.json \
   --store /absolute/run/user_journal.sqlite \
   --exports /absolute/run/exports \
+  --require-existing-store \
   --host 127.0.0.1 --port 8765
 ```
+
+`--require-existing-store`는 기존 journal을 다시 여는 운영 실행용이다. 지정한
+파일이 없거나 SQLite integrity/version 검사를 통과하지 못하면 store 초기화나
+migration 전에 실패한다. 새 설치와 격리된 test에서 새 journal을 만들 때만 이
+옵션을 생략한다. 시작 로그는 실제 Python executable, import한 CLI module,
+catalog, journal, export root와 catalog dataset ID를 JSON으로 남긴다.
 
 브라우저에서 `http://127.0.0.1:8765/`를 연다. service는 loopback 주소만
 허용하고 state-changing browser request의 `Origin`이 같은 local service인지
@@ -190,6 +197,30 @@ relay가 `Host`/`Origin`을 WSL backend의 loopback origin으로 바꾸므로 �
 service의 CSRF 검사가 그대로 적용된다. XLSX/CSV bytes, status,
 `Content-Type`/`Content-Disposition`은 요청 ID와 함께 전달된다. 종료할 때는
 PowerShell에서 `Ctrl+C`를 눌러 Windows listener와 relay를 함께 닫는다.
+
+### 현재 21사 runtime의 표준 재시작 경로
+
+현재 동결된 21사 history는 아래 v1/v2 catalog 두 entry를 함께 사용한다. 과거
+v1 run을 열기 위해 v1 entry를 지우거나 v2 root로 바꾸지 않는다.
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 \
+PYTHONPATH=/home/plusbdw/.codex/worktrees/universe50-delivery-status-r5/sec_xbrl/src \
+/home/plusbdw/user_work/projects/sec_xbrl/.venv/bin/python \
+  -m sec_xbrl.screening serve \
+  --catalog /home/plusbdw/user_work/projects/sec_xbrl/data/processed/screening_runs/20261009_usability/catalog_r3.json \
+  --store /home/plusbdw/user_work/projects/sec_xbrl/data/processed/screening_runs/20261009_initial/user_journal.sqlite \
+  --exports /home/plusbdw/user_work/projects/sec_xbrl/data/processed/screening_runs/20261009_initial/exports \
+  --require-existing-store --host 127.0.0.1 --port 18766
+```
+
+WSL backend는 `127.0.0.1:18766`, Windows browser bridge는
+`127.0.0.1:18765`다. 기존 문서의 `8884` 표기는 이전 explorer runtime이며 현재
+backend가 아니다. 재시작 전에는 journal의 SQLite consistent copy와 table별
+row/digest를 별도 private 경로에 기록한다. rollback은 새 runtime을 정지하고
+이전 accepted source `e84289a…`와 기존 journal 경로로 다시 시작한다. journal
+복원이 필요하면 원본을 덮어쓰지 않고 consistent copy를 새 경로에 복원해 검증한
+뒤 그 경로를 명시한다.
 
 주요 HTTP 경계는 다음과 같다.
 
