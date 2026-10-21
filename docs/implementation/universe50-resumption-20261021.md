@@ -34,22 +34,48 @@ period/unit/Q4 선택, reader gate와 producer source는 바뀌지 않았다.
 SHA-256은
 `249813a4c54ecad840dc6e12697a6dbb1592cc14773061908354312cbbdef608`다.
 
-## 다음 운영 순서
+## 2026-10-21 실행 결과와 현재 gate
 
-1. ROOT가 canonical first-five 뒤의 protected baseline을 한 번 fresh capture한다. Raw
-   9,873 files, package view, metadata 50, accepted first-five History·financial roots와
-   보존된 failed roots의 exact fileset/hash를 포함한다.
-2. collection 순서를 유지하고 first-five를 뺀 45사를 한 회사씩 처리한다. 첫 회사는
-   `AMD` / CIK `0000002488`다. 각 회사는 History build, full audit, governed FY/QTD
-   inventory, ROOT History acceptance를 순서대로 마친다.
-3. 각 worker는 process-tree RSS 16 GiB, 10,800초, Polars threads 2, one-heavy-stage,
-   no `RLIMIT_AS` 경계를 유지한다. 실패 root는 보존하고 자동 retry·cleanup·acceptance를
-   하지 않는다.
-4. 50개 History가 수락된 뒤 source `4357c83…`로 FULL50 financial 8 stages를 fresh
-   실행하고 H5 exact 107 manifests와 6 phases를 검증한다.
-5. 기존 immutable reference set을 재검증해 first-five/intermediate dataset을 중복하지
-   않는 최종 FULL50 catalog를 발행한다. 별도 private journal UAT와 ROOT 승인 뒤에만
-   controlled live rollout을 판단한다.
+ROOT는 canonical first-five 뒤의 fresh protected baseline을 수락했다. inventory locator는
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/later45_actual_l4_runtime_r2/keeper-results/protected-inventory-r3.json`이고
+SHA-256은
+`081720ff3b6a2405a53c700e3fa6604bf138933a67c0109d567e7b5efb4c9599`다. local
+acceptance locator는
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_later45_protected_baseline_acceptance_20261021.json`이고
+SHA-256은
+`37dbeb4eb8893a8d88c6d1e90af2157d2e3790d87c0b2d6ca05708f473e010b0`다.
+
+baseline capture가 사용하는 pinned validator의 project dependency는 source 또는 전역
+환경을 바꾸지 않고 project-local user base에 결속했다.
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/resume_20261021_runtime_deps/lib/python3.12/site-packages/project-runtime.pth`가
+기존 main `.venv`의 site-packages를 가리킨다. 실행 시 `PYTHONUSERBASE`를 이 root로
+지정하고 `PYTHONNOUSERSITE`는 설정하지 않는다. 이 결정 기록은
+`resume_20261021_root/project_runtime_dependency_binding.json`, SHA-256
+`28d37fb1b5ded6493d21e502a27aa2e1893afb7faee5960cf94491c5660e34fa`다. package 설치,
+source 변경 또는 global environment 변경은 없었다.
+
+첫 later-45 대상 AMD의 metadata-only preflight는 History build 전에
+`ValueError: target source scope differs`로 중단했다. request, GO, History worker는 실행하지
+않았고 자동 재시도도 하지 않았다. 실패 증거는
+`resume_20261021_operator/AMD_metadata_preflight_failed_evidence.json`, SHA-256
+`33de4e13148ed84054a652623b12c8cce112073ccd635bc86e650d3675b23b18`다.
+
+ROOT의 45사 metadata-only 대조 결과, 45사 모두 candidate original intake hash와 adopted
+collection intake hash가 다르다. JSON을 비교하면 각 filing의 `status`가 original의
+`INGESTED`에서 adopted collection의 `REUSED`로 바뀐 것만 다르고 plan, filing metadata,
+source 의미에는 다른 차이가 없다. 현재 runner는 두 hash를 하나의 target hash로 동시에
+검증하므로 AMD에서 충돌했다. 진단 locator는
+`resume_20261021_root/later45_intake_binding_diagnosis.json`, SHA-256
+`c2b4667653d774dfb287799c1a8c55be8eb2ff3252c7aba8f8392a02fa88cc41`다. 이를 해결할
+최소 별도 original/adopted hash 검증은 사용자 결정 대기 중이다. 따라서 아직 50사
+financial-ready 상태가 아니며, 결정 전에는 code 변경이나 metadata 재시도를 하지 않는다.
+
+결정 뒤에도 collection 순서를 유지해 first-five를 뺀 45사를 한 회사씩 처리한다. 각
+worker는 process-tree RSS 16 GiB, 10,800초, Polars threads 2, one-heavy-stage, no
+`RLIMIT_AS` 경계를 유지한다. 실패 root를 보존하며 자동 retry, cleanup 또는 acceptance를
+하지 않는다. 50개 History가 수락된 뒤 source `4357c83…`로 FULL50 financial 8 stages와
+H5 exact 107 manifests/6 phases를 검증하고, 별도 private journal UAT와 ROOT 승인 뒤에만
+controlled live rollout을 판단한다.
 
 protected baseline은 canonical first-five acceptance, Raw·package·metadata,
 first-five History와 failed roots가 모두 동일할 때만 later-45 전 구간에서 재사용한다.
