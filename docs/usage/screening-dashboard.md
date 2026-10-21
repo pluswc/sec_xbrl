@@ -222,6 +222,24 @@ row/digest를 별도 private 경로에 기록한다. rollback은 새 runtime을 
 복원이 필요하면 원본을 덮어쓰지 않고 consistent copy를 새 경로에 복원해 검증한
 뒤 그 경로를 명시한다.
 
+Windows bridge의 현재 exact foreground restart 명령은 다음과 같다.
+
+```powershell
+& "C:\Users\plusbdw\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe" `
+  "\\wsl.localhost\Ubuntu\home\plusbdw\.codex\worktrees\universe50-delivery-status-r5\sec_xbrl\examples\screening\windows-loopback-bridge.cjs" `
+  --distribution "Ubuntu" `
+  --linux-python "/home/plusbdw/user_work/projects/sec_xbrl/.venv/bin/python" `
+  --source-root "/home/plusbdw/.codex/worktrees/universe50-delivery-status-r5/sec_xbrl/src" `
+  --backend-port 18766 `
+  --frontend-port 18765
+```
+
+현재 persistent runtime의 backend process record/log locator는
+`work/screening21_stability_20261021/live-backend-process.json`, Windows bridge
+record는 app visualization의 `screening21-stability-20261021/bridge-18765.json`이다.
+PID는 관찰값이므로 재시작 전에는 record의 명령·source·port와 현재 process를 함께
+대조한다.
+
 주요 HTTP 경계는 다음과 같다.
 
 | 동작 | endpoint |

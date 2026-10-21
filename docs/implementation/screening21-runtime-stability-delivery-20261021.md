@@ -84,3 +84,32 @@ R8 first-five 보고서의 상태
 그대로 보존한다. 참조 receipt의 PASS/hash 확인은 formal financial acceptance가
 아니다. 50사 확대는 계속 pending이며 이 runtime 안정화로 readiness를 올리지
 않는다.
+
+## 독립 검증·로컬 인수·live 반영 — 2026-10-21 후속
+
+동결 source `0e59d33ab0d4e6af0ed748267195083bf7cb3158`은 별도 read-only
+검증에서 **PASS**했다. 검증자는 격리 archive와 현재 checkout의 frozen bytes가
+같음을 확인하고 bounded 47 tests를 9.95초에, 새 CLI 6 tests를 0.38초에 통과했다.
+lead는 이를 **LOCALLY_ACCEPTED_21_COMPANY_RUNTIME_AND_LIVE**로 수락했다.
+
+같은 source를 기존 v1+v2 catalog와 원본 journal을 사용하는 WSL
+`127.0.0.1:18766` backend에 `--require-existing-store`로 반영했다. Windows
+`127.0.0.1:18765` bridge의 read-only Chrome 확인은 회사 21개, 회사 상세, 2사
+비교, 기존 조건 4개 버전과 기존 결과 4개 재열기를 모두 통과했다. page error와
+failed HTTP는 0이었다. live 전후 journal byte SHA-256은 모두
+`e486bb5e504d51272837ed9dc00de267529f74a20c40403b0abd85e480be0997`이고 모든 table의
+row count와 logical digest도 같았다. 기존 3 definitions, 4 revisions, 4 runs와
+2 universes를 변경하지 않았다.
+
+동결 직후 working `cli.py`가 base bytes로 돌아간 현상을 발견했지만 frozen commit
+blob은 보존되어 있었다. 구현자가 해당 파일만 frozen HEAD bytes로 복원했고,
+독립 검증자는 격리 archive로 검증했다. live 시작 전후에도 source bytes가 frozen
+commit과 같음을 다시 확인했다. 원인은 확정하지 않았으므로 이 현상을 제품 결함이나
+특정 process의 쓰기로 단정하지 않는다.
+
+현재 persistent process record와 exact backend/Windows bridge restart 명령은
+[스크리닝 이용 가이드](../usage/screening-dashboard.md#현재-21사-runtime의-표준-재시작-경로)에
+있다. 원격 push·PR·remote CI·`main` 병합은 수행하지 않았고 `main`은
+`201acf9aec2f8183acb7dd843579938db14236cd`다. 이 수락은 기존 21사 annual consumer
+runtime에 한정된다. `actual_financial_ready=false`와 50사 재무 확대 pending 상태는
+변하지 않는다.
