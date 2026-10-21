@@ -128,3 +128,34 @@ financial-ready 상태가 아니다. 앞선 실패 root와 로그는 그대로 �
 현재 21사 live UI, catalog와 원래 journal/records는 이 source 수정 및 later-45 작업과
 분리해 계속 보존한다. 남은 회사도 collection 순서대로 회사 하나, heavy stage 하나씩
 ROOT의 별도 request와 GO로만 진행하며 자동 재시도나 자동 acceptance를 하지 않는다.
+
+## 2026-10-22 AMD 수락과 다음 회사 진행 상태
+
+앞 절의 AMD 감사 실행 중 상태는 이후 완료 증거로 대체됐다. intake adoption과 same-leaf
+source-root 수정 뒤, actual auditor에도 original candidate와 adopted intake를 분리해
+검증하는 동일한 status-only 계약을 적용했다. source-only focused controls는 회사마다
+반복하지 않고 이미 독립 검토된 결과를 재사용한다. AMD의 fresh History build와 L4 감사
+113 guards, 독립 artifact reconciliation이 PASS했고 ROOT는 AMD History를 local
+acceptance했다. acceptance locator는
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_later45_AMD_history_actual_acceptance_20261021.json`,
+SHA-256 `768943807742961f4e1cd14c108bc15953bbdbc3e41a7d62a102fd6aec57c989`다.
+
+AMD governed period inventory에서 발견된 FY `fiscal_quarter` null-only 가정은 기존
+FY-null fixture를 유지하면서 canonical History의 exact integer 4도 허용하는 좁은 adapter
+수정으로 교정했다. source row, schema, hash와 order key를 정규화하지 않고 그대로
+보존하며 FY와 QTD 목록은 `period_class`로 계속 분리한다. focused owned controls는 16 PASS였고
+source acceptance SHA-256은
+`c4c6e91b0988ab08903d6e84330bab86a1e4819fe531c4dadb0bab3b26970d79`다.
+AMD inventory는 1 GiB/120초 metadata resource 경계에서 PASS했고 FY input 2021–2025,
+display 2022–2025, QTD years 2021–2026을 보존했다. History와 period-readiness의 ROOT
+acceptance locator는
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_later45_AMD_history_period_readiness_acceptance_20261022.json`,
+SHA-256 `923c68befd51f8453044ca36acd5dd562b7346e4a1f402948b28fe8d49578801`다.
+이로써 accepted History와 governed period scope를 갖춘 회사는 기존 first-five와 AMD를
+합쳐 6사다. 이는 50사 financial-ready나 live rollout acceptance를 뜻하지 않는다.
+
+다음 collection 순서인 AAPL은 fresh metadata preflight와 ROOT GO를 거쳐 현재 한 번의
+bounded History build가 실행 중이다. AAPL History, 감사, period inventory와 financial은
+아직 수락되지 않았다. 회사별 source-only test 재실행, 자동 retry 또는 자동 acceptance는
+하지 않으며 실패·운영 보정 증거는 모두 보존한다. 현재 21사 live UI, catalog와 원래
+journal/records는 중단하거나 교체하지 않고 계속 보존한다.
