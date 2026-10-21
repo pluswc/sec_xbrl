@@ -221,3 +221,26 @@ rollout은 아직 수락되지 않았다.
 21사 live UI, catalog, journal과 원래 records는 이 복구 과정에서도 중단하거나 변경하지
 않았다. 남은 회사도 collection 순서, 회사 하나와 heavy stage 하나, 별도 ROOT GO, 실패
 root 보존, no automatic retry/acceptance 경계를 유지한다.
+
+## 2026-10-22 20/50 History·period input readiness
+
+MU, QCOM, WMT와 COST의 History proof와 governed period inventory를 ROOT가 각각 local
+acceptance했다. exact readiness acceptance는 다음과 같다.
+
+- MU: `work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_later45_MU_history_period_readiness_acceptance_20261022.json`, SHA-256 `a765119c33fb065125e63d2350d38a48e1bac165b7c99cdc1ab71c93ec84e819`
+- QCOM: `work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_later45_QCOM_history_period_readiness_acceptance_20261022.json`, SHA-256 `8fb6b90acee7bb8f167423ef7829f3f1fda837722f5910618a1d96a5fbc75bba`
+- WMT: `work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_later45_WMT_history_period_readiness_acceptance_20261022.json`, SHA-256 `a30594ee8e9da293e8145bfa6dc808cb7907a05d41553400465663f205a9043e`
+- COST: `work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_later45_COST_history_period_readiness_acceptance_20261022.json`, SHA-256 `26c130184010e715ee9334930013ffb36bcd4e6031d544b8451a3792d8c71e52`
+
+이 네 회사와 앞서 수락한 16사를 합쳐 exact-50 collection 중 20사가 History와 governed
+period input ready 상태다. 이는 FULL50 financial 또는 UI ready 상태가 아니며, 30사의
+History·period readiness가 더 필요하다. TGT build session 77264는 현재 실행 중이므로
+accepted 20사 집계에 포함하지 않는다.
+
+50사 input readiness가 완료된 뒤에도 ROOT가 final FULL50 config와 별도 GO를 확정하고,
+annual analysis, quarterly analysis, quality, identity, annual metrics, annual dataset v2,
+quarterly metrics, combined dataset v3의 고정 8단계를 실행해야 한다. 이어서 H5의 107개
+manifest·6개 phase 검증, 독립 acceptance, private-journal UAT와 controlled rollout이 남아
+있다. original first-five acceptance proof와 nullable auditor의 writer·independent 19+19 PASS
+source evidence는 변경하거나 반복하지 않고 재사용한다. 기존 21사 live runtime, catalog,
+journal과 원래 records도 변경 없이 보존한다.
