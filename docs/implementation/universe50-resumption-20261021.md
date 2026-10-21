@@ -189,3 +189,35 @@ acceptance 전이며, 새 INTC audit GO나 actual dispatch 권한을 만들지 �
 nullable-auditor 변경과 무관하다. MU와 INTC 모두 각자의 semantic acceptance 전에는 accepted
 15사 집계에 포함하지 않는다. 21사 live UI, catalog, journal과 원래 records는 계속 보존하며,
 회사 하나와 heavy stage 하나씩만 실행하고 자동 retry, cleanup 또는 acceptance를 하지 않는다.
+
+## 2026-10-22 INTC R6 복구 수락과 R5b 실행 결속
+
+nullable-binding auditor R6는 writer와 독립 검토에서 각각 focused 19 tests PASS를
+기록했다. source acceptance locator는
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_later45_l4_nullable_binding_r6_acceptance.json`,
+SHA-256 `b736fd14600515118f1c1af91b85361ba6a8305b72274264e2e53beeeb40b290`다.
+R5의 첫 복구 시도는 payload phase 전에 keeper policy path가 이전 R4를 가리킨다는
+`KEEPER_POLICY_FIXED` 검증으로 중단됐으며, 그 실패 root와 observer는 보존했다. source나
+History payload는 바뀌지 않았다.
+
+fresh R5b keeper는 policy를 포함한 모든 keeper role을 새 root에 고정했다. accepted source
+pins SHA-256은 `aa0102c1a4764dc5b38954a4d78328372735745204d9663736de76d43b30b8b8`,
+bound-runtime acceptance SHA-256은
+`8702a20d90f4fc0919e139f047ac75f3f8978e980158450815dcf30e49741491`,
+launcher SHA-256은 `565157e81d1a97e6afb7dc3ca7305cd9bc95e8f70c5c46637dcc2ef0d2359e64`다.
+ROOT launcher acceptance locator는
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_root_later45_nullable_binding_stable_launcher_r5b_acceptance.json`,
+SHA-256 `a2a513c6f2acdfb10740b2383e954934d211ebb3c9b37d88e91757043d0ef013`다.
+
+R6b actual audit는 112 guards와 109 jobs를 통과해 102 files, 416,099 records를 검증했고,
+INTC History acceptance SHA-256은
+`b565eb587f0fde76a16762a66274f899787092016c59324d538aba0432872276`다.
+후속 governed period inventory acceptance SHA-256은
+`e07aaac90ce1ce98d2721a9b04254dc86143f03eda6e74acd60efcb74aa4212c`다.
+따라서 기존 first-five를 포함한 History와 period-readiness 수락 범위는 16사다. MU 감사는
+별도 bounded 실행 중이며 아직 이 집계에 포함하지 않는다. FULL50 financial-ready와 live
+rollout은 아직 수락되지 않았다.
+
+21사 live UI, catalog, journal과 원래 records는 이 복구 과정에서도 중단하거나 변경하지
+않았다. 남은 회사도 collection 순서, 회사 하나와 heavy stage 하나, 별도 ROOT GO, 실패
+root 보존, no automatic retry/acceptance 경계를 유지한다.
