@@ -367,3 +367,47 @@ profile remains proposed pending its independent review and ROOT acceptance; no 
 inventory or GO has run from it. The readiness checkpoint therefore remains 33 History and 32 governed-period
 companies, while the existing 21-company live runtime, catalog, journal and original records remain
 unchanged.
+
+## 2026-10-22 CRM corrected History and governed-period local acceptance
+
+The user-approved CRM accession correction has completed its separately governed source, runtime,
+build, audit and period-inventory stages. ROOT accepted the final `1d4fbc8c…` engine,
+`f9a3f20b…` runner, R7c audit and R6c keeper/launcher binding in
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_root_crm_fiscal_focus_final_runtime_acceptance_20261022.json`,
+SHA-256 `89f3a5fca4e6c7cca3acbcc111e4eeef37770449fe9fbadf9e6332d2830da9f9`.
+The earlier independent FAIL reports and the R7/R7b/R6b control attempts remain preserved as historical
+evidence; this acceptance applies to the final exact R7c/R6c bytes only.
+
+The fresh corrected CRM History build and 112-guard R7c audit passed with 102 files and 384006 records.
+ROOT's company History acceptance is
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_later45_CRM_fiscal_focus_history_actual_acceptance_20261022.json`,
+SHA-256 `76d9993b29047ac58a8e694ef0b2f73c7b51dc3f9616272766cbffd76e9dbfa7`.
+The governed period inventory then passed with annual input years 2022–2026, display years 2023–2026,
+and quarter-input years 2022–2027. Its readiness acceptance is
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_later45_CRM_history_period_readiness_acceptance_20261022.json`,
+SHA-256 `da9d019e71e8108dad719d1014fb174c1543a70fd7afa06bb8bba5d80fab546a`.
+The accepted History root is
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/ops_writer/history-later45-20261021/CRM-history-recovery-t3v2-later45-20261022-fiscal-focus-r4`;
+the accepted period inventory is under
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/ops_writer/period-inventory-later45-20261022/CRM-fiscal-focus-r4-fy-quarter-r2`.
+
+Raw Layer 1 still records the filed lexical fiscal focus `2025`. The corrected History retains that
+reported value and its source provenance while applying reviewed effective fiscal year `2026` only to
+the exact approved accession's Layer 2 period observation. The earlier as-filed CRM History acceptance
+`fa56d5a1…`, original collection marker, failed inventory and immutable Raw source remain preserved.
+The corrected acceptance supersedes them only for the downstream financial-input scope described by
+[the accession-scoped correction contract](crm-fiscal-focus-correction.md); it does not redefine Raw.
+
+Operationally, each actual stage was authorized by its own hash-bound ROOT GO and invoked through the
+accepted bounded launcher or the accepted generic period-inventory worker: corrected History build,
+R7c audit, then governed inventory. These evidence paths document the completed run; checkout-local
+work directories are not normative prerequisites. Future runs must continue to follow the tracked
+[period rules](period-rules.md), correction contract and delivery workflow rather than replaying this
+historical session.
+
+The exact-50 checkpoint is now 37 unique companies with locally accepted History and 37 with governed
+period inputs. Financial output remains the accepted first five only. NKE is the active next bounded
+build, followed by KDP, MCD, GE, HON, UPS, UNP, MRK, ABBV, ABT, COP, DUK and LIN; none is counted before
+its separate History and period readiness acceptance. FULL50 financial production, the fixed eight
+financial stages, H5, private-journal UAT, controlled live rollout and main merge remain pending. The
+existing 21-company live runtime, catalog, journal and original records remain unchanged.
