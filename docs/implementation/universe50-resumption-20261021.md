@@ -526,3 +526,29 @@ user approval; their exact combined size is 181422800896 bytes, and zero files h
 The checkpoint remains 44 accepted History companies and 43 governed-period-ready companies.
 FULL50 financial and live-50 readiness remain pending. The existing 21-company live runtime,
 catalog and journal remain unchanged and the health endpoint continues to return HTTP 200.
+
+## 2026-10-22 MRK reported-stage runtime preparation contract
+
+The user approved deletion of exactly two superseded audit-only SQLite indices. ROOT removed
+181422800896 bytes and recorded the bounded result in
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/resume_20261021_root/approved_two_audit_index_cleanup_result_20261022.json`.
+The approval SHA-256 is `3051520d1d475f5c0a9454a7478c076695afb8a365b140858e790fbb2dab4202`.
+Adjacent evidence, V3 indices, Raw, published outputs and the existing 21-company live runtime were
+preserved; available storage rose to approximately 194 GB.
+
+The next MRK milestone remains preparation-only. The accepted `d43fe6e…` runner may recover only
+the exact MRK `6c1d9de…` storage-full reported stage through the existing declared-file clean copy,
+full component verification, ROOT attestation and fresh-H public recovery path. The component helper
+profile must pin the original config/preflight/request/GO/resource summary/log, plan/intake,
+37-file reported manifest, T1–T4 manifests, current protected baseline and accepted engine/runner
+sources. Its only company-specific semantic check is MRK CIK `0000310158` with 23 selected filings;
+the remaining JNJ helper algorithms and resource controls are copied unchanged.
+
+The MRK History audit profile must explicitly validate the normalized `reported_reuse` object in the
+config, preflight, request, build GO and typed receipt; require the public
+`reported_recovery_receipt.json`; and bind the byte-identical reported manifest to the preserved
+original T1–T4 roots. It must retain every existing source, Raw, lineage, graph, value, quarter,
+resource and protected-baseline check. Fresh MRK History, component evidence and execution roots must
+be disjoint from the immutable failed root and collection. Preparation creates only source profiles
+and non-runnable templates with unresolved output pins. Actual copy, component scan, attestation,
+recovery, audit, GO and acceptance remain separate ROOT-authorized stages.
