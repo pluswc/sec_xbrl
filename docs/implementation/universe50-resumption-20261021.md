@@ -456,3 +456,53 @@ dispatch is authorized by this checkpoint. Raw and metadata remain complete for 
 financial output remains the accepted first five only. FULL50 financial production, the fixed eight
 financial stages, H5, private-journal UAT, controlled live rollout and main merge remain pending. The
 existing 21-company live runtime, catalog, journal and original records remain unchanged.
+
+## 2026-10-22 HON correction source/runtime acceptance and MRK storage stop
+
+The user subsequently approved exactly two HON effective-focus corrections: annual accession
+`0000773840-22-000018` from reported year 2020 to effective year 2021, and quarterly accession
+`0000773840-21-000065` from reported period Q2 to effective period Q3. Raw lexical values remain
+unchanged. Engine commit `fbbe26203c4976fdc4867d27eeec180be930b98b` preserves separate reported
+and effective year/period provenance and binds both corrections to the exact cached ZIP member,
+QName, fact, context and reviewed approval evidence. Its engine acceptance SHA-256 is
+`d60294fa45aa30a94ef59f6efff976872fa7247f130131e3af3a5f419f76e85d`; the combined bounded
+source acceptance SHA-256 is
+`7dc969f0ae92ba92fbb82dc81f93be808179dd965fd53ae966d49aabdd51373f`.
+
+The HON-only R8b audit profile repaired the rejected R8 profile's four-column correction-coordinate
+insert without changing the other 16 scripts. ROOT accepted the R8b L4 source with SHA-256
+`e0db3a90dcf41377d03657adc4e168f78cdb68038a9d40892ae91bad4ef866cb` and the final bounded
+runtime with SHA-256
+`394a3ef50983d3482b044bdead90cd4624fc5c03a684b2edeefb2f51bea28b6f`.
+These are source/runtime acceptances only: no corrected HON actual result is accepted at this
+checkpoint, and the original HON History proof and failed period inventory remain immutable.
+
+UPS and UNP History plus governed-period readiness were accepted with SHA-256 values
+`f309edd07a3ad606cc30601c5d4c2d74fdafaaa72d37ce7a157366741c281f14` and
+`235b3b85e9f42ba2b4899db941a1a52a3f44aad245a042c24eab12ca23af788e`, respectively. The
+checkpoint therefore has 44 companies with accepted History and 43 with governed period inputs.
+FULL50 financial, H5 and UI readiness remain pending.
+
+MRK's bounded History build stopped after 7167.755 seconds, with peak process-tree RSS 4508684 KiB,
+when the quarter publisher's SQLite spill returned `database or disk is full`. The 19 GiB failed root
+is preserved unchanged. Its T1–T4 operational roots are complete, and its published reported stage
+contains all 12 panels: 36 manifest-declared payload files plus `history_manifest.json`, 667350518
+declared bytes total. The reported manifest SHA-256 is
+`9cc56f5ba911b9932a55784cd713f27f0aa584660d2a93db15db8e336a9ffb91`; its `.chunks` directory
+is empty. This is a storage failure during quarter materialization, not an accounting or source
+contradiction.
+
+The accepted JNJ reported-stage recovery design can avoid rebuilding MRK's completed reported
+panels, but its current runner admission is explicitly limited to JNJ and the original JNJ generation
+and recovery source identities. Reusing it for MRK therefore requires a narrow reviewed admission
+for MRK's exact failed root and 6c1 source identity, plus an independent declared-file clean copy,
+component verification report, root attestation and source-log binding. Recovery must target a fresh
+History root; it must not mutate the failed MRK tree. The clean copy and recovered reported copy each
+require about 637 MiB, while the quarter spill already exhausted the approximately 18 GiB then free,
+so recovery must wait for adequate temporary-space headroom.
+
+An independent read-only cleanup review identified two superseded audit-only SQLite indices of
+90501996544 and 90920804352 bytes. Their combined size is 181422800896 bytes, about 169 GiB. Deletion
+is only proposed and remains subject to explicit human approval; neither index nor any MRK evidence
+has been removed. No additional heavy operation is authorized while that decision is pending. The
+existing 21-company live runtime, catalog, journal and original records remain unchanged.
