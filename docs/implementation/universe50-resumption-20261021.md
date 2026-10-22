@@ -316,3 +316,22 @@ fail closed한다. calendar year 추론, ticker-specific core 분기, Raw 수정
 financial 실행과 ROOT GO·acceptance는 새 source와 runtime의 동결·독립 검증 뒤 별도다.
 History 33사, governed period input 32사 상태와 중단된 actual expansion, 기존 21사 live
 runtime/catalog/journal 보존 상태는 이 승인만으로 바뀌지 않는다.
+
+## 2026-10-22 CRM correction source freeze
+
+The user-approved accession-scoped correction is frozen in local engine commit
+`5de43fa9193ee8972b54a0720d8b26cd0dd4024c` and recovery-runner commit
+`27d11238d77129df361ca0a3b13f87e024a6db9a`. Focused validation passed 5 engine
+and 2 runner tests; Ruff and diff checks passed. The hash-bound correction artifact
+proposal is `resume_20261022_crm_fiscal_focus_correction/crm_fiscal_focus_correction.json`
+under the resumption work root, SHA-256
+`a5341665926da32479f990d4e776bc0ee1ab897fabbfaf7a0fd4fd57fc3b616c`.
+
+The source keeps Raw `2025`, applies effective `2026` only on the exact approved
+CIK/accession evidence before Layer 2 period observation, and preserves reported,
+effective and source-approval provenance. It does not relax the governed five-year
+inventory or any Q4, lineage or quality rule. CRM remains outside the financial-ready
+count until independent source/runtime acceptance, a fresh ROOT-governed build and
+audit, and a fresh governed period inventory all pass. The stopped checkpoint remains
+33 History and 32 governed-period companies; the existing 21-company live runtime,
+catalog and journal remain unchanged.

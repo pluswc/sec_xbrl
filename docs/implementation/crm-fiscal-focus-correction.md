@@ -73,3 +73,27 @@ After source freeze and independent verification, ROOT must separately accept ne
 and runtime bindings. Only then may ROOT author a fresh CRM config and GO. The accepted
 CRM History proof and failed inventory evidence remain immutable and are superseded only
 by a separately accepted fresh CRM chain.
+
+## Frozen local implementation
+
+The bounded implementation was frozen locally on 2026-10-22. Engine commit
+`5de43fa9193ee8972b54a0720d8b26cd0dd4024c` (tree
+`334a8bca575ff9b61bd60dd2870d118064593b6a`) adds the hash-bound correction
+registry, the History CLI seam, the pre-period-observation copy, Layer 2
+reported/effective provenance, distinct FY2026 current and FY2025 prior-comparative
+coordinates, and correction-artifact binding in the Layer 2 run fingerprint.
+Runner commit `27d11238d77129df361ca0a3b13f87e024a6db9a` (tree
+`a68a25d90f2fe1ef6dadc3f99cfefb3aa3e2ea2a`) pins the expanded engine module
+set and threads the correction path and SHA-256 through preflight, request,
+build and receipt. The no-correction route retains the existing arguments and
+period-rule identity.
+
+The focused engine suite passed 5 tests and the focused runner suite passed 2;
+Ruff and `git diff --check` passed in both worktrees. The proposed runtime
+correction artifact is
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/resume_20261022_crm_fiscal_focus_correction/crm_fiscal_focus_correction.json`,
+SHA-256 `a5341665926da32479f990d4e776bc0ee1ab897fabbfaf7a0fd4fd57fc3b616c`.
+It binds approval artifact SHA-256
+`524e0592066b11255a254df066d9839fc878747640513d3694bd59d0ba28faca`.
+These are frozen implementation and proposal records, not source acceptance,
+a ROOT GO, or permission to run CRM.
