@@ -335,3 +335,35 @@ count until independent source/runtime acceptance, a fresh ROOT-governed build a
 audit, and a fresh governed period inventory all pass. The stopped checkpoint remains
 33 History and 32 governed-period companies; the existing 21-company live runtime,
 catalog and journal remain unchanged.
+
+## 2026-10-22 CRM correction evidence-binding amendment
+
+The initial CRM correction freeze above remains historical and was not accepted. Independent
+review report
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/independent_crm_fiscal_focus_correction_20261022/report.json`,
+SHA-256 `a81e4c73771a983803e48bfb7e8474c05e862775d9bd7d4ca70fecdff82d5e62`,
+found that the first implementation trusted declared fact/context fields without independently
+matching them to the cached inline source. The unaccepted artifact bytes are preserved separately
+as `crm_fiscal_focus_correction_unaccepted_a5341665_historical.json`, SHA-256
+`a5341665926da32479f990d4e776bc0ee1ab897fabbfaf7a0fd4fd57fc3b616c`.
+
+The amended engine commit is `1d4fbc8c03270ffa48dd1b3b11f78d68bab009fd`. It binds the ROOT evidence
+supplement SHA-256 `797f2df5ba46a56bff05e9d8555a59824e64534a285196aac9dfcda162dbde6b`,
+verifies the exact cached ZIP hash and the single `crm-20260131.htm` member's size and CRC,
+then reads at most 131072 member bytes to match fact `f-36`, context `c-1`, reported lexical
+`2025`, and context dates 2025-02-01 through 2026-01-31. A synthetic 1900 context fails closed.
+The amended governed correction artifact SHA-256 is
+`41f14d24b947110c06a7fb4fdc695a0a0141526c51e445b5f4053a91b07cbc35`.
+
+The amended runner commit is `f9a3f20b59064a5b1031e0ebd1417efb62e04123`. Its correction-only seam
+requires the exact prior accepted CRM READY marker, keeps the collection plan, intake, marker and
+receipts hash-stable, and writes the fresh corrected marker and typed receipt under a separate empty
+evidence root. Focused engine validation passed 6 tests; focused runner validation passed the two
+correction threading tests and the collection-preservation control, with the latter repeated once
+after fixing its fixture setup. Ruff and diff checks passed. ROOT accepted these source-only commits
+in `lead_crm_fiscal_focus_source_acceptance_1d4fbc8_f9a3f20.json`, SHA-256
+`43d8a092d912806011ad3386d02e9f81fd4947ec87d3abcda82e4707dacfe331`. The R7 runtime
+profile remains proposed pending its independent review and ROOT acceptance; no CRM rebuild, audit,
+inventory or GO has run from it. The readiness checkpoint therefore remains 33 History and 32 governed-period
+companies, while the existing 21-company live runtime, catalog, journal and original records remain
+unchanged.
