@@ -411,3 +411,48 @@ build, followed by KDP, MCD, GE, HON, UPS, UNP, MRK, ABBV, ABT, COP, DUK and LIN
 its separate History and period readiness acceptance. FULL50 financial production, the fixed eight
 financial stages, H5, private-journal UAT, controlled live rollout and main merge remain pending. The
 existing 21-company live runtime, catalog, journal and original records remain unchanged.
+
+## 2026-10-22 HON fiscal metadata conflict and expansion stop
+
+The exact-50 checkpoint has advanced to 42 companies with locally accepted History and 41 with
+governed period inputs. HON History passed its 113-guard actual audit with 103 files and 645206
+records; ROOT's History-only acceptance is
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_later45_HON_history_actual_acceptance_20261022.json`,
+SHA-256 `1bdaeb851868e8e6394453cf0830055471f2cf444c856a42dd06b12120a64edb`.
+HON is not period-ready: the strict inventory found annual years 2020, 2022, 2023, 2024 and 2025,
+so the five-consecutive-year contract correctly failed. The failed resource and all accepted History
+evidence remain preserved.
+
+ROOT's bounded diagnosis is
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/resume_20261021_root/hon_original_fiscal_metadata_conflict_diagnosis.json`,
+SHA-256 `26347259caa139af8cf6ae6831c030e7b62b6d29bfb1dda71b02a4013be71a2e`.
+It read at most 131072 bytes from each of two exact cached members and did not reparse or scan the
+broader Raw corpus:
+
+- Annual accession `0000773840-22-000018`, member `hon-20211231.htm`, reports
+  `DocumentFiscalYearFocus=2020` and `DocumentFiscalPeriodFocus=FY` against context
+  2021-01-01 through 2021-12-31. Its immutable ZIP path is
+  `data/raw/universe_runs/20261010_universe50_quarterly/resumption_20261013/packages/0000773840/000077384022000018/0000773840-22-000018-xbrl.zip`,
+  SHA-256 `0adb0f3401383fb8ecf4d7195f4a87d6700a1f5a5663c45ad9bd497e944494cf`;
+  the Layer 1 manifest SHA-256 is
+  `cb1a63cb0e8fd482d2263b880deeb42fc6a9e84655a3b0c845d3e693c0481b1c`.
+- Quarterly accession `0000773840-21-000065`, member `hon-20210930.htm`, reports
+  `DocumentFiscalYearFocus=2021` and `DocumentFiscalPeriodFocus=Q2` against context
+  2021-01-01 through 2021-09-30. Its immutable ZIP path is
+  `data/raw/universe_runs/20261010_universe50_quarterly/resumption_20261013/packages/0000773840/000077384021000065/0000773840-21-000065-xbrl.zip`,
+  SHA-256 `3214759e7e6468681a60fd45630b175ea7df87e1eff6226bb4541e3b92d9d26f`;
+  the Layer 1 manifest SHA-256 is
+  `5176ed253b2bacc314d9c70f15f1a2fd81b57e39a900bf7b5b05321e09fac3f8`.
+
+The diagnosis proposes two exact, evidence-bound effective values for human accounting review:
+annual fiscal year `2020` to `2021` and quarterly fiscal period `Q2` to `Q3`. Neither correction is
+approved or implemented. In particular, fiscal-period focus is new accounting meaning beyond the
+approved CRM year-only correction contract. Raw remains unchanged, and no rule, source, runtime,
+History or inventory has been modified or rerun for HON.
+
+Actual expansion is stopped while the user decision is pending. UPS, UNP, MRK, ABBV, ABT, COP, DUK
+and LIN are the other eight companies still lacking accepted governed-period readiness; no remaining
+dispatch is authorized by this checkpoint. Raw and metadata remain complete for 50 companies, while
+financial output remains the accepted first five only. FULL50 financial production, the fixed eight
+financial stages, H5, private-journal UAT, controlled live rollout and main merge remain pending. The
+existing 21-company live runtime, catalog, journal and original records remain unchanged.
