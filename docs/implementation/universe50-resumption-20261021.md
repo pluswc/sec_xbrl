@@ -506,3 +506,23 @@ An independent read-only cleanup review identified two superseded audit-only SQL
 is only proposed and remains subject to explicit human approval; neither index nor any MRK evidence
 has been removed. No additional heavy operation is authorized while that decision is pending. The
 existing 21-company live runtime, catalog, journal and original records remain unchanged.
+
+## 2026-10-22 MRK exact reported-stage admission source acceptance
+
+The narrow MRK source candidate is frozen at runner commit
+`d43fe6ebf2bce1c386582a2403e2461e4f59fb8c`. It admits only MRK CIK `0000310158`, the exact
+`6c1d9de…` source identities and the preserved storage-full root, controls, source log, plan/intake,
+37-file reported stage and T1–T4 manifests to the existing attested reported-stage recovery path.
+The existing JNJ profile and the public recovery, marker and receipt gates remain unchanged.
+
+Independent focused verification passed 16 tests with 96 deselected; its report SHA-256 is
+`6e1a972b4bce63016500ab9c0404a8fd60808f9d3bc775c3a4a83546b7de0c29`. ROOT locally accepted
+the source-only candidate in
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_history_recovery_source_acceptance_d43fe6e.json`,
+SHA-256 `08764d02cf80f8bf7f218d0c5b1344a4765598e174542366ae2855baf57d5415`.
+Actual declared-file copy, component verification, root attestation, runtime binding, GO, recovery and
+financial readiness have not run. The two proposed superseded-index deletions still require explicit
+user approval; their exact combined size is 181422800896 bytes, and zero files have been deleted.
+The checkpoint remains 44 accepted History companies and 43 governed-period-ready companies.
+FULL50 financial and live-50 readiness remain pending. The existing 21-company live runtime,
+catalog and journal remain unchanged and the health endpoint continues to return HTTP 200.
