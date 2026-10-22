@@ -300,3 +300,19 @@ filing narrative가 충돌하는 source-level contradiction이다.
 명시적 처리 결정 전에는 correction, rebuild 또는 retry를 하지 않는다. 기존 first-five proof와
 nullable auditor 19+19 PASS evidence를 계속 재사용하고, 21사 live runtime, catalog, journal과
 원래 records도 변경하지 않는다. FULL50 financial, H5와 UI readiness는 아직 성립하지 않는다.
+
+
+## 2026-10-22 CRM accession-scoped correction 승인
+
+사용자는 CRM accession `0001108524-26-000060`에 한해 Raw lexical `2025`를 보존하고
+reviewed effective fiscal year `2026`을 Layer 2 input에 적용하는 보정을 승인했다. exact
+CIK/accession, inline fact `f-36`, context `c-1`, primary document, report/context dates와
+package manifest·ZIP hashes가 모두 일치해야 하며 mismatch, malformed 또는 unconsumed entry는
+fail closed한다. calendar year 추론, ticker-specific core 분기, Raw 수정, five-year gate 완화와
+기존 Q4·lineage·quality 정책 변경은 승인 범위가 아니다. 상세 계약은
+[CRM accession-scoped fiscal-focus correction](crm-fiscal-focus-correction.md)에 있다.
+
+이 승인은 source와 focused test 구현만 허용한다. fresh CRM History build, audit, inventory,
+financial 실행과 ROOT GO·acceptance는 새 source와 runtime의 동결·독립 검증 뒤 별도다.
+History 33사, governed period input 32사 상태와 중단된 actual expansion, 기존 21사 live
+runtime/catalog/journal 보존 상태는 이 승인만으로 바뀌지 않는다.
