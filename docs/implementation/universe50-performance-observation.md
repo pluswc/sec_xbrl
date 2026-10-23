@@ -35,6 +35,8 @@ Raw or parent hashes, decode Parquet, query SQLite, or traverse `/proc/<pid>/fd`
 Whitelisted `BEGIN`, `FLUSH` and `END` events are grouped by stage, phase, ticker, view and period
 class, up to 100 phase identities. The report shows observed event count and source-log elapsed
 begin/end/duration only when safe non-negative finite values and both matching endpoints exist.
+It accepts both an explicit `event` field and the worker's stage-only `QUARTER_SPILL_*` form. The
+records column is the maximum observed non-negative cumulative value, not a sum across events.
 Missing endpoints remain `partial` with unknown duration. Event and byte coverage gaps are explicit,
 and observer elapsed/CPU delta remain separate from source-log elapsed.
 

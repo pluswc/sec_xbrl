@@ -364,12 +364,15 @@ def _update_phase_summaries(
     coverage_gap = 0
     for event in events:
         event_name = event.get("event")
-        parsed = _phase_name(event_name) if isinstance(event_name, str) else None
+        stage_fallback = not isinstance(event_name, str)
+        phase_source = event["stage"] if stage_fallback else event_name
+        parsed = _phase_name(phase_source)
         if parsed is None:
             continue
         phase, kind = parsed
+        normalized_stage = phase if stage_fallback else event["stage"]
         key = (
-            event["stage"],
+            normalized_stage,
             phase,
             str(event.get("ticker", "unknown")),
             str(event.get("view", "unknown")),
@@ -386,7 +389,7 @@ def _update_phase_summaries(
                 "view": key[3],
                 "period_class": key[4],
                 "observed_event_count": 0,
-                "source_records_total": 0,
+                "cumulative_records": None,
                 "begin_observer_elapsed_seconds": None,
                 "end_observer_elapsed_seconds": None,
                 "begin_source_elapsed_seconds": None,
@@ -398,7 +401,10 @@ def _update_phase_summaries(
             }
         summary = phases[key]
         summary["observed_event_count"] += 1
-        summary["source_records_total"] += event.get("records", 0)
+        if "records" in event:
+            summary["cumulative_records"] = max(
+                event["records"], summary["cumulative_records"] or 0
+            )
         source_field = None
         source_elapsed = None
         for candidate in ("elapsed_seconds", "monotonic_seconds"):
@@ -497,12 +503,12 @@ def _report(summary: dict[str, Any]) -> str:
         "",
         "## Observed phase timing",
         "",
-        "| Phase | Stage | Company | View / period | Events | Source elapsed begin / end / duration | Status |",
-        "| --- | --- | --- | --- | ---: | --- | --- |",
+        "| Phase | Stage | Company | View / period | Events | Cumulative records | Source elapsed begin / end / duration | Status |",
+        "| --- | --- | --- | --- | ---: | ---: | --- | --- |",
     ]
     for phase in summary.get("phase_summaries", []):
         lines.append(
-            "| {phase} | {stage} | {ticker} | {view} / {period_class} | {count} | "
+            "| {phase} | {stage} | {ticker} | {view} / {period_class} | {count} | {records} | "
             "{begin_field}:{begin} / {end_field}:{end} / {duration} ({basis}) | {status} |".format(
                 phase=phase["phase"],
                 stage=phase["stage"],
@@ -510,6 +516,7 @@ def _report(summary: dict[str, Any]) -> str:
                 view=phase["view"],
                 period_class=phase["period_class"],
                 count=phase["observed_event_count"],
+                records=phase["cumulative_records"],
                 begin_field=phase["begin_source_elapsed_field"],
                 begin=phase["begin_source_elapsed_seconds"],
                 end_field=phase["end_source_elapsed_field"],
@@ -520,7 +527,10 @@ def _report(summary: dict[str, Any]) -> str:
             )
         )
     if not summary.get("phase_summaries"):
-        lines.append("| unknown | unknown | unknown | unknown / unknown | 0 | None / None / None | partial |")
+        lines.append(
+            "| unknown | unknown | unknown | unknown / unknown | 0 | None | "
+            "None / None / None | partial |"
+        )
     lines.extend(
         [
             "",

@@ -160,7 +160,7 @@ def test_phase_summary_requires_safe_elapsed_and_begin_end_pair() -> None:
             "ticker": "MRK",
             "view": "cash_flow",
             "period_class": "QTD",
-            "records": 2,
+            "records": 14,
             "elapsed_seconds": 5.5,
             "monotonic_seconds": float("nan"),
         }
@@ -175,7 +175,7 @@ def test_phase_summary_requires_safe_elapsed_and_begin_end_pair() -> None:
     assert profiler._update_phase_summaries(phases, [end], 2.0, 100) == 0
     rows = profiler._phase_rows(phases)
     assert rows[0]["observed_event_count"] == 2
-    assert rows[0]["source_records_total"] == 14
+    assert rows[0]["cumulative_records"] == 14
     assert rows[0]["source_duration_seconds"] == 5.5
     assert rows[0]["source_duration_basis"] == "end_event_elapsed_seconds"
     assert rows[0]["status"] == "complete"
@@ -184,6 +184,69 @@ def test_phase_summary_requires_safe_elapsed_and_begin_end_pair() -> None:
     )
     assert other is not None
     assert profiler._update_phase_summaries(phases, [other], 3.0, 1) == 1
+
+
+def test_stage_only_quarter_spill_events_form_one_complete_report_phase() -> None:
+    raw_events = [
+        {
+            "stage": "QUARTER_SPILL_BEGIN",
+            "ticker": "MRK",
+            "view": "AS_FILED",
+            "period_class": "FY",
+            "records": 0,
+            "monotonic_seconds": 702800.489552393,
+        },
+        {
+            "stage": "QUARTER_SPILL_FLUSH",
+            "ticker": "MRK",
+            "view": "AS_FILED",
+            "period_class": "FY",
+            "records": 32,
+            "elapsed_seconds": 2.5,
+        },
+        {
+            "stage": "QUARTER_SPILL_FLUSH",
+            "ticker": "MRK",
+            "view": "AS_FILED",
+            "period_class": "FY",
+            "records": 64,
+            "elapsed_seconds": 4.0,
+        },
+        {
+            "stage": "QUARTER_SPILL_END",
+            "ticker": "MRK",
+            "view": "AS_FILED",
+            "period_class": "FY",
+            "records": 3883,
+            "elapsed_seconds": 169.7412,
+        },
+    ]
+    events = [profiler._stage_event(value) for value in raw_events]
+    assert all(event is not None for event in events)
+    phases: dict = {}
+    assert profiler._update_phase_summaries(phases, events, 10.0, 100) == 0
+    rows = profiler._phase_rows(phases)
+    assert len(rows) == 1
+    assert rows[0]["phase"] == "QUARTER_SPILL"
+    assert rows[0]["status"] == "complete"
+    assert rows[0]["source_duration_seconds"] == 169.7412
+    assert rows[0]["cumulative_records"] == 3883
+    assert rows[0]["observed_event_count"] == 4
+
+    report = profiler._report(
+        {
+            "termination_reason": "DURATION_REACHED",
+            "observation_elapsed_seconds": 10.0,
+            "sample_count": 1,
+            "latest_sample": {},
+            "observation_cpu_delta_seconds": 8.0,
+            "phase_summaries": rows,
+            "phase_coverage_gap_events": 0,
+            "log_coverage_gap_bytes": 0,
+        }
+    )
+    assert "QUARTER_SPILL" in report
+    assert "| 4 | 3883 |" in report
 
 
 def test_short_observation_writes_fresh_outputs_and_stops_on_pid_reuse(
