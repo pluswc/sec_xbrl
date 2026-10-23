@@ -552,3 +552,13 @@ resource and protected-baseline check. Fresh MRK History, component evidence and
 be disjoint from the immutable failed root and collection. Preparation creates only source profiles
 and non-runnable templates with unresolved output pins. Actual copy, component scan, attestation,
 recovery, audit, GO and acceptance remain separate ROOT-authorized stages.
+
+## 2026-10-24 MRK recovery performance observation
+
+The approved MRK reported-stage recovery is being observed by the separate read-only sampler
+described in [Universe-50 History resource observation](universe50-performance-observation.md).
+The observation fixes PID identity with `/proc` start time, records bounded CPU/RSS/I/O and explicit
+log/output-root growth, and keeps missing kernel I/O counters as `null`. Its elapsed time begins at
+attachment and its output is operational evidence only; it does not establish History `PASS`,
+period readiness, financial readiness or ROOT acceptance. Existing Raw data, failed and current MRK
+roots, and the 21-company live UI, catalog and journal remain unchanged.
