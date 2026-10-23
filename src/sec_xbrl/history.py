@@ -699,7 +699,6 @@ def _stage_records(
 
     _check_history_storage(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    json_fields = sorted({key for row in records for key, value in row.items() if isinstance(value, (dict, list, tuple))})
     if not records:
         return _StagedRecordWrite(path, 0, (), pl.Schema(), (), None)
     # json_fields is table-global: if a later row makes a field nested,
@@ -709,14 +708,53 @@ def _stage_records(
     # that global schema.  This prevents an early int/float or bool/int
     # batch from losing its original representation before a late string
     # promotes the complete column to String.
+    json_field_set: set[str] = set()
     schemas = []
+    schema_inference_failed = False
     for batch in _iter_record_batches(records):
-        schemas.append(
+        local_json_fields = sorted(
+            {
+                key
+                for row in batch
+                for key, value in row.items()
+                if isinstance(value, (dict, list, tuple))
+            }
+        )
+        json_field_set.update(local_json_fields)
+        if schema_inference_failed:
+            continue
+        try:
+            schemas.append(
+                pl.from_dicts(
+                    _schema_record_batch(batch, local_json_fields),
+                    infer_schema_length=None,
+                ).schema
+            )
+        except (OverflowError, pl.exceptions.PolarsError):
+            schema_inference_failed = True
+    json_fields = sorted(json_field_set)
+    if schema_inference_failed:
+        # A scalar in an early batch can be invalid for Polars but valid once a
+        # later nested value makes its column table-global JSON.  The original
+        # schema pass is the exact compatibility fallback and still raises for
+        # values that remain invalid after global JSON discovery.
+        schemas = [
             pl.from_dicts(
                 _schema_record_batch(batch, json_fields),
                 infer_schema_length=None,
             ).schema
-        )
+            for batch in _iter_record_batches(records)
+        ]
+    else:
+        schemas = [
+            pl.Schema(
+                {
+                    name: pl.String if name in json_field_set else dtype
+                    for name, dtype in schema.items()
+                }
+            )
+            for schema in schemas
+        ]
     global_schema = pl.concat(
         [pl.DataFrame(schema=schema).lazy() for schema in schemas],
         how="diagonal_relaxed",
@@ -820,7 +858,7 @@ def _schema_value(key: str, value: Any, json_fields: list[str]) -> Any:
 
 
 def _iter_encoded_record_batches(
-    records: tuple[dict[str, Any], ...], json_fields: list[str]
+    records: Sequence[dict[str, Any]], json_fields: list[str]
 ):
     """Yield bounded encoded batches; one indivisible row may exceed the cap."""
     batch: list[dict[str, Any]] = []
