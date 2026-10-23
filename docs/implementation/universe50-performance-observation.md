@@ -21,13 +21,22 @@ bytes, except for a bounded tail on initial attachment or truncation. Only JSON 
 retained. If no recognized new event exists, the sample says `unknown`; the observer does not infer a
 stage or ETA. Filesystem state is separate supporting evidence: a bounded non-symlink file scan
 reports regular-file and temporary-file bytes, deltas and available filesystem bytes. A
-`--max-files` cap prevents repeated unbounded file enumeration, and capped totals are explicitly
-partial.
+`--max-files` and `--max-entries` caps bound regular files and all visited directory entries,
+including directories, symlinks and other non-regular entries. Capped totals are explicitly partial.
+If appended log growth exceeds the byte limit, the observer reads the latest bounded tail, discards
+any leading partial line and records the skipped-byte gap instead of advancing past unseen tail
+events.
 
 The output directory must be fresh and outside the observed root. It receives append-only
 `samples.jsonl`, atomically replaced `summary.json`, and a short atomically replaced `report.md`.
 The sampler sends no signal, uses no ptrace, changes no process or observed file, and does not read
 Raw or parent hashes, decode Parquet, query SQLite, or traverse `/proc/<pid>/fd`.
+
+Whitelisted `BEGIN`, `FLUSH` and `END` events are grouped by stage, phase, ticker, view and period
+class, up to 100 phase identities. The report shows observed event count and source-log elapsed
+begin/end/duration only when safe non-negative finite values and both matching endpoints exist.
+Missing endpoints remain `partial` with unknown duration. Event and byte coverage gaps are explicit,
+and observer elapsed/CPU delta remain separate from source-log elapsed.
 
 ## MRK invocation
 
@@ -44,7 +53,10 @@ The evidence directory name must be new for each attachment.
   --output-dir /home/plusbdw/user_work/projects/sec_xbrl/work/universe50_quarterly_20261010/resumption_20261017_t3v2/performance_observations_20261024/mrk-sampler-r1 \
   --interval 5 \
   --duration 60 \
-  --max-files 2000
+  --max-files 2000 \
+  --max-entries 8000 \
+  --max-log-events 1000 \
+  --max-phases 100
 ```
 
 `--duration` limits the attachment interval; omitting it observes until process exit, zombie state or
@@ -67,9 +79,24 @@ The component-completion file timestamp was 2026-10-22 20:00:49 KST and the late
 gap. That wall-clock gap is historical scheduling/dispatch evidence, not computation time. At the
 referenced observation checkpoint the reported panels existed and the execution log was empty. A
 later bounded filesystem observation found quarter temporary directory
-`panels/.panels.partial-e2m2age8`, which supports only that quarter publishing entered an initial
-materialization interval. These filesystem facts do not identify the exact function or stage. The
-log-derived stage therefore remains `unknown` until a recognized JSON event is observed.
+`.panels.partial-e2m2age8` directly under the History root, which supports only that quarter
+publishing entered an initial materialization interval. These filesystem facts do not identify the
+exact function or stage. The log-derived stage therefore remains `unknown` until a recognized JSON
+event is observed.
+
+A separate ROOT point snapshot at
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/performance_observations_20261024/mrk_temporary_storage_snapshot.json`
+recorded cumulative worker CPU of 1082.53 seconds, approximately 0.67 GB RSS, 1,886,348,027 named
+quarter-spill bytes and a 1,903,976,448-byte open-unlinked SQLite file, with approximately 118.87 GB
+free. That snapshot used `/proc` file-descriptor metadata outside this CLI. It demonstrates why this
+sampler's named-file total can omit active storage; it does not authorize fd traversal here or prove
+an optimization effect.
+
+The first observed `QUARTER_SPILL_BEGIN` occurred approximately 967.39 seconds after the process
+start-time clock, while the AS_FILED/FY `END` reported 3,883 records and 169.7412 elapsed seconds;
+the following INSTANT phase reported 4,736 records and 118.127 seconds. The initial interval combines
+verification, copy, load and source-row preparation, so it cannot be assigned to one function, and
+these phase measurements do not prove that any source optimization would improve performance.
 
 ## Limits and interpretation
 
@@ -83,6 +110,11 @@ log-derived stage therefore remains `unknown` until a recognized JSON event is o
   accounting correctness or a precise code stage.
 - The reports are resource observations after attachment. They are not History `PASS`, governed
   period readiness, ROOT acceptance, or authorization for a retry, cleanup or future scheduled run.
+
+Potential investigation targets include repeated same-publication full JSON verification and
+per-cell set construction, serialization, journal and index storage. They are hypotheses only.
+Skipping verification, unconditional deduplication or deleting evidence could violate mutation
+ordering and ownership contracts, so no engine or runtime optimization is made or claimed here.
 
 The chosen structure keeps one direct CLI module because it has one caller-facing operation and no
 second production adapter. Its private calculation/read seams make offline edge cases testable
