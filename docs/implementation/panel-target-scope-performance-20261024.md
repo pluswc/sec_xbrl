@@ -108,3 +108,23 @@ graph memory를 줄였다는 주장은 하지 않는다. screening/detail view �
 이 후보는 로컬 소스와 증거만 동결한 상태다. 이미 시작한 LIN 397 실행에는 적용하거나
 재시작하지 않았으며, 실제 50개사 처리 완료 또는 운영 적용을 뜻하지 않는다. 독립 검증과
 별도의 향후 미시작 generation 바인딩 전에는 배포 후보일 뿐이다.
+
+## 전달 및 수락 상태
+
+2026-10-24 기준 production source `200d230b09e9b98fa814b913d47102140307dd50`를
+로컬 수락했다. 독립 검증은 중복 FACT 경계 보정의 직접 영향 4개 delta case를 통과했고,
+앞선 traversal/order/lineage 증거를 함께 확인했다. 최초 후보 `7e6a241d`는 같은
+`(source_filing_id, source_fact_id)`를 가진 복수 FACT node 중 하나를 누락하는 edge case로
+실패했으며, `200d230b`는 중복 key의 모든 node ID를 target에 포함해 이를 고쳤다.
+
+최종 bounded 비교는 397 대비 경과 시간 -7.33%였다. median RSS 차이는 -0.29%이고 부모
+watchdog 최대값은 후보가 더 높았으므로 RSS 개선으로 수락하지 않았다. 이 수락은 source와
+bounded 결과의 로컬 수락이며 main merge 또는 배포가 아니다.
+
+실제 DUK는 5a source로, LIN은 397 source로 generation을 마쳤다. 둘을 중단하거나 이 후보로
+재처리하지 않았다. source-bound final audit 네 건이 남아 있으며, selected-FACT target scope는
+향후 아직 시작하지 않은 generation에만 적용할 수 있다.
+
+독립 검증 보고서는 working evidence
+`panel_target_scope_independent_r2/report.json`에 있으며 SHA-256은
+`34b87a91cafc346858cf8bb4e70ece6665a7545d53f112ca4b27e40e9a2eb191`이다.
