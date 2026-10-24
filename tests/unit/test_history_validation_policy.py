@@ -144,7 +144,9 @@ def test_known_structure_or_reference_anomaly_remains_failure(
     state_path = next(state.glob("*.json"))
     before = state_path.read_bytes()
     if anomaly == "extra":
-        (root / "foreign.bin").write_bytes(b"foreign")
+        extra = root / "foreign" / "history_manifest.json"
+        extra.parent.mkdir()
+        extra.write_bytes(b"foreign")
     else:
         _rewrite_first_cell(root, manifest, dangling=True)
     calls = []

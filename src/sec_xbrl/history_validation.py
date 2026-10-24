@@ -243,7 +243,7 @@ def _actual_publication_files(root: Path) -> set[str]:
         value = path.lstat()
         if stat.S_ISLNK(value.st_mode) or (not stat.S_ISDIR(value.st_mode) and not stat.S_ISREG(value.st_mode)):
             raise ValueError("history publication contains an unsafe entry")
-        if stat.S_ISREG(value.st_mode) and path.name != "history_manifest.json":
+        if stat.S_ISREG(value.st_mode) and path != root / "history_manifest.json":
             result.add(str(path.relative_to(root)))
     return result
 
