@@ -60,6 +60,7 @@
 | 50 issuer T3 참조 수리 | [수리 전달](../implementation/universe50-t3-reference-repair-delivery.md) | **2026-10-17 APPROVED**; T3 reference fix, 새 output/run version, tiny 우선 검증. actual CVX/first-five/exact-50는 tiny PASS 뒤 lead 별도 실행 | 구현 후보 존재; 동결 SHA는 구현 인계에 기록 | 구현자 1,497 unit / 4 skipped, 관련 cached 14 / 0 skipped, Ruff PASS; 별도 Astra 독립 검증 대기 | 미수락; 기존 HOLD와 Raw/JNJ component 수락 경계 유지 | 미병합; push·PR·CI 없음 |
 | 50 issuer History panel 메모리 | [메모리 전달](../implementation/history-panel-memory-delivery.md) | **2026-10-17 APPROVED SOURCE/SYNTHETIC CORRECTION ONLY**; 실행 소유권·typed spill·failure preservation 및 trusted checkpoint/typed temporal 보완. actual retry와 OPS 통합 제외 | 첫 `6851853…` 및 두 번째 `5a48407…` 독립 FAIL; F3/F4 범위 한정 Astra 구현 후보, 새 SHA는 인계 report에 기록 | 기존 unguarded unit 결과는 source-only 근거에서 제외. F3/F4 focused 77 passed, guarded 허용 unit+synthetic 1,561 passed/5 deselected, 기존 55 controls/93 Parquet 비교·Ruff·diff PASS. 5 cached node 제외·실제 경로 guard·16 GiB RSS/Polars 2/no AS 검사; 새 독립 검증 대기 | 미수락; JNJ 실패 partial·기존 Raw/History acceptance 불변 | 미병합; push·PR·CI 없음 |
 | 50 issuer private quarter spill 성능 | [성능 전달](../implementation/universe50-quarter-spill-performance-delivery.md) | **2026-10-17 APPROVED SOURCE/SYNTHETIC ONLY + QP CORRECTION**; full SQL/journal/yield ownership 경계, safe 중복 stat 제거와 monotonic/elapsed metadata. actual read/retry, cap·timeout 변경 제외 | `ce45d956…` independent FAIL 봉인; 같은 sole-writer worktree에 보정 후보 존재, 새 동결 SHA는 correction 인계에 기록 | QP1 SQL 전 0 rows/no `APPLIED`, QP2 replacement·symlink·ancestor yield 전 거부, nested synthetic state/journal exact equivalence; 별도 Astra 재검증 대기 | 미수락; actual 3시간 원인·완료 여부 미측정 | 미병합; push·PR·CI 없음 |
+| History publication 일상 검증 | [검증 정책](../implementation/history-validation-policy-20261024.md) | **2026-10-24 APPROVED**; routine initial/changed/unchanged와 명시적 detailed, recovery strict 보존. 생산자 row 증분·완료 회사 재감사 제외 | final `e4a9f5426454fe9cb2014452529a6eb1930efc49`; 첫 `5db2ec…` table-binding FAIL 수리 | 독립 r2 **PASS**; focused 8 PASS. 교정 bounded 측정은 무변경 시간·관측 RSS 이점만 확인하고 최초/변경 회귀를 보존 | **2026-10-24 LOCALLY_ACCEPTED SOURCE_AND_BOUNDED_FIXTURE_ONLY**; 실제 회사 runtime 미채택 | 미병합; push·PR·remote CI 없음 |
 | 회사 설명·외부 프로필 | [전달 계약](../implementation/company-description-delivery.md) · [완료 기록](../implementation/company-description-completion.md) · [사용 안내](../usage/company-descriptions.md) | generic collector·reader·선택적 profile과 합성 fixture 구현; 실제 Investing 본문은 **RIGHTS_DECISION_PENDING / BLOCKED** | final `51aeff7665a1f09e4bab2cce562b2250e0f316a0` | **PASS**; 109 relevant / 0 skipped, native 26 controls | **2026-10-10 LOCALLY_ACCEPTED_INFRA_ONLY** | 미병합; push·PR·remote CI 미수행 |
 | 스크리닝 대시보드 | [로드맵](screening-dashboard-roadmap.md), [구현 전달 계약](../implementation/screening-dashboard-delivery.md), [S01–S08 인수 계약](../implementation/screening-dashboard-user-acceptance.md), [완료 기록](../implementation/screening-dashboard-completion.md) | **2026-10-09 APPROVED**; P0–P6 로컬 v1, 기존 annual reported metric만. P7·새 회계 정책·원격 제외 | final `acce036d1f8feef2f268b1df740009a11ce537e5`; actual 21사 publication | **PASS**; 1,322 passed / 35 skipped, focused 38, Ruff·JS/CJS, S01–S08·native evidence | **2026-10-09 LOCALLY_ACCEPTED** | 미병합 |
 | 일반 투자자 스크리닝 R1 | [R1 전달 계약](../implementation/screening-usability-delivery.md), [지표 정의](../implementation/screening-metric-definitions.md), [완료 기록](../implementation/screening-usability-completion.md) | **2026-10-09 APPROVED**; 21 reported+10 derived, opt-in FY-end INSTANT, v1 호환 | final `271fb1c968ebc03d98aea1561cd096187302a7fe`; metrics `screening-metrics-2a512baef9131d3dcef0e1da`; dataset `screening-dataset-370c328056802a7fb42d02a6` | **PASS**; 1,351 passed / 35 skipped, 651 FY2025 control 일치, native 31조건·XLSX·live GET PASS | **2026-10-09 LOCALLY_ACCEPTED** | 미병합; push·PR·remote CI 미수행 |
@@ -119,10 +120,12 @@ SHA는 `9708508ec953ee4323ae29318c639abc9e0650b6`이고, 병합 시각은
 미래 수락 조건의 작성은 사용자 승인이나 일정 약속이 아니다. 소스 함수나
 작업 세션/브랜치의 존재도 전체 기능 승인·완료·배포를 증명하지 않는다.
 
-2026-10-24 history publication의 일상 저장 검증을 routine/detailed로 구분하는 승인된
-구현 계약은 [history validation 정책](../implementation/history-validation-policy-20261024.md)에
-있다. 이는 producer 계산의 증분화나 과거 50개 회사 의미 감사 반복을 뜻하지 않으며,
-독립 검증·로컬 인수·`main` 병합·운영 채택 상태는 구현 후보와 별도로 기록한다.
+2026-10-24 history publication의 일상 저장 검증을 routine/detailed로 구분하는 최종
+`e4a9f5…`는 독립 r2 PASS 뒤 source 및 bounded fixture 범위에서 로컬 수락됐다. 상세
+계약과 교정 측정의 최초/변경 회귀는
+[history validation 정책](../implementation/history-validation-policy-20261024.md)에 있다.
+이는 producer 계산의 증분화나 과거 50개 회사 의미 감사 반복을 뜻하지 않으며, 실제
+회사 runtime 채택·`main` 병합·원격 전달은 아직 수행하지 않았다.
 
 ## 증거와 재현 — 임시 디렉터리에 의존하지 않는 인계
 
