@@ -55,11 +55,11 @@ source filing ID와 source fact ID를 함께 사용했고 원본 파일 상대 �
 
 | 항목 | 기준 median | 후보 median | 변화 |
 |---|---:|---:|---:|
-| 전체 경과 | 0.5262초 | 0.4652초 | -11.6% |
-| peak RSS | 228,080 KiB | 233,316 KiB | +2.3% |
+| 전체 경과 | 0.5078초 | 0.4458초 | -12.2% |
+| peak RSS | 229,136 KiB | 227,496 KiB | -0.7% |
 
 RSS 차이는 실행 잡음 범위라 개선으로 해석하지 않는다. 부모 watchdog이 본 전체 프로세스
-최대치는 기준 244,912 KiB, 후보 244,280 KiB였고, 각 실행에 1 GiB/30초 제한을 적용했다.
+최대치는 기준 249,148 KiB, 후보 248,388 KiB였고, 각 실행에 1 GiB/30초 제한을 적용했다.
 후보 임시 spool peak는 cells
 3,109,678 bytes였고 rows는 154,831 bytes, columns는
 0 bytes였다. 최종 columns/rows/cells count, 전역 JSON fields, 전체 decoded fingerprint,
@@ -85,9 +85,11 @@ guard가 활성화된 실패 경로에서는 기존 History 정책대로 workspa
 보존한다. 따라서 모든 임시 directory를 삭제한다고 주장하지 않는다. 일반 경로에서도
 foreign pathname 교체가 보이면 workspace finalizer를 분리해 외부 파일을 지우지 않는다.
 
-소유권 예외 보정은 성공 경로를 바꾸지 않으므로 위 3회 성능 수치는 그대로 계승했다.
-보정 뒤에는 guard 거부, regular file·symlink `O_EXCL` 충돌, header write 중 pathname 교체,
-소유 FD close와 외부 내용 보존을 별도 focused test로 검증했고 성능 측정을 반복하지 않았다.
+소유권 예외 보정은 핵심 materialization/staging 알고리즘을 바꾸지 않았지만, 정상 discard에도
+추가 device/inode 검사가 들어간다. 따라서 독립 정확성 검토가 끝난 `b55bd26c` production
+bytes를 기준으로 위 3회 성능 측정을 새로 수행했다. guard 거부, regular file·symlink
+`O_EXCL` 충돌, header write 중 pathname 교체, 소유 FD close와 외부 내용 보존은 별도
+focused test로 검증했다.
 
 late nested field가 앞선 bool/int/큰 정수/Decimal/date/Unicode/null 값을 전역 JSON으로
 승격하는 기존 동작과 schema를 eager 기준과 byte 단위로 비교했다. 입력 provenance도
@@ -104,7 +106,7 @@ python -B tools/profile_panel_generation.py compare \
   --fixture .../panel_generation_writer_20261024/cop_fy2025_revenue_component_v2.json \
   --baseline-source .../history-copy-encoding/sec_xbrl/src \
   --candidate-source .../panel-scope-performance/sec_xbrl/src \
-  --output .../panel_generation_writer_20261024/paired_uninstrumented_bounded_final.json \
+  --output .../panel_generation_writer_20261024/paired_uninstrumented_b55_final.json \
   --rotations 3
 ```
 
