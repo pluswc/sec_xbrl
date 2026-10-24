@@ -5,8 +5,9 @@
 이 milestone은 한 회사의 공시가 기존 입력 뒤에 정확히 한 건 추가된 경우에만 이전
 History publication을 명시적으로 받아 재사용한다. 기본 `build_history` 동작은 그대로
 전체 생성이며, `--previous-history`와 증명 자료가 함께 주어진 호출만 증분 경로를
-시도한다. source `a83a3b2…`는 로컬 검사와 실제 AAPL 단일 후보 측정을 완료했다.
-독립 검증, 로컬 수락, `main` 병합, 운영 채택은 아직 완료되지 않았다.
+시도한다. source `a83a3b2…`는 로컬 검사와 실제 AAPL 단일 후보 측정을 완료했고,
+2026-10-25 독립 검증 PASS와 ROOT 로컬 수락을 받았다. `main` 병합과 운영 채택은 아직
+완료되지 않았다.
 
 이 변경은 Raw 추출이나 원본 Fact 근거, canonical ID, 공시 선택 view, 회계 기간,
 Q4/YTD 파생 규칙을 바꾸지 않는다. 과거 50개 회사의 완료 검증과 109단계 독립 감사도
@@ -43,9 +44,11 @@ Q4/YTD 파생 규칙을 바꾸지 않는다. 과거 50개 회사의 완료 검�
 - T2는 이전 edge를 재사용하고 새 공시 edge만 변환한다.
 - T4는 이전 ledger를 재사용하고 전체 입력의 작은 amendment evidence를 바탕으로 새
   accession row만 만든다.
-- T3는 새 T1을 다시 읽은 값으로 이전 observation stage를 재구성해 이전 T3 값·순서와
-  정확히 대조하고, relationship stage도 exact suffix임을 확인할 때만 stage-preserving
-  merge를 쓴다. 둘 중 하나라도 다르면 T3만 기존 전체 producer로 전환한다.
+- T3는 reader-attested T1의 typed observation prefix를 대조하고, cached relationship
+  node·edge를 ID로 찾은 뒤 현재 reader-attested T2의 edge 순서에 맞춰 재배열한다.
+  따라서 old/new accession이 관계 순서에서 섞여도 exact suffix를 요구하지 않는다.
+  ID 충돌, foreign/missing node, endpoint 또는 typed prefix 불일치가 있으면 T3만 기존
+  전체 producer로 전환한다.
 - History 표는 새 공시의 `CURRENT_FOCUS`가 건드린 period class 전체를 다시 만든다.
   historical comparative 행만으로 table을 dirty 처리하지 않는다. FY/YTD 변화는 QTD
   closure도 dirty로 본다. as-of/view 정책이 바뀌면 History 표는 보수적으로 모두 다시
@@ -57,6 +60,35 @@ Q4/YTD 파생 규칙을 바꾸지 않는다. 과거 50개 회사의 완료 검�
 증명 준비 뒤에는 과거 Raw cohort와 이전 publication/canonical mapping 객체를 새 graph와
 panel 생성 전에 해제한다. 남는 상태는 suffix snapshot, 작은 filing/ledger 입력, path,
 hash, dirty class와 receipt 자료뿐이다.
+
+## 호출 방법
+
+Python API는 새 input 전체를 가리키는 `intake_manifest`, 비어 있는 새 `output_root`와
+함께 이전 publication 및 그 재사용 증명을 명시한다.
+
+```python
+build_history(
+    intake_manifest=current_intake,
+    output_root=new_output,
+    previous_history=previous_publication,
+    previous_reuse_evidence=approved_evidence,
+)
+```
+
+같은 호출의 CLI 형태는 다음과 같다.
+
+```bash
+python -m sec_xbrl.history build \
+  --intake-manifest CURRENT_INTAKE.json \
+  --output-root NEW_OUTPUT_ROOT \
+  --previous-history PREVIOUS_HISTORY_ROOT \
+  --previous-reuse-evidence APPROVED_REUSE_EVIDENCE.json
+```
+
+두 opt-in 인자를 주지 않으면 기존 전체 생성 경로다. 이전 publication이 없거나 evidence,
+source/rule identity, content pin, strict suffix, typed prefix 또는 graph 무결성 증명이
+맞지 않으면 기존 publication을 수정하지 않고 전체 생성으로 전환한다. 기존 output과
+충돌하거나 새 output의 scope/input이 맞지 않는 경우에는 오류로 종료한다.
 
 ## 검증과 측정 경계
 
@@ -94,6 +126,14 @@ T4 ledger 23개가 같음을 확인했다. 값·Python 타입·schema·순서·I
 `work/actual_quarter_append_20261024/incremental-append-v1-r6/final_report.json`에 있으며
 SHA-256은 `6dec17ca5e84e40ff4da552beb9d7dea3b4e33415d1b3775d6833a09f030a262`이다.
 단일 회사·공시 pair 결과이므로 반복 append나 다른 회사의 속도를 주장하지 않는다.
+
+독립 검증 보고서는
+`work/actual_quarter_append_20261024/incremental-append-v1-r6/independent_review/report.json`
+(SHA-256 `b7ce03da44028af71ce4c2bc6e4a6c6433c85e51565cc3488bff6eaf2b3c1c2d`)이며
+PASS다. ROOT 로컬 수락은 같은 R6 디렉터리의 `lead_acceptance.json`
+(SHA-256 `55319b3cdb8b3f1a333e569046e42067ec2aec258966b8a753b1270a6b4676f8`)에
+기록했다. 수락 범위는 opt-in append source와 이 bounded actual pair이며 운영 배포나
+`main` 병합을 뜻하지 않는다.
 
 남는 비용은 전체 canonical mapping 계산, 이전 Raw 정상 입력 로드와 prefix 확인, dirty
 period class 전체 재생성이다. 이는 행 단위 producer 증분화가 아니다.
