@@ -101,9 +101,17 @@ Ruff format/check, git diff --check: PASS
 신 R16의 실제 `FileStream`, `ChunkRecords`, `verify_coverage`를 실행했다. 두 arm은
 동일한 public/private Parquet I/O, schema·count·physical hash 전후 검사, JSON decode,
 aggregate와 per-row digest, 최종 public stream result 및 전체 physical coverage 검사를
-수행했다. 정규화한 complete report SHA는 모든 실행에서
-`dd0b820dd7a2815f699a337359ae3ef035283e7eb013e57d01a110ced42b7f47`로 같았다.
-독립 public/private row 순서 변경과 null 변경은 두 runtime 모두 닫힌 실패였다.
+수행했다. 기존 3회 측정에서 basename만 남긴 정규화 complete report SHA는
+`dd0b820dd7a2815f699a337359ae3ef035283e7eb013e57d01a110ced42b7f47`였다. 이 값은
+기존 timing 비교의 식별자일 뿐 경로 계층 증거로 사용하지 않는다. 보강 검사에서는
+fixture 임시 루트 접두사만 `<FIXTURE_ROOT>`로 치환하고 그 아래의 모든 상대 경로를
+보존했다. 이 엄격한 R13/R16 complete report는 byte-for-byte 같았고 SHA는
+`638026250ee68d36eca34e5a6cbd0d398f0e1f8e69ea90e7df19d43e5f96d921`였다.
+
+public 또는 private 한쪽의 정상 물리 해시와 public proof를 변조 후 자료에 맞게 다시
+고정한 다음, 반대쪽은 그대로 둔 채 일반 중첩값·행 순서·null의 2×3 조합을 검사했다.
+여섯 경우 모두 R13과 R16의 실제 `verify_coverage` typed row 비교에서 닫힌 실패했다.
+따라서 오래된 파일 해시나 선언 불일치를 mutation 검출로 세지 않았다.
 
 3회 paired fresh subprocess 중앙값은 R13 2.7263초, R16 2.6387초로 R16이 3.22%
 짧았고 peak RSS는 471,212→470,780 KiB(-0.09%)였다. 이 전체 coverage 측정은 raw
@@ -112,5 +120,6 @@ MRK CPU 간섭이 있어 보편적 속도 향상은 주장하지 않는다.
 
 - `work/.../history_copy_encoding_writer_20261024/actual_coverage_profile.json`
   (`04145258be23c93cd08b7ad641946420a4ab49e2bd6f0a2a328afe8cb4548efc`)
-- 구 R13 실제 coverage·변조 검사: 3 passed in 4.59s
-- 신 R16 실제 coverage·변조 검사와 R14/R15 checker COW 비교: 4 passed in 4.95s
+- 기존 paired timing 결과는 코드를 바꾸지 않았으므로 재실행하지 않았다.
+- 구 R13 엄격한 경로·양쪽 변조 검사: 7 passed in 10.38s
+- 신 R16 엄격한 경로·양쪽 변조 검사: 7 passed in 10.17s
