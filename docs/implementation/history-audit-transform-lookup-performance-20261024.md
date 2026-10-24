@@ -38,6 +38,11 @@ R17은 accepted R15 standard runtime의 19개 Python script와 dependency metada
 `build_spec.py`는 바꾸지 않았다. 실제 GO, dispatch, keeper 또는 audit는 만들거나 실행하지
 않았다.
 
+이 구현의 production source 커밋은
+`b8c1c8664f41994accd835b7a5fcbee708a59fe0`이다. 2026-10-24 독립 검증은
+이 source와 R17의 19-script frozen map에 PASS했고, ROOT는 같은 날 source와 bounded
+kernel 비교를 로컬 수락했다. 이 상태는 main merge나 실제 배포를 뜻하지 않는다.
+
 ## 정확성 검증
 
 Focused 검증은 다음 경계를 포함한다.
@@ -56,14 +61,28 @@ Focused 검증은 다음 경계를 포함한다.
 테스트만 수정해 1 PASS로 재실행했다. 제품 동작 실패는 없었다. 기존 완료 기업 audit와
 기존 broad suite는 반복하지 않았다.
 
+별도 독립 검증은 8개 boundary case와 production `phase_engine.consumer_file()`을 직접
+호출하는 synthetic integration 1개를 통과했다. Integration은 rows/cells/derived의 exact와
+null-padding 성공, columns 재구성, missing/reorder/value/corruption 거부를 확인했다. 최초
+integration fixture에 `audit_counts` table이 빠져 생긴 실패는 reviewer-owned fixture만
+고친 뒤 해당 검사만 재실행해 PASS했으며 제품 결함은 아니었다. 이전 마일스톤에서 수락한
+R15 COW와 shared typed-hash 증거는 그대로 이어받았고 그 코드는 바꾸지 않았다. 독립 보고서
+SHA-256은 `43d44a5045ec167ac02b6925777c2870634b52e8308d36b9a1aa3f80a8c97f8f`다.
+
 ## Bounded 3-arm 측정
 
-각 case는 fresh serial subprocess에서 R14, R15, R17을 회전 순서로 3회 실행했다. 각 arm은
+이 수치는 **emulated bounded kernel** 비교다. 각 case는 fresh serial subprocess에서 R14,
+R15, R17 알고리즘 모드를 회전 순서로 3회 실행했다. 세 모드는 모두 새 candidate
+`AuditIndex`를 사용하고, profiler 안의 지역 `_cow_cell`과 inline comparison으로 각각
+deep-copy/decoded compare, COW/decoded compare, COW/verified-canonical compare를 재현한다.
 동일 SQLite pragma와 32 KiB compression threshold로 metadata write, row/column/T1 lookup,
-source transform, expected write, consumer compare, `verify_storage()`를 수행했다. 제한은
-process당 30초, peak RSS 1 GiB다. R14는 deep-copy+decoded compare, R15는 COW+decoded
-compare, R17은 COW+verified-canonical compare다. 이는 bounded fixture workload이며 실제
-회사 처리량이 아니다.
+source transform, expected write, consumer compare, `verify_storage()`, commit과 close를
+수행한다. 제한은 process당 30초, peak RSS 1 GiB다.
+
+Timer는 import, fixture load와 입력 fingerprint 생성을 제외한다. Peak RSS는 process 시작을
+포함한 fresh-process 최대값이다. 이 harness는 실제 `FileStream`의 physical/raw 및 decoded
+hash, 전체 `source_file()`과 `consumer_file()`, 전체 runtime 또는 회사 audit 시간을
+측정하지 않는다. 따라서 아래 차이를 whole-audit 또는 runtime 속도 개선으로 부르지 않는다.
 
 | 입력/case | records | R14 total | R15 total | R17 total | R14→R17 | R15→R17 |
 |---|---:|---:|---:|---:|---:|---:|
@@ -90,11 +109,40 @@ fingerprint와 storage payload count는 모든 arm/rotation에서 같았다.
   `eb87a0810910e0194db98498fc8749d7bfabf1292a8226a0392d449a2d29a1f6`, 1 record,
   570 candidates.
 
+프로젝트 Python 3.12 환경에서 다음 명령으로 기존 측정을 재현할 수 있다. `WORK_ROOT`는
+fixture와 결과를 둔 `resumption_20261017_t3v2` 절대 경로다. 별도 orchestration 도구는
+필요하지 않다.
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /home/plusbdw/user_work/projects/sec_xbrl/.venv/bin/python -B \
+  tools/profile_history_audit_transform_lookup.py compare \
+  --fixture "$WORK_ROOT/audit_index_rich_sample_20261024/transactions.jsonl" \
+  --cycles 4 --rotations 3 --case exact \
+  --output "$WORK_ROOT/audit_transform_lookup_writer_20261024/paired_rich_exact.json"
+
+PYTHONDONTWRITEBYTECODE=1 /home/plusbdw/user_work/projects/sec_xbrl/.venv/bin/python -B \
+  tools/profile_history_audit_transform_lookup.py compare \
+  --fixture "$WORK_ROOT/audit_index_cached_sample_20261024/transactions.jsonl" \
+  --cycles 32 --rotations 3 --case exact \
+  --output "$WORK_ROOT/audit_transform_lookup_writer_20261024/paired_cached_exact.json"
+
+PYTHONDONTWRITEBYTECODE=1 /home/plusbdw/user_work/projects/sec_xbrl/.venv/bin/python -B \
+  tools/profile_history_audit_transform_lookup.py compare \
+  --fixture "$WORK_ROOT/audit_index_cached_sample_20261024/transactions.jsonl" \
+  --cycles 32 --rotations 3 --case null-padding \
+  --output "$WORK_ROOT/audit_transform_lookup_writer_20261024/paired_cached_null_padding.json"
+```
+
 ## 한계와 다음 단계
 
 이 측정은 복사된 immutable fixture에 한정된다. 실제 COP audit, live DB, SEC 원본 또는 완료
 기업 검증을 실행하지 않았고 실제 전체 audit 시간 개선을 입증하지 않는다. Source
 row/column/T1은 아직 매 cell마다 조회한다. 그 cache는 mutable alias와 corruption masking을
 피하기 위해 operation count를 먼저 본 뒤 job-local, byte-bounded, transaction/version
-invalidated 형태로 별도 검토한다. 이후 물리 순차 읽기와 병렬 scheduling은 이 정확성 경계를
-유지하는 별도 마일스톤이다.
+invalidated 형태로 별도 검토한다. 다음 승인 방향은 물리 순차 읽기, 그 다음 메모리 예산을
+지키는 병렬 scheduling이며 둘 다 아직 구현하지 않았다.
+
+2026-10-24 인계 시점에 ABT의 기존 감사 47건은 수락됐으며 재실행하지 않았다. 남은 실제
+대상은 COP, DUK, LIN이다. R17은 COP의 engine `2b5dde23c50b6ac0b83459df42777f38f312da0b`에
+정확히 묶인 후보지만, static binding review와 별도 actual GO가 남아 있어 실제 COP audit는
+시작하지 않았다. 실제 채택·dispatch와 완료 판정은 이 source 수락과 별도 운영 단계다.
