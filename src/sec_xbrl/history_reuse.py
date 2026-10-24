@@ -37,7 +37,6 @@ class HistoryAppendReusePlan:
     mappings_by_cik: Mapping[str, MappingTables]
     filing_by_id: Mapping[str, Mapping[str, Any]]
     ledger_inputs_by_cik: Mapping[str, tuple[Mapping[str, Any], ...]]
-    mapping_prefix_exact: bool
     dirty_period_classes: frozenset[str]
     producer_code_identity: str
 
@@ -104,7 +103,7 @@ def prepare_history_append(
         if run != old_run:
             raise HistoryAppendReuseError("previous T1-T4 declarations differ")
     mappings = _canonical_mappings(release)
-    mapping_prefix_exact = _verify_mapping_prefix(publications["t1"], mappings, old_inputs)
+    _verify_mapping_prefix(publications["t1"], mappings, old_inputs)
     filing_by_id, ledger_inputs_by_cik = _small_release_state(release)
     old_snapshot_ids = frozenset(item.snapshot_id for item in old_inputs)
     new_snapshots = tuple(
@@ -132,7 +131,6 @@ def prepare_history_append(
         mappings_by_cik=mappings,
         filing_by_id=filing_by_id,
         ledger_inputs_by_cik=ledger_inputs_by_cik,
-        mapping_prefix_exact=mapping_prefix_exact,
         dirty_period_classes=frozenset(dirty),
         producer_code_identity=producer_code_identity,
     )
@@ -234,7 +232,6 @@ def publish_append_roots(
             t1_pub,
             t2_pub,
             new_edges,
-            mapping_prefix_exact=plan.mapping_prefix_exact,
         )
         OperationalLayer2Publisher(Path(output_root) / "t3").publish(run, t3_rows)
         t3_mode = "STAGE_PRESERVING_MERGE"
@@ -363,14 +360,13 @@ def _verify_mapping_prefix(
     previous: VerifiedLayer2Publication,
     mappings: Mapping[str, MappingTables],
     old_inputs: Sequence[Any],
-) -> bool:
+) -> None:
     old_filing_ids = {
         str(row.get("source_filing_id") or row.get("filing_id") or "")
         for dataset in ("company_concept_map", "company_axis_map", "company_member_map", "structural_change")
         for row in previous.records(dataset)
     }
     old_filing_ids.discard("")
-    exact = True
     for dataset in ("company_concept_map", "company_axis_map", "company_member_map"):
         expected = list(previous.records(dataset))
         actual = [
@@ -381,10 +377,8 @@ def _verify_mapping_prefix(
         ]
         if not _rows_equal_with_schema_union(expected, actual):
             raise HistoryAppendReuseError(f"previous {dataset} prefix changed")
-        exact = exact and expected == actual
     if len(old_inputs) == 0:
         raise HistoryAppendReuseError("previous input prefix is empty")
-    return exact
 
 
 def _rows_equal_with_schema_union(left: Sequence[Any], right: Sequence[Any]) -> bool:
@@ -508,7 +502,11 @@ def _dirty_period_classes(snapshots: Sequence[CorpusSnapshot]) -> set[str]:
             q4_policy_by_fact_id=None,
             source_snapshot_id=snapshot.input.snapshot_id,
         )
-        dirty.update(str(row["period_class"]) for row in result.observations)
+        dirty.update(
+            str(row["period_class"])
+            for row in result.observations
+            if row.get("comparative_type") == "CURRENT_FOCUS"
+        )
         form = str(filing.get("form") or "").removesuffix("/A")
         if form in {"10-Q", "10-K"}:
             dirty.add("QTD_3M")
@@ -522,14 +520,9 @@ def _merge_graph(
     current_t1: VerifiedLayer2Publication,
     current_t2: VerifiedLayer2Publication,
     new_edges: Sequence[Mapping[str, Any]],
-    *,
-    mapping_prefix_exact: bool,
 ) -> dict[str, tuple[dict[str, Any], ...]]:
     """Merge a filing-scoped suffix in the exact full-producer stage order."""
     from sec_xbrl.longitudinal.exploration_graph import _graph_datasets
-
-    if not mapping_prefix_exact:
-        raise HistoryAppendReuseError("T3 mapping row representation changed")
 
     old_filing_ids = {
         str(row.get("source_filing_id") or "")
@@ -551,9 +544,34 @@ def _merge_graph(
             ("member", "company_member_map"),
         )
     }
+    old_observations = [
+        row
+        for row in current_t1.records("reported_period_observation")
+        if str(row.get("source_filing_id") or "") in old_filing_ids
+    ]
+    current_old_stage = _graph_datasets(old_observations, (), maps)
+    current_old_node_ids = {
+        row["analysis_exploration_node_id"]
+        for row in current_old_stage["analysis_exploration_node"]
+    }
+    previous_nodes = list(previous.records("analysis_exploration_node"))
+    previous_edges = list(previous.records("analysis_exploration_edge"))
+    old_stage_nodes = [
+        row
+        for row in previous_nodes
+        if row["analysis_exploration_node_id"] in current_old_node_ids
+    ]
+    old_stage_edges = [
+        row for row in previous_edges if not row.get("source_relationship_edge_id")
+    ]
+    if (
+        old_stage_nodes != list(current_old_stage["analysis_exploration_node"])
+        or old_stage_edges != list(current_old_stage["analysis_exploration_edge"])
+    ):
+        raise HistoryAppendReuseError("T3 old observation stage changed after reader roundtrip")
     new = _graph_datasets(new_observations, list(new_edges), maps)
-    old_nodes = list(previous.records("analysis_exploration_node"))
-    old_edges = list(previous.records("analysis_exploration_edge"))
+    old_nodes = previous_nodes
+    old_edges = previous_edges
     old_relationship_ids = [
         str(row["source_relationship_edge_id"])
         for row in old_edges

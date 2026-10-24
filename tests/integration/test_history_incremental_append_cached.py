@@ -141,3 +141,26 @@ def test_schema_union_padding_is_typed_and_policy_ignores_only_filing_suffix() -
     changed = {**current, "as_of_date": "2026-10-11"}
     assert not history_policy_changed(previous, current)
     assert history_policy_changed(previous, changed)
+
+
+def test_dirty_periods_ignore_comparative_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from sec_xbrl.history_reuse import _dirty_period_classes
+    from sec_xbrl.longitudinal import period_observation
+
+    class Materializer:
+        def materialize(self, **_kwargs):
+            return SimpleNamespace(
+                observations=(
+                    {"period_class": "INSTANT", "comparative_type": "CURRENT_FOCUS"},
+                    {"period_class": "FY", "comparative_type": "HISTORICAL_COMPARATIVE"},
+                )
+            )
+
+    snapshot = SimpleNamespace(
+        input=SimpleNamespace(snapshot_id="new"),
+        records=lambda name: ({"form": "10-Q"},) if name == "filing" else (),
+    )
+    monkeypatch.setattr(period_observation, "PeriodObservationMaterializer", Materializer)
+    assert _dirty_period_classes((snapshot,)) == {"INSTANT", "QTD_3M"}

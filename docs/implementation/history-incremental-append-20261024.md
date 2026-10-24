@@ -43,10 +43,11 @@ Q4/YTD 파생 규칙을 바꾸지 않는다. 과거 50개 회사의 완료 검�
 - T2는 이전 edge를 재사용하고 새 공시 edge만 변환한다.
 - T4는 이전 ledger를 재사용하고 전체 입력의 작은 amendment evidence를 바탕으로 새
   accession row만 만든다.
-- T3는 노드 덮어쓰기와 stage 순서를 정확히 증명할 수 있을 때만 stage-preserving merge를
-  쓴다. mapping row 표현이나 relationship stage가 exact suffix가 아니면 T3만 기존 전체
-  producer로 전환한다.
-- History 표는 새 공시가 건드린 period class 전체를 다시 만든다. FY/YTD 변화는 QTD
+- T3는 새 T1을 다시 읽은 값으로 이전 observation stage를 재구성해 이전 T3 값·순서와
+  정확히 대조하고, relationship stage도 exact suffix임을 확인할 때만 stage-preserving
+  merge를 쓴다. 둘 중 하나라도 다르면 T3만 기존 전체 producer로 전환한다.
+- History 표는 새 공시의 `CURRENT_FOCUS`가 건드린 period class 전체를 다시 만든다.
+  historical comparative 행만으로 table을 dirty 처리하지 않는다. FY/YTD 변화는 QTD
   closure도 dirty로 본다. as-of/view 정책이 바뀌면 History 표는 보수적으로 모두 다시
   만들지만 as-of와 무관한 T1~T4 증분은 유지한다. 깨끗한 표의 파일은 이전 publication의
   선언 hash를 확인한 뒤 복사한다.
