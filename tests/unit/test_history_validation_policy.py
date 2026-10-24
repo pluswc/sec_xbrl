@@ -112,6 +112,24 @@ def test_routine_initial_unchanged_cross_root_and_changed_table(tmp_path: Path) 
     assert all("QTD_0" in path for path in changed.checked_files)
 
 
+def test_rebound_table_files_recheck_old_and_new_reference_closures(tmp_path: Path) -> None:
+    root, manifest = _publication(tmp_path / "publication")
+    state = tmp_path / "state"
+    history.HistoryPublicationReader(root).validate(state_root=state)
+    state_path = next(state.glob("*.json"))
+    before = state_path.read_bytes()
+
+    first, second = manifest["tables"]
+    first["files"]["rows"], second["files"]["rows"] = (
+        second["files"]["rows"], first["files"]["rows"]
+    )
+    history._write_json(root / "history_manifest.json", manifest)
+
+    with pytest.raises(ValueError, match="routine check anomaly"):
+        history.HistoryPublicationReader(root).validate(state_root=state)
+    assert state_path.read_bytes() == before
+
+
 def test_state_or_code_drift_uses_detailed_storage_fallback(tmp_path: Path) -> None:
     root, manifest = _publication(tmp_path / "publication", second=False)
     state = tmp_path / "state"

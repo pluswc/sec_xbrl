@@ -144,6 +144,8 @@ def validate_publication(
                 and old.get("sha256") == entry["info"]["sha256"]
                 and old.get("count") == entry["info"]["count"]
                 and old.get("json_fields") == entry["info"].get("json_fields")
+                and old.get("table_key") == entry["table_key"]
+                and old.get("role") == entry["role"]
                 and old.get("identity") == list(identity)
             ):
                 reused.add(relative)
@@ -160,6 +162,8 @@ def validate_publication(
                 and old.get("sha256") == actual_digest
                 and old.get("count") == entry["info"]["count"]
                 and old.get("json_fields") == entry["info"].get("json_fields")
+                and old.get("table_key") == entry["table_key"]
+                and old.get("role") == entry["role"]
             ):
                 reused.add(relative)
             else:
@@ -169,7 +173,9 @@ def validate_publication(
         raise ValueError("history publication file anomaly") from exc
 
     removed = set(prior_files) - set(inventory) if isinstance(prior_files, dict) else set()
-    checked = set(inventory) if prior is None or removed else _table_closure(changed, inventory)
+    checked = set(inventory) if prior is None or removed else _table_closure(
+        changed, inventory, prior_files
+    )
     sampled_rows = 0
     decoded_json = 0
     schemas = {
@@ -215,7 +221,12 @@ def _manifest_inventory(manifest: Mapping[str, Any]) -> dict[str, dict[str, Any]
     for index, table in enumerate(tables):
         if not isinstance(table, dict) or not isinstance(table.get("files"), dict):
             raise TypeError("history publication table files are malformed")
-        table_key = _canonical_hash({key: table.get(key) for key in ("cik", "ticker", "view", "period_class")})
+        table_key = _canonical_hash(
+            {
+                key: table.get(key)
+                for key in ("cik", "ticker", "view", "period_class", "scope")
+            }
+        )
         for role, info in table["files"].items():
             _add_info(result, info, table_key=table_key, role=str(role), table_index=index)
     if manifest.get("derived_quarter") is not None:
@@ -248,8 +259,18 @@ def _actual_publication_files(root: Path) -> set[str]:
     return result
 
 
-def _table_closure(changed: set[str], inventory: Mapping[str, Mapping[str, Any]]) -> set[str]:
+def _table_closure(
+    changed: set[str],
+    inventory: Mapping[str, Mapping[str, Any]],
+    prior_files: Mapping[str, Any],
+) -> set[str]:
     keys = {inventory[path]["table_key"] for path in changed}
+    keys.update(
+        prior["table_key"]
+        for path in changed
+        if isinstance((prior := prior_files.get(path)), dict)
+        and isinstance(prior.get("table_key"), str)
+    )
     return {path for path, entry in inventory.items() if entry["table_key"] in keys}
 
 
