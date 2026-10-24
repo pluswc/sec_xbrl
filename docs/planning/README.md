@@ -127,6 +127,12 @@ SHA는 `9708508ec953ee4323ae29318c639abc9e0650b6`이고, 병합 시각은
 이는 producer 계산의 증분화나 과거 50개 회사 의미 감사 반복을 뜻하지 않으며, 실제
 회사 runtime 채택·`main` 병합·원격 전달은 아직 수행하지 않았다.
 
+2026-10-24 AAPL cached 분기 한 건 추가 측정에서 가장 큰 단일 함수 경계였던 quarter
+publisher의 같은 source-table row/column private spill 재저장을 제거한 `18f8872…`는
+독립 3건 PASS 뒤 로컬 수락됐다. 단일 actual pair의 시간·RSS, 결과 동등성, 전체 이력
+재생성 한계는 [AAPL 분기 추가 성능 인계](../implementation/aapl-quarter-append-performance-20261024.md)에
+기록한다. `main` 병합과 운영 runtime 채택은 수행하지 않았다.
+
 ## 증거와 재현 — 임시 디렉터리에 의존하지 않는 인계
 
 필수 계약과 검증 절차는 위 추적 문서 및 U4 계획의 입력/검증 절에 있다.
