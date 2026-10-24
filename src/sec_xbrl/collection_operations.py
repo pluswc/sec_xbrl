@@ -961,8 +961,12 @@ def _create_build_attestation(
     destination: Path,
     publication: Path,
     views: Sequence[str],
+    validation_mode: str = "routine",
+    validation_state_root: Path | None = None,
 ) -> dict[str, Any]:
-    history.HistoryPublicationReader(publication).verify_all()
+    validation = history.HistoryPublicationReader(publication).validate(
+        mode=validation_mode, state_root=validation_state_root
+    )
     manifest_path = publication / "history_manifest.json"
     publication_manifest = _read_json(manifest_path)
     if publication_manifest.get("plan") != plan:
@@ -973,7 +977,7 @@ def _create_build_attestation(
         raise ValueError("history publication views differ")
     if not publication.resolve(strict=False).is_relative_to(destination.resolve(strict=False)):
         raise ValueError("history publication escapes the declared output root")
-    declared_files = _declared_publication_files(publication, publication_manifest)
+    declared_files = validation.declared_files
     if not declared_files:
         raise ValueError("history publication has no declared data files")
     return {
@@ -989,6 +993,12 @@ def _create_build_attestation(
         "history_manifest": str(manifest_path.absolute()),
         "history_manifest_sha256": _digest(manifest_path),
         "declared_files": declared_files,
+        "storage_validation": {
+            "level": validation.level,
+            "reason": validation.reason,
+            "report": validation.state_path,
+            "detailed_fallback": validation.detailed_fallback,
+        },
         "completed_at": _now(),
     }
 
@@ -1001,6 +1011,8 @@ def _validate_build_attestation(
     plan_sha256: str,
     intake_path: Path,
     intake: _IntakeAttestation,
+    validation_mode: str = "routine",
+    validation_state_root: Path | None = None,
 ) -> str | None:
     try:
         if not intake.complete or intake.error or intake.sha256 is None:
@@ -1037,7 +1049,15 @@ def _validate_build_attestation(
             raise ValueError("attested history publication intake differs")
         if publication_manifest.get("views") != marker.get("views"):
             raise ValueError("attested history publication views differ")
-        declared_files = _declared_publication_files(publication, publication_manifest)
+        if validation_state_root is None:
+            # Offline status keeps its established direct digest check and does
+            # not mutate routine state merely by rendering status.
+            declared_files = _declared_publication_files(publication, publication_manifest)
+        else:
+            validation = history.HistoryPublicationReader(publication).validate(
+                mode=validation_mode, state_root=validation_state_root
+            )
+            declared_files = validation.declared_files
         if not declared_files:
             raise ValueError("attested history publication has no declared data files")
         if marker.get("declared_files") != declared_files:
@@ -1053,6 +1073,7 @@ def build_universe(
     output_root: Path,
     views: Sequence[str] = ("AS_FILED", "LATEST_REPORTED"),
     selected_tickers: Sequence[str] | None = None,
+    validation_mode: str = "routine",
 ) -> Path:
     """Publish governed history for all or selected raw-complete companies."""
     attested = _attest_run(manifest_path)
@@ -1090,6 +1111,8 @@ def build_universe(
                 plan_sha256=company["plan_sha256"],
                 intake_path=intake_path,
                 intake=intake,
+                validation_mode=validation_mode,
+                validation_state_root=company_root / "history-validation",
             )
             if error:
                 raise ValueError(f"invalid existing build attestation for {ticker}: {error}")
@@ -1126,6 +1149,8 @@ def build_universe(
                 intake_manifest=intake,
                 output_root=destination,
                 views=tuple(views),
+                validation_mode=validation_mode,
+                validation_state_root=company_root / "history-validation",
             )
             result = _create_build_attestation(
                 ticker=ticker,
@@ -1136,6 +1161,8 @@ def build_universe(
                 destination=destination,
                 publication=publication,
                 views=views,
+                validation_mode=validation_mode,
+                validation_state_root=company_root / "history-validation",
             )
             _write_once_json(marker, result, label=f"{ticker} build")
         except Exception as exc:  # noqa: BLE001 - company-level isolation is the contract.
@@ -1209,6 +1236,8 @@ def _company_status(
                 plan_sha256=company["plan_sha256"],
                 intake_path=intake_path,
                 intake=intake,
+                validation_mode="routine",
+                validation_state_root=company_root / "history-validation",
             )
         except (OSError, TypeError, ValueError) as exc:
             build_attestation_error = str(exc)
@@ -1397,6 +1426,7 @@ def main() -> None:
     build.add_argument("--output-root", type=Path, required=True)
     build.add_argument("--views", nargs="+", default=["AS_FILED", "LATEST_REPORTED"])
     build.add_argument("--ticker", action="append", default=[])
+    build.add_argument("--validation-mode", choices=("routine", "detailed"), default="routine")
     status_parser = commands.add_parser("status")
     status_parser.add_argument("--manifest", type=Path, required=True)
     status_parser.add_argument("--output-root", type=Path)
@@ -1427,6 +1457,7 @@ def main() -> None:
             output_root=args.output_root,
             views=tuple(args.views),
             selected_tickers=tuple(args.ticker) or None,
+            validation_mode=args.validation_mode,
         )
         status = read_universe_status(manifest_path=args.manifest)
     else:

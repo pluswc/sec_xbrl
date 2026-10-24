@@ -1011,8 +1011,8 @@ def test_raw_complete_is_distinct_from_ready_and_build_failures_are_isolated(
     }
     monkeypatch.setattr(
         operations.history,
-        "HistoryPublicationReader",
-        lambda *args, **kwargs: pytest.fail("ordinary status must use offline digests only"),
+        "build_history",
+        lambda *args, **kwargs: pytest.fail("ordinary status must not rebuild history"),
     )
     assert operations.read_universe_status(manifest_path=manifest).ready_companies == 1
     (tmp_path / "publications/AAA/panels/0000000001/LATEST_REPORTED/QTD_3M/rows.parquet").write_bytes(

@@ -1081,10 +1081,15 @@ def _assemble_quarter_table(target, *, target_index, staging, chunk_root):
 
 
 def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots: bool = False,
-                            operational_root: Path | None = None, _recovery_access: Any = None) -> Path:
+                            operational_root: Path | None = None, _recovery_access: Any = None,
+                            validation_mode: str = "routine",
+                            validation_state_root: Path | None = None) -> Path:
     """Upgrade reported period evidence and materialize governed quarter cells."""
     old = HistoryPublicationReader(publication, _recovery_access=_recovery_access)
-    old.verify_all()
+    if _recovery_access is None:
+        old.validate(mode=validation_mode, state_root=validation_state_root)
+    else:
+        old.verify_all()
     destination = output_root / "panels"
     if destination.exists():
         raise ValueError("choose a new immutable quarterly publication destination")
@@ -1092,7 +1097,11 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
     output_root.mkdir(parents=True, exist_ok=True)
     intake_path = Path(old.manifest["source_intake"])
     if not reuse_roots and operational_root is None:
-        build_history(intake_manifest=intake_path, output_root=output_root, views=tuple(old.manifest["views"]), roots_only=True)
+        build_history(
+            intake_manifest=intake_path, output_root=output_root,
+            views=tuple(old.manifest["views"]), roots_only=True,
+            validation_mode=validation_mode, validation_state_root=validation_state_root,
+        )
     prepared_root = operational_root or output_root
     roots = {name: prepared_root / name / prepared_root.name for name in ("t1", "t2", "t3", "t4")}
     observed = Layer2PublicationReader().load(roots["t1"])
@@ -1150,7 +1159,10 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
         del targets, derived
         gc.collect()
         verified = HistoryPublicationReader(staging, allow_staging=True, _recovery_access=_recovery_access)
-        verified.verify_all()
+        if _recovery_access is None:
+            verified.validate(mode=validation_mode, state_root=validation_state_root)
+        else:
+            verified.verify_all()
         _check_history_storage()
         _rename_history_directory(staging, destination)
         return destination
@@ -1163,8 +1175,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--publication", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--validation-mode", choices=("routine", "detailed"), default="routine")
+    parser.add_argument("--validation-state-root", type=Path)
     args = parser.parse_args()
-    print(publish_quarter_history(publication=args.publication, output_root=args.output_root))
+    print(publish_quarter_history(
+        publication=args.publication, output_root=args.output_root,
+        validation_mode=args.validation_mode, validation_state_root=args.validation_state_root,
+    ))
 
 
 if __name__ == "__main__":

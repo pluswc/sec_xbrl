@@ -183,7 +183,11 @@ def test_completed_history_reuse_accepts_exact_active_fingerprint(
     monkeypatch.setattr(
         history,
         "HistoryPublicationReader",
-        lambda root: SimpleNamespace(manifest=manifest, verify_all=lambda: None),
+        lambda root: SimpleNamespace(
+            manifest=manifest,
+            verify_all=lambda: None,
+            validate=lambda **kwargs: None,
+        ),
     )
 
     assert history.build_history(intake_manifest=intake_path, output_root=output) == output / "panels"
@@ -246,7 +250,11 @@ def test_completed_history_releases_raw_cohort_before_quarter_publication(
     monkeypatch.setattr(
         history,
         "HistoryPublicationReader",
-        lambda root: SimpleNamespace(manifest=manifest, verify_all=lambda: None),
+        lambda root: SimpleNamespace(
+            manifest=manifest,
+            verify_all=lambda: None,
+            validate=lambda **kwargs: None,
+        ),
     )
 
     def publish(**kwargs):

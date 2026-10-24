@@ -392,7 +392,8 @@ def _validate_intake(intake: dict[str, Any]) -> None:
 
 
 def build_history(*, intake_manifest: Path, output_root: Path,
-                  views: tuple[str, ...] = ("AS_FILED", "LATEST_REPORTED"), roots_only: bool = False) -> Path:
+                  views: tuple[str, ...] = ("AS_FILED", "LATEST_REPORTED"), roots_only: bool = False,
+                  validation_mode: str = "routine", validation_state_root: Path | None = None) -> Path:
     """Publish all history once; materialize fiscal pivots for offline reload."""
     from sec_xbrl.analytics import (
         CompanyAnalysisPanelBuilder,
@@ -447,19 +448,22 @@ def build_history(*, intake_manifest: Path, output_root: Path,
             raise ValueError("existing history publication has incomplete operational roots")
         del release
         gc.collect()
-        history_reader.verify_all()
+        history_reader.validate(mode=validation_mode, state_root=validation_state_root)
         from sec_xbrl.analytics.history_quarters import publish_quarter_history
         consumer = output_root / "panels"
         if consumer.exists():
             consumer_reader = HistoryPublicationReader(consumer)
             if consumer_reader.manifest.get("input_fingerprint") != input_fingerprint:
                 raise ValueError("existing quarter history uses different inputs or active rules")
-            consumer_reader.verify_all()
+            consumer_reader.validate(mode=validation_mode, state_root=validation_state_root)
             return consumer
         # The immutable Layer 2 roots and reported publication now carry every
         # required input identity.  Do not retain the Raw cohort while the
         # additive quarter publisher performs its own verified reads.
-        return publish_quarter_history(publication=destination, output_root=output_root, reuse_roots=True)
+        return publish_quarter_history(
+            publication=destination, output_root=output_root, reuse_roots=True,
+            validation_mode=validation_mode, validation_state_root=validation_state_root,
+        )
     # Existing verified roots are reused without rerunning their producers.
     if not roots["t1"].exists():
         print(json.dumps({"stage": "BUILD_T1"}), flush=True)
@@ -591,11 +595,17 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     # Storage validation and the quarter producer need none of the build graph.
     del graph, periods, ledgers_by_cik, ledger, filing_by_id, builder, selector
     gc.collect()
-    # Audit the complete persisted output before its atomic publication.
-    HistoryPublicationReader(staging, allow_staging=True).verify_all()
+    # Apply the selected storage policy before atomic publication. Routine
+    # evidence is recorded distinctly and never labelled a full semantic audit.
+    HistoryPublicationReader(staging, allow_staging=True).validate(
+        mode=validation_mode, state_root=validation_state_root
+    )
     staging.rename(destination)
     from sec_xbrl.analytics.history_quarters import publish_quarter_history
-    return publish_quarter_history(publication=destination, output_root=output_root, reuse_roots=True)
+    return publish_quarter_history(
+        publication=destination, output_root=output_root, reuse_roots=True,
+        validation_mode=validation_mode, validation_state_root=validation_state_root,
+    )
 
 
 def _expected_quarters(keys: list[tuple[Any, ...]]) -> list[Any]:
@@ -1232,6 +1242,34 @@ class HistoryPublicationReader:
             info = self.manifest["derived_quarter"]
             for _record in _iter_history_records(_history_dataset_path(self.root, info), info):
                 pass
+
+    def validate(self, *, mode: str = "routine", state_root: Path | None = None):
+        """Run the default routine policy or the unchanged detailed storage scan."""
+        if mode not in {"routine", "detailed"}:
+            raise ValueError("validation mode must be routine or detailed")
+        from sec_xbrl.history_validation import validate_publication, validation_code_identity
+
+        package = Path(__file__).parent
+        identity = validation_code_identity(
+            # The history result depends on selector, mapping, period, graph,
+            # quarter and metric producers across this package. Hashing this
+            # bounded source tree avoids a manually stale dependency list.
+            sources=tuple(sorted(package.rglob("*.py"))),
+            rules={
+                "history_version": HISTORY_VERSION,
+                "layer2_rules": asdict(_history_layer2_rule_versions()),
+                "period_rule": self.manifest.get("period_rule"),
+                "derivation_rule": self.manifest.get("derivation_rule"),
+            },
+        )
+        return validate_publication(
+            root=self.root,
+            manifest=self.manifest,
+            detailed=self.verify_all,
+            code_identity=identity,
+            mode=mode,
+            state_root=state_root,
+        )
 
     def load(self, *, ticker: str, period_class: str = "QTD_3M", view: str = "LATEST_REPORTED"):
         from sec_xbrl.analytics import FiscalTimeSeriesResult
@@ -2053,6 +2091,8 @@ def main() -> None:
     build.add_argument("--intake-manifest", type=Path, required=True)
     build.add_argument("--output-root", type=Path, required=True)
     build.add_argument("--views", nargs="+", default=["AS_FILED", "LATEST_REPORTED"])
+    build.add_argument("--validation-mode", choices=("routine", "detailed"), default="routine")
+    build.add_argument("--validation-state-root", type=Path)
     query = commands.add_parser("query")
     query.add_argument("--publication", type=Path, required=True)
     query.add_argument("--ticker", required=True)
@@ -2091,7 +2131,10 @@ def main() -> None:
             attestation=args.attestation, expected_attestation_sha256=args.expected_attestation_sha256,
         )
     elif args.command == "build":
-        result = build_history(intake_manifest=args.intake_manifest, output_root=args.output_root, views=tuple(args.views))
+        result = build_history(
+            intake_manifest=args.intake_manifest, output_root=args.output_root, views=tuple(args.views),
+            validation_mode=args.validation_mode, validation_state_root=args.validation_state_root,
+        )
     elif args.command == "repair-coverage":
         result = repair_history_coverage(publication=args.publication, destination=args.destination)
     else:
