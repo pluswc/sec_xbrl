@@ -64,7 +64,8 @@ def test_migration_evidence_binds_code_and_every_payload(tmp_path: Path) -> None
         migration_evidence=path,
         previous_history=previous,
         previous_manifest=previous_manifest,
-        publications=publications,
+        roots={name: publication.run_root for name, publication in publications.items()},
+        manifests={name: publication.manifest_path for name, publication in publications.items()},
         producer_code_identity="code-one",
     )
     with pytest.raises(HistoryAppendReuseError, match="does not bind"):
@@ -72,7 +73,8 @@ def test_migration_evidence_binds_code_and_every_payload(tmp_path: Path) -> None
             migration_evidence=path,
             previous_history=previous,
             previous_manifest=previous_manifest,
-            publications=publications,
+            roots={name: publication.run_root for name, publication in publications.items()},
+            manifests={name: publication.manifest_path for name, publication in publications.items()},
             producer_code_identity="code-two",
         )
     (publications["t2"].run_root / "payload.parquet").write_bytes(b"changed")
@@ -81,7 +83,8 @@ def test_migration_evidence_binds_code_and_every_payload(tmp_path: Path) -> None
             migration_evidence=path,
             previous_history=previous,
             previous_manifest=previous_manifest,
-            publications=publications,
+            roots={name: publication.run_root for name, publication in publications.items()},
+            manifests={name: publication.manifest_path for name, publication in publications.items()},
             producer_code_identity="code-one",
         )
 
@@ -167,3 +170,17 @@ def test_t3_stage_merge_matches_full_graph(tmp_path: Path) -> None:
         tmp_path / "t2", {"filing_relationship_edge": ()}
     )
     assert _merge_graph(previous, current_t1, current_t2, ()) == full_graph
+
+
+def test_incremental_quarter_manifest_follows_current_targets() -> None:
+    from sec_xbrl.analytics.history_quarters import _quarter_target_keys
+
+    targets = {
+        ("TEST", "AS_FILED", "QTD_3M"): object(),
+        ("TEST", "AS_FILED", "YTD_9M"): object(),
+    }
+
+    assert _quarter_target_keys(targets) == [
+        ("TEST", "AS_FILED", "QTD_3M"),
+        ("TEST", "AS_FILED", "YTD_9M"),
+    ]

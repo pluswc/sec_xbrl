@@ -137,6 +137,7 @@ publisher의 같은 source-table row/column private spill 재저장을 제거한
 깨끗한 History 표를 증명 기반으로 재사용하고, 정확한 순서를 증명할 수 없는 T3만 전체
 생성으로 전환한다. 계약, 검사 범위와 아직 남은 전체 계산은
 [History 증분 append v1](../implementation/history-incremental-append-20261024.md)에 기록한다.
+source `59598b2…`의 실제 AAPL 단일 후보와 full reference 동등성은 로컬에서 확인했으며,
 독립 검증, 로컬 수락, `main` 병합과 운영 채택은 별도 미완료 단계다.
 
 ## 증거와 재현 — 임시 디렉터리에 의존하지 않는 인계

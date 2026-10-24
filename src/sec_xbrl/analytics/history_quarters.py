@@ -19,7 +19,7 @@ import stat
 import tempfile
 import zlib
 from collections import defaultdict
-from collections.abc import MutableMapping, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
 from copy import deepcopy
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
@@ -1098,6 +1098,13 @@ def _assemble_quarter_table(target, *, target_index, staging, chunk_root):
     return table
 
 
+def _quarter_target_keys(
+    targets: Mapping[tuple[Any, Any, Any], Any],
+) -> list[tuple[str, str, str]]:
+    """Keep the full producer's target order for incremental publication."""
+    return sorted((str(key[0]), str(key[1]), str(key[2])) for key in targets)
+
+
 def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots: bool = False,
                             operational_root: Path | None = None, _recovery_access: Any = None,
                             validation_mode: str = "routine",
@@ -1178,12 +1185,8 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
                 (str(table["ticker"]), str(table["view"]), str(table["period_class"])): table
                 for table in previous_reader.manifest["tables"]
             }
-        for source_table in old.manifest["tables"]:
-            key = (
-                str(source_table["ticker"]),
-                str(source_table["view"]),
-                str(source_table["period_class"]),
-            )
+        target_keys = _quarter_target_keys(targets)
+        for key in target_keys:
             if key in built_tables:
                 tables.append(built_tables[key])
                 continue

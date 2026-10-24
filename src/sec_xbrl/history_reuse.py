@@ -25,15 +25,16 @@ class HistoryAppendReuseError(ValueError):
     """Raised when a declared previous publication cannot prove safe reuse."""
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class HistoryAppendReusePlan:
     layer2_run: Any
     previous_history: Path
     previous_reported: Path
     previous_roots: Mapping[str, Path]
-    previous_publications: Mapping[str, VerifiedLayer2Publication]
+    previous_manifest_sha256: Mapping[str, str]
     old_snapshot_ids: frozenset[str]
     new_snapshots: tuple[CorpusSnapshot, ...]
+    new_filing_count: int
     mappings_by_cik: Mapping[str, MappingTables]
     filing_by_id: Mapping[str, Mapping[str, Any]]
     ledger_inputs_by_cik: Mapping[str, tuple[Mapping[str, Any], ...]]
@@ -68,9 +69,10 @@ def prepare_history_append(
     if not isinstance(roots_value, dict) or set(roots_value) != {"t1", "t2", "t3", "t4"}:
         raise HistoryAppendReuseError("previous history has no complete operational roots")
     roots = {name: Path(value).absolute() for name, value in roots_value.items()}
-    reader = Layer2PublicationReader()
-    publications = {name: reader.load(path) for name, path in roots.items()}
-    old_run = _run_from_manifest(_read_publication_manifest(publications["t1"].manifest_path))
+    manifests = {
+        name: path / "layer2_run_manifest.json" for name, path in roots.items()
+    }
+    old_run = _run_from_manifest(_read_publication_manifest(manifests["t1"]))
     current_run = release.layer2_run
     reported_sha = _sha256(previous_reported / "history_manifest.json")
     if (
@@ -98,12 +100,14 @@ def prepare_history_append(
     new_input = current_inputs[-1]
     if _input_order(new_input) <= old_last:
         raise HistoryAppendReuseError("new filing is not strictly later than the previous prefix")
-    for publication in publications.values():
-        run = _run_from_manifest(_read_publication_manifest(publication.manifest_path))
+    for manifest in manifests.values():
+        run = _run_from_manifest(_read_publication_manifest(manifest))
         if run != old_run:
             raise HistoryAppendReuseError("previous T1-T4 declarations differ")
     mappings = _canonical_mappings(release)
-    _verify_mapping_prefix(publications["t1"], mappings, old_inputs)
+    previous_t1 = Layer2PublicationReader().load(roots["t1"])
+    _verify_mapping_prefix(previous_t1, mappings, old_inputs)
+    del previous_t1
     filing_by_id, ledger_inputs_by_cik = _small_release_state(release)
     old_snapshot_ids = frozenset(item.snapshot_id for item in old_inputs)
     new_snapshots = tuple(
@@ -117,7 +121,8 @@ def prepare_history_append(
         migration_evidence=migration_evidence,
         previous_history=previous_history,
         previous_manifest=manifest_path,
-        publications=publications,
+        roots=roots,
+        manifests=manifests,
         producer_code_identity=producer_code_identity,
     )
     return HistoryAppendReusePlan(
@@ -125,9 +130,12 @@ def prepare_history_append(
         previous_history=previous_history,
         previous_reported=previous_reported,
         previous_roots=roots,
-        previous_publications=publications,
+        previous_manifest_sha256={
+            name: _sha256(manifest) for name, manifest in manifests.items()
+        },
         old_snapshot_ids=old_snapshot_ids,
         new_snapshots=new_snapshots,
+        new_filing_count=len(new_snapshots),
         mappings_by_cik=mappings,
         filing_by_id=filing_by_id,
         ledger_inputs_by_cik=ledger_inputs_by_cik,
@@ -149,11 +157,14 @@ def publish_append_roots(
     from sec_xbrl.longitudinal.versioned_observation_panel import _panel_row
 
     run = plan.layer2_run
+    new_accessions = {snapshot.input.accession for snapshot in plan.new_snapshots}
     roots = {name: Path(output_root) / name / run.run_version for name in ("t1", "t2", "t3", "t4")}
-    old_t1 = plan.previous_publications["t1"]
+    reader = Layer2PublicationReader()
+    old_t1 = reader.load(plan.previous_roots["t1"])
     t1: dict[str, list[dict[str, Any]]] = {
         name: list(old_t1.records(name)) for name in old_t1.datasets
     }
+    old_observations = tuple(t1.get("reported_period_observation", ()))
     for dataset in ("company_concept_map", "company_axis_map", "company_member_map"):
         t1[dataset] = []
     for mapping in plan.mappings_by_cik.values():
@@ -199,8 +210,10 @@ def publish_append_roots(
     OperationalLayer2Publisher(Path(output_root) / "t1").publish(
         run, {name: tuple(rows) for name, rows in t1.items() if rows}
     )
+    del old_t1, t1
 
-    old_edges = list(plan.previous_publications["t2"].records("filing_relationship_edge"))
+    old_t2 = reader.load(plan.previous_roots["t2"])
+    old_edges = list(old_t2.records("filing_relationship_edge"))
     new_edges: list[dict[str, Any]] = []
     for snapshot in plan.new_snapshots:
         filing = _one_filing(snapshot)
@@ -223,17 +236,30 @@ def publish_append_roots(
     OperationalLayer2Publisher(Path(output_root) / "t2").publish(
         run, {"filing_relationship_edge": tuple(old_edges + new_edges)}
     )
+    del old_t2, old_edges
+    # Canonical mappings and Raw suffix rows are no longer needed once T1/T2
+    # are immutable. Do not retain them beside current T1/T2 and the old T3.
+    plan.mappings_by_cik = {}
+    plan.new_snapshots = ()
 
-    t1_pub = Layer2PublicationReader().load(roots["t1"])
-    t2_pub = Layer2PublicationReader().load(roots["t2"])
+    t1_pub = reader.load(roots["t1"])
+    current_observations = t1_pub.records("reported_period_observation")
+    if not _rows_equal_with_schema_union(
+        old_observations, current_observations[: len(old_observations)]
+    ):
+        raise HistoryAppendReuseError("published T1 observation prefix changed")
+    del old_observations, current_observations
+    t2_pub = reader.load(roots["t2"])
+    old_t3 = reader.load(plan.previous_roots["t3"])
     try:
         t3_rows = _merge_graph(
-            plan.previous_publications["t3"],
+            old_t3,
             t1_pub,
             t2_pub,
             new_edges,
         )
         OperationalLayer2Publisher(Path(output_root) / "t3").publish(run, t3_rows)
+        del t3_rows
         t3_mode = "STAGE_PRESERVING_MERGE"
     except (HistoryAppendReuseError, ValueError) as exc:
         from sec_xbrl.longitudinal.exploration_graph import ExplorationGraphPipeline
@@ -244,9 +270,12 @@ def publish_append_roots(
         )
         ExplorationGraphPipeline().publish(t1_pub, t2_pub, output_root=Path(output_root) / "t3")
         t3_mode = "FULL_FALLBACK"
+    finally:
+        del old_t3
+    del t1_pub, t2_pub, new_edges
 
-    old_ledger = list(plan.previous_publications["t4"].records("accession_version_ledger"))
-    new_accessions = {snapshot.input.accession for snapshot in plan.new_snapshots}
+    old_t4 = reader.load(plan.previous_roots["t4"])
+    old_ledger = list(old_t4.records("accession_version_ledger"))
     new_ledger = [
         row
         for cik, inputs in plan.ledger_inputs_by_cik.items()
@@ -255,6 +284,7 @@ def publish_append_roots(
     OperationalLayer2Publisher(Path(output_root) / "t4").publish(
         run, {AccessionVersionLedgerPipeline.dataset: tuple(old_ledger + new_ledger)}
     )
+    del old_t4, old_ledger
     return roots, t3_mode
 
 
@@ -265,12 +295,12 @@ def reuse_manifest_payload(plan: HistoryAppendReusePlan) -> dict[str, Any]:
         "previous_history": str(plan.previous_history),
         "previous_reported": str(plan.previous_reported),
         "reused_filings": plan.reused_filings,
-        "new_filings": len(plan.new_snapshots),
+        "new_filings": plan.new_filing_count,
         "dirty_period_classes": sorted(plan.dirty_period_classes),
         "producer_code_identity": plan.producer_code_identity,
         "previous_manifests": {
-            name: _sha256(publication.manifest_path)
-            for name, publication in sorted(plan.previous_publications.items())
+            name: digest
+            for name, digest in sorted(plan.previous_manifest_sha256.items())
         },
     }
 
@@ -407,7 +437,8 @@ def _verify_reuse_evidence(
     migration_evidence: Path | None,
     previous_history: Path,
     previous_manifest: Path,
-    publications: Mapping[str, VerifiedLayer2Publication],
+    roots: Mapping[str, Path],
+    manifests: Mapping[str, Path],
     producer_code_identity: str,
 ) -> None:
     receipt_path = previous_history.parent / "history_append_reuse_receipt.json"
@@ -422,12 +453,12 @@ def _verify_reuse_evidence(
             "current_history": str(previous_history),
             "current_history_manifest_sha256": _sha256(previous_manifest),
             "current_operational_manifest_sha256": {
-                name: _sha256(publication.manifest_path)
-                for name, publication in sorted(publications.items())
+                name: _sha256(manifest)
+                for name, manifest in sorted(manifests.items())
             },
             "current_operational_content_sha256": {
-                name: _root_content_pins(publication.run_root)
-                for name, publication in sorted(publications.items())
+                name: _root_content_pins(root)
+                for name, root in sorted(roots.items())
             },
             "producer_code_identity": producer_code_identity,
         }
@@ -446,12 +477,12 @@ def _verify_reuse_evidence(
         "previous_history": str(previous_history),
         "previous_history_manifest_sha256": _sha256(previous_manifest),
         "previous_operational_manifest_sha256": {
-            name: _sha256(publication.manifest_path)
-            for name, publication in sorted(publications.items())
+            name: _sha256(manifest)
+            for name, manifest in sorted(manifests.items())
         },
         "previous_operational_content_sha256": {
-            name: _root_content_pins(publication.run_root)
-            for name, publication in sorted(publications.items())
+            name: _root_content_pins(root)
+            for name, root in sorted(roots.items())
         },
         "compatible_producer_code_identity": producer_code_identity,
     }
@@ -544,31 +575,8 @@ def _merge_graph(
             ("member", "company_member_map"),
         )
     }
-    old_observations = [
-        row
-        for row in current_t1.records("reported_period_observation")
-        if str(row.get("source_filing_id") or "") in old_filing_ids
-    ]
-    current_old_stage = _graph_datasets(old_observations, (), maps)
-    current_old_node_ids = {
-        row["analysis_exploration_node_id"]
-        for row in current_old_stage["analysis_exploration_node"]
-    }
     previous_nodes = list(previous.records("analysis_exploration_node"))
     previous_edges = list(previous.records("analysis_exploration_edge"))
-    old_stage_nodes = [
-        row
-        for row in previous_nodes
-        if row["analysis_exploration_node_id"] in current_old_node_ids
-    ]
-    old_stage_edges = [
-        row for row in previous_edges if not row.get("source_relationship_edge_id")
-    ]
-    if (
-        old_stage_nodes != list(current_old_stage["analysis_exploration_node"])
-        or old_stage_edges != list(current_old_stage["analysis_exploration_edge"])
-    ):
-        raise HistoryAppendReuseError("T3 old observation stage changed after reader roundtrip")
     new = _graph_datasets(new_observations, list(new_edges), maps)
     old_nodes = previous_nodes
     old_edges = previous_edges
