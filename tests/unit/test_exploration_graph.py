@@ -322,6 +322,16 @@ def test_selected_fact_paths_prune_only_unreachable_branches_and_keep_path_evide
                 "context_id": f"ctx:{name}",
             }
         )
+    nodes.append(
+        {
+            "cik": cik,
+            "analysis_exploration_node_id": "123",
+            "node_kind": "CONCEPT",
+            "origin": "STANDARD_CONCEPT",
+            "raw_id": "numeric-looking-id",
+            "raw_qname": "us-gaap:NumericLookingId",
+        }
+    )
 
     def edge(identity: str, left: str, right: str, role: str) -> dict:
         return {
@@ -413,6 +423,8 @@ def test_selected_fact_paths_prune_only_unreachable_branches_and_keep_path_evide
                 target_node_ids=targets,
             )
         )
+    with pytest.raises(ExplorationGraphError, match="root node"):
+        reader.traverse(publication, root_node_ids=(123,))  # type: ignore[arg-type]
 
 
 def test_reader_rejects_invalid_edge_even_when_target_scope_would_prune_it(

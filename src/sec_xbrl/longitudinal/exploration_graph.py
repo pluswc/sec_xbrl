@@ -301,7 +301,7 @@ class ExplorationGraphReader:
         """
         self._check(publication, None)
         nodes, outgoing, _edges = self._indexes(publication)
-        roots = tuple(str(root) for root in root_node_ids)
+        roots = tuple(root_node_ids)
         for root in roots:
             if root not in nodes:
                 raise ExplorationGraphError("root node is outside the verified exploration graph")

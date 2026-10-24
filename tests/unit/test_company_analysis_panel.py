@@ -30,7 +30,11 @@ REVENUE_CONCEPT = "node:revenue-concept"
 
 
 def _graph(
-    tmp_path, *, snapshot_id: str = "snap:q3", foreign_same_fact: bool = False
+    tmp_path,
+    *,
+    snapshot_id: str = "snap:q3",
+    foreign_same_fact: bool = False,
+    duplicate_same_fact: bool = False,
 ):
     run = Layer2Run(
         "t5-fixture",
@@ -187,6 +191,20 @@ def _graph(
                 "to_node_id": "node:foreign-same-fact",
                 "scope_kind": "FOREIGN_FIXTURE",
                 "order": None,
+            },
+        )
+    if duplicate_same_fact:
+        nodes += (
+            {
+                **nodes[5],
+                "analysis_exploration_node_id": "node:detail-duplicate",
+            },
+        )
+        edges += (
+            {
+                **edges[3],
+                "analysis_exploration_edge_id": "edge:fact-duplicate",
+                "to_node_id": "node:detail-duplicate",
             },
         )
     published = OperationalLayer2Publisher(tmp_path / "graph").publish(
@@ -356,7 +374,7 @@ def test_cached_graph_indexes_are_defensive_and_refresh_for_new_publication(tmp_
             "exploration": graph, "cik": CIK, "fiscal_year": 2024, "fiscal_quarter": 3,
             "period_class": "QTD_3M", "view": "LATEST_REPORTED", "as_of_date": "2023-11-21"}
     first = builder.build(**args)
-    nodes, facts, _placement = builder._graph_indexes(graph)
+    nodes, facts, _duplicate_fact_node_ids, _placement = builder._graph_indexes(graph)
     raw_root = next(
         row
         for row in graph.datasets[builder._graph_reader.node_dataset]
@@ -424,6 +442,67 @@ def test_target_scoped_panel_is_exactly_equal_to_full_traversal(
         DETAIL,
     ]
     assert all(row["source_filing_id"] == FILING for row in candidate.values)
+
+
+def test_target_scope_keeps_every_node_for_a_duplicate_filing_fact_key(
+    tmp_path, monkeypatch
+) -> None:
+    graph = _graph(tmp_path / "graph", duplicate_same_fact=True)
+    rows = (
+        _selected(TOTAL),
+        _selected(
+            DETAIL,
+            dimensions=(("axis:product", "member:data-center", None, "EXPLICIT", False),),
+            value="14514000000",
+        ),
+    )
+    args = {
+        "selected_rows": rows,
+        "exploration": graph,
+        "cik": CIK,
+        "fiscal_year": 2024,
+        "fiscal_quarter": 3,
+        "period_class": "QTD_3M",
+        "view": "LATEST_REPORTED",
+        "as_of_date": "2023-11-21",
+        "analysis_view_id": "nvda-q3",
+    }
+    builder = CompanyAnalysisPanelBuilder()
+    candidate = builder.build(**args)
+    _nodes, facts, duplicate_fact_node_ids, _placement = builder._graph_indexes(graph)
+    assert facts[(FILING, DETAIL)]["analysis_exploration_node_id"] == "node:detail-duplicate"
+    assert duplicate_fact_node_ids[(FILING, DETAIL)] == (
+        DETAIL_NODE,
+        "node:detail-duplicate",
+    )
+
+    selected_keys = {(FILING, TOTAL), (FILING, DETAIL)}
+
+    def legacy_paths(self, publication, *, root_node_ids, target_node_ids):
+        del target_node_ids
+        for root_index, root in enumerate(root_node_ids):
+            for path in self.traverse(publication, root_node_ids=(root,)):
+                node = path["node"]
+                key = (str(node.get("source_filing_id")), str(node.get("source_fact_id")))
+                if node.get("node_kind") == "FACT" and key in selected_keys:
+                    yield root_index, path
+
+    monkeypatch.setattr(
+        "sec_xbrl.longitudinal.exploration_graph.ExplorationGraphReader._iter_selected_fact_paths",
+        legacy_paths,
+    )
+    baseline = CompanyAnalysisPanelBuilder().build(**args)
+
+    assert candidate == baseline
+    assert len(candidate.values) == 3
+    assert {
+        tuple(row["navigation_path_node_ids"])
+        for row in candidate.bindings
+        if row["source_fact_id"] == DETAIL
+    } == {
+        (ROOT, AXIS, MEMBER, DETAIL_NODE),
+        (ROOT, AXIS, MEMBER, "node:detail-duplicate"),
+    }
 
 
 @pytest.mark.parametrize(

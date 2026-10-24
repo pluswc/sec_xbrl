@@ -34,6 +34,11 @@ unavailable row, graph에 없는 total/orphan root 오류, total과 함께 있�
 dimension selection의 기존 no-output 동작도 유지한다. 동일 fact ID가 다른 filing에 있어도
 두 필드 key로 구분한다.
 
+Layer2 계약은 같은 `(source_filing_id, source_fact_id)`를 가진 서로 다른 FACT node ID를
+허용한다. root 해석은 기존처럼 node 순서의 마지막 mapping을 사용한다. target 해석은 그
+key에 속한 모든 FACT node ID를 포함한다. 고유 key에는 추가 tuple을 만들지 않고 실제 중복
+key만 작은 secondary index에 보관한다.
+
 ## Attestation 및 물리 읽기 경계
 
 `Layer2PublicationReader.load()`는 여전히 전체 operational Parquet을 읽고 모든 row 계약,
@@ -70,16 +75,19 @@ component이며 전체 publication/company 재검증은 아니다.
 ## 397 대비 계측 없는 전체 비교
 
 accepted `3972358c`를 기준으로 동일 fixture의 panel build→fiscal spill→Parquet
-stage/finalize→reload→성공 close 전체를 fresh subprocess에서 3회 교차 실행했다. 각 실행은
-30초/1 GiB watchdog을 적용했고 cold graph index 및 첫 reverse index 비용을 포함했다.
+stage/finalize→reload→성공 close workload를 fresh subprocess에서 3회 교차 실행했다. 각
+실행은 30초/1 GiB watchdog을 적용했고 cold graph index 및 첫 reverse index 비용을
+포함했다. 경과 시간은 import와 fixture publication construction 이후부터 측정했으며 process
+peak RSS에는 subprocess 시작 비용이 포함된다.
 
 | 항목 | 397 median | 후보 median | 변화 |
 |---|---:|---:|---:|
-| 전체 경과 | 0.4631초 | 0.4267초 | -7.9% |
-| process peak RSS | 233,656 KiB | 221,028 KiB | -5.4% |
+| 전체 경과 | 0.4533초 | 0.4200초 | -7.3% |
+| process peak RSS | 232,764 KiB | 232,092 KiB | -0.3% |
 
-부모 watchdog 최대 관측은 기준 248,888 KiB, 후보 242,432 KiB였다. 작은 component와 동시
-호스트 작업의 영향을 받으므로 RSS 개선을 전체 회사에 외삽하지 않는다.
+부모 watchdog 최대 관측은 기준 243,936 KiB, 후보 250,240 KiB였다. 이 작은 component에서
+RSS 차이는 실질적 개선으로 해석하지 않는다. 동시 호스트 작업의 영향도 있으므로 전체
+회사에 외삽하지 않는다.
 
 두 arm의 complete decoded fingerprint는
 `0b0497946befa8611980982834080dafccd3fc5be966a8d2058083e936980df0`로 같았다.
@@ -88,10 +96,10 @@ columns/rows/cells count, JSON fields, artifact bytes와 각 Parquet SHA-256도 
 
 ## 검증과 한계
 
-관련 graph/panel unit 15개가 통과했다. diamond, parallel role/targetRole, multiple roots,
+관련 graph/panel focused unit가 통과했다. diamond, parallel role/targetRole, multiple roots,
 cycle, depth 3 경로, empty/no-reachable targets, unavailable, missing root/dimension orphan,
-filing-qualified identical fact ID, defensive copy, cache invalidation, target 밖 corrupt endpoint
-거부를 포함한다.
+filing-qualified identical fact ID, 동일 filing/fact key의 복수 FACT node, defensive copy, cache
+invalidation, target 밖 corrupt endpoint 거부와 public root 입력 진단 보존을 포함한다.
 
 이번 결과는 bounded COP component의 논리 탐색 비용 개선이다. 전체 T3 파일 읽기나 resident
 graph memory를 줄였다는 주장은 하지 않는다. screening/detail view 분리, graph 저장 형식,

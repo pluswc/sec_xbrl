@@ -45,6 +45,7 @@ class CompanyAnalysisPanelBuilder:
         self._indexes: tuple[
             dict[str, Mapping[str, Any]],
             dict[tuple[str, str], Mapping[str, Any]],
+            dict[tuple[str, str], tuple[str, ...]],
             dict[tuple[str, str], list[dict[str, Any]]],
         ] | None = None
 
@@ -52,8 +53,19 @@ class CompanyAnalysisPanelBuilder:
         if self._indexed_graph is exploration:
             return self._indexes
         nodes, _outgoing, edges = self._graph_reader._indexes(exploration)
-        facts = {(str(row.get("source_filing_id")), str(row.get("source_fact_id"))): row
-                 for row in nodes.values() if row.get("node_kind") == "FACT"}
+        facts: dict[tuple[str, str], Mapping[str, Any]] = {}
+        duplicate_fact_node_ids: dict[tuple[str, str], list[str]] = {}
+        for row in nodes.values():
+            if row.get("node_kind") != "FACT":
+                continue
+            key = (str(row.get("source_filing_id")), str(row.get("source_fact_id")))
+            previous = facts.get(key)
+            if previous is not None:
+                duplicates = duplicate_fact_node_ids.setdefault(
+                    key, [str(previous["analysis_exploration_node_id"])]
+                )
+                duplicates.append(str(row["analysis_exploration_node_id"]))
+            facts[key] = row
         placement: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for edge in edges:
             if edge.get("source_network_type") != "PRE":
@@ -67,7 +79,12 @@ class CompanyAnalysisPanelBuilder:
                     key = (str(edge.get("source_filing_id")), str(node.get("raw_id")))
                     placement.setdefault(key, []).append({"statement_types": kinds, **dict(edge)})
         self._indexed_graph = exploration
-        self._indexes = (nodes, facts, placement)
+        self._indexes = (
+            nodes,
+            facts,
+            {key: tuple(node_ids) for key, node_ids in duplicate_fact_node_ids.items()},
+            placement,
+        )
         return self._indexes
 
     def build(
@@ -97,7 +114,7 @@ class CompanyAnalysisPanelBuilder:
         _validate_selection_scope(
             selected, cik, fiscal_year, fiscal_quarter, period_class, view, as_of_date
         )
-        nodes, facts, placement = self._graph_indexes(exploration)
+        nodes, facts, duplicate_fact_node_ids, placement = self._graph_indexes(exploration)
         definitions: list[dict[str, Any]] = []
         bindings: list[dict[str, Any]] = []
         values: list[dict[str, Any]] = []
@@ -130,9 +147,12 @@ class CompanyAnalysisPanelBuilder:
             root_selections.append(selection)
             root_node_ids.append(str(root["analysis_exploration_node_id"]))
         target_node_ids = tuple(
-            str(facts[key]["analysis_exploration_node_id"])
+            node_id
             for key in selected_by_fact
             if key in facts
+            for node_id in duplicate_fact_node_ids.get(
+                key, (str(facts[key]["analysis_exploration_node_id"]),)
+            )
         )
         for root_index, path in self._graph_reader._iter_selected_fact_paths(
             exploration,
