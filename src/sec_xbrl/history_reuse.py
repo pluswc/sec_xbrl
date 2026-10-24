@@ -607,18 +607,27 @@ def _merge_graph(
         for row in old_edges
         if row.get("source_relationship_edge_id")
     ]
+    current_relationships = list(current_t2.records("filing_relationship_edge"))
     current_relationship_ids = [
-        str(row["filing_relationship_edge_id"])
-        for row in current_t2.records("filing_relationship_edge")
+        str(row["filing_relationship_edge_id"]) for row in current_relationships
     ]
-    if current_relationship_ids[: len(old_relationship_ids)] != old_relationship_ids:
-        raise HistoryAppendReuseError("T3 relationship stage is not an exact suffix")
+    new_relationship_ids = [
+        str(row["filing_relationship_edge_id"]) for row in new_edges
+    ]
+    if (
+        len(current_relationship_ids) != len(set(current_relationship_ids))
+        or set(current_relationship_ids)
+        != set(old_relationship_ids) | set(new_relationship_ids)
+        or set(old_relationship_ids) & set(new_relationship_ids)
+    ):
+        raise HistoryAppendReuseError("T3 relationship stage is not an exact append")
     return _merge_graph_stages(
         old_nodes,
         old_edges,
         list(new["analysis_exploration_node"]),
         list(new["analysis_exploration_edge"]),
         current_t1,
+        current_relationships,
     )
 
 
@@ -628,11 +637,13 @@ def _merge_graph_stages(
     new_nodes: list[dict[str, Any]],
     new_edges: list[dict[str, Any]],
     current_t1: VerifiedLayer2Publication,
+    current_relationships: Sequence[Mapping[str, Any]],
 ) -> dict[str, tuple[dict[str, Any], ...]]:
     from sec_xbrl.longitudinal.exploration_graph import (
         _concept_node_id,
         _dimension_node,
         _fact_node,
+        _relationship_concept_node,
     )
 
     maps = {
@@ -643,21 +654,48 @@ def _merge_graph_stages(
         for kind, dataset in (("axis", "company_axis_map"), ("member", "company_member_map"))
     }
     stage1: set[str] = set()
+    current_dimension_nodes: dict[str, dict[str, Any]] = {}
     for row in current_t1.records("reported_period_observation"):
         stage1.add(_concept_node_id(row))
         stage1.add(_fact_node(row)["analysis_exploration_node_id"])
         for axis_raw_id, member_raw_id, *_rest in tuple(row.get("raw_dimension_signature") or ()):
             axis = maps["axis"].get((str(row["source_filing_id"]), str(axis_raw_id)))
             if axis is not None:
-                stage1.add(_dimension_node(row, axis, "AXIS")["analysis_exploration_node_id"])
+                node = _dimension_node(row, axis, "AXIS")
+                stage1.add(node["analysis_exploration_node_id"])
+                current_dimension_nodes[node["analysis_exploration_node_id"]] = node
             member = maps["member"].get((str(row["source_filing_id"]), str(member_raw_id))) if member_raw_id else None
             if member is not None:
-                stage1.add(_dimension_node(row, member, "MEMBER")["analysis_exploration_node_id"])
-    old_stage1 = [row for row in old_nodes if row["analysis_exploration_node_id"] in stage1]
+                node = _dimension_node(row, member, "MEMBER")
+                stage1.add(node["analysis_exploration_node_id"])
+                current_dimension_nodes[node["analysis_exploration_node_id"]] = node
+    old_stage1 = [
+        current_dimension_nodes.get(str(row["analysis_exploration_node_id"]), row)
+        for row in old_nodes
+        if row["analysis_exploration_node_id"] in stage1
+    ]
     old_relationship = [row for row in old_nodes if row["analysis_exploration_node_id"] not in stage1]
     new_stage1 = [row for row in new_nodes if row["analysis_exploration_node_id"] in stage1]
     new_relationship = [row for row in new_nodes if row["analysis_exploration_node_id"] not in stage1]
-    merged_nodes = old_stage1 + new_stage1 + old_relationship + new_relationship
+    relationship_nodes = {
+        str(row["analysis_exploration_node_id"]): row
+        for row in old_relationship + new_relationship
+    }
+    ordered_relationship_nodes: list[dict[str, Any]] = []
+    seen_relationship_nodes: set[str] = set()
+    for relationship in current_relationships:
+        for side in ("from", "to"):
+            node_id = str(
+                _relationship_concept_node(relationship, side)[
+                    "analysis_exploration_node_id"
+                ]
+            )
+            if node_id in relationship_nodes and node_id not in seen_relationship_nodes:
+                ordered_relationship_nodes.append(relationship_nodes[node_id])
+                seen_relationship_nodes.add(node_id)
+    if seen_relationship_nodes != set(relationship_nodes):
+        raise HistoryAppendReuseError("T3 relationship node order is incomplete")
+    merged_nodes = old_stage1 + new_stage1 + ordered_relationship_nodes
 
     def edge_stage(row: Mapping[str, Any]) -> str:
         if row.get("source_relationship_edge_id"):
@@ -666,13 +704,26 @@ def _merge_graph_stages(
             return "augmentation"
         return "initial"
 
-    merged_edges = [
+    initial_edges = [
         row
-        for stage in ("initial", "augmentation", "relationship")
+        for stage in ("initial", "augmentation")
         for rows in (old_edges, new_edges)
         for row in rows
         if edge_stage(row) == stage
     ]
+    relationship_edges = {
+        str(row["source_relationship_edge_id"]): row
+        for row in old_edges + new_edges
+        if edge_stage(row) == "relationship"
+    }
+    ordered_relationship_edges = [
+        relationship_edges[str(row["filing_relationship_edge_id"])]
+        for row in current_relationships
+        if str(row["filing_relationship_edge_id"]) in relationship_edges
+    ]
+    if len(ordered_relationship_edges) != len(relationship_edges):
+        raise HistoryAppendReuseError("T3 relationship edge order is incomplete")
+    merged_edges = initial_edges + ordered_relationship_edges
     node_ids = [row["analysis_exploration_node_id"] for row in merged_nodes]
     edge_ids = [row["analysis_exploration_edge_id"] for row in merged_edges]
     if len(node_ids) != len(set(node_ids)) or len(edge_ids) != len(set(edge_ids)):

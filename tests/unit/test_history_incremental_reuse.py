@@ -172,6 +172,90 @@ def test_t3_stage_merge_matches_full_graph(tmp_path: Path) -> None:
     assert _merge_graph(previous, current_t1, current_t2, ()) == full_graph
 
 
+def test_t3_stage_merge_follows_interleaved_current_relationship_order(
+    tmp_path: Path,
+) -> None:
+    def relationship(
+        filing: str,
+        edge: str,
+        left: str,
+        right: str,
+        *,
+        role: str | None = None,
+        target_role: str | None = None,
+    ) -> dict:
+        return {
+            "cik": "0000000001",
+            "filing_relationship_edge_id": edge,
+            "source_filing_id": filing,
+            "source_snapshot_id": f"snapshot:{filing}",
+            "accession": filing,
+            "form": "10-Q",
+            "filed_date": "2026-01-01",
+            "report_date": "2025-12-31",
+            "network_type": "PRE",
+            "role_uri": role or f"role:{filing}",
+            "arcrole_uri": "arcrole:parent-child",
+            "from_raw_concept_id": left,
+            "from_raw_concept_qname": f"test:{left}",
+            "from_raw_concept_is_standard": False,
+            "from_company_canonical_concept_id": f"company:{left}",
+            "from_concept_mapping_id": f"mapping:{left}",
+            "from_concept_mapping_version": "v1",
+            "from_mapping_evidence": "{}",
+            "from_mapping_review_required": False,
+            "to_raw_concept_id": right,
+            "to_raw_concept_qname": f"test:{right}",
+            "to_raw_concept_is_standard": False,
+            "to_company_canonical_concept_id": f"company:{right}",
+            "to_concept_mapping_id": f"mapping:{right}",
+            "to_concept_mapping_version": "v1",
+            "to_mapping_evidence": "{}",
+            "to_mapping_review_required": False,
+            "target_role_uri": target_role,
+            "order": "1",
+            "weight": None,
+            "preferred_label": None,
+            "closed": None,
+            "usable": None,
+        }
+
+    old_a = relationship("old-a", "edge:a", "a", "b")
+    old_b = relationship("old-b", "edge:b", "c", "d")
+    new = relationship(
+        "new", "edge:new", "e", "f", role="role:primary"
+    )
+    new_target_role = relationship(
+        "new",
+        "edge:new-target-role",
+        "e",
+        "f",
+        role="role:alternate",
+        target_role="role:detail",
+    )
+    old_graph = _graph_datasets((), (old_a, old_b), {"axis": {}, "member": {}})
+    full_graph = _graph_datasets(
+        (), (old_a, new, new_target_role, old_b), {"axis": {}, "member": {}}
+    )
+    previous = _publication(tmp_path / "old", old_graph)
+    current_t1 = _publication(
+        tmp_path / "t1",
+        {
+            "reported_period_observation": (),
+            "company_axis_map": (),
+            "company_member_map": (),
+        },
+    )
+    current_t2 = _publication(
+        tmp_path / "t2",
+        {"filing_relationship_edge": (old_a, new, new_target_role, old_b)},
+    )
+
+    assert _merge_graph(
+        previous, current_t1, current_t2, (new, new_target_role)
+    ) == full_graph
+
+
 def test_incremental_quarter_manifest_follows_current_targets() -> None:
     from sec_xbrl.analytics.history_quarters import _quarter_target_keys
 
