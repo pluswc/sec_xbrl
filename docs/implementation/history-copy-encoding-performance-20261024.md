@@ -94,3 +94,23 @@ R15 source-only runtime 통합: 2 passed in 0.11s
 R16 source-only runtime 통합: 2 passed in 0.10s
 Ruff format/check, git diff --check: PASS
 ```
+
+## 독립 검토 보강: 실제 coverage 경로
+
+승인된 rich 1건을 4개 exercise row로 확장한 self-contained Parquet fixture에서 구 R13과
+신 R16의 실제 `FileStream`, `ChunkRecords`, `verify_coverage`를 실행했다. 두 arm은
+동일한 public/private Parquet I/O, schema·count·physical hash 전후 검사, JSON decode,
+aggregate와 per-row digest, 최종 public stream result 및 전체 physical coverage 검사를
+수행했다. 정규화한 complete report SHA는 모든 실행에서
+`dd0b820dd7a2815f699a337359ae3ef035283e7eb013e57d01a110ced42b7f47`로 같았다.
+독립 public/private row 순서 변경과 null 변경은 두 runtime 모두 닫힌 실패였다.
+
+3회 paired fresh subprocess 중앙값은 R13 2.7263초, R16 2.6387초로 R16이 3.22%
+짧았고 peak RSS는 471,212→470,780 KiB(-0.09%)였다. 이 전체 coverage 측정은 raw
+physical 변환까지 포함하므로 R16의 shared raw path를 유지했다. 표본이 작고 현재
+MRK CPU 간섭이 있어 보편적 속도 향상은 주장하지 않는다.
+
+- `work/.../history_copy_encoding_writer_20261024/actual_coverage_profile.json`
+  (`04145258be23c93cd08b7ad641946420a4ab49e2bd6f0a2a328afe8cb4548efc`)
+- 구 R13 실제 coverage·변조 검사: 3 passed in 4.59s
+- 신 R16 실제 coverage·변조 검사와 R14/R15 checker COW 비교: 4 passed in 4.95s
