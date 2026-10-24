@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from sec_xbrl import collection_operations, history
+from sec_xbrl import collection_operations, history, history_validation
 from sec_xbrl.analytics import history_quarters
 from sec_xbrl.history_validation import validate_publication
 
@@ -85,6 +85,17 @@ def _rewrite_first_cell(root: Path, manifest: dict, *, dangling: bool = False) -
     return manifest
 
 
+def _rewrite_role(root: Path, manifest: dict, role: str, rows: list[dict]) -> None:
+    table = manifest["tables"][0]
+    info = table["files"][role]
+    path = root / info["path"]
+    path.unlink()
+    written = history._write_records(path, tuple(rows))
+    table["files"][role] = {**written, "path": info["path"]}
+    (root / "history_manifest.json").unlink()
+    history._write_json(root / "history_manifest.json", manifest)
+
+
 def test_routine_initial_unchanged_cross_root_and_changed_table(tmp_path: Path) -> None:
     root, _ = _publication(tmp_path / "first")
     state = tmp_path / "state"
@@ -124,6 +135,84 @@ def test_rebound_table_files_recheck_old_and_new_reference_closures(tmp_path: Pa
         second["files"]["rows"], first["files"]["rows"]
     )
     history._write_json(root / "history_manifest.json", manifest)
+
+    with pytest.raises(ValueError, match="routine check anomaly"):
+        history.HistoryPublicationReader(root).validate(state_root=state)
+    assert state_path.read_bytes() == before
+
+
+def test_reference_check_reads_each_narrow_file_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import polars as pl
+
+    root, manifest = _publication(tmp_path / "publication", second=False)
+    inventory = history_validation._manifest_inventory(manifest)
+    original = pl.LazyFrame.collect
+    calls = 0
+
+    def counted(frame, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(frame, *args, **kwargs)
+
+    monkeypatch.setattr(pl.LazyFrame, "collect", counted)
+    history_validation._check_table_references(root, inventory, set(inventory))
+    assert calls == 3
+
+
+@pytest.mark.parametrize(
+    "anomaly",
+    [
+        "row-null",
+        "row-duplicate",
+        "column-null",
+        "column-duplicate",
+        "cell-null",
+        "cell-duplicate",
+        "row-reference-null",
+        "column-reference-null",
+        "row-reference-type",
+    ],
+)
+def test_reference_anomalies_fail_and_preserve_state(tmp_path: Path, anomaly: str) -> None:
+    root, manifest = _publication(tmp_path / "publication", second=False)
+    state = tmp_path / "state"
+    history.HistoryPublicationReader(root).validate(state_root=state)
+    state_path = next(state.glob("*.json"))
+    before = state_path.read_bytes()
+    table = manifest["tables"][0]
+    role = "rows" if anomaly.startswith("row-") else "columns"
+    if "reference" in anomaly or anomaly.startswith("cell-"):
+        role = "cells"
+    rows = list(history.HistoryPublicationReader(root)._records(table["files"][role]))
+    if anomaly.endswith("duplicate"):
+        if role == "cells":
+            rows[len(rows) // 2] = {
+                **rows[len(rows) // 2],
+                "fiscal_time_series_cell_id": rows[0]["fiscal_time_series_cell_id"],
+            }
+        else:
+            rows.append(dict(rows[0]))
+    elif anomaly == "row-null":
+        rows[0] = {**rows[0], "fiscal_time_series_row_id": None}
+    elif anomaly == "column-null":
+        rows[0] = {**rows[0], "fiscal_time_series_column_id": None}
+    elif anomaly == "cell-null":
+        rows[len(rows) // 2] = {
+            **rows[len(rows) // 2], "fiscal_time_series_cell_id": None
+        }
+    elif anomaly == "row-reference-null":
+        rows[len(rows) // 2] = {
+            **rows[len(rows) // 2], "fiscal_time_series_row_id": None
+        }
+    elif anomaly == "column-reference-null":
+        rows[len(rows) // 2] = {
+            **rows[len(rows) // 2], "fiscal_time_series_column_id": None
+        }
+    else:
+        rows[0] = {**rows[0], "fiscal_time_series_row_id": 7}
+    _rewrite_role(root, manifest, role, rows)
 
     with pytest.raises(ValueError, match="routine check anomaly"):
         history.HistoryPublicationReader(root).validate(state_root=state)

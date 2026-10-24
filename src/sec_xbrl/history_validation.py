@@ -333,24 +333,45 @@ def _check_table_references(
             raise ValueError("history cell reference schema is missing")
         row_path, _ = entries["rows"]
         column_path, _ = entries["columns"]
-        row_ids = pl.scan_parquet(root / row_path, parallel="none", low_memory=True, rechunk=False).select(row_field)
-        column_ids = pl.scan_parquet(root / column_path, parallel="none", low_memory=True, rechunk=False).select(column_field)
-        for frame, field in ((row_ids, row_field), (column_ids, column_field), (cell_frame, cell_id)):
-            counts = frame.select(
-                pl.len().alias("count"),
-                pl.col(field).null_count().alias("nulls"),
-                pl.col(field).n_unique().alias("unique"),
-            ).collect(engine="streaming").row(0, named=True)
-            if counts["nulls"] or counts["unique"] != counts["count"]:
+        row_ids = (
+            pl.scan_parquet(root / row_path, parallel="none", low_memory=True, rechunk=False)
+            .select(row_field)
+            .collect(engine="streaming")
+        )
+        column_ids = (
+            pl.scan_parquet(root / column_path, parallel="none", low_memory=True, rechunk=False)
+            .select(column_field)
+            .collect(engine="streaming")
+        )
+        for frame, field in ((row_ids, row_field), (column_ids, column_field)):
+            identifiers = frame.get_column(field)
+            if identifiers.null_count() or identifiers.n_unique() != frame.height:
                 raise ValueError("history table identity is null or duplicated")
-        cell_refs = cell_frame.select(row_field, column_field)
-        dangling_rows = cell_refs.select(row_field).unique().join(
-            row_ids.unique(), on=row_field, how="anti"
-        ).select(pl.len()).collect(engine="streaming").item()
-        dangling_columns = cell_refs.select(column_field).unique().join(
-            column_ids.unique(), on=column_field, how="anti"
-        ).select(pl.len()).collect(engine="streaming").item()
-        if dangling_rows or dangling_columns:
+        if (
+            schema[row_field] != row_ids.schema[row_field]
+            or schema[column_field] != column_ids.schema[column_field]
+        ):
+            raise ValueError("history cell reference type differs from table identity type")
+        counts = cell_frame.select(
+            pl.len().alias("count"),
+            pl.col(cell_id).null_count().alias("cell_nulls"),
+            pl.col(cell_id).n_unique().alias("cell_unique"),
+            pl.col(row_field)
+            .is_in(pl.lit(row_ids.get_column(row_field)).implode())
+            .fill_null(False)
+            .not_()
+            .sum()
+            .alias("dangling_rows"),
+            pl.col(column_field)
+            .is_in(pl.lit(column_ids.get_column(column_field)).implode())
+            .fill_null(False)
+            .not_()
+            .sum()
+            .alias("dangling_columns"),
+        ).collect(engine="streaming").row(0, named=True)
+        if counts["cell_nulls"] or counts["cell_unique"] != counts["count"]:
+            raise ValueError("history table identity is null or duplicated")
+        if counts["dangling_rows"] or counts["dangling_columns"]:
             raise ValueError("history cell reference is dangling")
 
 
