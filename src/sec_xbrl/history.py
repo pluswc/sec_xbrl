@@ -722,11 +722,13 @@ class _TypedStageRecordSpool:
             self._identity = (stat_result.st_dev, stat_result.st_ino)
             self._write(_TYPED_STAGE_SPOOL_MAGIC)
         except BaseException:
-            self.close()
             try:
-                self.path.unlink(missing_ok=True)
-            except OSError:
-                pass
+                try:
+                    self.remove_owned()
+                except OSError:
+                    pass
+            finally:
+                self.close()
             raise
 
     def _open_fd(self) -> int:
@@ -753,6 +755,23 @@ class _TypedStageRecordSpool:
             or (path.st_dev, path.st_ino) != self._identity
         ):
             raise ValueError("typed stage spool ownership changed")
+
+    def remove_owned(self) -> bool:
+        """Remove only the pathname still bound to this spool's open inode."""
+        if self.fd is None or self._identity is None:
+            return False
+        try:
+            descriptor = os.fstat(self.fd)
+            path = os.stat(self.path, follow_symlinks=False)
+        except FileNotFoundError:
+            return True
+        if (
+            (descriptor.st_dev, descriptor.st_ino) != self._identity
+            or (path.st_dev, path.st_ino) != self._identity
+        ):
+            return False
+        self.path.unlink()
+        return True
 
     def append(self, record: dict[str, Any]) -> None:
         if self._sealed is not None:
@@ -826,10 +845,14 @@ class _TypedStageRecordSpool:
 
     def discard(self) -> None:
         """Remove a successfully consumed private spool before publication."""
-        self._check_identity()
-        self.close()
-        _check_history_storage()
-        self.path.unlink()
+        try:
+            self._check_identity()
+            _check_history_storage()
+            self._check_identity()
+            if not self.remove_owned():
+                raise ValueError("typed stage spool ownership changed")
+        finally:
+            self.close()
 
     def close(self) -> None:
         if self.fd is not None:
@@ -865,7 +888,10 @@ def _stage_records(
             spool = _TypedStageRecordSpool(Path(workspace.name))
         except BaseException:
             if workspace is not None:
-                _cleanup_history_workspace(workspace)
+                if any(Path(workspace.name).iterdir()):
+                    workspace._finalizer.detach()
+                else:
+                    _cleanup_history_workspace(workspace)
             raise
     try:
         replay_records, json_fields, global_schema = _discover_record_schema(
@@ -896,10 +922,20 @@ def _stage_records(
         else:
             spool_bytes = 0
     except BaseException:
+        remove_workspace = True
         if spool is not None:
-            spool.close()
+            try:
+                try:
+                    remove_workspace = spool.remove_owned()
+                except OSError:
+                    remove_workspace = False
+            finally:
+                spool.close()
         if workspace is not None:
-            _cleanup_history_workspace(workspace)
+            if remove_workspace:
+                _cleanup_history_workspace(workspace)
+            else:
+                workspace._finalizer.detach()
         raise
     return _StagedRecordWrite(
         path,

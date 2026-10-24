@@ -71,13 +71,23 @@ RSS 차이는 실행 잡음 범위라 개선으로 해석하지 않는다. 부�
 임시 spool은 기존 비실행 typed `_spill_pack`/`_spill_unpack` 계약을 그대로 사용한다.
 각 frame 길이와 payload SHA-256, 전체 순서 chain digest, 개수·파일 크기, inode/device
 소유권을 확인한다. header/payload 변경, frame 순서 변경, truncation, trailing append를
-fail closed로 거부한다. 생성/open/header write 실패는 FD와 workspace를 정리한다. 정상
-인코딩 뒤에는 spool을 최종 chunk inventory를 반환하기 전에 삭제한다.
+fail closed로 거부한다. 생성/open/header write 실패에서는 소유 FD를 닫고, 현재 pathname의
+device/inode가 그 FD에 고정한 identity와 일치할 때만 소유 spool을 제거한다. guard가 생성을
+거부했거나 `O_EXCL` 충돌이 났거나 pathname이 교체된 경우에는 기존 파일·symlink target·
+교체 파일을 삭제하지 않는다. 정상 인코딩 뒤에는 동일한 identity 확인 후 spool을 최종
+chunk inventory를 반환하기 전에 삭제한다.
 
 History storage guard의 path 인자는 exclusive create 직전에만 전달한다. 이미 소유권을
 고정한 spool의 seal/read/delete 검사는 인자 없는 guard check와 fd/path inode 비교를 함께
 사용한다. 기존 파일을 overwrite로 간주해 거부하는 recovery guard에서도 정상 spool이
 오탐 없이 동작하고, 모든 생성 경로가 소유 root 안인지 focused test로 확인했다.
+guard가 활성화된 실패 경로에서는 기존 History 정책대로 workspace와 진단 artifact를
+보존한다. 따라서 모든 임시 directory를 삭제한다고 주장하지 않는다. 일반 경로에서도
+foreign pathname 교체가 보이면 workspace finalizer를 분리해 외부 파일을 지우지 않는다.
+
+소유권 예외 보정은 성공 경로를 바꾸지 않으므로 위 3회 성능 수치는 그대로 계승했다.
+보정 뒤에는 guard 거부, regular file·symlink `O_EXCL` 충돌, header write 중 pathname 교체,
+소유 FD close와 외부 내용 보존을 별도 focused test로 검증했고 성능 측정을 반복하지 않았다.
 
 late nested field가 앞선 bool/int/큰 정수/Decimal/date/Unicode/null 값을 전역 JSON으로
 승격하는 기존 동작과 schema를 eager 기준과 byte 단위로 비교했다. 입력 provenance도

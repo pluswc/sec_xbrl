@@ -156,6 +156,72 @@ def test_typed_stage_spool_constructor_failure_leaves_no_file(
     assert not list(tmp_path.iterdir())
 
 
+@pytest.mark.parametrize("kind", ("file", "symlink"))
+def test_typed_stage_spool_exclusive_collision_preserves_foreign_path(
+    tmp_path: Path, kind: str
+) -> None:
+    path = tmp_path / "typed-records.spool"
+    target = tmp_path / "foreign-target"
+    target.write_bytes(b"foreign-content")
+    if kind == "file":
+        path.write_bytes(b"foreign-content")
+    else:
+        path.symlink_to(target)
+
+    with pytest.raises(FileExistsError):
+        history._TypedStageRecordSpool(tmp_path)
+
+    assert path.read_bytes() == b"foreign-content"
+    assert target.read_bytes() == b"foreign-content"
+    if kind == "symlink":
+        assert path.is_symlink()
+
+
+def test_typed_stage_spool_guard_rejection_preserves_preexisting_file(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "typed-records.spool"
+    path.write_bytes(b"foreign-content")
+
+    def reject_existing(candidate: Path | None = None) -> None:
+        if candidate is not None and candidate.exists():
+            raise ValueError("guard refuses overwrite")
+
+    token = history._HISTORY_STORAGE_GUARD.set(reject_existing)
+    try:
+        with pytest.raises(ValueError, match="guard refuses overwrite"):
+            history._TypedStageRecordSpool(tmp_path)
+    finally:
+        history._HISTORY_STORAGE_GUARD.reset(token)
+
+    assert path.read_bytes() == b"foreign-content"
+
+
+def test_typed_stage_spool_constructor_path_exchange_preserves_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "typed-records.spool"
+    displaced = tmp_path / "owned-displaced.spool"
+    opened_fd: int | None = None
+
+    def exchange_then_fail(fd: int, _payload: Any) -> int:
+        nonlocal opened_fd
+        opened_fd = fd
+        path.rename(displaced)
+        path.write_bytes(b"foreign-replacement")
+        raise OSError("injected exchanged-path write failure")
+
+    monkeypatch.setattr(history.os, "write", exchange_then_fail)
+    with pytest.raises(OSError, match="exchanged-path"):
+        history._TypedStageRecordSpool(tmp_path)
+
+    assert path.read_bytes() == b"foreign-replacement"
+    assert displaced.exists()
+    assert opened_fd is not None
+    with pytest.raises(OSError):
+        os.fstat(opened_fd)
+
+
 def test_spilled_staging_constructor_failure_cleans_workspace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -170,6 +236,44 @@ def test_spilled_staging_constructor_failure_cleans_workspace(
             tmp_path / "failed.parquet", _SpilledRecordSequence(fixture, "cells")
         )
     assert not list(tmp_path.glob(".failed.parquet.chunks-*"))
+
+
+def test_spilled_staging_path_exchange_retains_foreign_workspace_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = _SpilledFixture(({"id": "one"},))
+
+    def exchange_then_fail(
+        spool: history._TypedStageRecordSpool, _record: dict[str, Any]
+    ) -> None:
+        spool.path.rename(spool.path.with_name("owned-displaced.spool"))
+        spool.path.write_bytes(b"foreign-replacement")
+        raise OSError("injected staging path exchange")
+
+    monkeypatch.setattr(history._TypedStageRecordSpool, "append", exchange_then_fail)
+    with pytest.raises(OSError, match="staging path exchange"):
+        history._stage_records(
+            tmp_path / "failed.parquet", _SpilledRecordSequence(fixture, "cells")
+        )
+
+    workspaces = list(tmp_path.glob(".failed.parquet.chunks-*"))
+    assert len(workspaces) == 1
+    assert (workspaces[0] / "typed-records.spool").read_bytes() == b"foreign-replacement"
+    assert (workspaces[0] / "owned-displaced.spool").exists()
+
+
+def test_guarded_staging_failure_retains_diagnostic_workspace(tmp_path: Path) -> None:
+    fixture = _SpilledFixture(({"id": "one", "unsupported": object()},))
+    token = history._HISTORY_STORAGE_GUARD.set(lambda _path=None: None)
+    try:
+        with pytest.raises(FiscalTimeSeriesError, match="unsupported typed spill scalar"):
+            history._stage_records(
+                tmp_path / "failed.parquet", _SpilledRecordSequence(fixture, "cells")
+            )
+    finally:
+        history._HISTORY_STORAGE_GUARD.reset(token)
+
+    assert len(list(tmp_path.glob(".failed.parquet.chunks-*"))) == 1
 
 
 def test_ordinary_sequence_keeps_existing_nonspooled_path(tmp_path: Path) -> None:
