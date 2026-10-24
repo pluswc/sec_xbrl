@@ -69,6 +69,19 @@ def _reject_json_constant(value: str) -> None:
     raise ValueError(f"non-finite JSON constant: {value}")
 
 
+def decode_canonical_bytes(data: bytes) -> Any:
+    """Decode canonical audit JSON with the storage format's strict number rules."""
+
+    try:
+        return json.loads(
+            data,
+            parse_constant=_reject_json_constant,
+            parse_float=_finite_float,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise AuditIndexError("CORRUPT_PAYLOAD_JSON") from exc
+
+
 class AuditIndex:
     """A new-format audit index; existing files must be opened explicitly."""
 
@@ -289,15 +302,16 @@ class AuditIndex:
         ).fetchone()
         _require(row is not None, "DANGLING_PAYLOAD_REF")
         data = self._canonical_payload_bytes(payload_id, row)
-        try:
-            value = json.loads(
-                data,
-                parse_constant=_reject_json_constant,
-                parse_float=_finite_float,
+        return decode_canonical_bytes(data)
+
+    def _verified_canonical_rows(
+        self, rows: Iterator[tuple[Any, Any, Any, Any]]
+    ) -> Iterator[bytes]:
+        for payload_id, encoding, payload, byte_count in rows:
+            _require(encoding is not None, "DANGLING_PAYLOAD_REF")
+            yield self._canonical_payload_bytes(
+                payload_id, (encoding, payload, byte_count)
             )
-        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
-            raise AuditIndexError("CORRUPT_PAYLOAD_JSON") from exc
-        return value
 
     def payload_ref(self, value: Any) -> PayloadRef:
         """Store a logical payload without adding an object/expected row."""
@@ -340,6 +354,17 @@ class AuditIndex:
         for key, payload_id in rows:
             yield json.loads(key), self._load_payload(payload_id)
 
+    def item_canonical_values(self, bucket: str) -> Iterator[bytes]:
+        """Yield verified object payload bytes in first-insertion order."""
+
+        rows = self.db.execute(
+            """SELECT o.payload_id,p.encoding,p.payload,p.byte_count
+               FROM objects o LEFT JOIN payloads p ON p.payload_id=o.payload_id
+               WHERE o.bucket=? ORDER BY o.ord""",
+            (bucket,),
+        )
+        yield from self._verified_canonical_rows(rows)
+
     def emit(self, target: str, kind: str, value: Any) -> PayloadRef:
         ref = self._store_payload(value)
         self.db.execute(
@@ -373,6 +398,17 @@ class AuditIndex:
         )
         for (payload_id,) in rows:
             yield self._load_payload(payload_id)
+
+    def expected_canonical(self, target: str, kind: str) -> Iterator[bytes]:
+        """Yield verified expected payload bytes without JSON decode/re-encode."""
+
+        rows = self.db.execute(
+            """SELECT e.payload_id,p.encoding,p.payload,p.byte_count
+               FROM expected e LEFT JOIN payloads p ON p.payload_id=e.payload_id
+               WHERE e.target=? AND e.kind=? ORDER BY e.ordinal""",
+            (target, kind),
+        )
+        yield from self._verified_canonical_rows(rows)
 
     def add_candidate_refs(
         self,

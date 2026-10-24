@@ -9,7 +9,12 @@ from typing import Any
 import pytest
 
 from tools import history_audit_index as storage
-from tools.history_audit_index import AuditIndex, AuditIndexError, canonical_text
+from tools.history_audit_index import (
+    AuditIndex,
+    AuditIndexError,
+    canonical_text,
+    decode_canonical_bytes,
+)
 from tools.profile_history_audit_index import LegacyIndex
 
 
@@ -244,6 +249,89 @@ def test_equal_payloads_deduplicate_without_coalescing_logical_rows(tmp_path: Pa
         assert index.db.execute("SELECT count(*) FROM expected").fetchone()[0] == 2
     finally:
         index.close()
+
+
+def test_verified_canonical_iterators_preserve_order_and_avoid_n_plus_one(
+    tmp_path: Path,
+) -> None:
+    index = AuditIndex(tmp_path / "index.sqlite", compression_threshold=128)
+    try:
+        first = {"id": "first", "large": "한글🚀" * 100, "typed": [1, True, None, -0.0]}
+        second = {"id": "second", "large": "plain", "typed": [2**100, False]}
+        index.put("rows", "one", first)
+        index.put("rows", "two", second)
+        index.emit("target", "cells", first)
+        index.emit("target", "cells", second)
+        index.emit("target", "cells", first)
+        statements: list[str] = []
+        index.db.set_trace_callback(statements.append)
+
+        object_bytes = list(index.item_canonical_values("rows"))
+        expected_bytes = list(index.expected_canonical("target", "cells"))
+
+        index.db.set_trace_callback(None)
+        assert object_bytes == [
+            canonical_text(first).encode(),
+            canonical_text(second).encode(),
+        ]
+        assert expected_bytes == [
+            canonical_text(first).encode(),
+            canonical_text(second).encode(),
+            canonical_text(first).encode(),
+        ]
+        selects = [statement for statement in statements if statement.startswith("SELECT")]
+        assert len(selects) == 2
+        assert all("LEFT JOIN payloads" in statement for statement in selects)
+        assert [decode_canonical_bytes(value) for value in expected_bytes] == [
+            first,
+            second,
+            first,
+        ]
+
+        borrowed = index.get("rows", "one")
+        borrowed["typed"].append("mutated")
+        assert index.get("rows", "one") == first
+        listed = list(index.items("rows"))
+        listed[0][1]["typed"].append("mutated")
+        assert next(index.items("rows"))[1] == first
+    finally:
+        index.close()
+
+
+@pytest.mark.parametrize("compression_threshold", (None, 32))
+def test_verified_canonical_iterators_fail_closed_on_mutation_and_dangling_refs(
+    tmp_path: Path, compression_threshold: int | None
+) -> None:
+    index = AuditIndex(
+        tmp_path / f"index-{compression_threshold}.sqlite",
+        compression_threshold=compression_threshold,
+    )
+    try:
+        value = {"id": "cell", "text": "z" * 100}
+        ref = index.emit("target", "cells", value)
+        index.db.commit()
+        index.db.execute(
+            "UPDATE payloads SET payload=? WHERE payload_id=?", (b"{}", ref.payload_id)
+        )
+        with pytest.raises(AuditIndexError, match="CORRUPT_PAYLOAD"):
+            list(index.expected_canonical("target", "cells"))
+        index.db.rollback()
+        assert list(index.expected_canonical("target", "cells")) == [
+            canonical_text(value).encode()
+        ]
+
+        index.db.execute("PRAGMA foreign_keys=OFF")
+        index.db.execute("DELETE FROM payloads WHERE payload_id=?", (ref.payload_id,))
+        with pytest.raises(AuditIndexError, match="DANGLING_PAYLOAD_REF"):
+            list(index.expected_canonical("target", "cells"))
+    finally:
+        index.close()
+
+
+def test_strict_canonical_decoder_rejects_nonfinite_and_invalid_json() -> None:
+    for payload in (b'{"value":NaN}', b'{"value":Infinity}', b"not-json", b"\xff"):
+        with pytest.raises(AuditIndexError, match="CORRUPT_PAYLOAD_JSON"):
+            decode_canonical_bytes(payload)
 
 
 def test_large_unicode_payload_compression_is_lossless(tmp_path: Path) -> None:
