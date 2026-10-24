@@ -158,6 +158,17 @@ def publish_append_roots(
 
     run = plan.layer2_run
     new_accessions = {snapshot.input.accession for snapshot in plan.new_snapshots}
+    mapping = None
+    rows: Sequence[Mapping[str, Any]] = ()
+    snapshot = None
+    result = None
+    filing = None
+    concept_map = None
+    axis_map = None
+    member_map = None
+    concepts: Sequence[Mapping[str, Any]] = ()
+    roles: Mapping[str, Mapping[str, Any]] = {}
+    relationship = None
     roots = {name: Path(output_root) / name / run.run_version for name in ("t1", "t2", "t3", "t4")}
     reader = Layer2PublicationReader()
     old_t1 = reader.load(plan.previous_roots["t1"])
@@ -241,6 +252,17 @@ def publish_append_roots(
     # are immutable. Do not retain them beside current T1/T2 and the old T3.
     plan.mappings_by_cik = {}
     plan.new_snapshots = ()
+    mapping = None
+    rows = ()
+    snapshot = None
+    result = None
+    filing = None
+    concept_map = None
+    axis_map = None
+    member_map = None
+    concepts = ()
+    roles = {}
+    relationship = None
 
     t1_pub = reader.load(roots["t1"])
     current_observations = t1_pub.records("reported_period_observation")
