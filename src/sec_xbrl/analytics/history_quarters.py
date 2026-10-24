@@ -524,12 +524,22 @@ def _spill_reported_table(old, table, publication, by_fact, targets, materialize
     columns, rows = source["columns"], source["rows"]
     info = table["files"]["cells"]
     count = 0
+    # A source table owns one value for each row ID. Columns can converge on
+    # one reclassified target ID, so retain the last source-column identity
+    # rather than assuming that target IDs are unique. These indexes live for
+    # this source table only; the first write from every later table still
+    # preserves the existing cross-table last-wins order.
+    written_rows: set[tuple[tuple[str, str, str], str]] = set()
+    last_source_column: dict[
+        tuple[tuple[str, str, str], str], str
+    ] = {}
     started_at = monotonic()
     _quarter_progress("QUARTER_SPILL_BEGIN", table, count, started_at)
     for original in _iter_history_records(_history_dataset_path(old.root, info), info):
         # Large evidence trees remain read-only until the typed spill serializes.
         cell, value = _copy_reclassified_cell(original)
-        old_column = columns[cell["fiscal_time_series_column_id"]]
+        source_column_id = cell["fiscal_time_series_column_id"]
+        old_column = columns[source_column_id]
         period_class = table["period_class"]
         if value is not None and value.get("selected_source_fact_id"):
             source = by_fact.get((value["source_filing_id"], value["selected_source_fact_id"]))
@@ -563,10 +573,18 @@ def _spill_reported_table(old, table, publication, by_fact, targets, materialize
         target = targets[key]
         column = {**old_column, "period_class": period_class,
                   "fiscal_time_series_column_id": _id("column", (old_column["fiscal_year"], old_column["fiscal_quarter"], period_class))}
-        cell["fiscal_time_series_column_id"] = column["fiscal_time_series_column_id"]
+        column_id = column["fiscal_time_series_column_id"]
+        cell["fiscal_time_series_column_id"] = column_id
         cell["fiscal_time_series_cell_id"] = _id("reclassified-cell", cell.get("fiscal_time_series_cell_id"), PERIOD_RULE)
-        target["columns"][column["fiscal_time_series_column_id"]] = column
-        target["rows"][cell["fiscal_time_series_row_id"]] = rows[cell["fiscal_time_series_row_id"]]
+        column_key = (key, column_id)
+        if last_source_column.get(column_key) != source_column_id:
+            target["columns"][column_id] = column
+            last_source_column[column_key] = source_column_id
+        row_id = cell["fiscal_time_series_row_id"]
+        row_key = (key, row_id)
+        if row_key not in written_rows:
+            target["rows"][row_id] = rows[row_id]
+            written_rows.add(row_key)
         cell_key = len(target["cells"])
         target["cells"].append(cell)
         materialized[key][(cell["fiscal_time_series_row_id"], cell["fiscal_time_series_column_id"])] = True

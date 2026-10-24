@@ -10,6 +10,7 @@ from collections import defaultdict
 from copy import deepcopy
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 
 import polars as pl
 import pytest
@@ -18,6 +19,77 @@ from test_history_recovery import _recovery_fixture
 
 from sec_xbrl import history
 from sec_xbrl.analytics import history_quarters as quarters
+
+
+def test_reported_spill_skips_only_same_source_metadata_rewrites(tmp_path, monkeypatch):
+    def table_fixture(root, marker, cells):
+        root.mkdir()
+        columns = (
+            {"fiscal_time_series_column_id": "source-a", "fiscal_year": 2026,
+             "fiscal_quarter": 1, "period_class": "QTD_3M", "marker": marker},
+            {"fiscal_time_series_column_id": "source-b", "fiscal_year": 2026,
+             "fiscal_quarter": 1, "period_class": "QTD_3M", "marker": "B"},
+        )
+        rows = ({"fiscal_time_series_row_id": "row", "marker": marker},)
+        records = {
+            "columns": columns,
+            "rows": rows,
+            "cells": tuple(
+                {"fiscal_time_series_cell_id": f"cell-{marker}-{index}",
+                 "fiscal_time_series_row_id": "row",
+                 "fiscal_time_series_column_id": source_column,
+                 "value_lineage": None}
+                for index, source_column in enumerate(cells)
+            ),
+        }
+        files = {}
+        for name, values in records.items():
+            path = root / f"{name}.parquet"
+            files[name] = {**history._write_records(path, values), "path": path.name}
+        return {
+            "ticker": "TEST", "cik": "0000000001", "view": "AS_FILED",
+            "period_class": "QTD_3M", "scope": {}, "files": files,
+        }
+
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first = table_fixture(first_root, "A", ("source-a", "source-b", "source-a", "source-a"))
+    second = table_fixture(second_root, "C", ("source-a", "source-a"))
+    spill_root = tmp_path / "spill"
+    spill_root.mkdir()
+    spill = quarters._QuarterSpill(spill_root)
+    mutations = []
+    original_mutate = spill.mutate
+
+    def counted(operation, bucket, key, value=None):
+        mutations.append((operation, bucket, key))
+        return original_mutate(operation, bucket, key, value)
+
+    monkeypatch.setattr(spill, "mutate", counted)
+    targets, materialized = {}, {}
+    try:
+        for table, root in ((first, first_root), (second, second_root)):
+            reader = SimpleNamespace(root=root, manifest={"plan": {"as_of_date": "2026-10-10"}})
+            quarters._spill_reported_table(
+                reader, table, root, spill.mapping(), targets, materialized,
+                defaultdict(int), spill, {},
+            )
+            target = targets[("TEST", "AS_FILED", "QTD_3M")]
+            column_mutations = [row for row in mutations if row[1] == target["columns"].bucket]
+            row_mutations = [row for row in mutations if row[1] == target["rows"].bucket]
+            if table is first:
+                # A -> B -> A is retained; the final identical A is skipped.
+                assert len(column_mutations) == 3
+                assert len(row_mutations) == 1
+                assert next(iter(target["columns"].values()))["marker"] == "A"
+            else:
+                # A new source table writes once again, preserving last-wins.
+                assert len(column_mutations) == 4
+                assert len(row_mutations) == 2
+                assert next(iter(target["columns"].values()))["marker"] == "C"
+                assert next(iter(target["rows"].values()))["marker"] == "C"
+    finally:
+        spill.close()
 
 
 def test_spill_order_types_overwrite_and_duplicate_groups(tmp_path):
