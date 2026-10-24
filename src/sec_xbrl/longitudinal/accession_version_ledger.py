@@ -146,7 +146,12 @@ class AccessionVersionLedgerReader:
         )
 
 
-def _ledger_rows(cik: str, inputs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _ledger_rows(
+    cik: str,
+    inputs: list[dict[str, Any]],
+    *,
+    selected_accessions: set[str] | None = None,
+) -> list[dict[str, Any]]:
     filings_by_accession = {
         str(item["filing"].get("accession") or ""): item["filing"] for item in inputs
     }
@@ -156,6 +161,8 @@ def _ledger_rows(cik: str, inputs: list[dict[str, Any]]) -> list[dict[str, Any]]
     for item in inputs:
         filing = item["filing"]
         accession = str(filing["accession"])
+        if selected_accessions is not None and accession not in selected_accessions:
+            continue
         is_amendment = bool(filing.get("is_amendment")) or str(filing.get("form") or "").endswith("/A")
         evidence = item["amendment_evidence"]
         linkage = _linkage(filing, evidence, filings_by_accession, is_amendment)

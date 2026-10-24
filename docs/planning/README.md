@@ -133,6 +133,12 @@ publisher의 같은 source-table row/column private spill 재저장을 제거한
 재생성 한계는 [AAPL 분기 추가 성능 인계](../implementation/aapl-quarter-append-performance-20261024.md)에
 기록한다. `main` 병합과 운영 runtime 채택은 수행하지 않았다.
 
+2026-10-24 후속 증분 append 후보는 strictly-later 단일 CIK 공시에서 이전 T1/T2/T4와
+깨끗한 History 표를 증명 기반으로 재사용하고, 정확한 순서를 증명할 수 없는 T3만 전체
+생성으로 전환한다. 계약, 검사 범위와 아직 남은 전체 계산은
+[History 증분 append v1](../implementation/history-incremental-append-20261024.md)에 기록한다.
+독립 검증, 로컬 수락, `main` 병합과 운영 채택은 별도 미완료 단계다.
+
 ## 증거와 재현 — 임시 디렉터리에 의존하지 않는 인계
 
 필수 계약과 검증 절차는 위 추적 문서 및 U4 계획의 입력/검증 절에 있다.

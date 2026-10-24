@@ -11,6 +11,7 @@ import gc
 import hashlib
 import json
 import os
+import shutil
 import stat
 import tempfile
 import uuid
@@ -393,7 +394,9 @@ def _validate_intake(intake: dict[str, Any]) -> None:
 
 def build_history(*, intake_manifest: Path, output_root: Path,
                   views: tuple[str, ...] = ("AS_FILED", "LATEST_REPORTED"), roots_only: bool = False,
-                  validation_mode: str = "routine", validation_state_root: Path | None = None) -> Path:
+                  validation_mode: str = "routine", validation_state_root: Path | None = None,
+                  previous_history: Path | None = None,
+                  previous_reuse_evidence: Path | None = None) -> Path:
     """Publish all history once; materialize fiscal pivots for offline reload."""
     from sec_xbrl.analytics import (
         CompanyAnalysisPanelBuilder,
@@ -432,6 +435,21 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     reader = Layer2PublicationReader()
     roots = {name: output_root / name / run_id for name in ("t1", "t2", "t3", "t4")}
     _validate_existing_operational_roots(reader, roots, input_fingerprint)
+    append_plan = None
+    append_info = None
+    append_fallback = None
+    append_filing_by_id = None
+    if previous_history is not None and not any(path.exists() for path in roots.values()):
+        from sec_xbrl.history_reuse import HistoryAppendReuseError, prepare_history_append
+
+        try:
+            append_plan = prepare_history_append(
+                previous_history=previous_history, release=release, views=views,
+                migration_evidence=previous_reuse_evidence,
+            )
+        except (HistoryAppendReuseError, OSError, ValueError) as exc:
+            append_fallback = f"{type(exc).__name__}: {exc}"
+            print(json.dumps({"stage": "HISTORY_APPEND_FULL_FALLBACK", "reason": append_fallback}), flush=True)
     destination = output_root / "reported-panels"
     if destination.exists() and not roots_only:
         history_reader = HistoryPublicationReader(destination)
@@ -465,18 +483,51 @@ def build_history(*, intake_manifest: Path, output_root: Path,
             validation_mode=validation_mode, validation_state_root=validation_state_root,
         )
     # Existing verified roots are reused without rerunning their producers.
-    if not roots["t1"].exists():
+    if append_plan is not None:
+        from sec_xbrl.history_reuse import publish_append_roots, reuse_manifest_payload
+
+        print(
+            json.dumps(
+                {
+                    "stage": "BUILD_INCREMENTAL_ROOTS",
+                    "reused_filings": append_plan.reused_filings,
+                    "new_filings": len(append_plan.new_snapshots),
+                }
+            ),
+            flush=True,
+        )
+        append_filing_by_id = dict(append_plan.filing_by_id)
+        # The proof plan retains only the suffix Raw snapshot, full canonical
+        # maps, and small ledger inputs. Drop the full old Raw cohort before
+        # constructing any new operational publication.
+        del release
+        gc.collect()
+        _append_roots, t3_mode = publish_append_roots(plan=append_plan, output_root=output_root)
+        append_payload = reuse_manifest_payload(append_plan)
+        append_payload["t3_mode"] = t3_mode
+        append_info = {
+            "previous_history": append_plan.previous_history,
+            "previous_reported": append_plan.previous_reported,
+            "dirty_period_classes": frozenset(append_plan.dirty_period_classes),
+            "payload": append_payload,
+        }
+        # Old T1-T4 rows and full canonical mappings are bootstrap evidence,
+        # not serving state. Release them before loading the new roots.
+        del append_plan
+        append_plan = None
+        gc.collect()
+    elif not roots["t1"].exists():
         print(json.dumps({"stage": "BUILD_T1"}), flush=True)
         VersionedObservationPanelPipeline().publish(release, output_root=output_root / "t1")
-    if not roots["t2"].exists():
+    if append_plan is None and not roots["t2"].exists():
         print(json.dumps({"stage": "BUILD_T2"}), flush=True)
         FilingRelationshipIndexPipeline().publish(release, output_root=output_root / "t2")
     observations = reader.load(roots["t1"])
     relationships = reader.load(roots["t2"])
-    if not roots["t3"].exists():
+    if append_plan is None and not roots["t3"].exists():
         print(json.dumps({"stage": "BUILD_T3"}), flush=True)
         ExplorationGraphPipeline().publish(observations, relationships, output_root=output_root / "t3")
-    if not roots["t4"].exists():
+    if append_plan is None and not roots["t4"].exists():
         print(json.dumps({"stage": "BUILD_T4"}), flush=True)
         AccessionVersionLedgerPipeline().publish(release, output_root=output_root / "t4")
     graph = reader.load(roots["t3"])
@@ -490,12 +541,17 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     print(json.dumps({"stage": "OPERATIONAL_ROOTS_READY", "filings": snapshot_count}), flush=True)
     if roots_only:
         return output_root
-    filing_by_id = {str(row["filing_id"]): row for row in release.records("filing")}
+    filing_by_id = (
+        append_filing_by_id
+        if append_filing_by_id is not None
+        else {str(row["filing_id"]): row for row in release.records("filing")}
+    )
     # T1-T4 have been validated against the active run fingerprint, and the
     # only remaining release data needed by reported panels is the small
     # filing index above.  Releasing the cohort here avoids retaining every
     # immutable Raw snapshot beside T1/T3 panel materialization.
-    del release
+    if append_filing_by_id is None:
+        del release
     periods, comparative_counts = _partition_current_observations(observations)
     del observations
     ciks = tuple(str(company["cik"]) for company in plan["companies"])
@@ -506,6 +562,25 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     output_root.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".panels.partial-", dir=output_root))
     tables = []
+    reused_reported = None
+    previous_tables: dict[tuple[str, str, str], dict[str, Any]] = {}
+    dirty_period_classes = set()
+    if append_info is not None:
+        reused_reported = HistoryPublicationReader(append_info["previous_reported"])
+        previous_tables = {
+            (str(table["ticker"]), str(table["view"]), str(table["period_class"])): table
+            for table in reused_reported.manifest["tables"]
+        }
+        dirty_period_classes = set(append_info["dirty_period_classes"])
+        previous_plan = reused_reported.manifest.get("plan")
+        from sec_xbrl.history_reuse import history_policy_changed
+
+        if not isinstance(previous_plan, dict) or history_policy_changed(previous_plan, plan):
+            # Layer 2 is independent of serving as-of/view policy. History
+            # tables are conservatively rebuilt when that policy changes.
+            dirty_period_classes.update(
+                str(table["period_class"]) for table in reused_reported.manifest["tables"]
+            )
     for company in plan["companies"]:
         cik, ticker = company["cik"], company["ticker"]
         coverage_keys = _filing_coverage_keys(tuple(filing_by_id.values()), cik)
@@ -515,6 +590,37 @@ def build_history(*, intake_manifest: Path, output_root: Path,
             for period_class in sorted({key[3] for key in keys}):
                 scoped = [key for key in keys if key[3] == period_class]
                 if not scoped:
+                    continue
+                table_key = (str(ticker), str(view), str(period_class))
+                if (
+                    reused_reported is not None
+                    and period_class not in dirty_period_classes
+                    and table_key in previous_tables
+                ):
+                    prior = previous_tables[table_key]
+                    copied = {**prior, "files": {}}
+                    for name, info in prior["files"].items():
+                        _check_history_storage()
+                        relative_path = Path(info["path"])
+                        source = _history_dataset_path(reused_reported.root, info)
+                        target = staging / relative_path
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copyfile(source, target)
+                        if _sha256_file(target) != info["sha256"]:
+                            raise ValueError("reused history table hash mismatch")
+                        copied["files"][name] = dict(info)
+                    tables.append(copied)
+                    print(
+                        json.dumps(
+                            {
+                                "stage": "PANEL_REUSED",
+                                "ticker": ticker,
+                                "view": view,
+                                "period_class": period_class,
+                            }
+                        ),
+                        flush=True,
+                    )
                     continue
                 expected = []
                 if period_class == "QTD_3M":
@@ -591,6 +697,13 @@ def build_history(*, intake_manifest: Path, output_root: Path,
                 "comparative_scope": "CURRENT_FOCUS",
                 "comparative_observations_retained_in_t1": dict(comparative_counts),
                 "quarterly_derivation_status": "NOT_MATERIALIZED_REPORTED_SERIES_ONLY"}
+    if append_info is not None:
+        manifest["history_append_reuse"] = append_info["payload"]
+    elif append_fallback is not None:
+        manifest["history_append_reuse"] = {
+            "mode": "FULL_FALLBACK",
+            "reason": append_fallback,
+        }
     _write_json(staging / "history_manifest.json", manifest)
     # Storage validation and the quarter producer need none of the build graph.
     del graph, periods, ledgers_by_cik, ledger, filing_by_id, builder, selector
@@ -602,10 +715,17 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     )
     staging.rename(destination)
     from sec_xbrl.analytics.history_quarters import publish_quarter_history
-    return publish_quarter_history(
+    result = publish_quarter_history(
         publication=destination, output_root=output_root, reuse_roots=True,
         validation_mode=validation_mode, validation_state_root=validation_state_root,
+        previous_history=None if append_info is None else append_info["previous_history"],
+        dirty_period_classes=None if append_info is None else frozenset(dirty_period_classes),
     )
+    if append_info is not None:
+        from sec_xbrl.history_reuse import write_reuse_receipt
+
+        write_reuse_receipt(output_root, append_info["payload"])
+    return result
 
 
 def _expected_quarters(keys: list[tuple[Any, ...]]) -> list[Any]:
@@ -2093,6 +2213,8 @@ def main() -> None:
     build.add_argument("--views", nargs="+", default=["AS_FILED", "LATEST_REPORTED"])
     build.add_argument("--validation-mode", choices=("routine", "detailed"), default="routine")
     build.add_argument("--validation-state-root", type=Path)
+    build.add_argument("--previous-history", type=Path)
+    build.add_argument("--previous-reuse-evidence", type=Path)
     query = commands.add_parser("query")
     query.add_argument("--publication", type=Path, required=True)
     query.add_argument("--ticker", required=True)
@@ -2134,6 +2256,8 @@ def main() -> None:
         result = build_history(
             intake_manifest=args.intake_manifest, output_root=args.output_root, views=tuple(args.views),
             validation_mode=args.validation_mode, validation_state_root=args.validation_state_root,
+            previous_history=args.previous_history,
+            previous_reuse_evidence=args.previous_reuse_evidence,
         )
     elif args.command == "repair-coverage":
         result = repair_history_coverage(publication=args.publication, destination=args.destination)

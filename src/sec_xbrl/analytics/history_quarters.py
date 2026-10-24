@@ -1101,7 +1101,9 @@ def _assemble_quarter_table(target, *, target_index, staging, chunk_root):
 def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots: bool = False,
                             operational_root: Path | None = None, _recovery_access: Any = None,
                             validation_mode: str = "routine",
-                            validation_state_root: Path | None = None) -> Path:
+                            validation_state_root: Path | None = None,
+                            previous_history: Path | None = None,
+                            dirty_period_classes: frozenset[str] | None = None) -> Path:
     """Upgrade reported period evidence and materialize governed quarter cells."""
     old = HistoryPublicationReader(publication, _recovery_access=_recovery_access)
     if _recovery_access is None:
@@ -1144,10 +1146,12 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
             _spill_reported_table(old, table, publication, by_fact, targets, materialized, changes, spill, additive_by_pair)
         derived = _derive_quarter_targets(targets, additive_by_pair, materialized, spill)
         spill.checkpoint()
-        tables = []
+        built_tables: dict[tuple[str, str, str], dict[str, Any]] = {}
         for target_index, (key, target) in enumerate(sorted(targets.items())):
+            if dirty_period_classes is not None and key[2] not in dirty_period_classes:
+                continue
             table = _assemble_spilled_table(target, staging, spill)
-            tables.append(table)
+            built_tables[(str(key[0]), str(key[1]), str(key[2]))] = table
             print(
                 json.dumps(
                     {
@@ -1165,6 +1169,39 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
         spill.close()
         if not _retain_history_artifacts():
             shutil.rmtree(chunk_root)
+        tables: list[dict[str, Any]] = []
+        previous_tables: dict[tuple[str, str, str], dict[str, Any]] = {}
+        previous_reader = None
+        if previous_history is not None:
+            previous_reader = HistoryPublicationReader(previous_history)
+            previous_tables = {
+                (str(table["ticker"]), str(table["view"]), str(table["period_class"])): table
+                for table in previous_reader.manifest["tables"]
+            }
+        for source_table in old.manifest["tables"]:
+            key = (
+                str(source_table["ticker"]),
+                str(source_table["view"]),
+                str(source_table["period_class"]),
+            )
+            if key in built_tables:
+                tables.append(built_tables[key])
+                continue
+            if previous_reader is None or key not in previous_tables:
+                raise ValueError("unchanged quarter table has no previous publication proof")
+            prior = previous_tables[key]
+            copied = {**prior, "files": {}}
+            for name, info in prior["files"].items():
+                _check_history_storage()
+                relative = Path(info["path"])
+                source = _history_dataset_path(previous_reader.root, info)
+                target = staging / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, target)
+                if _sha256_file(target) != info["sha256"]:
+                    raise ValueError("reused quarter table hash mismatch")
+                copied["files"][name] = dict(info)
+            tables.append(copied)
         manifest = {**old.manifest, "version": HISTORY_VERSION, "tables": tables, "period_rule": PERIOD_RULE,
                     "operational_roots": {key: str(path.absolute()) for key, path in roots.items()},
                     "input_fingerprint": input_fingerprint,
@@ -1173,6 +1210,8 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
                     "derivation_rule": QUARTER_RULE, "period_reclassification_counts": dict(changes),
                     "supersedes_publication": str(publication.absolute()),
                     "source_manifest_sha256": hashlib.sha256((publication / "history_manifest.json").read_bytes()).hexdigest()}
+        if previous_history is not None:
+            manifest["history_append_reuse"] = old.manifest.get("history_append_reuse")
         _write_json(staging / "history_manifest.json", manifest)
         del targets, derived
         gc.collect()

@@ -49,6 +49,26 @@ class ExplorationGraphPipeline:
         observation_rows = observations.records("reported_period_observation")
         relationship_rows = relationships.records("filing_relationship_edge")
         maps = _mapping_index(observations)
+        datasets = _graph_datasets(observation_rows, relationship_rows, maps)
+        publication = OperationalLayer2Publisher(Path(output_root)).publish(
+            _exploration_run(observations), datasets
+        )
+        return ExplorationGraphResult(
+            publication,
+            len(datasets["analysis_exploration_node"]),
+            len(datasets["analysis_exploration_edge"]),
+        )
+
+
+def _graph_datasets(
+    observation_rows: Iterable[Mapping[str, Any]],
+    relationship_rows: Iterable[Mapping[str, Any]],
+    maps: Mapping[str, Mapping[tuple[str, str], Mapping[str, Any]]],
+) -> dict[str, tuple[dict[str, Any], ...]]:
+    """Build graph rows without publishing, for an attested append merge."""
+    observation_rows = tuple(dict(row) for row in observation_rows)
+    relationship_rows = tuple(dict(row) for row in relationship_rows)
+    if True:  # Keep the original producer body as one exact nested block.
         nodes: dict[str, dict[str, Any]] = {}
         edges: dict[str, dict[str, Any]] = {}
 
@@ -161,14 +181,10 @@ class ExplorationGraphPipeline:
             else:
                 add_edge(_relationship_edge(row, "MEMBER_HIERARCHY", left, right))
 
-        datasets = {
-            "analysis_exploration_node": tuple(nodes.values()),
-            "analysis_exploration_edge": tuple(edges.values()),
-        }
-        publication = OperationalLayer2Publisher(Path(output_root)).publish(
-            _exploration_run(observations), datasets
-        )
-        return ExplorationGraphResult(publication, len(nodes), len(edges))
+    return {
+        "analysis_exploration_node": tuple(nodes.values()),
+        "analysis_exploration_edge": tuple(edges.values()),
+    }
 
 
 class ExplorationGraphReader:
