@@ -726,10 +726,11 @@ def _merge_graph_stages(
     merged_edges = initial_edges + ordered_relationship_edges
     node_ids = [row["analysis_exploration_node_id"] for row in merged_nodes]
     edge_ids = [row["analysis_exploration_edge_id"] for row in merged_edges]
-    if len(node_ids) != len(set(node_ids)) or len(edge_ids) != len(set(edge_ids)):
+    node_id_set = set(node_ids)
+    if len(node_ids) != len(node_id_set) or len(edge_ids) != len(set(edge_ids)):
         raise HistoryAppendReuseError("T3 append produced colliding identities")
     if any(
-        row[endpoint] not in set(node_ids)
+        row[endpoint] not in node_id_set
         for row in merged_edges
         for endpoint in ("from_node_id", "to_node_id")
     ):
