@@ -11,8 +11,10 @@ Lead는 이 범위를 로컬 수락했다. 원격 push, PR, CI, `main` 병합과
 
 후속 ID/FK 단일-pass 성능 후보는
 `84d5248c937526e78c165facddbb6dc0040522d0`이다. 이 후보는 아래 bounded 비교와
-작성자 검사를 통과했지만 독립 검증과 별도 로컬 인수 전이므로, 위 `e4a9f5…` 수락
-상태와 구분한다.
+작성자 검사 뒤 독립 직접 영향 14건 PASS를 받았고 Lead가 2026-10-24 source 및
+bounded fixture 범위로 로컬 수락했다. 독립 보고서 SHA-256은
+`8f333018a377b4eca3b6bf3be18cc156ebc876846c2bb8bb16355444ba57112f`다.
+`main` 병합, 실제 회사 runtime 채택과 전체 회사 생산자 증분은 이 수락에 포함되지 않는다.
 
 목표는 history publication의 일상 저장 검증에서 모든 nested JSON을 매번 다시
 디코드하는 비용을 줄이는 것이다. 재무 계산, 공시 선택, 기간 분류, T1~T4 생산,
@@ -197,7 +199,8 @@ RSS는 `/proc/<pid>/status`를 5 ms 간격으로 관측한 최대값의 3회 중
 
 작성자 focused 검사는 duplicate/null row·column·cell ID, 중간 및 null dangling FK,
 dtype mismatch, table binding 재배치, state/code fallback과 실패 state 보존을 포함해
-18건 PASS였다. 원시 증거는 다음 위치에 있다.
+18건 PASS였다. 독립 검증은 직접 영향 14건 PASS였으며 성능 benchmark를 반복하지 않고
+동결된 작성자 측정의 경계와 값을 대조했다. 원시 증거는 다음 위치에 있다.
 
 - `work/history_validation_bottleneck_probe_20261024/profile.json`, SHA-256
   `65483215089b058473c9d98dbe25f714f90c83df77d343b03459ac228966e449`
