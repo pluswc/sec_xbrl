@@ -9,6 +9,11 @@
 Lead는 이 범위를 로컬 수락했다. 원격 push, PR, CI, `main` 병합과 실제 회사 runtime
 채택은 수행하지 않았다.
 
+후속 ID/FK 단일-pass 성능 후보는
+`84d5248c937526e78c165facddbb6dc0040522d0`이다. 이 후보는 아래 bounded 비교와
+작성자 검사를 통과했지만 독립 검증과 별도 로컬 인수 전이므로, 위 `e4a9f5…` 수락
+상태와 구분한다.
+
 목표는 history publication의 일상 저장 검증에서 모든 nested JSON을 매번 다시
 디코드하는 비용을 줄이는 것이다. 재무 계산, 공시 선택, 기간 분류, T1~T4 생산,
 Raw guard, 기존 파일 내용과 manifest 형식은 변경하지 않는다. 과거 50개 회사의
@@ -156,6 +161,48 @@ fixture를 한 번 만들고 각 arm/회차의 publication과 state를 미리 �
   `4f5bda332f3418f48c4f6652ac187d6f4ecf2352140b9af131fd3fd6d596c041`
 - `work/history_validation_measurement_corrected_20261024/memory_summary.json`, SHA-256
   `c1d3e52009e8b9320e467500b0edf8efce03f6d70c13012321ad93e0ddb7f306`
+
+## 실제 분기 추가 모양의 ID/FK 단일-pass 후보
+
+코드 수정 전 한 차례만 분해 계측했다. 전기 state가 있는 3-table publication에서 한
+table에 column 1개와 기존 24 rows에 대응하는 cells 24개를 추가했고, old rows와 다른
+2개 table은 그대로 두었다. Apple actual-data evidence는 QTD_3M·2026 Q3·후보 1개라는
+모양 label에만 참고했으며, fixture는 합성 자료여서 Apple 재무 사실을 검증하지 않는다.
+
+총 51.33 ms 중 ID/FK가 32.57 ms(63.45%), schema/count/sample이 13.06 ms(25.45%),
+전체 `sec_xbrl` source identity hash가 1.85 ms(3.60%)였다. ID/FK는 row·column·cell
+ID 집계 세 번과 row·column anti-join 두 번, 합계 5번의 lazy collect를 실행했다.
+이 수치는 inclusive stage와 내부 collect가 겹치므로 서로 더하지 않는다.
+
+후속 후보는 row와 column의 좁은 ID frame을 각각 한 번 읽고, 같은 객체로 null·중복과
+membership를 검사한다. Cells는 `cell_id`, `row_id`, `column_id` 전체를 한 streaming
+aggregate로 검사한다. Null FK는 membership false로 바꿔 실패시키고, cell FK와 대상
+ID의 dtype가 정확히 같지 않으면 거부한다. Cells 전체 record나 Python dict는
+materialize하지 않는다. 따라서 파일별 한 번, table당 3 collect로 줄이면서 전체
+narrow-column ID/FK 검사는 유지한다.
+
+동일 fixture bytes와 source별 전기 state를 부모에서 준비하고, 두 arm 모두 fresh child에서
+Polars를 먼저 import한 뒤 같은 `HistoryPublicationReader.validate()` 경계만 3회 실행했다.
+선언 fingerprint, 변경 closure 3파일, 새 root SHA 확인 9파일, sample/JSON 수가 모두
+같았다.
+
+| arm | 중앙 시간 | 이전 대비 | 5 ms 관측 RSS 중앙값 | 이전 대비 |
+| --- | ---: | ---: | ---: | ---: |
+| `d188552…` 기존 ID/FK | 51.62 ms | 기준 | 103.15 MiB | 기준 |
+| `84d5248…` 단일-pass | 27.84 ms | -46.08% | 96.50 MiB | -6.45% |
+
+RSS는 `/proc/<pid>/status`를 5 ms 간격으로 관측한 최대값의 3회 중앙값이며 순간 peak를
+놓칠 수 있다. 이 bounded 검증 경로의 결과를 실제 회사 전체 분기 추가 시간으로
+외삽하지 않는다. 실제 분기 생성자의 row 단위 증분 계산은 여전히 별도 범위다.
+
+작성자 focused 검사는 duplicate/null row·column·cell ID, 중간 및 null dangling FK,
+dtype mismatch, table binding 재배치, state/code fallback과 실패 state 보존을 포함해
+18건 PASS였다. 원시 증거는 다음 위치에 있다.
+
+- `work/history_validation_bottleneck_probe_20261024/profile.json`, SHA-256
+  `65483215089b058473c9d98dbe25f714f90c83df77d343b03459ac228966e449`
+- `work/history_validation_id_ref_benchmark_20261024/profile.json`, SHA-256
+  `a49bd1c978ac5ba2577db98634953b7213a280f02b7c765054f4fe613ba93a5e`
 
 ## 남은 범위
 
