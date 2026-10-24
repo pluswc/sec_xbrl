@@ -1,0 +1,102 @@
+# Selected FACT 대상 패널 탐색 최적화 (2026-10-24)
+
+## 범위와 결정
+
+이 마일스톤은 이미 전체 검증을 마친 T3 exploration graph 안에서 패널 결과에 도달할 수
+없는 branch를 탐색 queue에 넣지 않는다. T4-B가 선택한 정확한
+`(source_filing_id, selected_source_fact_id)` FACT만 target으로 삼는다. 회계 선택, root
+선택, 공개 `traverse()` 의미, role/targetRole 해석, 패널 ID·순서·lineage, fiscal/History
+작성은 바꾸지 않는다.
+
+`ExplorationGraphReader`는 selected-FACT 전용 private iterator를 제공한다. 첫 호출에서만
+현재 attested publication의 incoming adjacency를 만들고 target들의 reverse ancestor
+closure를 계산한다. 기존 breadth-first, edge-ID 정렬, per-path cycle 검사를 그대로 쓰되
+closure 밖 node로 향하는 edge는 enqueue하지 않는다. target FACT에서 끝나는 path만
+`_plain_copy`하여 panel builder에 넘긴다. publication object가 바뀌면 outgoing·incoming
+cache를 함께 무효화한다.
+
+## 정확성 근거
+
+모든 root→target simple path의 각 node는 해당 target에 도달할 수 있으므로 reverse
+ancestor 집합에 속한다. 따라서 closure 밖 branch 제거는 selected FACT path를 없앨 수
+없다. cycle이 있는 graph에서는 현재 path와 충돌하는 경로 때문에 실제로는 target에 갈 수
+없는 prefix가 보수적으로 남을 수 있지만 결과 누락은 생기지 않는다.
+
+root 순서와 각 node의 edge-ID 정렬 순서를 유지한다. target에 도달할 수 없는 queue entry는
+나중에 target entry를 만들 수도 없으므로 이를 제거해도 남은 target path의 상대 BFS 순서는
+같다. global visited, 고정 depth 제한, edge/node 병합을 사용하지 않는다. parallel role edge,
+`role_uri`, `arcrole`, `target_role_uri`, edge ID와 complete path node/edge lineage는 원본 객체
+단위로 유지한다. 반환 시에만 defensive copy하여 reader가 보유한 attested mapping은 외부
+수정으로부터 격리한다.
+
+public `traverse()`는 이전과 같이 모든 simple outbound path를 반환한다. invalid root 오류,
+unavailable row, graph에 없는 total/orphan root 오류, total과 함께 있어 root가 아닌 missing
+dimension selection의 기존 no-output 동작도 유지한다. 동일 fact ID가 다른 filing에 있어도
+두 필드 key로 구분한다.
+
+## Attestation 및 물리 읽기 경계
+
+`Layer2PublicationReader.load()`는 여전히 전체 operational Parquet을 읽고 모든 row 계약,
+manifest count, node/edge endpoint를 검증한 뒤에만 reader attestation을 부여한다. target과
+무관한 branch의 endpoint를 손상한 실제 Parquet도 load 단계에서 거부하는 focused test를
+포함했다.
+
+따라서 이번 개선은 **전체 load/검증을 마친 graph 내부의 enqueue와 defensive copy 범위**를
+줄인다. 파일 I/O와 full resident graph 크기는 그대로다. 물리 selective read에는 별도
+publication-time index/partition, hash/count와 scoped validation proof, 새 reader contract가
+필요하므로 이번 범위에서 제외했다.
+
+## 고정 입력 관측
+
+입력은 `cop_fy2025_revenue_component_v2.json`, SHA-256
+`2703f0c3478a5ee9e686aaf218cffea4c0b1d0f16e04d953fc69ab871c9922b8`이다.
+이는 완료 COP의 FY2025 `LATEST_REPORTED` Revenue에서 파생한 bounded internally-attested
+component이며 전체 publication/company 재검증은 아니다.
+
+상세 계측 한 번에서 다음 변화가 확인됐다.
+
+| 항목 | 기준 | 후보 |
+|---|---:|---:|
+| graph nodes / edges | 120 / 277 | 120 / 277 |
+| selected FACT targets | 32 | 32 |
+| 방문 path states | 1,700 | 662 |
+| plain-copied/emitted paths | 1,700 | 520 |
+| panel definitions/bindings/values | 520/520/520 | 520/520/520 |
+| traversal plain-copy 시간 | 약 0.0646초 | 약 0.0204초 |
+| panel build 시간 | 약 0.1090초 | 약 0.0739초 |
+
+상세 monkeypatch 시간은 inclusive 진단값이므로 전체 시간과 더하지 않는다.
+
+## 397 대비 계측 없는 전체 비교
+
+accepted `3972358c`를 기준으로 동일 fixture의 panel build→fiscal spill→Parquet
+stage/finalize→reload→성공 close 전체를 fresh subprocess에서 3회 교차 실행했다. 각 실행은
+30초/1 GiB watchdog을 적용했고 cold graph index 및 첫 reverse index 비용을 포함했다.
+
+| 항목 | 397 median | 후보 median | 변화 |
+|---|---:|---:|---:|
+| 전체 경과 | 0.4631초 | 0.4267초 | -7.9% |
+| process peak RSS | 233,656 KiB | 221,028 KiB | -5.4% |
+
+부모 watchdog 최대 관측은 기준 248,888 KiB, 후보 242,432 KiB였다. 작은 component와 동시
+호스트 작업의 영향을 받으므로 RSS 개선을 전체 회사에 외삽하지 않는다.
+
+두 arm의 complete decoded fingerprint는
+`0b0497946befa8611980982834080dafccd3fc5be966a8d2058083e936980df0`로 같았다.
+columns/rows/cells count, JSON fields, artifact bytes와 각 Parquet SHA-256도 byte 단위로
+동일했다. 최종 Parquet 합계는 122,490 bytes다.
+
+## 검증과 한계
+
+관련 graph/panel unit 15개가 통과했다. diamond, parallel role/targetRole, multiple roots,
+cycle, depth 3 경로, empty/no-reachable targets, unavailable, missing root/dimension orphan,
+filing-qualified identical fact ID, defensive copy, cache invalidation, target 밖 corrupt endpoint
+거부를 포함한다.
+
+이번 결과는 bounded COP component의 논리 탐색 비용 개선이다. 전체 T3 파일 읽기나 resident
+graph memory를 줄였다는 주장은 하지 않는다. screening/detail view 분리, graph 저장 형식,
+회계 evidence 의미도 변경하지 않았다.
+
+이 후보는 로컬 소스와 증거만 동결한 상태다. 이미 시작한 LIN 397 실행에는 적용하거나
+재시작하지 않았으며, 실제 50개사 처리 완료 또는 운영 적용을 뜻하지 않는다. 독립 검증과
+별도의 향후 미시작 generation 바인딩 전에는 배포 후보일 뿐이다.

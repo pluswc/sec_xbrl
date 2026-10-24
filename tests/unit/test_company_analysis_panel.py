@@ -29,7 +29,9 @@ STATEMENT_ROOT = "node:statement-root"
 REVENUE_CONCEPT = "node:revenue-concept"
 
 
-def _graph(tmp_path, *, snapshot_id: str = "snap:q3"):
+def _graph(
+    tmp_path, *, snapshot_id: str = "snap:q3", foreign_same_fact: bool = False
+):
     run = Layer2Run(
         "t5-fixture",
         "fixture",
@@ -151,6 +153,42 @@ def _graph(tmp_path, *, snapshot_id: str = "snap:q3"):
             "order": None,
         },
     )
+    if foreign_same_fact:
+        nodes += (
+            {
+                "cik": CIK,
+                "analysis_exploration_node_id": "node:foreign-bridge",
+                "node_kind": "CONCEPT",
+                "origin": "STANDARD_CONCEPT",
+                "raw_id": "concept:foreign-bridge",
+                "raw_qname": "us-gaap:Revenues",
+            },
+            {
+                **nodes[0],
+                "analysis_exploration_node_id": "node:foreign-same-fact",
+                "source_filing_id": "filing:other",
+            },
+        )
+        edges += (
+            {
+                "cik": CIK,
+                "analysis_exploration_edge_id": "edge:foreign-same-fact",
+                "edge_kind": "FACT_SCOPE",
+                "from_node_id": ROOT,
+                "to_node_id": "node:foreign-bridge",
+                "scope_kind": "FOREIGN_FIXTURE",
+                "order": None,
+            },
+            {
+                "cik": CIK,
+                "analysis_exploration_edge_id": "edge:foreign-same-fact-detail",
+                "edge_kind": "FACT_SCOPE",
+                "from_node_id": "node:foreign-bridge",
+                "to_node_id": "node:foreign-same-fact",
+                "scope_kind": "FOREIGN_FIXTURE",
+                "order": None,
+            },
+        )
     published = OperationalLayer2Publisher(tmp_path / "graph").publish(
         run, {"analysis_exploration_node": nodes, "analysis_exploration_edge": edges}
     )
@@ -336,3 +374,64 @@ def test_cached_graph_indexes_are_defensive_and_refresh_for_new_publication(tmp_
     with pytest.raises(CompanyAnalysisPanelError, match="source_snapshot_id"):
         builder.build(**{**args, "exploration": other})
     assert builder._indexed_graph is other
+
+
+def test_target_scoped_panel_is_exactly_equal_to_full_traversal(
+    tmp_path, monkeypatch
+) -> None:
+    graph = _graph(tmp_path / "graph", foreign_same_fact=True)
+    rows = (
+        _selected(TOTAL),
+        _selected(
+            DETAIL,
+            dimensions=(("axis:product", "member:data-center", None, "EXPLICIT", False),),
+            value="14514000000",
+        ),
+        _selected(
+            "fact:selected-but-absent",
+            dimensions=(("axis:product", "member:absent", None, "EXPLICIT", False),),
+        ),
+    )
+    args = {
+        "selected_rows": rows,
+        "exploration": graph,
+        "cik": CIK,
+        "fiscal_year": 2024,
+        "fiscal_quarter": 3,
+        "period_class": "QTD_3M",
+        "view": "LATEST_REPORTED",
+        "as_of_date": "2023-11-21",
+        "analysis_view_id": "nvda-q3",
+    }
+    candidate = CompanyAnalysisPanelBuilder().build(**args)
+
+    def legacy_paths(self, publication, *, root_node_ids, target_node_ids):
+        targets = set(target_node_ids)
+        for root_index, root in enumerate(root_node_ids):
+            for path in self.traverse(publication, root_node_ids=(root,)):
+                if path["node"]["analysis_exploration_node_id"] in targets:
+                    yield root_index, path
+
+    monkeypatch.setattr(
+        "sec_xbrl.longitudinal.exploration_graph.ExplorationGraphReader._iter_selected_fact_paths",
+        legacy_paths,
+    )
+    baseline = CompanyAnalysisPanelBuilder().build(**args)
+
+    assert candidate == baseline
+    assert [row["selected_source_fact_id"] for row in candidate.values] == [
+        TOTAL,
+        DETAIL,
+    ]
+    assert all(row["source_filing_id"] == FILING for row in candidate.values)
+
+
+@pytest.mark.parametrize(
+    "dimensions",
+    ((), (("axis:product", "member:orphan", None, "EXPLICIT", False),)),
+)
+def test_target_scope_preserves_missing_root_and_dimension_orphan_error(
+    tmp_path, dimensions
+) -> None:
+    with pytest.raises(CompanyAnalysisPanelError, match="not present"):
+        _build(tmp_path, (_selected("fact:missing-root", dimensions=dimensions),))

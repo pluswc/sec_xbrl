@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import defaultdict, deque
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -182,6 +182,7 @@ class ExplorationGraphReader:
         self._nodes: dict[str, Mapping[str, Any]] = {}
         self._outgoing: dict[str, tuple[Mapping[str, Any], ...]] = {}
         self._edges: tuple[Mapping[str, Any], ...] = ()
+        self._incoming: dict[str, tuple[str, ...]] | None = None
 
     def _indexes(
         self, publication: VerifiedLayer2Publication
@@ -217,8 +218,52 @@ class ExplorationGraphReader:
                 for key, edges in outgoing.items()
             }
             self._edges = edge_rows
+            self._incoming = None
             self._indexed_publication = publication
         return self._nodes, self._outgoing, self._edges
+
+    def _iter_selected_fact_paths(
+        self,
+        publication: VerifiedLayer2Publication,
+        *,
+        root_node_ids: Iterable[str],
+        target_node_ids: Iterable[str],
+    ) -> Iterator[tuple[int, dict[str, Any]]]:
+        """Yield complete paths ending at selected FACTs, in full traversal order."""
+        self._check(publication, None)
+        nodes, outgoing, edges = self._indexes(publication)
+        roots = tuple(str(root) for root in root_node_ids)
+        for root in roots:
+            if root not in nodes:
+                raise ExplorationGraphError(
+                    "root node is outside the verified exploration graph"
+                )
+        targets = frozenset(
+            str(target)
+            for target in target_node_ids
+            if str(target) in nodes and nodes[str(target)].get("node_kind") == "FACT"
+        )
+        if not targets:
+            return
+        if self._incoming is None:
+            incoming: dict[str, list[str]] = defaultdict(list)
+            for edge in edges:
+                incoming[str(edge["to_node_id"])].append(str(edge["from_node_id"]))
+            self._incoming = {node_id: tuple(parents) for node_id, parents in incoming.items()}
+        relevant = set(targets)
+        pending = deque(targets)
+        while pending:
+            node_id = pending.popleft()
+            for parent in self._incoming.get(node_id, ()):
+                if parent not in relevant:
+                    relevant.add(parent)
+                    pending.append(parent)
+        for root_index, root in enumerate(roots):
+            if root not in relevant:
+                continue
+            for path in _walk_paths(nodes, outgoing, (root,), relevant=relevant):
+                if str(path["node"]["analysis_exploration_node_id"]) in targets:
+                    yield root_index, _plain_copy(path)
 
     def roots_for_fact(
         self,
@@ -256,31 +301,20 @@ class ExplorationGraphReader:
         """
         self._check(publication, None)
         nodes, outgoing, _edges = self._indexes(publication)
-        result: list[dict[str, Any]] = []
-        queue: deque[
-            tuple[
-                str,
-                tuple[str, ...],
-                tuple[Mapping[str, Any], ...],
-                int,
-                Mapping[str, Any] | None,
-            ]
-        ] = deque()
-        for root in root_node_ids:
+        roots = tuple(str(root) for root in root_node_ids)
+        for root in roots:
             if root not in nodes:
                 raise ExplorationGraphError("root node is outside the verified exploration graph")
-            queue.append((root, (root,), (), 0, None))
-        while queue:
-            node_id, path, path_edges, depth, incoming = queue.popleft()
-            result.append({"depth": depth, "path_node_ids": path, "path_edges": path_edges, "node": nodes[node_id], "incoming_edge": incoming})
-            if max_depth is not None and depth >= max_depth:
-                continue
-            for edge in sorted(outgoing.get(node_id, ()), key=lambda item: str(item["analysis_exploration_edge_id"])):
-                target = str(edge["to_node_id"])
-                if target in path:  # semantic/cyclic DEF or presentation paths terminate safely.
-                    continue
-                queue.append((target, path + (target,), path_edges + (edge,), depth + 1, edge))
-        return _plain_copy(tuple(result))
+        return _plain_copy(
+            tuple(
+                _walk_paths(
+                    nodes,
+                    outgoing,
+                    roots,
+                    max_depth=max_depth,
+                )
+            )
+        )
 
     def _check(self, publication: VerifiedLayer2Publication, cik: str | None) -> None:
         if not publication.is_reader_attested:
@@ -289,6 +323,49 @@ class ExplorationGraphReader:
             raise ExplorationGraphError("publication has no exploration graph datasets")
         if cik is not None and cik not in publication.input_ciks:
             raise ExplorationGraphError("requested CIK is outside the verified publication")
+
+
+def _walk_paths(
+    nodes: Mapping[str, Mapping[str, Any]],
+    outgoing: Mapping[str, tuple[Mapping[str, Any], ...]],
+    roots: tuple[str, ...],
+    *,
+    relevant: set[str] | None = None,
+    max_depth: int | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Walk breadth-first simple paths, optionally excluding irrelevant nodes."""
+    queue: deque[
+        tuple[
+            str,
+            tuple[str, ...],
+            tuple[Mapping[str, Any], ...],
+            int,
+            Mapping[str, Any] | None,
+        ]
+    ] = deque((root, (root,), (), 0, None) for root in roots)
+    while queue:
+        node_id, path, path_edges, depth, incoming = queue.popleft()
+        yield {
+            "depth": depth,
+            "path_node_ids": path,
+            "path_edges": path_edges,
+            "node": nodes[node_id],
+            "incoming_edge": incoming,
+        }
+        if max_depth is not None and depth >= max_depth:
+            continue
+        for edge in sorted(
+            outgoing.get(node_id, ()),
+            key=lambda item: str(item["analysis_exploration_edge_id"]),
+        ):
+            target = str(edge["to_node_id"])
+            if target in path:  # semantic/cyclic DEF or presentation paths terminate safely.
+                continue
+            if relevant is not None and target not in relevant:
+                continue
+            queue.append(
+                (target, path + (target,), path_edges + (edge,), depth + 1, edge)
+            )
 
 
 def _plain_copy(value: Any) -> Any:

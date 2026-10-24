@@ -106,6 +106,8 @@ class CompanyAnalysisPanelBuilder:
             for row in selected
             if row["selection_status"] == "SELECTED"
         }
+        root_selections: list[dict[str, Any]] = []
+        root_node_ids: list[str] = []
         for selection in _root_selections(selected):
             if selection["selection_status"] == "UNAVAILABLE":
                 definition, binding, value = _unavailable_line(
@@ -125,29 +127,48 @@ class CompanyAnalysisPanelBuilder:
                     "selected direct fact is not present in the attested exploration graph"
                 )
             _require_graph_fact_match(selection, root)
-            root_id = str(root["analysis_exploration_node_id"])
-            paths = self._graph_reader.traverse(exploration, root_node_ids=(root_id,))
-            for path in paths:
-                node = path["node"]
-                if node.get("node_kind") != "FACT":
-                    continue
-                path_fact_key = (str(node.get("source_filing_id")), str(node.get("source_fact_id")))
-                # T3 graph contains all as-filed facts.  Values enter this
-                # panel only if their exact direct observation was selected by
-                # T4-B for the requested view/as-of scope.
-                source = selected_by_fact.get(path_fact_key)
-                if source is None:
-                    continue
-                _require_graph_fact_match(source, node)
-                definition, binding, value = _reported_line(
-                    source, selection, path, nodes, analysis_view_id, analysis_view_version
+            root_selections.append(selection)
+            root_node_ids.append(str(root["analysis_exploration_node_id"]))
+        target_node_ids = tuple(
+            str(facts[key]["analysis_exploration_node_id"])
+            for key in selected_by_fact
+            if key in facts
+        )
+        for root_index, path in self._graph_reader._iter_selected_fact_paths(
+            exploration,
+            root_node_ids=root_node_ids,
+            target_node_ids=target_node_ids,
+        ):
+            node = path["node"]
+            path_fact_key = (
+                str(node.get("source_filing_id")),
+                str(node.get("source_fact_id")),
+            )
+            # T3 graph contains all as-filed facts.  Values enter this panel
+            # only if their exact direct observation was selected by T4-B for
+            # the requested view/as-of scope.
+            source = selected_by_fact[path_fact_key]
+            _require_graph_fact_match(source, node)
+            definition, binding, value = _reported_line(
+                source,
+                root_selections[root_index],
+                path,
+                nodes,
+                analysis_view_id,
+                analysis_view_version,
+            )
+            binding["primary_statement_evidence"] = deepcopy(
+                placement.get(
+                    (
+                        str(source.get("source_filing_id")),
+                        str(source.get("raw_concept_id")),
+                    ),
+                    [],
                 )
-                binding["primary_statement_evidence"] = deepcopy(placement.get(
-                    (str(source.get("source_filing_id")), str(source.get("raw_concept_id"))), []
-                ))
-                definitions.append(definition)
-                bindings.append(binding)
-                values.append(value)
+            )
+            definitions.append(definition)
+            bindings.append(binding)
+            values.append(value)
         _reject_duplicates(definitions, bindings, values)
         ordered_definitions = tuple(sorted(definitions, key=_definition_order))
         definition_order = {

@@ -4,6 +4,8 @@ import hashlib
 from pathlib import Path
 from types import MappingProxyType
 
+import pytest
+
 from sec_xbrl.filing.layer1_ingestion import Layer1SnapshotManifest
 from sec_xbrl.longitudinal import (
     CorpusRelease,
@@ -18,6 +20,8 @@ from sec_xbrl.longitudinal import (
     OperationalLayer2Publisher,
     VersionedObservationPanelPipeline,
 )
+from sec_xbrl.longitudinal.exploration_graph import ExplorationGraphError
+from sec_xbrl.longitudinal.materialization import Layer2PublicationValidationError
 
 
 def _release() -> CorpusRelease:
@@ -276,8 +280,184 @@ def test_reader_refreshes_borrowed_index_and_keeps_every_diamond_path(tmp_path: 
         ("node:a:one", "node:c:one", "node:d:one"),
     ]
     first_node = reader._nodes["node:a:one"]
+    reader._incoming = {"node:old": ("node:stale",)}
     reader.traverse(second, root_node_ids=("node:a:two",))
     assert reader._indexed_publication is second
+    assert reader._incoming is None
     assert "node:a:one" not in reader._nodes
     assert reader._nodes["node:a:two"] is second.datasets[reader.node_dataset][0]
     assert first_node is first.datasets[reader.node_dataset][0]
+
+
+def test_selected_fact_paths_prune_only_unreachable_branches_and_keep_path_evidence(
+    tmp_path: Path,
+) -> None:
+    release = _release()
+    cik = "0000320193"
+    names = ("root-a", "root-b", "left", "right", "join", "dead", "dead-end")
+    nodes = [
+        {
+            "cik": cik,
+            "analysis_exploration_node_id": f"node:{name}",
+            "node_kind": "CONCEPT",
+            "origin": "STANDARD_CONCEPT",
+            "raw_id": name,
+            "raw_qname": f"us-gaap:{name}",
+        }
+        for name in names
+    ]
+    for name in ("target", "isolated"):
+        nodes.append(
+            {
+                "cik": cik,
+                "analysis_exploration_node_id": f"node:{name}",
+                "node_kind": "FACT",
+                "origin": "STANDARD_CONCEPT",
+                "raw_id": f"fact:{name}",
+                "raw_qname": "us-gaap:Revenues",
+                "source_fact_id": f"fact:{name}",
+                "source_filing_id": "filing:one",
+                "accession": "0000320193-25-000001",
+                "filed_date": "2025-05-01",
+                "context_id": f"ctx:{name}",
+            }
+        )
+
+    def edge(identity: str, left: str, right: str, role: str) -> dict:
+        return {
+            "cik": cik,
+            "analysis_exploration_edge_id": f"edge:{identity}",
+            "edge_kind": "STATEMENT_COMPONENT",
+            "source_network_type": "PRE",
+            "from_node_id": f"node:{left}",
+            "to_node_id": f"node:{right}",
+            "role_uri": role,
+            "target_role_uri": f"{role}/target",
+        }
+
+    edges = (
+        edge("a-left-one", "root-a", "left", "role:one"),
+        edge("a-left-two", "root-a", "left", "role:two"),
+        edge("a-right", "root-a", "right", "role:right"),
+        edge("left-join", "left", "join", "role:left"),
+        edge("right-join", "right", "join", "role:right"),
+        edge("join-target", "join", "target", "role:target"),
+        edge("join-cycle", "join", "root-a", "role:cycle"),
+        edge("a-dead", "root-a", "dead", "role:dead"),
+        edge("dead-end", "dead", "dead-end", "role:dead"),
+        edge("b-join", "root-b", "join", "role:b"),
+    )
+    published = OperationalLayer2Publisher(tmp_path / "targeted").publish(
+        release.layer2_run,
+        {
+            "analysis_exploration_node": tuple(nodes),
+            "analysis_exploration_edge": edges,
+        },
+    )
+    publication = Layer2PublicationReader().load(published.run_root)
+    reader = ExplorationGraphReader()
+    roots = ("node:root-a", "node:root-b")
+    targets = ("node:target",)
+    expected = []
+    for root_index, root in enumerate(roots):
+        expected.extend(
+            (root_index, row)
+            for row in reader.traverse(publication, root_node_ids=(root,))
+            if row["node"]["analysis_exploration_node_id"] in targets
+        )
+    actual = list(
+        reader._iter_selected_fact_paths(
+            publication, root_node_ids=roots, target_node_ids=targets
+        )
+    )
+
+    assert actual == expected
+    assert len(actual) == 4  # two parallel roles, one diamond alternative, one second root
+    assert all("node:dead" not in row["path_node_ids"] for _, row in actual)
+    assert {
+        edge["role_uri"]
+        for _, row in actual
+        for edge in row["path_edges"]
+        if edge["from_node_id"] == "node:root-a"
+    } >= {"role:one", "role:two", "role:right"}
+    assert all(
+        edge["target_role_uri"]
+        for _, row in actual
+        for edge in row["path_edges"]
+    )
+    assert max(row["depth"] for _, row in actual) == 3
+    actual[0][1]["path_edges"][0]["role_uri"] = "mutated"
+    source_edge = next(
+        edge
+        for edge in publication.datasets[reader.edge_dataset]
+        if edge["analysis_exploration_edge_id"] == "edge:a-left-one"
+    )
+    assert source_edge["role_uri"] == "role:one"
+    assert list(
+        reader._iter_selected_fact_paths(
+            publication, root_node_ids=roots, target_node_ids=()
+        )
+    ) == []
+    assert list(
+        reader._iter_selected_fact_paths(
+            publication,
+            root_node_ids=("node:root-a",),
+            target_node_ids=("node:isolated",),
+        )
+    ) == []
+    with pytest.raises(ExplorationGraphError, match="root node"):
+        list(
+            reader._iter_selected_fact_paths(
+                publication,
+                root_node_ids=("node:missing",),
+                target_node_ids=targets,
+            )
+        )
+
+
+def test_reader_rejects_invalid_edge_even_when_target_scope_would_prune_it(
+    tmp_path: Path,
+) -> None:
+    import polars as pl
+
+    release = _release()
+    published = OperationalLayer2Publisher(tmp_path / "invalid-pruned").publish(
+        release.layer2_run,
+        {
+            "analysis_exploration_node": (
+                {
+                    "cik": "0000320193",
+                    "analysis_exploration_node_id": "node:root",
+                    "node_kind": "CONCEPT",
+                    "origin": "STANDARD_CONCEPT",
+                    "raw_id": "root",
+                    "raw_qname": "us-gaap:Root",
+                },
+                {
+                    "cik": "0000320193",
+                    "analysis_exploration_node_id": "node:dead",
+                    "node_kind": "CONCEPT",
+                    "origin": "STANDARD_CONCEPT",
+                    "raw_id": "dead",
+                    "raw_qname": "us-gaap:Dead",
+                },
+            ),
+            "analysis_exploration_edge": (
+                {
+                    "cik": "0000320193",
+                    "analysis_exploration_edge_id": "edge:dead",
+                    "edge_kind": "DIMENSION_LENS",
+                    "from_node_id": "node:root",
+                    "to_node_id": "node:dead",
+                },
+            ),
+        },
+    )
+    edge_path = next(published.run_root.rglob("analysis_exploration_edge.parquet"))
+    frame = pl.read_parquet(edge_path).with_columns(
+        pl.lit("node:missing").alias("to_node_id")
+    )
+    frame.write_parquet(edge_path)
+
+    with pytest.raises(Layer2PublicationValidationError, match="fail contract validation"):
+        Layer2PublicationReader().load(published.run_root)
