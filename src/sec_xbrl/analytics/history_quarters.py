@@ -17,6 +17,7 @@ import shutil
 import sqlite3
 import stat
 import tempfile
+import zlib
 from collections import defaultdict
 from collections.abc import MutableMapping, Sequence
 from copy import deepcopy
@@ -164,6 +165,76 @@ def _spill_unpack(payload):
     return decode(marshal.loads(payload[1:]))
 
 
+_SPILL_DB_VALUE_MAGIC = b"QSV1"
+_SPILL_DB_VALUE_HEADER_SIZE = len(_SPILL_DB_VALUE_MAGIC) + 1 + 8 + 32
+_SPILL_DB_COMPRESSION_THRESHOLD = 32 * 1024
+_SPILL_DB_MAX_RAW_BYTES = 1 << 30
+
+
+def _spill_db_value_pack(value):
+    """Envelope typed bytes for the disposable SQLite value BLOB only."""
+    raw = _spill_pack(value)
+    kind = b"R"
+    body = raw
+    if len(raw) >= _SPILL_DB_COMPRESSION_THRESHOLD:
+        compressed = zlib.compress(raw, level=1)
+        if len(compressed) < len(raw):
+            kind = b"Z"
+            body = compressed
+    return (
+        _SPILL_DB_VALUE_MAGIC
+        + kind
+        + len(raw).to_bytes(8, "big")
+        + hashlib.sha256(raw).digest()
+        + body
+    )
+
+
+def _spill_db_value_raw(payload):
+    """Strictly restore new-format private DB bytes without migration."""
+    encoded = bytes(payload)
+    if len(encoded) < _SPILL_DB_VALUE_HEADER_SIZE:
+        raise ValueError("invalid private quarter spill database value")
+    if encoded[: len(_SPILL_DB_VALUE_MAGIC)] != _SPILL_DB_VALUE_MAGIC:
+        raise ValueError("invalid private quarter spill database value")
+    kind = encoded[len(_SPILL_DB_VALUE_MAGIC) : len(_SPILL_DB_VALUE_MAGIC) + 1]
+    size_start = len(_SPILL_DB_VALUE_MAGIC) + 1
+    raw_size = int.from_bytes(encoded[size_start : size_start + 8], "big")
+    if raw_size > _SPILL_DB_MAX_RAW_BYTES:
+        raise ValueError("invalid private quarter spill database value size")
+    expected_hash = encoded[size_start + 8 : _SPILL_DB_VALUE_HEADER_SIZE]
+    body = encoded[_SPILL_DB_VALUE_HEADER_SIZE :]
+    if kind == b"R":
+        raw = body
+    elif kind == b"Z":
+        decompressor = zlib.decompressobj()
+        try:
+            raw = decompressor.decompress(body, raw_size + 1)
+        except zlib.error as exc:
+            raise ValueError("invalid private quarter spill database compression") from exc
+        if (
+            len(raw) > raw_size
+            or not decompressor.eof
+            or decompressor.unused_data
+            or decompressor.unconsumed_tail
+        ):
+            raise ValueError("invalid private quarter spill database compression")
+    else:
+        raise ValueError("invalid private quarter spill database value")
+    if len(raw) != raw_size or hashlib.sha256(raw).digest() != expected_hash:
+        raise ValueError("invalid private quarter spill database value integrity")
+    return raw
+
+
+def _spill_db_row_factory(cursor, row):
+    """Expose the protected typed bytes while storing only envelopes on disk."""
+    values = list(row)
+    for index, column in enumerate(cursor.description or ()):
+        if column[0] == "value" and values[index] is not None:
+            values[index] = _spill_db_value_raw(values[index])
+    return tuple(values)
+
+
 class _QuarterSpill:
     """Private, run-owned typed records; never opens an input-supplied database.
 
@@ -193,6 +264,7 @@ class _QuarterSpill:
             # Empty filename asks the trusted SQLite VFS for a private on-disk
             # temporary database. No publication pathname or sidecar is opened.
             self.db = sqlite3.connect("")
+            self.db.row_factory = _spill_db_row_factory
             self.check()
             options = {row[0] for row in self.execute("PRAGMA compile_options")}
             if "TEMP_STORE=3" in options:
@@ -240,7 +312,7 @@ class _QuarterSpill:
                             "operation": operation, "bucket": bucket, "key": key, "value": value})
         if operation == "SET":
             self.execute("INSERT INTO records(bucket,key,original_key,value) VALUES(?,?,?,?) ON CONFLICT(bucket,key) DO UPDATE SET value=excluded.value",
-                         (bucket, _SpillMap._key(key), _spill_pack(key), _spill_pack((key, value))))
+                         (bucket, _SpillMap._key(key), _spill_pack(key), _spill_db_value_pack((key, value))))
             row = self.execute("SELECT ordinal,original_key FROM records WHERE bucket=? AND key=?",
                                (bucket, _SpillMap._key(key))).fetchone()
             evidence = {"ordinal": row[0], "original_key": _spill_unpack(row[1])}

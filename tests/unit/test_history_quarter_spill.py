@@ -10,7 +10,6 @@ from collections import defaultdict
 from copy import deepcopy
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
-from pathlib import Path
 
 import polars as pl
 import pytest
@@ -116,16 +115,12 @@ def test_streamed_repartition_preserves_large_all_fields_without_eager_load(tmp_
         assert spill.db.execute("PRAGMA database_list").fetchone()[2] == ""
         assert spill.db.execute("PRAGMA temp_store").fetchone() == (1,)
         assert spill.db.execute("PRAGMA cache_size").fetchone() == (-2048,)
-        if sys.platform == "linux":
-            anonymous_sizes = []
-            for descriptor in Path("/proc/self/fd").iterdir():
-                try:
-                    stat = descriptor.stat()
-                except OSError:
-                    continue
-                if stat.st_nlink == 0:
-                    anonymous_sizes.append(stat.st_size)
-            assert max(anonymous_sizes, default=0) > 20*1024*1024
+        # The repetitive evidence is now compressed in the private DB.  Its
+        # logical SQLite pages stay bounded while the protected journal above
+        # retains the complete typed event stream.
+        page_count = spill.db.execute("PRAGMA page_count").fetchone()[0]
+        page_size = spill.db.execute("PRAGMA page_size").fetchone()[0]
+        assert 0 < page_count * page_size < 5*1024*1024
     finally:
         spill.close()
 

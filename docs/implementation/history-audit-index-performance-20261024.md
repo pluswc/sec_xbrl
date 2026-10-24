@@ -182,3 +182,90 @@ PYTHONDONTWRITEBYTECODE=1 .../.venv/bin/python -B -m ruff check --no-cache \
   tests/unit/test_history_audit_index.py
 All checks passed!
 ```
+
+## Stage B: 분기 생성 private spill의 공간 절감
+
+Stage A 후보 `4bc5f67c6946a3525f49292fd196fcfabb981c46`은 독립 검증
+`8450b147e8321da966988041bdca4661974afc04e88bdfd977c6ed559647940d`에서
+PASS했고, 리드가
+`5445620925fb319bafa6067f810b3431999c6fc2fa74fc55ab65331625f621f2`로
+로컬 수락했다. Stage B는 같은 공간 절감 원리를 History 분기 생성의 private
+SQLite spill에만 적용한다. 공개 History 결과, 회계 계산, candidate locator,
+보호 journal과 감사 runtime binding은 대상이 아니다.
+
+관측된 문제는 `_QuarterSpill`이 동일한 typed value를 anonymous SQLite BLOB과
+이름 있는 보호 journal에 모두 기록한다는 점이다. 선택한 설계는 기존
+`_spill_pack()` 결과가 32 KiB 이상이고 zlib level 1 결과가 더 짧을 때에만 private
+DB BLOB을 압축하는 작은 versioned envelope다. envelope는 raw/compressed 구분,
+압축 전 길이와 SHA-256을 가진다. 읽기는 1 GiB 상한 안에서 stream 종료, 잔여 입력,
+원본 길이와 hash를 확인하고 기존 typed bytes를 반환한다. 작은 값이나 압축 이득이
+없는 값은 raw envelope로 둔다.
+
+기존 `_spill_pack()`/`_spill_unpack()`, `_append_event()`, PLANNED/APPLIED 순서,
+원본 key와 ordinal, 소유권·경로·FD 검사 및 journal framing은 바꾸지 않았다. DB
+row factory가 `value` 열만 기존 typed bytes로 복원하므로 mapping/sequence의
+getitem, items, values, slice와 음수 index 인터페이스도 그대로다. 구형 DB를 여는
+경로와 이행은 추가하지 않았다. 대안인 journal 압축은 forensic 형식을 바꾸므로
+채택하지 않았고, 값 dedup이나 per-leaf SQL DAG도 순서와 실패 면적을 넓히므로
+추가하지 않았다.
+
+### Stage B 측정
+
+기준은 `59c1c7bc13b2ebcee8b8acad7dc128d26d886b8d`이고 candidate는 Stage A
+커밋 위 작업본이다. 각 arm을 별도 subprocess로 3회 교차 순서 실행했다. 각 실행은
+30초 timeout, 1 GiB RSS watchdog, SQLite 설정과 read pass 2회를 동일하게 사용했다.
+RLIMIT_AS는 사용하지 않았다. 표의 시간과 RSS는 3회 중앙값이다. 모든 비교에서
+ordered typed semantic SHA, record count, journal event count, decoded typed journal
+SHA와 raw framed journal SHA가 arm 사이에 일치했다.
+anonymous DB 수치는 `PRAGMA page_count * page_size`인 논리 SQLite page bytes이며,
+OS의 실제 할당량이나 `du` 수치가 아니다. journal은 이름 있는 파일의 실제 byte다.
+
+| 사례 | DB baseline→candidate | journal | 합산 공간 변화 | 전체 시간 변화 | peak RSS 변화 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 승인 prefix 24건, 613,936 B typed | 684,032→364,544 B | 630,172 B 동일 | -24.31% | +18.57% | +0.08% |
+| 승인 rich 1건, 5,025,774 B typed | 5,050,368→311,296 B | 5,026,899 B 동일 | -47.03% | +20.55% | -8.88% |
+| 합성 repeated-rich, 49,257,032 B typed | 50,413,568→4,276,224 B | 49,593,884 B 동일 | -46.13% | +38.40% | +0.43% |
+| 합성 small typed, 32,107,985 B typed | 34,062,336 B 동일 | 35,127,205 B 동일 | 0.00% | +2.92% | -0.16% |
+
+승인 fixture는 각각 원본 24건과 1건을 한 cycle만 사용했다. rich 사례의 anonymous
+DB는 93.84% 줄었지만 journal을 그대로 보존하므로 합산 절감은 47.03%다. 이 결과는
+private DB 중복으로 인한 공간 압력을 줄이는 근거이며, 생성 속도 개선 근거는 아니다.
+압축 대상의 write/read CPU 비용 때문에 실제 rich 표본 전체 시간은 20.55%, 합성
+repeated-rich는 38.40% 늘었다. 작은 값은 page 단위 공간 변화가 없고 시간은 2.92%
+늘었다. 한정 표본을 전체 기업이나 MRK 실행 시간·최종 크기로 외삽하지 않는다.
+
+측정 JSON은 다음과 같다.
+
+- `work/.../quarter_spill_storage_writer_20261024/synthetic_profile.json`
+  (`8117775eceb5b84704cef364ea4f9ccce9aa6c350d61a72c00375f6115d6ada6`)
+- `work/.../quarter_spill_storage_writer_20261024/prefix24_profile.json`
+  (`4d28b839c73f60be786a96101718f68ffb21741fa3f5add5f014f9e33cbab351`)
+- `work/.../quarter_spill_storage_writer_20261024/rich1_profile.json`
+  (`530de099e272b9f601396a16a2ab59b1ee6f4aabe6f2d13a53ae0933dec69b3b`)
+
+프로파일 도구는 명시한 JSONL 하나만 읽고 16 MiB를 넘으면 거부한다. 원본 fixture
+건수, cycle과 실제 exercise 건수를 분리해 기록한다. 실제 producer, SEC 원본,
+active MRK SQLite 또는 완료 결과는 읽거나 실행하지 않았다. 이 단계는 source-only
+후보이며 새 GO, runtime binding과 실제 작업 실행은 별도 수락 대상이다.
+
+focused 검증은 codec 손상·상한, 모든 기존 typed 값, mapping/sequence 경로,
+journal 바이트 동일성, 비압축 6 MiB 값의 실제 anonymous disk spill, 기존 분기 spill
+동작과 메모리 성능 계약을 포함했다. 기존 대형 반복 fixture의 anonymous DB가 반드시
+20 MiB를 넘는다는 물리 크기 기대는 공간 개선과 충돌하므로, 전체 typed journal
+20 MiB 보존과 공개 결과·streaming 검사는 유지하면서 DB page bytes가 5 MiB 미만임을
+검사하도록 바꿨다.
+
+```text
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=<candidate>/src .../.venv/bin/python -B \
+  -m pytest -q -p no:cacheprovider \
+  tests/unit/test_history_quarter_spill_codec.py \
+  tests/unit/test_history_quarter_spill.py \
+  tests/unit/test_history_quarter_spill_performance.py
+38 passed in 1.30s
+
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=<candidate>/src .../.venv/bin/python -B \
+  -m ruff check --no-cache src/sec_xbrl/analytics/history_quarters.py \
+  tests/unit/test_history_quarter_spill_codec.py \
+  tests/unit/test_history_quarter_spill.py tools/profile_quarter_spill_storage.py
+All checks passed!
+```
