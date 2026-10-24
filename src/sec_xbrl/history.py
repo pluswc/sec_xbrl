@@ -685,11 +685,156 @@ class _StagedRecordWrite:
     schema: Any
     chunk_paths: tuple[Path, ...]
     workspace: Any | None
+    spool_bytes: int = 0
 
     def cleanup(self) -> None:
         if self.workspace is not None:
             _cleanup_history_workspace(self.workspace)
             self.workspace = None
+
+
+_TYPED_STAGE_SPOOL_MAGIC = b"sec-xbrl-history-stage-spool-v1\n"
+
+
+class _TypedStageRecordSpool:
+    """Disk-backed, checksummed replay of one expensive spilled-record pass."""
+
+    def __init__(self, directory: Path) -> None:
+        from sec_xbrl.analytics.fiscal_time_series import _spill_pack, _spill_unpack
+
+        self._pack = _spill_pack
+        self._unpack = _spill_unpack
+        self.path = directory / "typed-records.spool"
+        self.fd: int | None = None
+        self._identity: tuple[int, int] | None = None
+        self._size = 0
+        self._count = 0
+        self._digest = hashlib.sha256(_TYPED_STAGE_SPOOL_MAGIC).digest()
+        self._sealed: tuple[int, int, bytes] | None = None
+        try:
+            _check_history_storage(self.path)
+            self.fd = os.open(
+                self.path,
+                os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+            )
+            stat_result = os.fstat(self.fd)
+            self._identity = (stat_result.st_dev, stat_result.st_ino)
+            self._write(_TYPED_STAGE_SPOOL_MAGIC)
+        except BaseException:
+            self.close()
+            try:
+                self.path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+
+    def _open_fd(self) -> int:
+        if self.fd is None:
+            raise ValueError("typed stage spool is closed")
+        return self.fd
+
+    def _write(self, payload: bytes) -> None:
+        fd = self._open_fd()
+        remaining = memoryview(payload)
+        while remaining:
+            written = os.write(fd, remaining)
+            if written <= 0:
+                raise OSError("typed stage spool short write")
+            remaining = remaining[written:]
+        self._size += len(payload)
+
+    def _check_identity(self) -> None:
+        descriptor = os.fstat(self._open_fd())
+        path = os.stat(self.path, follow_symlinks=False)
+        if (
+            self._identity is None
+            or (descriptor.st_dev, descriptor.st_ino) != self._identity
+            or (path.st_dev, path.st_ino) != self._identity
+        ):
+            raise ValueError("typed stage spool ownership changed")
+
+    def append(self, record: dict[str, Any]) -> None:
+        if self._sealed is not None:
+            raise ValueError("typed stage spool is already sealed")
+        self._check_identity()
+        payload = self._pack(record)
+        length = len(payload).to_bytes(8, "big")
+        self._write(length + hashlib.sha256(payload).digest() + payload)
+        self._digest = hashlib.sha256(self._digest + length + payload).digest()
+        self._count += 1
+
+    def seal(self) -> None:
+        if self._sealed is not None:
+            raise ValueError("typed stage spool is already sealed")
+        _check_history_storage()
+        self._check_identity()
+        if os.fstat(self._open_fd()).st_size != self._size:
+            raise ValueError("typed stage spool size changed")
+        self._sealed = (self._count, self._size, self._digest)
+
+    @property
+    def byte_count(self) -> int:
+        return self._size
+
+    def __len__(self) -> int:
+        return self._count
+
+    def __iter__(self) -> Iterator[dict[str, Any]]:
+        if self._sealed is None:
+            raise ValueError("typed stage spool is not sealed")
+        _check_history_storage()
+        expected_count, expected_size, expected_digest = self._sealed
+        self._check_identity()
+        fd = self._open_fd()
+        if os.fstat(fd).st_size != expected_size:
+            raise ValueError("typed stage spool size changed")
+        offset = len(_TYPED_STAGE_SPOOL_MAGIC)
+        if os.pread(fd, offset, 0) != _TYPED_STAGE_SPOOL_MAGIC:
+            raise ValueError("typed stage spool header changed")
+        digest = hashlib.sha256(_TYPED_STAGE_SPOOL_MAGIC).digest()
+        count = 0
+        while offset < expected_size:
+            header = os.pread(fd, 40, offset)
+            if len(header) != 40:
+                raise ValueError("typed stage spool is truncated")
+            size = int.from_bytes(header[:8], "big")
+            offset += 40
+            if size > expected_size - offset:
+                raise ValueError("typed stage spool frame is truncated")
+            payload = os.pread(fd, size, offset)
+            if len(payload) != size:
+                raise ValueError("typed stage spool frame is truncated")
+            if hashlib.sha256(payload).digest() != header[8:]:
+                raise ValueError("typed stage spool payload changed")
+            digest = hashlib.sha256(digest + header[:8] + payload).digest()
+            record = self._unpack(payload)
+            if not isinstance(record, dict):
+                raise TypeError("typed stage spool record is invalid")
+            count += 1
+            offset += size
+            yield record
+        if (
+            offset != expected_size
+            or count != expected_count
+            or digest != expected_digest
+        ):
+            raise ValueError("typed stage spool sequence changed")
+        self._check_identity()
+        if os.fstat(fd).st_size != expected_size:
+            raise ValueError("typed stage spool changed during read")
+
+    def discard(self) -> None:
+        """Remove a successfully consumed private spool before publication."""
+        self._check_identity()
+        self.close()
+        _check_history_storage()
+        self.path.unlink()
+
+    def close(self) -> None:
+        if self.fd is not None:
+            os.close(self.fd)
+            self.fd = None
 
 
 def _stage_records(
@@ -708,10 +853,83 @@ def _stage_records(
     # that global schema.  This prevents an early int/float or bool/int
     # batch from losing its original representation before a late string
     # promotes the complete column to String.
+    workspace = None
+    spool = None
+    from sec_xbrl.analytics.fiscal_time_series import _SpilledRecordSequence
+
+    if isinstance(records, _SpilledRecordSequence):
+        try:
+            workspace = tempfile.TemporaryDirectory(
+                prefix=f".{path.name}.chunks-", dir=path.parent
+            )
+            spool = _TypedStageRecordSpool(Path(workspace.name))
+        except BaseException:
+            if workspace is not None:
+                _cleanup_history_workspace(workspace)
+            raise
+    try:
+        replay_records, json_fields, global_schema = _discover_record_schema(
+            pl, records, spool
+        )
+        if workspace is None:
+            workspace = tempfile.TemporaryDirectory(
+                prefix=f".{path.name}.chunks-", dir=path.parent
+            )
+        chunk_paths: list[Path] = []
+        chunk_directory = Path(workspace.name)
+        for encoded_batch, _encoded_bytes in _iter_encoded_record_batches(
+            replay_records, json_fields
+        ):
+            chunk_path = chunk_directory / f"{len(chunk_paths):08d}.parquet"
+            _check_history_storage(chunk_path)
+            pl.from_dicts(
+                encoded_batch,
+                schema=global_schema,
+                infer_schema_length=None,
+            ).write_parquet(
+                chunk_path, row_group_size=_RECORD_WRITE_BATCH_SIZE
+            )
+            chunk_paths.append(chunk_path)
+        if spool is not None:
+            spool_bytes = spool.byte_count
+            spool.discard()
+        else:
+            spool_bytes = 0
+    except BaseException:
+        if spool is not None:
+            spool.close()
+        if workspace is not None:
+            _cleanup_history_workspace(workspace)
+        raise
+    return _StagedRecordWrite(
+        path,
+        len(records),
+        tuple(json_fields),
+        global_schema,
+        tuple(chunk_paths),
+        workspace,
+        spool_bytes,
+    )
+
+
+def _discover_record_schema(
+    pl: Any,
+    records: Sequence[dict[str, Any]],
+    spool: _TypedStageRecordSpool | None,
+) -> tuple[
+    Sequence[dict[str, Any]] | _TypedStageRecordSpool,
+    list[str],
+    Any,
+]:
+    """Infer the global schema while optionally retaining one typed replay."""
+    replay_records: Sequence[dict[str, Any]] | _TypedStageRecordSpool = records
     json_field_set: set[str] = set()
     schemas = []
     schema_inference_failed = False
     for batch in _iter_record_batches(records):
+        if spool is not None:
+            for row in batch:
+                spool.append(row)
         local_json_fields = sorted(
             {
                 key
@@ -732,18 +950,20 @@ def _stage_records(
             )
         except (OverflowError, pl.exceptions.PolarsError):
             schema_inference_failed = True
+    if spool is not None:
+        spool.seal()
+        replay_records = spool
     json_fields = sorted(json_field_set)
     if schema_inference_failed:
         # A scalar in an early batch can be invalid for Polars but valid once a
-        # later nested value makes its column table-global JSON.  The original
-        # schema pass is the exact compatibility fallback and still raises for
-        # values that remain invalid after global JSON discovery.
+        # later nested value makes its column table-global JSON.  Replay the
+        # typed spool rather than reconstructing the expensive source again.
         schemas = [
             pl.from_dicts(
                 _schema_record_batch(batch, json_fields),
                 infer_schema_length=None,
             ).schema
-            for batch in _iter_record_batches(records)
+            for batch in _iter_record_batches(replay_records)
         ]
     else:
         schemas = [
@@ -759,36 +979,7 @@ def _stage_records(
         [pl.DataFrame(schema=schema).lazy() for schema in schemas],
         how="diagonal_relaxed",
     ).collect_schema()
-    workspace = tempfile.TemporaryDirectory(
-        prefix=f".{path.name}.chunks-", dir=path.parent
-    )
-    chunk_paths: list[Path] = []
-    try:
-        chunk_directory = Path(workspace.name)
-        for encoded_batch, _encoded_bytes in _iter_encoded_record_batches(
-            records, json_fields
-        ):
-            chunk_path = chunk_directory / f"{len(chunk_paths):08d}.parquet"
-            _check_history_storage(chunk_path)
-            pl.from_dicts(
-                encoded_batch,
-                schema=global_schema,
-                infer_schema_length=None,
-            ).write_parquet(
-                chunk_path, row_group_size=_RECORD_WRITE_BATCH_SIZE
-            )
-            chunk_paths.append(chunk_path)
-    except BaseException:
-        _cleanup_history_workspace(workspace)
-        raise
-    return _StagedRecordWrite(
-        path,
-        len(records),
-        tuple(json_fields),
-        global_schema,
-        tuple(chunk_paths),
-        workspace,
-    )
+    return replay_records, json_fields, global_schema
 
 
 def _finalize_staged_records(staged: _StagedRecordWrite) -> dict[str, Any]:
