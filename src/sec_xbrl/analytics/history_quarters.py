@@ -503,6 +503,16 @@ def _quarter_progress(stage, table, count, started_at):
                       "monotonic_seconds": now, "elapsed_seconds": now - started_at}), flush=True)
 
 
+def _copy_reclassified_cell(original):
+    """Copy only dictionaries mutated while reclassifying a reported cell."""
+    cell = dict(original)
+    value = cell.get("value_lineage")
+    if isinstance(value, dict):
+        value = dict(value)
+        cell["value_lineage"] = value
+    return cell, value
+
+
 def _spill_reported_table(old, table, publication, by_fact, targets, materialized, changes, spill, additive):
     """Reclassify one fully decoded cell at a time; retain only disk references."""
     source = {}
@@ -517,8 +527,8 @@ def _spill_reported_table(old, table, publication, by_fact, targets, materialize
     started_at = monotonic()
     _quarter_progress("QUARTER_SPILL_BEGIN", table, count, started_at)
     for original in _iter_history_records(_history_dataset_path(old.root, info), info):
-        cell = deepcopy(dict(original))
-        value = cell.get("value_lineage")
+        # Large evidence trees remain read-only until the typed spill serializes.
+        cell, value = _copy_reclassified_cell(original)
         old_column = columns[cell["fiscal_time_series_column_id"]]
         period_class = table["period_class"]
         if value is not None and value.get("selected_source_fact_id"):
