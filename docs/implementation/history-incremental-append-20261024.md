@@ -5,7 +5,7 @@
 이 milestone은 한 회사의 공시가 기존 입력 뒤에 정확히 한 건 추가된 경우에만 이전
 History publication을 명시적으로 받아 재사용한다. 기본 `build_history` 동작은 그대로
 전체 생성이며, `--previous-history`와 증명 자료가 함께 주어진 호출만 증분 경로를
-시도한다. source `59598b2…`는 로컬 검사와 실제 AAPL 단일 후보 측정을 완료했다.
+시도한다. source `a83a3b2…`는 로컬 검사와 실제 AAPL 단일 후보 측정을 완료했다.
 독립 검증, 로컬 수락, `main` 병합, 운영 채택은 아직 완료되지 않았다.
 
 이 변경은 Raw 추출이나 원본 Fact 근거, canonical ID, 공시 선택 view, 회계 기간,
@@ -63,29 +63,36 @@ hash, dirty class와 receipt 자료뿐이다.
 bounded cached NVDA 두 공시 fixture에서 이전 한 건 publication, 두 건 전체 생성, 두 건
 증분 생성을 비교했다. T1~T4 전체 dataset과 final columns/rows/cells의 값·타입·ID·순서가
 같음을 확인했고, `prior_candidate_publication`의 불변 publication 절대 경로만 재사용
-출처 차이로 명시적으로 정규화했다. 직접 영향 unit/integration과 기존 graph 검사
-12건이 통과했다.
+출처 차이로 명시적으로 정규화했다. 최종 endpoint membership 수정 뒤 직접 영향 unit
+6건이 통과했고, 같은 수정 직전의 cached full-vs-append integration 1건도 통과했다.
+마지막 수정은 endpoint마다 node ID 집합을 다시 만들던 O(E·N) 반복을 동일한 단일 집합
+조회로 바꾼 것으로 값·순서 판정은 바꾸지 않았다.
 
 실제 AAPL 22→23 공시 append 후보는 독립 검증 전에 한 번만 실행했다. 비교 기준
 99.110초/2,183,675,904바이트는 이전 source의 단일 historical baseline이며 같은 source의
 동시 paired baseline이 아니다. 후보의 공통 discover·cached ingest 1.540초, migration
-proof 준비 0.182초, build 92.736초, query 0.607초를 합친 전체는 95.065초로 4.08% 짧았다.
-quarter publisher는 38.513초에서 35.187초로 8.64% 짧았다. 20ms 간격 관측 RSS 최대값은
-3,316,862,976바이트로 51.89% 증가했으며 순간 최대값을 놓칠 수 있다. RAM 개선은
-입증되지 않았다.
+proof 준비 0.182초, build 89.833초, query 0.607초를 합친 전체는 92.161초로 7.01%
+짧았다. quarter publisher는 38.513초에서 34.020초로 11.67% 짧았다. 20ms 간격 관측
+RSS 최대값은 2,092,429,312바이트로 4.18% 낮았으며 순간 최대값을 놓칠 수 있다.
 
 이 실행은 이전 22개 공시와 새 공시 1개를 구분했고, History 10개 표 중 FY와 YTD_6M의
 두 view 4개를 재사용하며 INSTANT, QTD_3M, YTD_9M의 6개를 다시 만들었다. T3는
-reader roundtrip 뒤 이전 observation stage가 정확히 같다는 증명이 실패해
-`FULL_FALLBACK`을 사용했다. 따라서 이 자료에서는 T3 merge의 실행 효과가 없었다.
+reader-attested T2의 관계 edge 순서를 기준으로 old/new relationship-only node와 edge를
+재배열한 `STAGE_PRESERVING_MERGE`를 사용했다.
+
+앞선 R3는 T3 observation stage 대조 방식 때문에 `FULL_FALLBACK`했고 RSS가 51.89%
+증가해 미수락으로 보존했다. R4b는 실제 T2 관계 순서가 old/new accession을 섞는다는
+사실을 prefix로 잘못 가정해 fallback했다. R5는 endpoint마다 전체 node ID 집합을 다시
+만드는 O(E·N) 결함으로 중단했으며 source와 실패 시도 증거를 보존했다. R6는 이 반복만
+제거한 뒤 새 후보를 한 번 실행한 결과다.
 
 새 후보와 기존 full reference를 한 번 비교해 History 31개 파일과 한쪽당 31,230개
 record, T1 4개 dataset, T2 edge 51,248개, T3 node 53,238개와 edge 107,750개,
 T4 ledger 23개가 같음을 확인했다. 값·Python 타입·schema·순서·ID·기간·단위·원본
 출처를 보존했고 `prior_candidate_publication` 절대 경로만 명시적으로 정규화했다.
 기계 보고서는
-`work/actual_quarter_append_20261024/incremental-append-v1-r3/final_report.json`에 있으며
-SHA-256은 `5d5e596a1c124a82d591fcbc3b2b4c81519e7f4983fa5b3ad1046d93341c446f`이다.
+`work/actual_quarter_append_20261024/incremental-append-v1-r6/final_report.json`에 있으며
+SHA-256은 `6dec17ca5e84e40ff4da552beb9d7dea3b4e33415d1b3775d6833a09f030a262`이다.
 단일 회사·공시 pair 결과이므로 반복 append나 다른 회사의 속도를 주장하지 않는다.
 
 남는 비용은 전체 canonical mapping 계산, 이전 Raw 정상 입력 로드와 prefix 확인, dirty
