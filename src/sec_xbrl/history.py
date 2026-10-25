@@ -716,10 +716,13 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     staging.rename(destination)
     from sec_xbrl.analytics.history_quarters import (
         _make_quarter_delta_capability,
+        _quarter_delta_scope_matches,
         publish_quarter_history,
     )
     delta_capability = None
-    if append_info is not None:
+    if append_info is not None and _quarter_delta_scope_matches(
+        append_info["payload"], frozenset(dirty_period_classes)
+    ):
         delta_capability = _make_quarter_delta_capability(
             publication=destination,
             previous_history=append_info["previous_history"],

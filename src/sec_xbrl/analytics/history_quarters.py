@@ -546,6 +546,13 @@ class _QuarterDeltaCapability:
     producer_code_identity: str
 
 
+def _quarter_delta_scope_matches(
+    append_payload: Mapping[str, Any], dirty_period_classes: frozenset[str]
+) -> bool:
+    """Require the effective serving closure to match the proven suffix scope."""
+    return append_payload.get("dirty_period_classes") == sorted(dirty_period_classes)
+
+
 def _make_quarter_delta_capability(
     *,
     publication: Path,
@@ -568,7 +575,7 @@ def _make_quarter_delta_capability(
         or set(roots) != {"t1", "t2", "t3", "t4"}
         or append_payload.get("previous_history") != str(Path(previous_history).absolute())
         or append_payload.get("previous_reported") != str(Path(previous_reported).absolute())
-        or append_payload.get("dirty_period_classes") != sorted(dirty_period_classes)
+        or not _quarter_delta_scope_matches(append_payload, dirty_period_classes)
         or append_payload.get("producer_code_identity") != _producer_code_identity()
     ):
         raise ValueError("quarter delta requires a validated append capability")

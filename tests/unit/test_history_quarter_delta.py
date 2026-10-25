@@ -97,6 +97,11 @@ def test_delta_inputs_require_private_current_publication_capability(tmp_path) -
         input_fingerprint="current-input",
         operational_roots=roots,
     ) is None
+    payload = {"dirty_period_classes": ["QTD_3M"]}
+    assert quarters._quarter_delta_scope_matches(payload, frozenset({"QTD_3M"}))
+    assert not quarters._quarter_delta_scope_matches(
+        payload, frozenset({"FY", "QTD_3M"})
+    )
     assert quarters._quarter_delta_inputs(
         capability,
         publication=tmp_path / "current",
