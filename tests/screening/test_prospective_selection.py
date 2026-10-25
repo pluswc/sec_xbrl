@@ -626,3 +626,78 @@ def test_batch_checks_invocation_local_producer_bytes_before_commit(tmp_path, mo
     assert len(calls)==2
     assert not (tmp_path/"ANNUAL").exists()
     assert not (tmp_path/"QUARTERLY").exists()
+
+
+@pytest.mark.parametrize("changed", ["core", "unknown", "alias", "retained_diagnostic"])
+def test_no_storage_batch_binds_origin_history_bytes_and_topology(tmp_path, monkeypatch, changed):
+    from sec_xbrl import prospective_selection as producer
+    prepared, _, config_path = _fixture(tmp_path, monkeypatch)
+    config = json.loads(config_path.read_text());config.pop("storage_reuse")
+    write_json(config_path, config)
+    root = prepared.histories["FIVE"].parent
+    diagnostic = root / ".chunks/quarter-spill.records"
+    if changed == "retained_diagnostic":
+        diagnostic.parent.mkdir();diagnostic.write_bytes(b"preserved strict physical input")
+    manifest = publish_prospective_selection(config_path=config_path, destination=tmp_path/"no-storage-selection")
+    declared = json.loads(prepared.histories["FIVE"].read_text())
+    core = root / next(iter(declared["tables"][0]["files"].values()))["path"]
+    controls = json.loads(manifest.read_text())["controls"]
+    assert any(pin["path"] == str(core) for pin in controls.values())
+    stage = producer._stage_reselected_analysis
+    calls = []
+    def mutate_after_second_stage(*args, **kwargs):
+        result = stage(*args, **kwargs);calls.append(True)
+        if len(calls) == 2:
+            if changed == "core": core.write_bytes(b"changed core after staging")
+            elif changed == "unknown": (root/"unexpected.json").write_bytes(b"unknown")
+            elif changed == "alias": (root/"alias.parquet").symlink_to(core)
+            else: diagnostic.write_bytes(b"changed retained diagnostic after staging")
+        return result
+    monkeypatch.setattr(producer,"_stage_reselected_analysis",mutate_after_second_stage)
+    with pytest.raises(ValueError):
+        producer.prepare_reselected_analysis_batch(prospective_selection=_pin(manifest),destinations={"FIVE":{
+            mode:tmp_path/mode for mode in ("ANNUAL","QUARTERLY")}})
+    assert len(calls) == 2
+    assert not (tmp_path/"ANNUAL").exists()
+    assert not (tmp_path/"QUARTERLY").exists()
+
+
+def test_partial_registry_does_not_exclude_uncovered_origin_diagnostic_bytes(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from sec_xbrl import prospective_selection as producer
+    from sec_xbrl.collection_operations import _declared_publication_files
+    prepared, _, _ = _fixture(tmp_path, monkeypatch)
+    manifest=prepared.histories["FIVE"];root=manifest.parent
+    diagnostic=root/".chunks/quarter-spill.records"
+    diagnostic.parent.mkdir();diagnostic.write_bytes(b"strict when origin has no v2 entry")
+    controls={"FIVE:origin_history_manifest":_pin(manifest)}
+    partial=SimpleNamespace(companies={"OTHER":{"histories":[]}})
+    producer._bind_origin_history(controls,ticker="FIVE",manifest=_pin(manifest),
+        declared=_declared_publication_files(root,json.loads(manifest.read_text())),storage=partial)
+    assert controls["FIVE:ORIGIN_HISTORY_PAYLOAD:.chunks/quarter-spill.records"]==_pin(diagnostic)
+    producer._check_input_topologies(controls,partial)
+    (root/"unknown.json").write_bytes(b"unapproved inventory")
+    with pytest.raises(ValueError,match="inventory changed"):
+        producer._check_input_topologies(controls,partial)
+
+
+def test_only_explicit_v2_origin_entry_excludes_diagnostic_body_at_batch_commit(tmp_path, monkeypatch):
+    from sec_xbrl import prospective_selection as producer
+    from tests.screening.test_financial_storage_reuse import _as_v2
+    _, _, config_path = _fixture(tmp_path, monkeypatch)
+    config=json.loads(config_path.read_text());storage=Path(config["storage_reuse"]["path"])
+    diagnostics=_as_v2(storage);config["storage_reuse"]=_pin(storage);write_json(config_path,config)
+    manifest=publish_prospective_selection(config_path=config_path,destination=tmp_path/"v2-selection")
+    stage=producer._stage_reselected_analysis
+    calls=[]
+    def change_only_nonconsumed_body(*args,**kwargs):
+        result=stage(*args,**kwargs);calls.append(True)
+        if len(calls)==2:
+            next(iter(diagnostics)).write_bytes(b"changed retained diagnostic body only")
+        return result
+    monkeypatch.setattr(producer,"_stage_reselected_analysis",change_only_nonconsumed_body)
+    roots=producer.prepare_reselected_analysis_batch(prospective_selection=_pin(manifest),destinations={"FIVE":{
+        mode:tmp_path/mode for mode in ("ANNUAL","QUARTERLY")}})
+    assert len(calls)==2
+    assert all(root.is_dir() for root in roots["FIVE"].values())

@@ -370,6 +370,8 @@ def _resolve_config(config_pin: dict[str, str]) -> tuple[str, dict, dict, Any]:
         for name, pin in pins.items():
             controls[f"{ticker}:{name}"] = pin
         controls[f"{ticker}:ORIGIN:build"] = _file_pin(build_path)
+        _bind_origin_history(controls, ticker=ticker, manifest=pins["origin_history_manifest"],
+                             declared=build["declared_files"], storage=storage)
         for accession, files in expected_policy["raw_inventory"].items():
             outcome = next(row for row in new_outcomes if row["filing"]["accession"] == accession)
             root = Path(outcome["source_run"]) / "snapshots" / cik / accession.replace("-", "")
@@ -406,8 +408,7 @@ def publish_prospective_selection(*, config_path: Path, destination: Path) -> Pa
     pin = _file_pin(config_path)
     cutoff, companies, controls, _storage = _resolve_config(pin)
     # Recheck every input at the write boundary; no stale preflight proof.
-    for declaration in controls.values():
-        _pin(declaration)
+    _verify_control_bytes(controls)
     _check_input_topologies(controls, _storage)
     _verify_producer_sources(producer_sources)
     destination.mkdir(parents=True)
@@ -549,8 +550,7 @@ def prepare_reselected_analysis_batch(
     ]
     # Current controls, Raw tables and governed History/analysis payloads, once per
     # batch. Retained nonconsumed diagnostics remain topology-only under v2.
-    for pin in selection.controls.values():
-        _pin(pin)
+    _verify_control_bytes(selection.controls)
     _check_input_topologies(selection.controls, selection.storage_reuse)
     _verify_producer_sources(producer_sources)
     result: dict[str, dict[str, Path]] = {}
@@ -560,6 +560,42 @@ def prepare_reselected_analysis_batch(
         staging.rename(destination)
         result.setdefault(ticker, {})[mode] = destination
     return result
+
+
+def _verify_control_bytes(controls: dict) -> None:
+    # Distinct provenance roles may bind the same payload. Hash each physical
+    # input once at this boundary while rejecting conflicting declarations.
+    unique = {}
+    for pin in controls.values():
+        previous = unique.setdefault(pin["path"], pin)
+        if previous != pin:
+            raise ValueError("prospective controls conflict for one physical input")
+    for pin in unique.values():
+        _pin(pin)
+
+
+def _bind_origin_history(controls: dict, *, ticker: str, manifest: dict,
+                         declared: dict, storage: Any) -> None:
+    """Active History freshness never depends on optional prior-check reuse."""
+    from sec_xbrl.financial_storage_reuse import storage_history
+    from sec_xbrl.history_selection import _retained_diagnostic
+    root = Path(manifest["path"]).parent
+    entry = storage_history(storage, ticker, Path(manifest["path"]))
+    if entry is not None and "retained_diagnostics" in entry:
+        # Only an explicitly verified v2 entry may exclude diagnostic bodies.
+        inventory = entry["payload_inventory"]
+    else:
+        # No optimization (or v1) retains the strict physical-byte policy.
+        inventory = _inventory(root)
+        extras = set(inventory) - set(declared) - {"history_manifest.json"}
+        if any(not _retained_diagnostic(relative, set(declared)) for relative in extras):
+            raise ValueError("prospective origin History has unknown physical inputs")
+    if (inventory.get("history_manifest.json") != manifest["sha256"]
+        or any(inventory.get(relative) != digest for relative, digest in declared.items())):
+        raise ValueError("prospective origin History payload inventory differs")
+    for relative, digest in inventory.items():
+        controls[f"{ticker}:ORIGIN_HISTORY_PAYLOAD:{relative}"] = {
+            "path": str(root / relative), "sha256": digest}
 
 
 def _producer_source_pins() -> dict[str, dict[str, str]]:
@@ -590,6 +626,27 @@ def _check_input_topologies(controls: dict, storage: Any) -> None:
             actual.add(str(path.relative_to(root)))
         if actual != expected:
             raise ValueError("prospective Raw inventory changed")
+    from sec_xbrl.financial_storage_reuse import storage_history
+    for key, manifest in controls.items():
+        if not key.endswith(":origin_history_manifest"):
+            continue
+        ticker = key.removesuffix(":origin_history_manifest")
+        root = Path(manifest["path"]).parent
+        prefix = ticker + ":ORIGIN_HISTORY_PAYLOAD:"
+        expected = {name.removeprefix(prefix) for name in controls if name.startswith(prefix)}
+        entry = storage_history(storage, ticker, Path(manifest["path"]))
+        if entry is not None and "retained_diagnostics" in entry:
+            expected.update(entry["retained_diagnostics"])
+        actual = set()
+        for path in root.rglob("*"):
+            if path.is_symlink() or (not path.is_dir() and not path.is_file()):
+                raise ValueError("prospective origin History has unsafe topology")
+            if path.is_file():
+                actual.add(str(path.relative_to(root)))
+            elif not any(path.iterdir()):
+                raise ValueError("prospective origin History has an unknown empty directory")
+        if actual != expected:
+            raise ValueError("prospective origin History inventory changed")
     if storage is not None:
         for company in storage.companies.values():
             for entry in company["histories"]:

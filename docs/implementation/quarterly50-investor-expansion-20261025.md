@@ -564,3 +564,31 @@ now renders the known `metric is unavailable for execution:` error in Korean:
 “현재 자료에서 실행할 수 없는 지표가 포함돼 있습니다. 사용 가능한 지표를 선택해 주세요.”
 Backend errors, execution validation and TTM availability policy are unchanged.
 This is a presentation correction, not TTM execution acceptance.
+
+## Independent P1 return and origin History closure repair
+
+Independent review of 9477b401f9d8111cf95216ec34357c3921c2481d returned FAIL:
+with optional storage_reuse omitted, governed origin History payloads were checked
+at resolution but missing from the later batch byte/inventory boundary. The
+reviewer's two-target synthetic probe mutated an origin Parquet after staging and
+both outputs incorrectly published. The earlier passing synthetic results did not
+cover that branch; they are not acceptance of this missing boundary. ROOT preserves
+the original failed report and requires a separate independent repair result.
+
+Every selected origin History now contributes all governed manifest-declared
+payload hashes and exact safe topology independently of prior-check optimization.
+No-storage, v1, or a partial registry without that exact origin entry retains the
+strict physical-byte policy, including recognized retained diagnostic bodies.
+Only an explicit verified v2 entry may exclude those bodies, preserving their
+safe exact inventory. Unknown files, empty directories, aliases, special entries
+or missing inputs fail closed. Distinct provenance roles sharing one physical
+path are hashed once at the commit boundary; conflicting pins reject.
+
+Repair validation: 10 relevant tests PASS in 4.97 s (16 unrelated prospective
+cases deselected), including six new no-storage/partial-registry/explicit-v2
+cases. Core mutation, unknown file, alias and retained-diagnostic mutation prevent
+both target publications without storage; an uncovered partial registry does not
+imply v2 exclusion; explicit v2 diagnostic-only body mutation remains eligible.
+Ruff/diff PASS. No actual input audit, old validation rerun, accounting change or
+TTM policy change. Independent rerun of the original failure probe and ROOT
+acceptance remain pending for the repair freeze.
