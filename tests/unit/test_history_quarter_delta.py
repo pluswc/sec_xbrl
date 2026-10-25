@@ -101,6 +101,7 @@ def test_delta_inputs_require_private_current_publication_capability(tmp_path) -
     ) is None
     payload = {
         "dirty_period_classes": ["QTD_3M"],
+        "history_policy_unchanged": True,
         "t3_mode": "STAGE_PRESERVING_MERGE",
         "quarter_fast_input_proof": {
             "proven": True,
@@ -110,6 +111,10 @@ def test_delta_inputs_require_private_current_publication_capability(tmp_path) -
     assert quarters._quarter_delta_scope_matches(payload, frozenset({"QTD_3M"}))
     assert not quarters._quarter_delta_scope_matches(
         payload, frozenset({"FY", "QTD_3M"})
+    )
+    assert not quarters._quarter_delta_scope_matches(
+        {**payload, "history_policy_unchanged": False},
+        frozenset({"QTD_3M"}),
     )
     assert quarters._quarter_delta_inputs(
         capability,

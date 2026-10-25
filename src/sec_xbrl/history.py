@@ -580,7 +580,11 @@ def build_history(*, intake_manifest: Path, output_root: Path,
         previous_plan = reused_reported.manifest.get("plan")
         from sec_xbrl.history_reuse import history_policy_changed
 
-        if not isinstance(previous_plan, dict) or history_policy_changed(previous_plan, plan):
+        policy_changed = not isinstance(previous_plan, dict) or history_policy_changed(
+            previous_plan, plan
+        )
+        append_info["payload"]["history_policy_unchanged"] = not policy_changed
+        if policy_changed:
             # Layer 2 is independent of serving as-of/view policy. History
             # tables are conservatively rebuilt when that policy changes.
             dirty_period_classes.update(

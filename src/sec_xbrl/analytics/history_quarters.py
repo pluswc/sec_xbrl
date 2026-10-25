@@ -596,6 +596,7 @@ def _quarter_delta_scope_matches(
     proof = append_payload.get("quarter_fast_input_proof")
     return bool(
         append_payload.get("dirty_period_classes") == sorted(dirty_period_classes)
+        and append_payload.get("history_policy_unchanged") is True
         and isinstance(proof, Mapping)
         and proof.get("proven") is True
         and proof.get("graph_scope_isolated") is True
