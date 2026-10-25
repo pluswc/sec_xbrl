@@ -621,3 +621,22 @@ basis-policy decision is pending. Latest12 Raw, latest50 metadata, new1109
 canonical control intakes and package view are prepared. Latest12 History and
 prospective38 actual execution remain held for final source review and that
 policy decision. No completed old company audit or baseline stage is repeated.
+
+
+## Independent repair PASS and selected-period caption
+
+ROOT reported independent PASS for the P1 repair at
+865d6a1d589a9241b9ae274164d3859cf52d5ee4, including the previously failing optional
+no-storage boundary. The original 9477 FAIL report remains historical evidence;
+the repair is separately verified, rather than retroactively relabeled.
+
+A final actual criteria observation found every non-instant metric captioned as
+annual. The criteria hint now uses the governed
+`observation_basis || period_class`: INSTANT → 기말잔액, QTD_3M → 분기실적,
+TTM → 최근4분기, with the existing annual fallback 연간실적. No financial
+calculation, metric definition or source API changes. Existing interface hierarchy,
+palette, depth, Korean type and spacing remain. Existing UI checks pass; ROOT
+owns the three actual DOM caption checks by final-JS overlay, without restarting
+the backend or rereading Raw. Baseline quarterly/YoY UAT remains accepted as
+reported above. TTM strict basis policy, its unaccepted execution status and the
+human policy question remain unchanged; actual latest12 builds remain held.
