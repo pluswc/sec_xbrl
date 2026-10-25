@@ -592,3 +592,32 @@ imply v2 exclusion; explicit v2 diagnostic-only body mutation remains eligible.
 Ruff/diff PASS. No actual input audit, old validation rerun, accounting change or
 TTM policy change. Independent rerun of the original failure probe and ROOT
 acceptance remain pending for the repair freeze.
+
+
+## Scoped period-label CSS correction and ROOT baseline report
+
+ROOT observed the global first-cell checkbox width leaking into quarter detail
+and peer series tables. The 34px width is now scoped to `#result-body td:first-child`;
+`.series-table` uses `word-break: keep-all`. This keeps Korean quarter labels
+readable while preserving existing palette, paper surfaces, border depth,
+11px metadata, 9×12px cell padding and spacing. No layout redesign or design-system
+instruction changes are made. ROOT owns desktop/compact visual overlay checks on
+the already loaded private baseline page; no data or audit rerun is needed.
+
+ROOT reported all six baseline stages COMPLETE on immutable source 1edec6:
+quality, identity, annual31 metrics, annual dataset, quarterly41 metrics and
+combined v3. The final previously uncompleted v3 attempt passed in 233.24 s,
+peak 11539400 KiB, after disabling an optional periodic faulthandler dump in the
+operator following SIGSEGV11. No product/data fix was requested for that runtime
+event. Private cloned-journal UI checks passed 50-target quarterly revenue/YoY
+execution (38 pass, 3 fail, 9 undetermined), eight-quarter detail and peer
+comparison, explicit save, and reopen of the original 21-company result context.
+Backend restart preserved exact condition/result reopen without extra records.
+Original catalog/journal hashes were unchanged. These are ROOT-reported baseline
+operational results, not independent acceptance of the phase3 repair.
+
+TTM actual availability remains zero and execution is NOT accepted; the human
+basis-policy decision is pending. Latest12 Raw, latest50 metadata, new1109
+canonical control intakes and package view are prepared. Latest12 History and
+prospective38 actual execution remain held for final source review and that
+policy decision. No completed old company audit or baseline stage is repeated.
