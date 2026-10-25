@@ -810,6 +810,10 @@ def _text_raw_matches(binding: dict[str, Any], expected: str) -> bool:
 
 def _raw_matches(binding: dict[str, Any], expected: str) -> bool:
     if binding.get("transform") == "numwordsen":
+        # The governed lexical nil is numeric zero, not xsi:nil. Preserve the
+        # declared Inline sign when comparing its immutable Raw representation.
+        if expected == "0" and binding.get("source_sign") == "-":
+            expected = "-0"
         return (
             binding.get("actual_raw_value") == expected
             and str(binding.get("actual_value_numeric")) == expected
