@@ -32,6 +32,7 @@ packages = ["src/sec_xbrl"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
