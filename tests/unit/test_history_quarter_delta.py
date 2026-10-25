@@ -111,7 +111,7 @@ def test_delta_inputs_require_private_current_publication_capability(tmp_path) -
     ) is None
 
 
-def test_delta_derivation_reuses_exact_unchanged_cell_and_counts_removal() -> None:
+def test_delta_derivation_reuses_exact_unchanged_cell_and_counts_removal(tmp_path) -> None:
     spill = _Spill()
     key = ("TEST", "AS_FILED", "QTD_3M")
     later = _locator("YTD_6M", "100", "2025-07-01", unchanged=False)
@@ -166,6 +166,53 @@ def test_delta_derivation_reuses_exact_unchanged_cell_and_counts_removal() -> No
         delta_metrics=removed_metrics,
     )
     assert removed_metrics["derived_removed_cells"] == 1
+
+    spill_root = tmp_path / "spill"
+    spill_root.mkdir()
+    actual_spill = quarters._QuarterSpill(spill_root)
+    try:
+        records = actual_spill.sequence()
+        routed = {}
+        for name, locator in (("later", later), ("earlier", earlier)):
+            index = len(records)
+            records.append(
+                {
+                    "cell": locator["cell"],
+                    "column": locator["column"],
+                    "row": locator["row"],
+                    "inputs_unchanged": True,
+                }
+            )
+            routed[name] = {
+                "additive": records.mapping.bucket,
+                "cell_key": index,
+                "inputs_unchanged": True,
+            }
+        actual_grouped = {
+            ("TEST", "AS_FILED"): {
+                (2025, "YTD_6M", quarters._scope(later["cell"]["value_lineage"])): [
+                    routed["later"]
+                ],
+                (2025, "QTD_3M", quarters._scope(earlier["cell"]["value_lineage"])): [
+                    routed["earlier"]
+                ],
+            }
+        }
+        actual_target = _target()
+        actual_metrics = defaultdict(int)
+        quarters._derive_quarter_targets(
+            {key: actual_target},
+            actual_grouped,
+            {key: set()},
+            actual_spill,
+            prior_derived_cells={metric_id: prior_cell},
+            prior_derived_metrics={metric_id: prior_metric},
+            delta_metrics=actual_metrics,
+        )
+        assert actual_metrics["derived_reused_cells"] == 1
+        assert actual_metrics["derived_recomputed_cells"] == 0
+    finally:
+        actual_spill.close()
 
     corrupted = {**prior_cell, "fiscal_time_series_column_id": "foreign-column"}
     with pytest.raises(quarters._QuarterDeltaFallback, match="derived cell binding"):
