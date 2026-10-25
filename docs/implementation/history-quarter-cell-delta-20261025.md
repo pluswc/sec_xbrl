@@ -2,55 +2,64 @@
 
 ## 범위와 상태
 
-`HISTORY_QUARTER_CELL_DELTA_V1`은 strictly-later 단일 CIK append에서 이미 증명된
-이전 reported publication과 final History publication을 받아, dirty History 표의 모든
-셀을 다시 private spill에 저장하던 비용을 줄이는 opt-in 경로다. 기존 full quarter
-producer는 oracle과 fallback으로 그대로 남는다. 이 문서는 source 후보 계약이며 실제
-AAPL 시간·RSS 측정, 독립 검증, 로컬 수락, 운영 반영과 `main` 병합은 아직 완료되지
-않았다.
+`HISTORY_QUARTER_CELL_DELTA_V1`은 증명된 History append에서 과거 fiscal cell을 다시
+분류하고 nested payload를 private spill에 넣는 일을 줄이는 opt-in 경로다. public
+Parquet schema, ID, 값, 순서, provenance와 불변 publication 계약은 바꾸지 않는다.
+기존 full quarter producer는 oracle과 보수적 fallback으로 남는다. 이 문서는 source
+후보 계약이며 실제 AAPL 시간·RSS, 독립 검증, 로컬 수락, 운영 반영과 `main` 병합은
+아직 완료되지 않았다.
 
-## 증명과 처리 경계
+## FAST 경로의 증명 경계
 
-이 경로는 이전 final manifest가 이전 reported manifest의 정확한 SHA-256과 publication
-경로에 묶였는지 먼저 확인한다. 현재와 이전 reported table은
-`(ticker, view, period_class)` 순서와 source cell occurrence 순서가 append-compatible해야
-한다. 각 source cell, source row와 source column은 타입을 보존해 비교한다. Parquet
-round-trip의 list/tuple 차이와 schema union의 부재/null padding만 기존 계약대로 허용하며
-`True`, `1`, `1.0`, candidate lineage와 provenance 차이는 같은 값으로 취급하지 않는다.
-델타 입력은 public path 인자로 활성화하지 않는다. strict append prefix, producer code와
-rule identity, 현재 input fingerprint와 T1~T4 root를 검증한 builder가 현재 reported
-manifest SHA에 묶어 발급한 private capability가 있을 때만 활성화한다. capability가 없거나
-다른 publication/input/root에 재사용되면 모든 이전 path와 dirty class를 버리고 full
-producer를 실행한다.
+FAST 경로는 builder가 만든 private capability가 현재 reported manifest SHA-256,
+input fingerprint, T1~T4 root와 이전 reported/final publication에 정확히 묶일 때만
+활성화된다. 다음 조건을 모두 만족해야 한다.
 
-일치한 reported cell은 기존 final cell의 ID·순서·payload를 재사용하고, 허용된
-`prior_candidate_publication` 경로만 현재 불변 reported publication으로 다시 묶는다.
-변경되거나 새로 추가된 occurrence만 기존 period attestation과 reclassification을
-실행한다. unchanged payload는 작은 bounded Parquet chunk로 전달하므로 큰 nested cell을
-SQLite private payload spill에 다시 저장하지 않는다. row/column 인덱스와 최종 full
-Parquet publication은 다시 작성되며, 물리 파일 I/O를 생략하는 기능은 아니다.
+- strictly-later 단일 CIK의 비수정 `10-Q` 한 건이다.
+- as-of, view, selector, period, mapping, quarter 정책과 producer code identity가 같다.
+- 새 `CURRENT_FOCUS` fiscal key가 이전 key와 겹치지 않고 fiscal chronology 뒤에 온다.
+- typed T1 prefix와 T4 prefix가 같고 T3는 stage-preserving merge를 통과한다.
+- 새 filing의 graph node와 edge가 이전 filing scope를 건드리지 않는다.
 
-Q2/Q3/Q4 additive derivation은 입력 두 셀이 모두 unchanged이고 이전 metric/cell의
-ID·row·column binding이 일치할 때만 이전 derived metric과 cell을 재사용한다. 나머지는
-기존 derivation을 실행한다. 삭제·중복·모호성으로 더 이상 생성되지 않는 이전 metric은
-제거 건수로 기록한다. 출력 이벤트는 reported `scanned/compared/reused/regenerated`와
-derived `reused/recomputed/removed`를 각각 기록하며 0도 명시한다.
+`10-K`, amendment, backfill, old fiscal insertion, as-of/view/policy 변경, T3 full fallback,
+schema·ID·순서 충돌이나 capability 재사용은 FAST 대상이 아니다. 이 경우 증명되지 않은
+이전 경로와 dirty flag를 버리고 이미 수락된 table-level full quarter 경로를 실행한다.
+특히 as-of 변경은 provenance field를 바꿀 수 있으므로 이전 셀 재사용으로 일반화하지
+않는다.
 
-source table 삭제, occurrence 재배열, target period partition 이동, 이전 locator·derived
-binding 불일치가 있으면 partial staging을 폐기하고 변경되지 않은 full producer를 새
-staging에서 다시 실행한다. hash, count, schema, ownership, journal, atomic publication과
-validation 정책은 완화하지 않는다. 이전 publication과 기존 결과는 수정하지 않는다.
+## 처리 방식과 정확성
 
-## 현재 근거와 남은 측정
+현재와 이전 reported publication에서는 hash, count와 schema를 먼저 확인한 뒤 compact
+cell ID·row ID·column ID 순서와 작은 row/column metadata를 비교한다. 전체 nested
+reported payload를 다시 비교하지 않는다. 새 fiscal column의 셀만 전체 디코드하고 기존
+period attestation과 reclassification을 실행한다.
 
-bounded cached NVDA append fixture에서 delta 경로는 current 2,456개 셀을 스캔해 이전
-1,100개를 비교·재사용하고 1,356개를 재생성했다. 이 fixture에서는 이전에 재사용할
-derived cell이 없어 42개를 재계산했다. full build와 append의 final columns/rows/cells 및
-T1~T4 값·타입·ID·순서 비교가 통과했다. 이는 실제 AAPL 성능 증거가 아니다.
+이전 final의 unchanged reported cell은 native Parquet projection으로 한 번 스트리밍하며
+허용된 `prior_candidate_publication` 경로만 현재 reported publication으로 다시 묶는다.
+이전 derived cell과 새 Q2/Q3/Q4 계산에 필요한 이전 additive partner만 선택적으로
+디코드한다. 이전 derived metric의 ID·row·column과 두 입력이 모두 unchanged이면 그대로
+재사용하고, 새 dependency closure만 기존 규칙으로 계산한다. compact index는 표당
+200,000건·64MiB, payload batch는 8MiB로 제한하며 초과하면 full fallback한다.
 
-다음 단계는 source를 동결한 뒤 기존 승인 AAPL 22→23 cached front와 migration proof를
-그대로 사용해 후보를 한 번 실행하는 것이다. 기준은 source `a83a3b2…`의 quarter
-34.0198756초, 전체 92.161452초, 20ms 관측 RSS 2,092,429,312바이트인 historical 단일
-실행이다. baseline은 다시 실행하지 않는다. 후보는 delta 실제 사용, counters, wall time,
-RSS와 새 output의 full reference 동등성을 한 번 확인한다. 회귀하거나 이득이 실용적이지
-않으면 채택하지 않으며, 다른 회사·반복 append·전체 운영 속도로 외삽하지 않는다.
+최종 row/cell 순서는 current reported source occurrence 순서로 만든 bounded ordinal에
+따라 복원하고 derived cell을 그 뒤에 붙인다. column은 기존 fiscal order와 comparability
+규칙을 유지한다. output은 여전히 full-readable immutable publication이며 unchanged
+Parquet도 새 destination에 쓴다. 따라서 저장 I/O 자체를 없애는 기능은 아니다.
+
+성공 이벤트 `QUARTER_CELL_DELTA`는 `fast_path_activated=1`, current scan/compare,
+reported reuse/regeneration, derived reuse/recompute/removal을 0값까지 기록한다. 파일 hash,
+count, JSON-field schema, ownership, journal과 atomic publication 검사는 그대로다. 오류나
+부분 staging은 새 output으로 섞지 않고 폐기한 뒤 full 경로로 전환한다.
+
+## 검증과 측정 경계
+
+작은 단위 검사는 typed scalar 구분, stale capability, fiscal backfill, native copy의 derived
+제외와 path rebind, additive derivation reuse/removal을 확인한다. cached NVDA의 Q1→Q2
+append는 FAST를 실제 활성화해 fresh full build와 columns/rows/cells 및 T1~T4의 값·타입·ID·
+순서·provenance가 같음을 확인한다. 이는 실제 AAPL 성능 증거가 아니다.
+
+실제 비교 기준은 기존 수락 AAPL 22→23 R6 한 회 실행의 quarter 34.0198756초, 전체
+92.161452초, 20ms 관측 RSS 2,092,429,312바이트다. baseline과 완료 회사 감사를 다시
+실행하지 않는다. 새 후보는 같은 cached front와 migration proof로 한 번만 실행하고,
+FAST 활성화·counters·wall time·RSS 및 새 output과 수락 full reference의 동등성을 한 번
+확인한다. 단일 pair 결과를 다른 회사, 반복 append나 모든 운영 refresh에 외삽하지 않는다.

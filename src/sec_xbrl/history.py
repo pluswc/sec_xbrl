@@ -505,6 +505,11 @@ def build_history(*, intake_manifest: Path, output_root: Path,
         _append_roots, t3_mode = publish_append_roots(plan=append_plan, output_root=output_root)
         append_payload = reuse_manifest_payload(append_plan)
         append_payload["t3_mode"] = t3_mode
+        fast_proof = append_payload.get("quarter_fast_input_proof")
+        if isinstance(fast_proof, dict):
+            fast_proof["graph_scope_isolated"] = (
+                t3_mode == "STAGE_PRESERVING_MERGE"
+            )
         append_info = {
             "previous_history": append_plan.previous_history,
             "previous_reported": append_plan.previous_reported,

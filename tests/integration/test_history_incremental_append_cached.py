@@ -24,7 +24,7 @@ def test_strict_suffix_append_matches_full_history(tmp_path: Path) -> None:
         item
         for item in original["filings"]
         if item["filing"]["cik"] == "0001045810"
-        and item["filing"]["report_date"] in {"2024-10-27", "2025-01-26"}
+        and item["filing"]["report_date"] in {"2024-04-28", "2024-07-28"}
     ]
     items.sort(key=lambda item: (item["filing"]["filed_date"], item["filing"]["accession"]))
     assert len(items) == 2
@@ -91,6 +91,7 @@ def test_strict_suffix_append_matches_full_history(tmp_path: Path) -> None:
     append_reader = HistoryPublicationReader(appended)
     assert append_reader.manifest["input_fingerprint"] != previous_reader.manifest["input_fingerprint"]
     assert append_reader.manifest["history_append_reuse"]["mode"] == "STRICTLY_LATER_SINGLE_CIK_APPEND_V1"
+    assert append_reader.manifest["history_append_reuse"]["quarter_fast_input_proof"]["proven"]
     full_tables = {
         (table["ticker"], table["view"], table["period_class"]): table
         for table in full_reader.manifest["tables"]

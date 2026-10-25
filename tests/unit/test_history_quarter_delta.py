@@ -72,6 +72,7 @@ def test_delta_inputs_require_private_current_publication_capability(tmp_path) -
         previous_history=Path("/previous/final"),
         previous_reported=Path("/previous/reported"),
         dirty_period_classes=frozenset({"QTD_3M"}),
+        new_focus_keys=frozenset({("0000000001", 2025, 3, "QTD_3M")}),
         input_fingerprint="current-input",
         operational_roots=tuple(
             sorted((name, str(path.absolute())) for name, path in roots.items())
@@ -82,6 +83,7 @@ def test_delta_inputs_require_private_current_publication_capability(tmp_path) -
         capability.previous_history,
         capability.previous_reported,
         capability.dirty_period_classes,
+        capability.new_focus_keys,
     )
     assert quarters._quarter_delta_inputs(
         capability,
@@ -97,7 +99,14 @@ def test_delta_inputs_require_private_current_publication_capability(tmp_path) -
         input_fingerprint="current-input",
         operational_roots=roots,
     ) is None
-    payload = {"dirty_period_classes": ["QTD_3M"]}
+    payload = {
+        "dirty_period_classes": ["QTD_3M"],
+        "t3_mode": "STAGE_PRESERVING_MERGE",
+        "quarter_fast_input_proof": {
+            "proven": True,
+            "graph_scope_isolated": True,
+        },
+    }
     assert quarters._quarter_delta_scope_matches(payload, frozenset({"QTD_3M"}))
     assert not quarters._quarter_delta_scope_matches(
         payload, frozenset({"FY", "QTD_3M"})
@@ -224,4 +233,54 @@ def test_delta_derivation_reuses_exact_unchanged_cell_and_counts_removal(tmp_pat
             prior_derived_cells={metric_id: corrupted},
             prior_derived_metrics={metric_id: prior_metric},
             delta_metrics=defaultdict(int),
+        )
+
+
+def test_delta_native_reuse_filters_derived_and_rebinds_only_publication(tmp_path) -> None:
+    root = tmp_path / "previous"
+    source = root / "cells.parquet"
+    direct = _cell("QTD_3M", "10", "2025-04-01")
+    direct.update(
+        fiscal_time_series_cell_id="reported",
+        fiscal_time_series_row_id="row",
+        fiscal_time_series_column_id="column",
+        value_status="REPORTED",
+        prior_candidate_publication="/old/publication",
+    )
+    derived = deepcopy(direct)
+    derived.update(
+        fiscal_time_series_cell_id="derived",
+        value_status="DERIVED",
+        prior_candidate_publication=None,
+    )
+    plan = quarters._stage_records(source, (direct, derived))
+    try:
+        info = {
+            **quarters._finalize_staged_records(plan),
+            "path": "cells.parquet",
+        }
+    finally:
+        plan.cleanup()
+
+    publication = tmp_path / "current"
+    result = quarters._delta_stage_reused_cells(
+        root,
+        info,
+        tmp_path / "owned" / "direct.parquet",
+        publication=publication,
+    )
+    rows = tuple(
+        quarters._iter_history_records(result["path"], result)
+    )
+    assert result["count"] == 1
+    assert rows[0]["fiscal_time_series_cell_id"] == "reported"
+    assert rows[0]["prior_candidate_publication"] == str(publication.absolute())
+    assert rows[0]["value_lineage"] == direct["value_lineage"]
+
+    with pytest.raises(quarters._QuarterDeltaFallback, match="declaration changed"):
+        quarters._delta_stage_reused_cells(
+            root,
+            {**info, "count": 3},
+            tmp_path / "owned" / "bad.parquet",
+            publication=publication,
         )

@@ -9,6 +9,7 @@ import pytest
 from sec_xbrl.history_reuse import (
     HistoryAppendReuseError,
     _dirty_period_classes,
+    _focus_suffix_is_later,
     _merge_graph,
     _root_content_pins,
     _rows_equal_with_schema_union,
@@ -116,6 +117,24 @@ def test_dirty_scope_uses_current_focus_and_ytd_closes_qtd(
     )
     monkeypatch.setattr(period_observation, "PeriodObservationMaterializer", Materializer)
     assert _dirty_period_classes((snapshot,)) == {"YTD_9M", "QTD_3M"}
+
+
+def test_fast_quarter_scope_rejects_backfilled_or_overlapping_fiscal_keys() -> None:
+    old = frozenset(
+        {
+            ("0000000001", 2025, 2, "YTD_6M"),
+            ("0000000001", 2025, 2, "QTD_3M"),
+        }
+    )
+    assert _focus_suffix_is_later(
+        old, frozenset({("0000000001", 2025, 3, "QTD_3M")})
+    )
+    assert not _focus_suffix_is_later(
+        old, frozenset({("0000000001", 2024, 3, "QTD_3M")})
+    )
+    assert not _focus_suffix_is_later(
+        old, frozenset({("0000000001", 2025, 2, "QTD_3M")})
+    )
     previous = {"as_of_date": "2026-10-10", "companies": [{"cik": "1", "filings": [1]}]}
     current = {"as_of_date": "2026-10-11", "companies": [{"cik": "1", "filings": [1, 2]}]}
     assert history_policy_changed(previous, current)

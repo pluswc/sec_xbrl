@@ -143,10 +143,11 @@ source `a83a3b2…`의 실제 AAPL 단일 후보와 full reference 동등성은 
 미완료 단계다.
 
 2026-10-25 후속 [quarter cell delta v1](../implementation/history-quarter-cell-delta-20261025.md)은
-dirty 표의 unchanged reported/derived cell payload를 증명 기반으로 재사용하고, 변경·신규
-셀과 파생 영향만 기존 규칙으로 다시 계산하는 opt-in source 후보다. cached fixture의
-full oracle 동등성은 확인했으나 실제 AAPL 시간·RSS, 독립 검증, 로컬 수락과 운영 반영은
-아직 완료되지 않았다.
+고정된 as-of·정책 아래 strictly-later 단일 `10-Q`의 disjoint fiscal suffix를 private
+capability로 증명해 unchanged final cell을 native Parquet으로 재사용하고, 새 column과
+파생 dependency closure만 기존 규칙으로 계산하는 opt-in source 후보다. cached Q1→Q2의
+FAST full-oracle 동등성은 확인했으나 실제 AAPL 시간·RSS, 독립 검증, 로컬 수락과 운영
+반영은 아직 완료되지 않았다.
 
 ## 증거와 재현 — 임시 디렉터리에 의존하지 않는 인계
 

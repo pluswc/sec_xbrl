@@ -39,6 +39,10 @@ class HistoryAppendReusePlan:
     filing_by_id: Mapping[str, Mapping[str, Any]]
     ledger_inputs_by_cik: Mapping[str, tuple[Mapping[str, Any], ...]]
     dirty_period_classes: frozenset[str]
+    old_focus_keys: frozenset[tuple[str, int, int | None, str]]
+    new_focus_keys: frozenset[tuple[str, int, int | None, str]]
+    new_filing_ids: frozenset[str]
+    quarter_fast_input_proven: bool
     producer_code_identity: str
 
     @property
@@ -107,6 +111,7 @@ def prepare_history_append(
     mappings = _canonical_mappings(release)
     previous_t1 = Layer2PublicationReader().load(roots["t1"])
     _verify_mapping_prefix(previous_t1, mappings, old_inputs)
+    old_focus_keys = _focus_keys(previous_t1.records("reported_period_observation"))
     del previous_t1
     filing_by_id, ledger_inputs_by_cik = _small_release_state(release)
     old_snapshot_ids = frozenset(item.snapshot_id for item in old_inputs)
@@ -115,7 +120,15 @@ def prepare_history_append(
     )
     if tuple(snapshot.input for snapshot in new_snapshots) != (new_input,):
         raise HistoryAppendReuseError("new snapshot does not match the declared suffix")
-    dirty = _dirty_period_classes(new_snapshots)
+    dirty, new_focus_keys = _dirty_period_classes_and_focus_keys(new_snapshots)
+    new_filings = tuple(_one_filing(snapshot) for snapshot in new_snapshots)
+    new_filing_ids = frozenset(str(row["filing_id"]) for row in new_filings)
+    quarter_fast_input_proven = bool(
+        new_focus_keys
+        and old_focus_keys.isdisjoint(new_focus_keys)
+        and _focus_suffix_is_later(old_focus_keys, new_focus_keys)
+        and all(str(row.get("form") or "") == "10-Q" for row in new_filings)
+    )
     producer_code_identity = _producer_code_identity()
     _verify_reuse_evidence(
         migration_evidence=migration_evidence,
@@ -140,6 +153,10 @@ def prepare_history_append(
         filing_by_id=filing_by_id,
         ledger_inputs_by_cik=ledger_inputs_by_cik,
         dirty_period_classes=frozenset(dirty),
+        old_focus_keys=old_focus_keys,
+        new_focus_keys=new_focus_keys,
+        new_filing_ids=new_filing_ids,
+        quarter_fast_input_proven=quarter_fast_input_proven,
         producer_code_identity=producer_code_identity,
     )
 
@@ -319,6 +336,12 @@ def reuse_manifest_payload(plan: HistoryAppendReusePlan) -> dict[str, Any]:
         "reused_filings": plan.reused_filings,
         "new_filings": plan.new_filing_count,
         "dirty_period_classes": sorted(plan.dirty_period_classes),
+        "quarter_fast_input_proof": {
+            "proven": plan.quarter_fast_input_proven,
+            "old_focus_keys": [list(key) for key in sorted(plan.old_focus_keys, key=repr)],
+            "new_focus_keys": [list(key) for key in sorted(plan.new_focus_keys, key=repr)],
+            "new_filing_ids": sorted(plan.new_filing_ids),
+        },
         "producer_code_identity": plan.producer_code_identity,
         "previous_manifests": {
             name: digest
@@ -540,9 +563,47 @@ def _root_content_pins(root: Path) -> dict[str, str]:
 
 
 def _dirty_period_classes(snapshots: Sequence[CorpusSnapshot]) -> set[str]:
+    return _dirty_period_classes_and_focus_keys(snapshots)[0]
+
+
+def _focus_keys(
+    observations: Sequence[Mapping[str, Any]],
+) -> frozenset[tuple[str, int, int | None, str]]:
+    keys: set[tuple[str, int, int | None, str]] = set()
+    for row in observations:
+        if row.get("comparative_type") != "CURRENT_FOCUS":
+            continue
+        year = row.get("fiscal_year")
+        quarter = row.get("fiscal_quarter")
+        if type(year) is not int or (quarter is not None and type(quarter) is not int):
+            continue
+        keys.add((str(row["cik"]), year, quarter, str(row["period_class"])))
+    return frozenset(keys)
+
+
+def _focus_suffix_is_later(
+    old: frozenset[tuple[str, int, int | None, str]],
+    new: frozenset[tuple[str, int, int | None, str]],
+) -> bool:
+    """Reject a late-filed backfill that would insert before an old fiscal column."""
+    for cik, year, quarter, period_class in new:
+        prior = [
+            (old_year, old_quarter is None, old_quarter or 0)
+            for old_cik, old_year, old_quarter, old_class in old
+            if old_cik == cik and old_class == period_class
+        ]
+        if prior and (year, quarter is None, quarter or 0) <= max(prior):
+            return False
+    return True
+
+
+def _dirty_period_classes_and_focus_keys(
+    snapshots: Sequence[CorpusSnapshot],
+) -> tuple[set[str], frozenset[tuple[str, int, int | None, str]]]:
     from sec_xbrl.longitudinal.period_observation import PeriodObservationMaterializer
 
     dirty: set[str] = set()
+    focus: list[dict[str, Any]] = []
     for snapshot in snapshots:
         filing = _one_filing(snapshot)
         result = PeriodObservationMaterializer().materialize(
@@ -560,12 +621,17 @@ def _dirty_period_classes(snapshots: Sequence[CorpusSnapshot]) -> set[str]:
             for row in result.observations
             if row.get("comparative_type") == "CURRENT_FOCUS"
         )
+        focus.extend(
+            dict(row)
+            for row in result.observations
+            if row.get("comparative_type") == "CURRENT_FOCUS"
+        )
         form = str(filing.get("form") or "").removesuffix("/A")
         if form in {"10-Q", "10-K"}:
             dirty.add("QTD_3M")
     if dirty & {"FY", "YTD_6M", "YTD_9M"}:
         dirty.add("QTD_3M")
-    return dirty
+    return dirty, _focus_keys(focus)
 
 
 def _merge_graph(
@@ -600,6 +666,29 @@ def _merge_graph(
     previous_nodes = list(previous.records("analysis_exploration_node"))
     previous_edges = list(previous.records("analysis_exploration_edge"))
     new = _graph_datasets(new_observations, list(new_edges), maps)
+    old_node_ids = {
+        str(row["analysis_exploration_node_id"]) for row in previous_nodes
+    }
+    new_filing_ids = {
+        str(row["source_filing_id"])
+        for row in (*new_observations, *new_edges)
+        if row.get("source_filing_id")
+    }
+    new_nodes = list(new["analysis_exploration_node"])
+    new_graph_edges = list(new["analysis_exploration_edge"])
+    if (
+        not new_filing_ids
+        or any(
+            str(row.get("source_filing_id") or "") not in new_filing_ids
+            for row in new_nodes + new_graph_edges
+        )
+        or any(
+            str(row[endpoint]) in old_node_ids
+            for row in new_graph_edges
+            for endpoint in ("from_node_id", "to_node_id")
+        )
+    ):
+        raise HistoryAppendReuseError("new graph scope touches the previous filing graph")
     old_nodes = previous_nodes
     old_edges = previous_edges
     old_relationship_ids = [
@@ -624,8 +713,8 @@ def _merge_graph(
     return _merge_graph_stages(
         old_nodes,
         old_edges,
-        list(new["analysis_exploration_node"]),
-        list(new["analysis_exploration_edge"]),
+        new_nodes,
+        new_graph_edges,
         current_t1,
         current_relationships,
     )
