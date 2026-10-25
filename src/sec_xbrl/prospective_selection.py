@@ -191,9 +191,6 @@ def _resolve_config(config_pin: dict[str, str]) -> tuple[str, dict, dict, Any]:
     if len(discovery) != len(summary["companies"]):
         raise ValueError("duplicate discovery company")
     controls = {"CONFIG": config_pin, "CURRENT_COLLECTION": current_pin, "DISCOVERY": summary_pin}
-    package = Path(__file__).parent
-    for path in sorted(package.rglob("*.py")):
-        controls[f"CURRENT_SOURCE:{path.relative_to(package)}"] = _file_pin(path)
     result = {}
     storage_proofs = {}
     origin_selections = {}
@@ -405,12 +402,14 @@ def _resolve_config(config_pin: dict[str, str]) -> tuple[str, dict, dict, Any]:
 def publish_prospective_selection(*, config_path: Path, destination: Path) -> Path:
     """Publish immutable evidence only after replaying the complete proof."""
     destination = safe_new_destination(destination, "prospective selection")
+    producer_sources = _producer_source_pins()
     pin = _file_pin(config_path)
     cutoff, companies, controls, _storage = _resolve_config(pin)
     # Recheck every input at the write boundary; no stale preflight proof.
     for declaration in controls.values():
         _pin(declaration)
     _check_input_topologies(controls, _storage)
+    _verify_producer_sources(producer_sources)
     destination.mkdir(parents=True)
     path = destination / "prospective_selection_manifest.json"
     write_json(
@@ -515,6 +514,7 @@ def prepare_reselected_analysis_batch(
     A failed filesystem rename may leave new targets for diagnosis, never a false
     all-or-nothing transaction claim or modifications to an existing publication.
     """
+    producer_sources = _producer_source_pins()
     selection = _resolve_manifest(prospective_selection)
     if not isinstance(destinations, dict) or not destinations:
         raise ValueError("reselection batch requires explicit destinations")
@@ -552,6 +552,7 @@ def prepare_reselected_analysis_batch(
     for pin in selection.controls.values():
         _pin(pin)
     _check_input_topologies(selection.controls, selection.storage_reuse)
+    _verify_producer_sources(producer_sources)
     result: dict[str, dict[str, Path]] = {}
     for ticker, mode, destination, staging in staged:
         # Recheck destination safety at commit, without another source replay.
@@ -561,13 +562,21 @@ def prepare_reselected_analysis_batch(
     return result
 
 
+def _producer_source_pins() -> dict[str, dict[str, str]]:
+    package = Path(__file__).parent
+    return {str(path.relative_to(package)): _file_pin(path)
+            for path in sorted(package.rglob("*.py"))}
+
+
+def _verify_producer_sources(expected: dict) -> None:
+    # Invocation-local freshness. Persisting absolute runtime source paths in the
+    # selection proof would prohibit relocation of byte-identical accepted code.
+    if _producer_source_pins() != expected:
+        raise ValueError("prospective producer sources changed before commit")
+
+
 def _check_input_topologies(controls: dict, storage: Any) -> None:
     """Recheck exact active input membership without hashing file bodies twice."""
-    package = Path(__file__).parent
-    actual_code = {str(path.absolute()) for path in package.rglob("*.py")}
-    expected_code = {pin["path"] for key, pin in controls.items() if key.startswith("CURRENT_SOURCE:")}
-    if actual_code != expected_code or any(Path(path).is_symlink() for path in actual_code):
-        raise ValueError("prospective producer source inventory changed")
     raw_roots = {}
     for key, pin in controls.items():
         if ":RAW:" in key:

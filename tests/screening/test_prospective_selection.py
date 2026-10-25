@@ -231,6 +231,7 @@ def test_prospective_selection_new_event_preserves_raw_and_old_bundle(tmp_path, 
     selection = resolve_prospective_selection(
         _pin(manifest), collection_manifest=latest, scope_companies=list(fixtures.COHORT)
     )
+    assert not any(key.startswith("CURRENT_SOURCE:") for key in selection.controls)
     assert selection.companies["FIVE"]["collection_status"] == "RAW_COMPLETE"
     assert selection.companies["FIVE"]["selection_status"] == "SELECTION_EQUIVALENT"
     for mode in ("ANNUAL", "QUARTERLY"):
@@ -605,3 +606,23 @@ def test_complete_coherently_pinned_submissions_cannot_omit_new_eligible_filing(
     # pins are coherent. The existing selector must still find the omitted item.
     with pytest.raises(ValueError, match="omits or changes eligible"):
         publish_prospective_selection(config_path=config, destination=tmp_path/"rejected")
+
+
+def test_batch_checks_invocation_local_producer_bytes_before_commit(tmp_path, monkeypatch):
+    from sec_xbrl import prospective_selection as producer
+    _, _, config = _fixture(tmp_path, monkeypatch)
+    manifest=publish_prospective_selection(config_path=config,destination=tmp_path/"selection")
+    source_pins=producer._producer_source_pins
+    calls=[]
+    def changed_before_commit():
+        result=source_pins();calls.append(True)
+        if len(calls)==2:
+            name=next(iter(result));result[name]={**result[name],"sha256":"0"*64}
+        return result
+    monkeypatch.setattr(producer,"_producer_source_pins",changed_before_commit)
+    with pytest.raises(ValueError,match="producer sources changed"):
+        producer.prepare_reselected_analysis_batch(prospective_selection=_pin(manifest),destinations={"FIVE":{
+            mode:tmp_path/mode for mode in ("ANNUAL","QUARTERLY")}})
+    assert len(calls)==2
+    assert not (tmp_path/"ANNUAL").exists()
+    assert not (tmp_path/"QUARTERLY").exists()

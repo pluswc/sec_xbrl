@@ -543,3 +543,16 @@ contracts. Ruff and diff checks PASS. The previously frozen strict append slice
 source acceptance. This final additive source freeze still requires separate
 independent read-only review and ROOT acceptance before actual latest execution;
 no main merge, live runtime release or TTM operational acceptance is claimed.
+
+
+Producer source-file pins for the batch commit check are invocation-local.
+Persisted compatibility uses relative module hashes, so relocation of identical
+accepted code from an immutable operator snapshot to the final runtime does not
+change prospective proof identity. Consumer source closure still binds the full
+current runtime code independently. No historical source freshness claim follows.
+
+The final portability/freshness correction passed 32 focused prospective/current-
+routine cases in 12.68 s (29 previously accepted storage cases deselected),
+including the new producer-code mutation-before-commit guard. The prior full
+150-case affected-contract run remains applicable; this additive correction has
+20 prospective cases. No actual company semantic validation was repeated.
