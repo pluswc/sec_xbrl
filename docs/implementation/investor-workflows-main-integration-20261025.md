@@ -14,8 +14,8 @@
 (145 commits)와 21사 runtime 안정화·명시적 저장·운영 도구 계보 `4dc90a4…`
 (공통 기준 뒤 101 commits)를 ordinary 3-way merge한다. 두 계보가 함께 바꾼
 `history.py`의 scoped READY reader, recovery guard와 최신 증분 producer를 모두
-유지한다. 이 문서는 구현 후보의 전달 상태를 기록하며, 원격 push·PR·CI·main
-병합 완료를 선언하지 않는다.
+유지한다. 이 문서는 구현 후보의 전달 상태를 기록한다. 후보는 [PR #65](https://github.com/pluswc/sec_xbrl/pull/65)로
+전달됐지만 required CI와 `main` 병합 완료를 선언하지 않는다.
 
 ## 통합 보정
 
@@ -52,7 +52,8 @@ journal·설정·Raw·publication을 다시 생성하거나 수정하지 않았�
 완료 기업 검증과 과거 성능 benchmark는 반복하지 않았다. 통합 후보에서 다음
 제한 검사를 수행했다.
 
-- fresh collection: `1904 tests collected`
+- 초기 부분 계보 collection: `1904 tests collected`; accepted composition까지 합친
+  최종 clean tree collection: `2505 tests collected`
 - recovery source guard: `151 passed`; 이후 test-only fixture 보정 1건 `1 passed`
 - recovery 교체·capability 경계: `7 passed`
 - screening 저장·CLI·분기 consumer·service·store: sandbox `55 passed`, loopback
@@ -65,9 +66,20 @@ journal·설정·Raw·publication을 다시 생성하거나 수정하지 않았�
 전체 clean-runner pytest와 required CI `test`는 PR에서 수행해야 한다. 로컬 검사는
 실제 회사 cache, 완료 기업 감사, live journal 또는 네트워크를 사용하지 않았다.
 
+### PR·CI 사전 보정
+
+통합 merge `ee218c6…`은 별도 읽기 전용 검증에서 PASS했고 독립 보고서 `ef13…`을
+남겼다. 첫 CI는 shebang을 가진 운영 도구 4개의 Git mode가 `100644`인 문제만
+발견했다. `5b56103…`은 파일 bytes를 바꾸지 않고 해당 mode만 `100755`로 고쳤다.
+두 번째 CI는 console `pytest`가 repository-local `tests`와 `tools`를 import하지
+못해 collection에서 끝났다. `c5edb57…`은 pytest 설정에 `pythonpath = ["."]` 한
+줄만 추가해 외부 `PYTHONPATH` 없이 Ruff PASS와 최종 2,505개 collection을 확인했다.
+이 두 보정은 History·스크리닝 제품 source를 바꾸지 않는다. 보정 뒤 required CI
+전체 결과는 아직 대기한다.
+
 ## 남은 전달 단계
 
-브랜치 동결 뒤 별도 읽기 전용 검토를 수행하고, 원격 PR에서 clean full CI를
+보정된 최종 문서 후보를 읽기 전용으로 대조하고, PR #65의 clean full CI를
 통과한 경우에만 총괄이 main 병합을 판단한다. 병합 뒤에도 실제 runtime source
 전환, 새 receipt 발급, cached data 재생성은 별도 운영 승인과 source-bound 검증이
 필요하다.
