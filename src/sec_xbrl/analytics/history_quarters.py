@@ -1068,7 +1068,8 @@ def _spill_reported_delta(
     current_routes: list[
         tuple[tuple[str, str, str], tuple[tuple[Any, ...], ...], frozenset[str]]
     ] = []
-    for table in current.manifest["tables"]:
+    derived_source_order: dict[tuple[Any, ...], tuple[int, int]] = {}
+    for table_ordinal, table in enumerate(current.manifest["tables"]):
         key = _delta_table_key(table)
         previous_table = previous_tables.get(key)
         maps: dict[str, dict[str, Any]] = {}
@@ -1132,6 +1133,23 @@ def _spill_reported_delta(
             raise _QuarterDeltaFallback("reported cell coordinates changed outside the suffix")
         metrics["compared_cells"] += len(old_scalar)
         current_routes.append((key, current_scalar, added_columns))
+        for cell_ordinal, (_cell_id, row_id, column_id) in enumerate(current_scalar):
+            column = maps["columns"].get(str(column_id))
+            if column is None:
+                raise _QuarterDeltaFallback("reported cell column metadata is missing")
+            routing_key = (
+                key[0],
+                key[1],
+                str(row_id),
+                column.get("fiscal_year"),
+                column.get("fiscal_quarter"),
+                key[2],
+            )
+            if routing_key in derived_source_order:
+                raise _QuarterDeltaFallback("derived source coordinate is duplicated")
+            derived_source_order[routing_key] = (table_ordinal, cell_ordinal)
+        if len(derived_source_order) > _DELTA_METADATA_MAX_ENTRIES:
+            raise _QuarterDeltaFallback("derived source order exceeds its bound")
 
     additive_records = spill.sequence()
     target_indexes: dict[tuple[str, str, str], int] = {}
@@ -1454,7 +1472,91 @@ def _spill_reported_delta(
         raise _QuarterDeltaFallback("previous derived cells and metrics disagree")
     for key, target in targets.items():
         _flush_delta_cells(target, chunk_root, target_indexes[key])
-    return prior_derived_cells, prior_derived_metrics
+    return prior_derived_cells, prior_derived_metrics, derived_source_order
+
+
+def _delta_derived_routing_key(
+    metric: Mapping[str, Any], cell: Mapping[str, Any]
+) -> tuple[Any, ...]:
+    quarter = metric.get("fiscal_quarter")
+    period_class = {2: "YTD_6M", 3: "YTD_9M", 4: "FY"}.get(quarter)
+    if period_class is None:
+        raise _QuarterDeltaFallback("derived metric quarter is unsupported")
+    return (
+        str(metric.get("ticker")),
+        str(metric.get("view")),
+        str(cell.get("fiscal_time_series_row_id")),
+        metric.get("fiscal_year"),
+        quarter,
+        period_class,
+    )
+
+
+def _merge_delta_derived_records(
+    *,
+    targets: Mapping[tuple[str, str, str], dict[str, Any]],
+    derived: Sequence[dict[str, Any]],
+    prior_cells: Mapping[tuple[str, str, str], dict[str, Any]],
+    prior_metrics: Mapping[tuple[str, str, str], dict[str, Any]],
+    source_order: Mapping[tuple[Any, ...], tuple[int, int]],
+    spill: Any,
+    metrics: MutableMapping[str, int],
+) -> Any:
+    """Merge proven old and newly derived records in full-producer order."""
+    if set(prior_cells) != set(prior_metrics):
+        raise _QuarterDeltaFallback("previous derived cells and metrics disagree")
+    new_cells: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for (ticker, view, _period_class), target in targets.items():
+        for cell in target["extra_cells"]:
+            cell_id = str(cell["fiscal_time_series_cell_id"])
+            key = (ticker, view, cell_id)
+            if key in new_cells:
+                raise _QuarterDeltaFallback("new derived cell identity is duplicated")
+            new_cells[key] = cell
+
+    entries: list[
+        tuple[tuple[str, str, tuple[int, int]], tuple[str, str, str], dict[str, Any], dict[str, Any], bool]
+    ] = []
+    for key, metric in prior_metrics.items():
+        cell = prior_cells[key]
+        order = source_order.get(_delta_derived_routing_key(metric, cell))
+        if order is None:
+            raise _QuarterDeltaFallback("previous derived source order is unbound")
+        entries.append(((key[0], key[1], order), key, metric, cell, True))
+    for metric in derived:
+        metric_id = str(metric["derived_metric_id"])
+        key = (str(metric["ticker"]), str(metric["view"]), metric_id)
+        cell = new_cells.pop(key, None)
+        if cell is None or key in prior_metrics:
+            raise _QuarterDeltaFallback("new derived cell binding changed")
+        order = source_order.get(_delta_derived_routing_key(metric, cell))
+        if order is None:
+            raise _QuarterDeltaFallback("new derived source order is unbound")
+        entries.append(((key[0], key[1], order), key, metric, cell, False))
+    if new_cells:
+        raise _QuarterDeltaFallback("new derived cell is not represented by a metric")
+
+    merged = spill.sequence()
+    replacement_cells = {
+        key: spill.sequence() for key in targets if key[2] == "QTD_3M"
+    }
+    seen_orders: set[tuple[str, str, tuple[int, int]]] = set()
+    reused = 0
+    for sort_key, key, metric, cell, is_reused in sorted(entries, key=lambda item: item[0]):
+        if sort_key in seen_orders:
+            raise _QuarterDeltaFallback("derived source order is ambiguous")
+        seen_orders.add(sort_key)
+        target_key = (key[0], key[1], "QTD_3M")
+        if target_key not in replacement_cells:
+            raise _QuarterDeltaFallback("derived target table is unavailable")
+        merged.append(metric)
+        replacement_cells[target_key].append(cell)
+        reused += int(is_reused)
+    for key, cells in replacement_cells.items():
+        targets[key]["extra_cells"] = cells
+    metrics["derived_reused_cells"] = reused
+    metrics["derived_removed_cells"] = 0
+    return merged
 
 def _assemble_spilled_table(target, staging, spill):
     table = {**target["table"], "files": {}}
@@ -2251,6 +2353,7 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
         delta_metrics = defaultdict(int)
         prior_derived_cells = None
         prior_derived_metrics = None
+        derived_source_order = None
         delta_mode = previous_history is not None and previous_reported is not None and dirty_period_classes is not None
 
         def full_delta_fallback(exc: _QuarterDeltaFallback) -> Path:
@@ -2286,7 +2389,11 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
                     raise _QuarterDeltaFallback(
                         "previous final publication is not bound to previous reported input"
                     )
-                prior_derived_cells, prior_derived_metrics = _spill_reported_delta(
+                (
+                    prior_derived_cells,
+                    prior_derived_metrics,
+                    derived_source_order,
+                ) = _spill_reported_delta(
                     current=old,
                     previous_reported=prior_reported_reader,
                     previous_final=prior_final_reader,
@@ -2313,10 +2420,24 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
                 additive_by_pair,
                 materialized,
                 spill,
-                prior_derived_cells=prior_derived_cells,
-                prior_derived_metrics=prior_derived_metrics,
                 delta_metrics=delta_metrics if delta_mode else None,
             )
+            if delta_mode:
+                if (
+                    prior_derived_cells is None
+                    or prior_derived_metrics is None
+                    or derived_source_order is None
+                ):
+                    raise _QuarterDeltaFallback("quarter delta derived proof is missing")
+                derived = _merge_delta_derived_records(
+                    targets=targets,
+                    derived=derived,
+                    prior_cells=prior_derived_cells,
+                    prior_metrics=prior_derived_metrics,
+                    source_order=derived_source_order,
+                    spill=spill,
+                    metrics=delta_metrics,
+                )
         except _QuarterDeltaFallback as exc:
             if not delta_mode:
                 raise

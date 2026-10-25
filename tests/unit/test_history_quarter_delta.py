@@ -303,3 +303,66 @@ def test_delta_cell_identity_is_scoped_by_table_and_view() -> None:
     assert quarters._delta_route_cell_target(index, latest, "shared-cell") == latest
     with pytest.raises(quarters._QuarterDeltaFallback, match="identity is duplicated"):
         quarters._delta_bind_cell_target(index, as_filed, "shared-cell")
+
+
+def test_delta_carries_prior_derived_records_in_current_source_order() -> None:
+    def metric(metric_id: str, year: int, quarter: int) -> dict:
+        return {
+            "derived_metric_id": metric_id,
+            "ticker": "TEST",
+            "view": "AS_FILED",
+            "fiscal_year": year,
+            "fiscal_quarter": quarter,
+        }
+
+    def cell(metric_id: str, row_id: str) -> dict:
+        return {
+            "fiscal_time_series_cell_id": metric_id,
+            "fiscal_time_series_row_id": row_id,
+        }
+
+    old_first = metric("old-first", 2024, 3)
+    added = metric("new-middle", 2026, 3)
+    old_last = metric("old-last", 2025, 3)
+    old_first_cell = cell("old-first", "row-a")
+    added_cell = cell("new-middle", "row-b")
+    old_last_cell = cell("old-last", "row-c")
+    old_first_key = ("TEST", "AS_FILED", "old-first")
+    old_last_key = ("TEST", "AS_FILED", "old-last")
+    target_key = ("TEST", "AS_FILED", "QTD_3M")
+    targets = {target_key: {"extra_cells": _Sequence([added_cell])}}
+    source_order = {
+        quarters._delta_derived_routing_key(old_first, old_first_cell): (0, 2),
+        quarters._delta_derived_routing_key(added, added_cell): (0, 7),
+        quarters._delta_derived_routing_key(old_last, old_last_cell): (0, 11),
+    }
+    counters = defaultdict(int)
+
+    merged = quarters._merge_delta_derived_records(
+        targets=targets,
+        derived=_Sequence([added]),
+        prior_cells={old_first_key: old_first_cell, old_last_key: old_last_cell},
+        prior_metrics={old_first_key: old_first, old_last_key: old_last},
+        source_order=source_order,
+        spill=_Spill(),
+        metrics=counters,
+    )
+
+    assert [row["derived_metric_id"] for row in merged] == [
+        "old-first",
+        "new-middle",
+        "old-last",
+    ]
+    assert list(merged) == [old_first, added, old_last]
+    assert [row["fiscal_time_series_cell_id"] for row in targets[target_key]["extra_cells"]] == [
+        "old-first",
+        "new-middle",
+        "old-last",
+    ]
+    assert list(targets[target_key]["extra_cells"]) == [
+        old_first_cell,
+        added_cell,
+        old_last_cell,
+    ]
+    assert counters["derived_reused_cells"] == 2
+    assert counters["derived_removed_cells"] == 0
