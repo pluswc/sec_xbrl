@@ -160,3 +160,58 @@ def test_storage_reuse_rejects_changed_or_unaccepted_sources(tmp_path,monkeypatc
     write_json(path,value)
     with pytest.raises((ValueError,OSError)):
         resolve_storage_reuse(_pin(path),collection_manifest=Path(prepared.paths["collection"]),scope_companies=list(COHORT))
+
+
+
+def test_ordinary_selected_history_and_storage_reuse_share_proof_without_decoder(tmp_path,monkeypatch):
+    from tests.screening.test_generic_metric_identity_integration import (
+        FINANCIAL_AS_OF,
+        _quarterly_analysis,
+    )
+    from tests.screening.test_history_selection import _selected_fixture
+    from tests.screening.test_screening_metric_publication import _analysis_bundle
+
+    prepared,companion,_=_selected_fixture(tmp_path,monkeypatch)
+    collection=Path(prepared.paths["collection"])
+    selection=json.loads(companion.read_text())["companies"][0]
+    histories=[]
+    for index,build_path in enumerate((collection.parent/"companies/FIVE/build_manifest.json",
+                                       Path(selection["build_manifest"]["path"]))):
+        build=json.loads(build_path.read_text())
+        manifest=Path(build["history_manifest"])
+        prior=tmp_path/f"combined-prior-storage-{index}.json"
+        write_json(prior,{"version":1,"full_storage_validation":True,"validation_level":"DETAILED",
+                          "publication_root":str(manifest.parent),"manifest_sha256":sha256_file(manifest),
+                          "files":{name:{"sha256":digest} for name,digest in build["declared_files"].items()}})
+        histories.append({"acceptance":selection["acceptance"],"previous_validation":_pin(prior),
+                          "build_manifest":_pin(build_path),"history_manifest":_pin(manifest),
+                          "payload_inventory":{str(path.relative_to(manifest.parent)):sha256_file(path)
+                                               for path in manifest.parent.rglob("*") if path.is_file()}})
+    storage_path=tmp_path/"combined-storage-reuse.json"
+    write_json(storage_path,{"schema_version":"financial-history-storage-reuse-v1","status":"ROOT_APPROVED",
+                            "collection_manifest":_pin(collection),"current_policy_source_sha256s":financial_storage_policy_sources(),
+                            "companies":[{**COHORT[0],"histories":histories}]})
+    selected_manifest=Path(selection["history_manifest"]["path"])
+    years=(2021,2022,2023,2024,2025)
+    annual=_analysis_bundle(tmp_path/"combined-selected-annual",years,ticker="FIVE",cik=COHORT[0]["cik"],
+                           financial_as_of=FINANCIAL_AS_OF,history_root=selected_manifest.parent)
+    quarterly=_quarterly_analysis(tmp_path/"combined-selected-quarter",history_root=selected_manifest.parent,years=years)
+    monkeypatch.setattr(history.HistoryPublicationReader,"verify_all",_forbidden)
+    config=json.loads((tmp_path/"quality-config.json").read_text())
+    config.update(history_selection=_pin(companion),storage_reuse=_pin(storage_path))
+    config["source_provenance"][0]["history_manifest_sha256"]=sha256_file(selected_manifest)
+    quality_config=tmp_path/"combined-quality-config.json";write_json(quality_config,config)
+    quality=metric_quality.publish_generic_metric_quality(config_path=quality_config,
+                collection_manifest=collection,source_binding_publication=tmp_path/"quality-bindings",
+                history_manifests={"FIVE":selected_manifest},destination=tmp_path/"combined-quality",producer_revision="b"*40)
+    config=json.loads(prepared.identity_config.read_text())
+    config.update(history_selection=_pin(companion),storage_reuse=_pin(storage_path),quality_root=str(quality.root),
+                  quality_manifest_sha256=sha256_file(quality.manifest_path))
+    config["companies"][0].update(history_root=str(selected_manifest.parent),history_manifest_sha256=sha256_file(selected_manifest),
+                                 annual_analysis_root=str(annual),annual_analysis_manifest_sha256=sha256_file(annual/"analysis_manifest.json"),
+                                 quarterly_analysis_root=str(quarterly),quarterly_analysis_manifest_sha256=sha256_file(quarterly/"analysis_manifest.json"))
+    identity_config=tmp_path/"combined-identity-config.json";write_json(identity_config,config)
+    identity=metric_identity.publish_generic_metric_identity(identity_config,tmp_path/"combined-identity")
+    reader=metric_identity.GenericMetricIdentityReader(identity.root)
+    assert reader.companies[0]["history"]["root"]==str(selected_manifest.parent)
+    assert reader.manifest["config"]["storage_reuse"]==_pin(storage_path)

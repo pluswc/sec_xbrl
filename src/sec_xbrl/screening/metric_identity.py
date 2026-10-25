@@ -283,7 +283,7 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
                                     scope_companies=config["companies"])
                if "storage_reuse" in config else None)
     selection = (resolve_history_selection(config["history_selection"], collection_manifest=collection_path,
-                                           scope_companies=config["companies"])
+                                           scope_companies=config["companies"], storage_reuse=storage)
                  if "history_selection" in config else None)
     company_sources: list[dict[str, Any]] = []
     history_hashes: dict[str, str] = {}
