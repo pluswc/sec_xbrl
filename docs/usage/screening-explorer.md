@@ -55,9 +55,10 @@ GET /api/company-comparison?dataset_id=ID&ciks=CIK1,CIK2&metric_ids=revenue,cfo&
 ## 연결이 끊겼을 때
 
 화면에 과거 제목·버튼이 남아 있는데 회사가 열리지 않거나 `fetch failed`가 보이면
-회사 자료부터 의심하지 말고 `127.0.0.1:8884` backend와 Windows
-`127.0.0.1:18765` bridge가 모두 응답하는지 먼저 확인한다. 두 서비스가 복구된 뒤
-browser를 새로고침해 cached 화면을 교체한다.
+회사 자료부터 의심하지 말고 WSL `127.0.0.1:18766` backend와 Windows
+`127.0.0.1:18765` browser bridge가 모두 응답하는지 먼저 확인한다. 과거
+`127.0.0.1:8884`는 이전 explorer runtime의 port이며 현재 backend가 아니다. 두
+서비스가 복구된 뒤 browser를 새로고침해 cached 화면을 교체한다.
 
 오래 유지할 로컬 실행은 backend를 호출 shell의 생명주기와 분리한다. 표준 library
 `subprocess.Popen`의 `start_new_session=True`, `stdin=DEVNULL`을 사용하고 stdout과

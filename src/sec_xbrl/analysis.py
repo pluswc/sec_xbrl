@@ -12,7 +12,7 @@ import html
 import json
 import re
 import uuid
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from itertools import pairwise
@@ -449,6 +449,21 @@ def _raw_material(reader, ticker: str) -> tuple[dict, list[dict]]:
         roles = {r["role_id"]: r for r in snapshot.records("role")}
         relationships.extend({**r, "role_uri": roles[r["role_id"]]["role_uri"], "role_definition": roles[r["role_id"]]["role_definition"]} for r in snapshot.records("relationship"))
     return concepts, relationships
+
+
+def _history_parts(reader, *, ticker: str, period_class: str, view: str):
+    """Return headers, a single-pass cell iterable, and scope.
+
+    Ordinary History publications expose the bounded stream. Reviewed
+    publications deliberately retain their existing composed ``load`` path so
+    suppression, quarantine, and reviewed additions cannot be bypassed.
+    """
+    stream = getattr(reader, "stream_cells", None)
+    if callable(stream):
+        source = stream(ticker=ticker, period_class=period_class, view=view)
+        return source.columns, source.rows, source.cells, source.scope
+    panel = reader.load(ticker=ticker, period_class=period_class, view=view)
+    return panel.columns, panel.rows, iter(panel.cells), panel.scope
 
 
 def _compact(cell: dict, row: dict, column: dict, *, ticker: str, view: str, node_id: str) -> dict:
@@ -1167,7 +1182,17 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
             years = list(range(fiscal_start, fiscal_end+1))
         else:
             annual_tables = [t for t in reader.manifest["tables"] if t["ticker"] == ticker and t["period_class"] == "FY"]
-            source_columns = reader.load(ticker=ticker, period_class="FY").columns if annual_tables else reader.load(ticker=ticker).columns
+            inference_period = "FY" if annual_tables else "QTD_3M"
+            source_columns, _source_rows, source_cells, _source_scope = _history_parts(
+                reader,
+                ticker=ticker,
+                period_class=inference_period,
+                view="LATEST_REPORTED",
+            )
+            # Fiscal inference uses only headers, but the former eager load also
+            # validated every cell. Drain the bounded stream to preserve that
+            # fail-closed behavior before accepting inferred years.
+            deque(source_cells, maxlen=0)
             years = sorted({c["fiscal_year"] for c in source_columns if c.get("column_status") == "AVAILABLE"})[-fiscal_years:]
         if not years:
             raise ValueError("no prepared fiscal periods")
@@ -1184,7 +1209,7 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
         for view in ("AS_FILED", "LATEST_REPORTED"):
             columns, cells, traces, nodes, edges, core_cells = [], [], [], {}, {}, []
             source_index: dict[tuple, list[tuple]] = defaultdict(list)
-            panels = {}
+            period_scopes = {}
             period_classes = (
                 ("FY", "INSTANT")
                 if period_mode == "ANNUAL" and include_year_end_balances
@@ -1193,21 +1218,23 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
                 else ("QTD_3M", "INSTANT")
             )
             for period in period_classes:
-                panel = reader.load(ticker=ticker, period_class=period, view=view)
-                panels[period] = panel
-                info["as_of"] = panel.scope["selection_as_of_date"]
+                source_columns, source_rows, source_cells, source_scope = _history_parts(
+                    reader, ticker=ticker, period_class=period, view=view
+                )
+                period_scopes[period] = source_scope
+                info["as_of"] = source_scope["selection_as_of_date"]
                 if period == "FY":
-                    fy_end_by_year = _annual_fy_end_by_year(panel.columns, years)
+                    fy_end_by_year = _annual_fy_end_by_year(source_columns, years)
                 selected_columns = _analysis_columns(
-                    panel.columns,
+                    source_columns,
                     years=years,
                     period_class=period,
                     period_mode=period_mode,
                     exact_fy_ends=fy_end_by_year if period == "INSTANT" and include_year_end_balances else None,
                 )
                 columns.extend(selected_columns.values())
-                rows = {r["fiscal_time_series_row_id"]: r for r in panel.rows}
-                for cell in panel.cells:
+                rows = {r["fiscal_time_series_row_id"]: r for r in source_rows}
+                for cell in source_cells:
                     if cell["fiscal_time_series_column_id"] not in selected_columns:
                         continue
                     row = rows[cell["fiscal_time_series_row_id"]]
@@ -1258,6 +1285,9 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
                     raw_key = (lineage_fields.get("source_filing_id"), lineage_fields.get("raw_concept_id"))
                     if all(raw_key):
                         source_index[raw_key].append((nid, compact, lineage_fields.get("raw_dimension_signature", [])))
+                # Do not retain the final bulky source cell while graph and
+                # output materialization operate on the compact records.
+                cell = None
             reviewed_exclusions = []
             if reviewed_q4 is not None:
                 reviewed_exclusions = [row for row in reviewed_q4.records("exclusion")
@@ -1294,7 +1324,7 @@ def prepare_analysis(*, publication: Path, destination: Path, tickers: tuple[str
                                 relationships=relationships,
                                 source_index=source_index,
                                 expected_scope={
-                                    "cik": panels[spec["period_class"]].scope.get("cik"),
+                                    "cik": period_scopes[spec["period_class"]].get("cik"),
                                     "ticker": ticker,
                                     "column_id": column["fiscal_time_series_column_id"],
                                     "period_class": spec["period_class"],

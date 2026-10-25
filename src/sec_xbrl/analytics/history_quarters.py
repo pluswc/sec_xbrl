@@ -43,6 +43,7 @@ from sec_xbrl.history import (
     _history_dataset_path,
     _iter_history_records,
     _open_recovery_path,
+    _remove_history_tree,
     _rename_history_directory,
     _retain_history_artifacts,
     _sha256_file,
@@ -2364,7 +2365,7 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
                 flush=True,
             )
             spill.close()
-            shutil.rmtree(staging)
+            _remove_history_tree(staging)
             return publish_quarter_history(
                 publication=publication,
                 output_root=output_root,
@@ -2486,12 +2487,12 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
             if not delta_mode:
                 raise
             return full_delta_fallback(exc)
-        shutil.rmtree(delta_chunk_root)
+        _remove_history_tree(delta_chunk_root)
         _check_history_storage()
         derived_info = _finalize_staged_records(_stage_records(staging / "derived_quarter.parquet", derived))
         spill.close()
         if not _retain_history_artifacts():
-            shutil.rmtree(chunk_root)
+            _remove_history_tree(chunk_root)
         tables: list[dict[str, Any]] = []
         previous_tables: dict[tuple[str, str, str], dict[str, Any]] = {}
         previous_reader = None

@@ -351,13 +351,20 @@ def test_build_releases_graph_periods_ledgers_before_verify_and_quarter(tmp_path
     fiscal_result = FiscalTimeSeriesResult(
         columns=(
             {
+                "fiscal_time_series_column_id": "column",
                 "column_status": "AVAILABLE",
                 "fiscal_quarter": 1,
                 "fiscal_year": 2026,
             },
         ),
-        rows=({"id": "row"},),
-        cells=({"id": "cell"},),
+        rows=({"fiscal_time_series_row_id": "row"},),
+        cells=(
+            {
+                "fiscal_time_series_cell_id": "cell",
+                "fiscal_time_series_row_id": "row",
+                "fiscal_time_series_column_id": "column",
+            },
+        ),
         scope={},
     )
 
@@ -383,14 +390,14 @@ def test_build_releases_graph_periods_ledgers_before_verify_and_quarter(tmp_path
         "FiscalTimeSeriesBuilder",
         lambda: SimpleNamespace(build_spilled=lambda **kw: SpilledResult()),
     )
-    original_verify = history.HistoryPublicationReader.verify_all
+    original_validate = history.HistoryPublicationReader.validate
     seen = []
 
-    def verify(reader):
+    def validate(reader, **kwargs):
         gc.collect()
         assert all(ref() is None for ref in refs)
-        seen.append("verify")
-        return original_verify(reader)
+        seen.append("validate")
+        return original_validate(reader, **kwargs)
 
     def publish(**_):
         gc.collect()
@@ -398,10 +405,10 @@ def test_build_releases_graph_periods_ledgers_before_verify_and_quarter(tmp_path
         seen.append("quarter")
         return output / "panels"
 
-    monkeypatch.setattr(history.HistoryPublicationReader, "verify_all", verify)
+    monkeypatch.setattr(history.HistoryPublicationReader, "validate", validate)
     monkeypatch.setattr(quarters, "publish_quarter_history", publish)
     assert history.build_history(intake_manifest=intake, output_root=output) == output / "panels"
-    assert seen == ["verify", "quarter"]
+    assert seen == ["validate", "quarter"]
 
 
 def test_recovery_sources_checks_all_roots_after_releasing_raw(tmp_path, monkeypatch):

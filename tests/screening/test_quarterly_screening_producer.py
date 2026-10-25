@@ -17,6 +17,7 @@ from sec_xbrl.metrics.quarterly_screening import (
     _exact_subtract,
     _percentage,
     _quarter_spine,
+    _verify_generic_identity_quarterly_parent,
     build_quarterly_company_records,
     publish_quarterly_screening_metrics,
 )
@@ -25,6 +26,53 @@ from sec_xbrl.metrics.screening import sha256_file
 CIK = "0000000001"
 AS_OF = "2026-10-10"
 USD = ['["iso4217:USD"]', "[]"]
+
+
+@pytest.mark.parametrize(
+    "defect", ("foreign", "stale", "unrelated_same_company", "unrelated_history")
+)
+def test_generic_identity_rejects_unattested_quarterly_parent(defect: str) -> None:
+    company = {"ticker": "TEST", "cik": CIK}
+    quarterly_source = {
+        "root": "/quarter-a",
+        "publication_id": "quarter-a",
+        "manifest_sha256": "a" * 64,
+        "declared_files": {"TEST/core_rows.parquet": "d" * 64},
+        "history_manifest_sha256": "b" * 64,
+        "quarter_source_evidence": {
+            "included": True,
+            "rule_version": "quarter-typed-primary-pre-evidence-v1",
+        },
+    }
+    attested = {
+        **company,
+        "quarterly_analysis": {
+            "root": "/quarter-a",
+            "publication_id": "quarter-a",
+            "manifest_sha256": "a" * 64,
+            "declared_files": {"TEST/core_rows.parquet": "d" * 64},
+            "period_mode": "QUARTERLY",
+            "history_manifest_sha256": "b" * 64,
+            "quarter_source_evidence": {
+                "included": True,
+                "rule_version": "quarter-typed-primary-pre-evidence-v1",
+            },
+        },
+    }
+    if defect == "foreign":
+        attested["cik"] = "0000000002"
+    elif defect == "stale":
+        attested["quarterly_analysis"]["manifest_sha256"] = "c" * 64
+    elif defect == "unrelated_same_company":
+        attested["quarterly_analysis"]["root"] = "/quarter-b"
+    else:
+        attested["quarterly_analysis"]["history_manifest_sha256"] = "e" * 64
+    with pytest.raises(ValueError, match="differs from generic identity"):
+        _verify_generic_identity_quarterly_parent(
+            SimpleNamespace(companies=[attested]),
+            company=company,
+            quarterly_source=quarterly_source,
+        )
 
 
 def _profile_rows() -> list[dict]:
@@ -162,6 +210,36 @@ def _one_quarter_inputs() -> tuple[list[dict], list[dict], list[dict]]:
             "actual_instant_date": "2025-04-01",
         },
     ]
+    return columns, cells, traces
+
+
+def _remap_one_quarter(
+    *, fiscal_year: int, fiscal_quarter: int, start: str, end: str
+) -> tuple[list[dict], list[dict], list[dict]]:
+    columns, cells, traces = _one_quarter_inputs()
+    for column in columns:
+        if column["actual_end_date"] is not None:
+            column["actual_end_date"] = end
+        if column["actual_instant_date"] is not None:
+            column["actual_instant_date"] = end
+    for cell in cells:
+        cell["start"] = None if cell["period_class"] == "INSTANT" else start
+        cell["end"] = end
+        cell["fiscal_year"] = fiscal_year
+        cell["fiscal_quarter"] = fiscal_quarter
+    for trace in traces:
+        lineage = trace["value_lineage"]
+        lineage["context_start_date"] = (
+            None if lineage["period_class"] == "INSTANT" else start
+        )
+        lineage["context_end_date"] = (
+            None if lineage["period_class"] == "INSTANT" else end
+        )
+        lineage["context_instant_date"] = (
+            end if lineage["period_class"] == "INSTANT" else None
+        )
+        lineage["report_date"] = date.fromisoformat(end).isoformat()
+        lineage["filed_date"] = "2026-09-01"
     return columns, cells, traces
 
 
@@ -666,6 +744,104 @@ def _four_quarter_revenue_inputs() -> tuple[list[dict], list[dict], list[dict]]:
     return columns, cells, traces
 
 
+def _four_quarters_with_derived_q4() -> tuple[list[dict], list[dict], list[dict]]:
+    columns, cells, traces = _four_quarter_revenue_inputs()
+    columns, cells, traces = columns[1:], cells[1:], traces[1:]
+    cell, trace = _prepared_input(
+        row_id="revenue",
+        value="300",
+        start="2025-10-01",
+        end="2026-01-01",
+        period_class="QTD_3M",
+        fiscal_quarter=4,
+        suffix="ttm-derived-q4",
+    )
+    cell.update(
+        status="DERIVED",
+        source_fact_id=None,
+        source_filing_ids=["filing-ttm-derived-fy", "filing-ttm-derived-ytd"],
+        basis_version="basis-A",
+        column_id="quarter-derived-q4",
+    )
+    lineage = trace["value_lineage"]
+    lineage.update(
+        accession=None,
+        source_filing_id=None,
+        source_snapshot_id=None,
+        selected_source_fact_id=None,
+        context_id=None,
+        derived_metric_id="derived-quarter-revenue-q4",
+        derivation_rule_version="approved-core-cumulative-difference-v1",
+        formula="FY - YTD_9M",
+        basis_version="basis-A",
+        structural_version="struct-A",
+        recast_version="recast-A",
+        filed_date="2026-02-01",
+        report_date="2025-12-31",
+    )
+    source_inputs = []
+    for suffix, value, period_class, end, filed, report in (
+        ("fy", "1000", "FY", "2026-01-01", "2026-02-01", "2025-12-31"),
+        ("ytd", "700", "YTD_9M", "2025-10-01", "2025-11-01", "2025-09-30"),
+    ):
+        _, source_trace = _prepared_input(
+            row_id="revenue",
+            value=value,
+            start="2025-01-01",
+            end=end,
+            period_class=period_class,
+            fiscal_quarter=4,
+            suffix=f"ttm-derived-{suffix}",
+        )
+        source = source_trace["value_lineage"]
+        source.update(
+            value_numeric=value,
+            basis_version="basis-A",
+            structural_version="struct-A",
+            recast_version="recast-A",
+            filed_date=filed,
+            report_date=report,
+        )
+        source_inputs.append(source)
+    lineage["source_inputs"] = source_inputs
+    columns.append(
+        {
+            "fiscal_time_series_column_id": cell["column_id"],
+            "actual_end_date": "2026-01-01",
+            "actual_instant_date": None,
+        }
+    )
+    cells.append(cell)
+    traces.append(trace)
+    return columns, cells, traces
+
+
+def test_ttm_accepts_eligible_derived_q4_without_changing_formula_or_basis() -> None:
+    columns, cells, traces = _four_quarters_with_derived_q4()
+    observations, _ = build_quarterly_company_records(
+        ticker="TEST", cik=CIK, financial_as_of=AS_OF, columns=columns,
+        rows=_profile_rows(), cells=cells, traces=traces, spine=_quarter_spine(AS_OF),
+    )
+    ttm = next(
+        row
+        for row in observations
+        if row["metric_id"] == "ttm_revenue"
+        and (row["calendar_year"], row["calendar_quarter"]) == (2025, 4)
+    )
+    assert ttm["availability_status"] == "AVAILABLE"
+    assert ttm["value"] == "1200"
+    assert ttm["basis_version"] == "basis-A"
+    inputs = ttm["source_lineage"]["derivation_inputs"]
+    assert [row["source_kind"] for row in inputs] == [
+        "REPORTED", "REPORTED", "REPORTED", "DERIVED_QUARTER",
+    ]
+    assert inputs[-1]["source_lineage"]["formula"] == "FY - YTD_9M"
+    assert all(
+        row["source_snapshot_id"] == row["source_lineage"]["source_snapshot_id"]
+        for row in inputs[:-1]
+    )
+
+
 @pytest.mark.parametrize(
     "mutation",
     ["EMPTY_BASIS", "STRUCTURAL_MISMATCH", "BASIS_BREAK", "STRUCTURAL_BREAK"],
@@ -838,4 +1014,110 @@ def test_immutable_publication_roundtrip_and_payload_tamper(
     with pytest.raises(ValueError, match="payload changed"):
         QuarterlyMetricReader(destination)
     assert (destination / MANIFEST).is_file()
+
+
+@pytest.mark.parametrize(
+    ("annual_end", "fiscal_year", "fiscal_quarter", "start", "end", "bucket"),
+    (
+        (2025, 2026, 1, "2026-01-01", "2026-04-01", (2026, 1)),
+        (2026, 2027, 1, "2026-05-01", "2026-08-01", (2026, 3)),
+    ),
+)
+def test_later_fiscal_year_quarter_survives_public_eight_bucket_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    annual_end: int,
+    fiscal_year: int,
+    fiscal_quarter: int,
+    start: str,
+    end: str,
+    bucket: tuple[int, int],
+) -> None:
+    columns, cells, traces = _remap_one_quarter(
+        fiscal_year=fiscal_year,
+        fiscal_quarter=fiscal_quarter,
+        start=start,
+        end=end,
+    )
+    records = {
+        "columns": columns,
+        "core_rows": _profile_rows(),
+        "core_cells": cells,
+        **{
+            f"trace_{digit}": traces if digit == "0" else []
+            for digit in "0123456789abcdef"
+        },
+    }
+
+    class FakeClient:
+        def _records(self, ticker: str, view: str, name: str) -> list[dict]:
+            assert (ticker, view) == ("TEST", "LATEST_REPORTED")
+            return deepcopy(records[name])
+
+    annual_root = tmp_path / f"annual-through-{annual_end}"
+    annual_root.mkdir()
+    annual_manifest = annual_root / "screening_metric_manifest.json"
+    annual_manifest.write_text("{}\n", encoding="utf-8")
+    annual = SimpleNamespace(
+        manifest={
+            "publication_id": f"annual-metrics-through-{annual_end}",
+            "financial_as_of": AS_OF,
+            "configured_ciks": [CIK],
+        }
+    )
+    monkeypatch.setattr(
+        "sec_xbrl.metrics.quarterly_screening.ScreeningMetricReader", lambda root: annual
+    )
+    monkeypatch.setattr(
+        "sec_xbrl.metrics.quarterly_screening._open_company_source",
+        lambda company, financial_as_of: (
+            FakeClient(),
+            {
+                "kind": "QUARTERLY_ANALYSIS_PUBLICATION",
+                "ticker": "TEST",
+                "cik": CIK,
+                "publication_id": f"quarter-analysis-fy{fiscal_year}",
+                "manifest_sha256": "a" * 64,
+                "declared_files": [],
+            },
+        ),
+    )
+    config = tmp_path / f"config-fy{fiscal_year}.json"
+    config.write_text(
+        json.dumps(
+            {
+                "schema_version": "quarterly-screening-metric-config-v1",
+                "financial_as_of": AS_OF,
+                "source_commit_sha": "b" * 40,
+                "annual_metric_root": str(annual_root),
+                "annual_metric_manifest_sha256": sha256_file(annual_manifest),
+                "companies": [
+                    {
+                        "ticker": "TEST",
+                        "cik": CIK,
+                        "analysis_root": "/unused/by-controlled-source",
+                        "analysis_manifest_sha256": "c" * 64,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    published = publish_quarterly_screening_metrics(
+        config, tmp_path / f"quarterly-fy{fiscal_year}"
+    )
+    reader = QuarterlyMetricReader(published.root)
+    observation = next(
+        row
+        for row in reader.observations
+        if row["metric_id"] == "quarter_revenue"
+        and (row["calendar_year"], row["calendar_quarter"]) == bucket
+    )
+    assert observation["availability_status"] == "AVAILABLE"
+    assert observation["value"] == "100"
+    assert observation["fiscal_year"] == fiscal_year
+    assert observation["fiscal_quarter"] == f"Q{fiscal_quarter}"
+    assert observation["period_start"] == start
+    assert observation["period_end"] == end
+    assert len(reader.period_inventory) == 8
 

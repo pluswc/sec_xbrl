@@ -21,7 +21,9 @@ def _revision_chain(
 ) -> tuple[ScreeningStore, dict, dict]:
     store = ScreeningStore(path)
     first = store.create_screen("무결성 조건", content)
-    second = store.revise_screen(first["screen_id"], content)
+    changed = json.loads(json.dumps(content))
+    changed["predicates"][0]["threshold"] = "51"
+    second = store.revise_screen(first["screen_id"], changed)
     store.integrity_check()
     return store, first, second
 
@@ -75,7 +77,8 @@ def test_valid_revision_chain_and_definition_identity_pass(
     store, first, second = _revision_chain(tmp_path / "valid.sqlite", revision_content)
     assert first["revision_number"] == 1
     assert second["revision_number"] == 2
-    assert store.revision(second["revision_id"])["content"] == revision_content
+    assert store.revision(first["revision_id"])["content"] == revision_content
+    assert store.revision(second["revision_id"])["content"]["predicates"][0]["threshold"] == "51"
     store.integrity_check()
 
 
@@ -122,7 +125,9 @@ def test_cross_screen_parent_rejected_even_with_recomputed_revision_identity(
     path = tmp_path / "cross-screen.sqlite"
     store, first, _second = _revision_chain(path, revision_content)
     other_first = store.create_screen("다른 조건", revision_content)
-    other_second = store.revise_screen(other_first["screen_id"], revision_content)
+    changed = json.loads(json.dumps(revision_content))
+    changed["predicates"][0]["threshold"] = "51"
+    other_second = store.revise_screen(other_first["screen_id"], changed)
     _replace_revision_identity(
         path,
         other_second["revision_id"],

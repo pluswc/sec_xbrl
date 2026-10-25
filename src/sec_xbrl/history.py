@@ -1351,12 +1351,23 @@ def open_history_publication(root: Path):
     return HistoryPublicationReader(root)
 
 
+@dataclass(frozen=True, slots=True)
+class HistoryCellStream:
+    """Canonical History headers plus a lazy, single-pass source-cell stream."""
+
+    columns: tuple[dict[str, Any], ...]
+    rows: tuple[dict[str, Any], ...]
+    cells: Iterator[dict[str, Any]]
+    scope: dict[str, Any]
+
+
 class HistoryPublicationReader:
     """Reload persisted fiscal tables only: no SEC, Arelle, selection or build."""
 
     def __init__(self, root: Path, *, allow_staging: bool = False, _recovery_access: Any = None) -> None:
         self.root = Path(root)
         self._recovery_access = _recovery_access
+        self._allow_staging = allow_staging
         _check_recovery_access(self.root, _recovery_access)
         if self.root.is_symlink() or (".partial-" in self.root.name and not allow_staging):
             raise ValueError("partial or symlink history publication is not consumable")
@@ -1374,6 +1385,60 @@ class HistoryPublicationReader:
             raise ValueError("history dataset row count mismatch")
         return tuple({key: json.loads(value) if key in info["json_fields"] and value is not None else value
                       for key, value in row.items()} for row in records)
+
+    def stream_cells(
+        self,
+        *,
+        ticker: str,
+        period_class: str = "QTD_3M",
+        view: str = "LATEST_REPORTED",
+    ) -> HistoryCellStream:
+        """Load table headers and lazily verify/decode every source cell once.
+
+        The iterator is deliberately unfiltered.  Consumers may discard a cell
+        after inspecting it, but successful consumption still validates every
+        persisted cell, including records outside a requested display window.
+
+        Streaming is an ordinary completed-publication API. Recovery-private
+        and staging readers keep using the existing eager recovery interfaces.
+        """
+        if getattr(self, "_recovery_access", None) is not None or getattr(
+            self, "_allow_staging", False
+        ) or ".partial-" in self.root.name:
+            raise ValueError("cell streaming requires an ordinary READY history publication")
+        _check_recovery_access(self.root)
+        matches = [
+            table
+            for table in self.manifest["tables"]
+            if table["ticker"] == ticker.upper()
+            and table["period_class"] == period_class
+            and table["view"] == view
+        ]
+        if len(matches) != 1:
+            raise ValueError("requested ticker/period class/view is not published")
+        table = matches[0]
+        source_info = table["files"]["cells"]
+        cell_info = {
+            **source_info,
+            "json_fields": list(source_info["json_fields"]),
+        }
+        cell_path = _history_dataset_path(self.root, cell_info)
+
+        def cells() -> Iterator[dict[str, Any]]:
+            # Creation and consumption may be separated by arbitrary caller
+            # work. Revalidate public readiness and the exact declared cell
+            # bytes before the first deferred decode.
+            _check_recovery_access(self.root)
+            if _history_dataset_path(self.root, cell_info) != cell_path:
+                raise ValueError("history cell dataset path changed before streaming")
+            yield from _iter_history_records(cell_path, cell_info)
+
+        return HistoryCellStream(
+            columns=self._records(table["files"]["columns"]),
+            rows=self._records(table["files"]["rows"]),
+            cells=cells(),
+            scope=table["scope"],
+        )
 
     def verify_all(self) -> None:
         _check_recovery_access(self.root, getattr(self, "_recovery_access", None))
@@ -1613,6 +1678,35 @@ class _RecoveryOutput:
             self.bindings[destination / path.relative_to(source)] = identity
         self.check()
 
+    def remove_owned_tree(self, path: Path) -> None:
+        """Remove one owned temporary tree, releasing its guards only afterward."""
+        self.check()
+        path = path.absolute()
+        if path == self.root or not path.is_relative_to(self.root):
+            raise ValueError("recovery temporary tree escapes its owned output")
+        expected = self.bindings.get(path)
+        try:
+            value = path.lstat()
+        except OSError as exc:
+            raise ValueError("recovery temporary tree ownership changed") from exc
+        if expected is None or not stat.S_ISDIR(value.st_mode) or (value.st_dev, value.st_ino) != expected:
+            raise ValueError("recovery temporary tree ownership changed")
+        owned = tuple(
+            candidate
+            for candidate in self.bindings
+            if candidate == path or candidate.is_relative_to(path)
+        )
+        shutil.rmtree(path)
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            raise ValueError("recovery temporary tree replacement retained")
+        for candidate in owned:
+            del self.bindings[candidate]
+        self.check()
+
     def mark_pending(self, metadata: dict[str, Any], attestation_bytes: bytes, report_bytes: bytes) -> None:
         self.transaction = {**metadata, "status": "NOT_READY", "token": uuid.uuid4().hex,
                             "output_root": str(self.root), "root_identity": list(self.identity)}
@@ -1677,6 +1771,15 @@ def _check_history_storage(path: Path | None = None) -> None:
     guard = _HISTORY_STORAGE_GUARD.get()
     if guard is not None:
         guard(path)
+
+
+def _remove_history_tree(path: Path) -> None:
+    """Remove an owned producer temporary tree without weakening recovery guards."""
+    owner = _RECOVERY_OUTPUT.get()
+    if owner is None:
+        shutil.rmtree(path)
+    else:
+        owner.remove_owned_tree(path)
 
 
 def _cleanup_history_workspace(workspace: Any) -> None:

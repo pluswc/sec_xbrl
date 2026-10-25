@@ -35,6 +35,9 @@ from sec_xbrl.universe_delivery import UniverseDeliveryReader
 
 VERSION = "screening-dataset-v1"
 CONFIG_VERSION = "screening-prepare-config-v1"
+LEGACY_IDENTITY_SOURCE_KIND = "LEGACY_SCREENING_DATASET"
+GENERIC_IDENTITY_SOURCE_KIND = "GENERIC_METRIC_IDENTITY_ATTESTATION"
+GENERIC_IDENTITY_MANIFEST = "generic_metric_identity_manifest.json"
 MANIFEST = "screening_dataset_manifest.json"
 COMPANIES = "companies.json"
 METADATA = "metadata_inventory.json"
@@ -58,6 +61,27 @@ class ScreeningPublication:
     root: Path
     publication_id: str
     manifest_path: Path
+
+
+def open_screening_identity_source(
+    *, kind: str, root: Path | str, manifest_sha256: str
+) -> Any:
+    """Open one explicitly selected metric-identity source without fallback."""
+    source_root = real_directory(Path(root), "screening metric identity source")
+    if kind == LEGACY_IDENTITY_SOURCE_KIND:
+        manifest_path = regular_file(
+            source_root / MANIFEST, "legacy screening identity source manifest"
+        )
+        if sha256_file(manifest_path) != manifest_sha256:
+            raise ValueError("screening identity source manifest differs from metric config")
+        return ScreeningDatasetReader(source_root)
+    if kind == GENERIC_IDENTITY_SOURCE_KIND:
+        from sec_xbrl.screening.metric_identity import GenericMetricIdentityReader
+
+        return GenericMetricIdentityReader(
+            source_root, manifest_sha256=manifest_sha256
+        )
+    raise ValueError("unsupported explicit screening metric identity source kind")
 
 
 def publish_screening_dataset(

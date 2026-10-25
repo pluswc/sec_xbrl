@@ -6,6 +6,23 @@ loopback 운영 locator는
 이 문서의 명령은 fresh checkout에서도 쓰는 일반 절차다. 현재 runtime의 ignored
 `RUNNING.md`는 해당 로컬 실행의 재시작 정보이며 이 가이드를 대신하지 않는다.
 
+## 조건과 결과를 따로 저장하기 — 2026-10-17 후속 구현
+
+1. 조건을 편집하고 **시험 실행**을 누릅니다. 이 동작은 저장 이력을 만들지 않습니다.
+2. 조건 자체를 재사용하려면 **조건 저장**을 누릅니다. 같은 내용과 자료 문맥을 다시 저장해도
+   새 버전은 만들지 않습니다. `저장 조건 버전`에서 버전을 고른 뒤 **불러오기**를
+   누르면 당시 조건·기간·정렬·준비 자료가 복원됩니다. 과거 저장 문맥이 없는
+   조건은 단일 과거 실행 자료를 사용하거나 현재 자료로 연다고 안내합니다.
+3. 당시 결과를 보관하려면 시험 실행 후 **결과 저장**을 누릅니다. 조건을 따로
+   저장하지 않아도 됩니다. 조건을 수정했으면 다시 시험 실행해야 합니다.
+4. **이력**에서 저장 결과를 골라 **열기**를 누릅니다. 현재 데이터로 다시 계산하지
+   않고 저장 당시의 조건과 결과를 표시합니다. 다운로드와 관심상태 기록은
+   저장한 결과에서 가능합니다.
+
+기존 이력은 그대로 유지합니다. 새 결과만을 위해 내부에 보관한 조건은 조건 목록에
+중복 표시하지 않습니다. 구현·검증·운영 반영 상태는
+[전달 계약](../implementation/screening-explicit-save-delivery.md)을 확인하세요.
+
 ## 경계와 준비물
 
 이 대시보드는 준비된 annual `AnalysisClient` bundle을 screening 전용 immutable
@@ -135,8 +152,15 @@ PYTHONPATH="$PWD/src" .venv/bin/python -m sec_xbrl.screening serve \
   --catalog /absolute/run/catalog.json \
   --store /absolute/run/user_journal.sqlite \
   --exports /absolute/run/exports \
+  --require-existing-store \
   --host 127.0.0.1 --port 8765
 ```
+
+`--require-existing-store`는 기존 journal을 다시 여는 운영 실행용이다. 지정한
+파일이 없거나 SQLite integrity/version 검사를 통과하지 못하면 store 초기화나
+migration 전에 실패한다. 새 설치와 격리된 test에서 새 journal을 만들 때만 이
+옵션을 생략한다. 시작 로그는 실제 Python executable, import한 CLI module,
+catalog, journal, export root와 catalog dataset ID를 JSON으로 남긴다.
 
 브라우저에서 `http://127.0.0.1:8765/`를 연다. service는 loopback 주소만
 허용하고 state-changing browser request의 `Origin`이 같은 local service인지
@@ -174,6 +198,48 @@ service의 CSRF 검사가 그대로 적용된다. XLSX/CSV bytes, status,
 `Content-Type`/`Content-Disposition`은 요청 ID와 함께 전달된다. 종료할 때는
 PowerShell에서 `Ctrl+C`를 눌러 Windows listener와 relay를 함께 닫는다.
 
+### 현재 21사 runtime의 표준 재시작 경로
+
+현재 동결된 21사 history는 아래 v1/v2 catalog 두 entry를 함께 사용한다. 과거
+v1 run을 열기 위해 v1 entry를 지우거나 v2 root로 바꾸지 않는다.
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 \
+PYTHONPATH=/home/plusbdw/.codex/worktrees/universe50-delivery-status-r5/sec_xbrl/src \
+/home/plusbdw/user_work/projects/sec_xbrl/.venv/bin/python \
+  -m sec_xbrl.screening serve \
+  --catalog /home/plusbdw/user_work/projects/sec_xbrl/data/processed/screening_runs/20261009_usability/catalog_r3.json \
+  --store /home/plusbdw/user_work/projects/sec_xbrl/data/processed/screening_runs/20261009_initial/user_journal.sqlite \
+  --exports /home/plusbdw/user_work/projects/sec_xbrl/data/processed/screening_runs/20261009_initial/exports \
+  --require-existing-store --host 127.0.0.1 --port 18766
+```
+
+WSL backend는 `127.0.0.1:18766`, Windows browser bridge는
+`127.0.0.1:18765`다. 기존 문서의 `8884` 표기는 이전 explorer runtime이며 현재
+backend가 아니다. 재시작 전에는 journal의 SQLite consistent copy와 table별
+row/digest를 별도 private 경로에 기록한다. rollback은 새 runtime을 정지하고
+이전 accepted source `e84289a…`와 기존 journal 경로로 다시 시작한다. journal
+복원이 필요하면 원본을 덮어쓰지 않고 consistent copy를 새 경로에 복원해 검증한
+뒤 그 경로를 명시한다.
+
+Windows bridge의 현재 exact foreground restart 명령은 다음과 같다.
+
+```powershell
+& "C:\Users\plusbdw\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe" `
+  "\\wsl.localhost\Ubuntu\home\plusbdw\.codex\worktrees\universe50-delivery-status-r5\sec_xbrl\examples\screening\windows-loopback-bridge.cjs" `
+  --distribution "Ubuntu" `
+  --linux-python "/home/plusbdw/user_work/projects/sec_xbrl/.venv/bin/python" `
+  --source-root "/home/plusbdw/.codex/worktrees/universe50-delivery-status-r5/sec_xbrl/src" `
+  --backend-port 18766 `
+  --frontend-port 18765
+```
+
+현재 persistent runtime의 backend process record/log locator는
+`work/screening21_stability_20261021/live-backend-process.json`, Windows bridge
+record는 app visualization의 `screening21-stability-20261021/bridge-18765.json`이다.
+PID는 관찰값이므로 재시작 전에는 record의 명령·source·port와 현재 process를 함께
+대조한다.
+
 주요 HTTP 경계는 다음과 같다.
 
 | 동작 | endpoint |
@@ -183,7 +249,9 @@ PowerShell에서 `Ctrl+C`를 눌러 Windows listener와 relay를 함께 닫는�
 | 지표 정의·coverage | `GET /api/metric-catalog?dataset_id=...` |
 | metadata/SIC peer | `GET /api/metadata`, `GET /api/peers` |
 | 조건 저장·revision | `GET/POST /api/screens`, `POST /api/screens/{id}/revisions` |
-| 실행·재열기·trace | `GET/POST /api/runs`, `GET /api/runs/{id}`, `GET /api/runs/{id}/trace` |
+| 시험 실행·결과 저장 | `POST /api/preview`, `POST /api/results` |
+| 전체 저장 조건 버전 | `GET /api/screen-revisions` |
+| legacy 실행·재열기·trace | `GET/POST /api/runs`, `GET /api/runs/{id}`, `GET /api/runs/{id}/trace` |
 | 실행 비교 | `GET /api/run-comparison` |
 | 판단 journal | `GET/POST /api/decisions` |
 | full/selected export | `POST /api/runs/{id}/exports` |
@@ -282,3 +350,7 @@ hash했더라도 restore의 관계 검사에서 거부된다.
 독립 expected 결과는 screening executor를 호출해 만들지 않는다. browser 자동
 검사 결과, 독립 검증, lead 로컬 인수, 사용자의 직접 walkthrough와 원격 merge는
 서로 다른 상태로 보고한다.
+
+저장 당시 자료와 현재 등록된 자료가 다르면 저장 결과 열기를 중단합니다.
+저장 기록이 삭제된 것은 아닙니다. 관리자가 당시 publication 등록을 복구하면
+다시 열 수 있습니다. 상세 시계열·동종기업 비교에도 당시 자료 검증을 적용합니다.

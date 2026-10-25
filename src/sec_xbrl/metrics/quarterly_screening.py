@@ -26,6 +26,7 @@ from typing import Any
 
 from sec_xbrl.analysis import open_analysis
 from sec_xbrl.metrics.screening import (
+    EXPLICIT_IDENTITY_CONFIG_VERSION,
     ScreeningMetricReader,
     _declared_analysis_files,
     _verify_analysis_files,
@@ -278,6 +279,7 @@ def publish_quarterly_screening_metrics(
     configured_ciks = sorted(row["cik"] for row in config["companies"])
     if sorted(annual.manifest.get("configured_ciks", [])) != configured_ciks:
         raise ValueError("annual and quarterly company membership differ")
+    generic_identity = _open_generic_identity_parent(annual)
 
     definitions = copy.deepcopy(list(METRIC_DEFINITIONS))
     all_observations: list[dict[str, Any]] = []
@@ -285,6 +287,9 @@ def publish_quarterly_screening_metrics(
     sources: list[dict[str, Any]] = []
     for company in config["companies"]:
         client, source = _open_company_source(company, config["financial_as_of"])
+        _verify_generic_identity_quarterly_parent(
+            generic_identity, company=company, quarterly_source=source
+        )
         observations, inventory = _company_records(
             ticker=company["ticker"],
             cik=company["cik"],
@@ -311,6 +316,13 @@ def publish_quarterly_screening_metrics(
         "manifest_sha256": config["annual_metric_manifest_sha256"],
         "company_membership_sha256": membership_hash,
     }
+    if generic_identity is not None:
+        annual_parent["generic_identity"] = {
+            "source_kind": "GENERIC_METRIC_IDENTITY_ATTESTATION",
+            "root": str(generic_identity.root),
+            "publication_id": generic_identity.publication_id,
+            "manifest_sha256": sha256_file(generic_identity.manifest_path),
+        }
     identity = {
         "config": config,
         "annual_parent": annual_parent,
@@ -549,6 +561,71 @@ def _validate_config(value: Any) -> dict[str, Any]:
     }
 
 
+def _open_generic_identity_parent(annual: ScreeningMetricReader) -> Any | None:
+    """Reopen only an explicitly declared generic identity from the annual parent."""
+    config = annual.manifest.get("config") or {}
+    source = annual.manifest.get("identity_source") or {}
+    from sec_xbrl.screening.dataset import (
+        GENERIC_IDENTITY_SOURCE_KIND,
+        open_screening_identity_source,
+    )
+
+    if source.get("kind") != GENERIC_IDENTITY_SOURCE_KIND:
+        return None
+    if config.get("schema_version") != EXPLICIT_IDENTITY_CONFIG_VERSION:
+        raise ValueError("annual metric parent config schema is unsupported")
+
+    reader = open_screening_identity_source(
+        kind=source["kind"],
+        root=source.get("root", ""),
+        manifest_sha256=source.get("manifest_sha256", ""),
+    )
+    if (
+        reader.publication_id != source.get("publication_id")
+        or reader.manifest.get("financial_as_of")
+        != annual.manifest.get("financial_as_of")
+        or sorted(row["cik"] for row in reader.companies)
+        != sorted(annual.manifest.get("configured_ciks", []))
+    ):
+        raise ValueError("annual metric generic identity scope changed")
+    return reader
+
+
+def _verify_generic_identity_quarterly_parent(
+    reader: Any | None,
+    *,
+    company: dict[str, Any],
+    quarterly_source: dict[str, Any],
+) -> None:
+    if reader is None:
+        return
+    matches = [
+        row
+        for row in reader.companies
+        if row.get("cik") == company["cik"] and row.get("ticker") == company["ticker"]
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            f"{company['ticker']}: quarterly company differs from generic identity"
+        )
+    attested = matches[0].get("quarterly_analysis") or {}
+    if (
+        attested.get("root") != quarterly_source.get("root")
+        or attested.get("publication_id") != quarterly_source.get("publication_id")
+        or attested.get("manifest_sha256")
+        != quarterly_source.get("manifest_sha256")
+        or attested.get("declared_files") != quarterly_source.get("declared_files")
+        or attested.get("period_mode") != "QUARTERLY"
+        or attested.get("history_manifest_sha256")
+        != quarterly_source.get("history_manifest_sha256")
+        or attested.get("quarter_source_evidence")
+        != quarterly_source.get("quarter_source_evidence")
+    ):
+        raise ValueError(
+            f"{company['ticker']}: quarterly analysis differs from generic identity"
+        )
+
+
 def _open_company_source(
     company: dict[str, Any], financial_as_of: str
 ) -> tuple[Any, dict[str, Any]]:
@@ -583,6 +660,12 @@ def _open_company_source(
         "publication_id": client.manifest["publication_id"],
         "manifest_sha256": digest,
         "declared_files": _declared_analysis_files(client.manifest),
+        "history_manifest_sha256": client.manifest.get(
+            "source_manifest_hashes", {}
+        ).get("history_manifest_sha256"),
+        "quarter_source_evidence": copy.deepcopy(
+            client.manifest["quarter_source_evidence"]
+        ),
     }
 
 
@@ -947,7 +1030,8 @@ def _prepared_observation(
         for field in (
             "accession", "source_id", "source_filing_id", "source_fact_id", "context_id",
             "raw_concept_qname", "raw_concept_namespace_uri", "unit_id",
-            "context_instant_date", "duration_days", "selected_source_ids",
+            "source_snapshot_id", "context_instant_date", "duration_days",
+            "selected_source_ids",
         ):
             record[field] = copy.deepcopy(source_lineage.get(field))
     record["observation_id"] = _observation_id(record)

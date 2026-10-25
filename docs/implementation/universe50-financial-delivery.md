@@ -1,0 +1,418 @@
+# 50사 재무 통합·실행 전달 계약 — 2026-10-17
+
+## 결정과 현재 상태
+
+사용자와 리드는 2026-10-17 exact-50 immutable collection을 부모로 삼아 연차·분기
+스크리닝 publication을 만드는 로컬 통합과 fail-closed 실행 경계를 승인했다. 승인된 작업
+계약은 로컬 운영 기록
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/lead_integration_and_financial_runner_contract.json`
+(SHA-256 `5988e1287fd7163ac7c8ca89fe8552d22b4b444cc39f95cf5809ebcc14f2c449`)에
+보존한다. 이 문서는 그 결정을 추적 가능한 구현 계약으로 승격한다.
+
+| 단계 | 현재 상태 |
+| --- | --- |
+| 범위 승인 | **APPROVED** — 동결 source 통합, quarterly identity 결속, offline runner와 합성 검증 |
+| 입력 source | producer `8a1b40a`, generic identity `6470e0b`, OPS `56a9d57`, package view `6e6f379` |
+| identity 검증·인수 | `6470e0b` 독립 PASS, source/synthetic 로컬 수락 |
+| 통합 구현 | `900d351` 독립 **FAIL** 뒤 F1–F4 좁은 보정 구현 중; 새 동결 SHA 확정 전 |
+| actual financial 실행 | **NOT_STARTED / NOT_READY** |
+| actual first-five·50사 인수 | 미수행 |
+| native UI·저장 journal 반영 | 미수행 |
+| push·PR·main 병합 | 미수행 |
+
+source/synthetic PASS는 actual financial payload, actual publication 또는 native 화면 인수를
+대신하지 않는다. 최종 통합 후보는 깨끗한 동결 SHA에서 별도 읽기 전용 검증을 통과해야
+actual stage GO 후보가 된다.
+
+별도 운영선에서 CVX의 새 History publication은 전수 독립 PASS와 리드 인수를 마쳤다.
+리드 인수 증거 `lead_actual_CVX_history_acceptance.json`의 SHA-256은
+`34c953a97a65ff2e36acbb72340553551c596978fa02a6622e3d85ae6d2bd51e`다. 이는 CVX
+History 한 회사의 부모 입력 수락이며 first-five quality/identity/financial chain, exact-50
+financial readiness 또는 이 통합 source의 독립 PASS를 뜻하지 않는다. 나머지 History
+build는 별도 운영 stage에서 직렬 진행되며 이 구현은 해당 payload를 읽거나 실행하지 않는다.
+
+## 누적 source와 보존 경계
+
+통합 branch는 producer `8a1b40a`를 기준으로 검증된 identity `6470e0b`, OPS
+`56a9d57`, package view `6e6f379`를 일반 merge해 각 이력을 보존한다. 이 병합은 다음을
+동시에 유지한다.
+
+- annual producer의 회사별 5 fiscal-year 입력, 최신 4 fiscal-year 표시, unavailable과
+  source lineage 정책
+- legacy `UniverseDelivery`와 manual reviewed-Q4 경로 및 기존 v1/v2/v3 publication
+- 명시적 `GENERIC_METRIC_IDENTITY_ATTESTATION` source kind와 fallback 금지
+- OPS의 shared heavy lock, process-tree RSS 감시, timeout과 owned process-group cleanup
+- package view의 immutable manifest와 archive hash 재검증
+
+Raw parser, history·analysis 구성, 분기 산술, source selection, UI/service/store와 저장 journal의
+계산·정책은 바꾸지 않는다. 실행 도구는 이 모듈의 공개 producer API만 순서대로 호출한다.
+
+## quarterly generic identity 결속
+
+legacy annual metric parent에는 기존 quarterly producer 동작을 그대로 적용한다. annual metric
+parent가 명시적 generic identity를 선언한 경우에만 quarterly producer는 다음을 추가로
+검증한다.
+
+1. annual metric manifest에 기록된 kind, identity root, manifest SHA-256과 publication ID로
+   `GenericMetricIdentityReader`를 다시 연다.
+2. identity의 financial cutoff와 CIK/ticker cohort가 annual metric membership과 정확히
+   일치하는지 확인한다.
+3. 각 quarterly analysis의 root, publication ID, manifest SHA-256, 선언 data-file hash,
+   history manifest SHA-256, `QUARTERLY` period mode와
+   `quarter-typed-primary-pre-evidence-v1`가 identity의 attested parent와 정확히 같은지
+   비교한다.
+4. foreign CIK, stale manifest, 같은 회사의 다른 analysis root/history 또는 변조된 parent는
+   publication 전에 거부한다. 성공한 quarterly manifest는 사용한 generic identity를 다시
+   고정한다.
+
+identity는 quarterly *analysis*까지만 부모로 두며 quarterly metric을 부모로 두지 않는다.
+따라서 `identity → annual31 → annual dataset v2 → quarterly17 → combined dataset v3`
+순서에 순환 의존이 없다.
+
+## offline financial runner
+
+`tools/universe50_financial_ops.py`는 새 실행마다 명시적 JSON config, source-only preflight,
+stage request와 운영자가 별도로 작성한 exact GO를 요구한다. config는 다음을 모두 고정한다.
+
+- exact-50 collection manifest path/hash와 parent company count 50
+- `FULL` 또는 `EXPLICIT_SUBSET`; first-five는 정확히 `TXN, HD, JNJ, CVX, NEE`
+- scoped 회사의 CIK/ticker, history build output root, consumer panels publication root와
+  manifest hash, collector·plan·intake 선언 hash, 연간 5 input FY·4 display FY 및 별도 명시
+  `quarter_input_years`
+- `financial_as_of=2026-10-10`과 별도
+  `metadata_observation_cutoff=2026-10-13T23:59:59Z`
+- package view root/manifest hash, source HEAD, 실행에 import되는 모든 producer·OPS·package
+  view·runner 파일 hash와 checkout 경로
+- 겹치지 않는 absolute fresh output root, fresh execution root, shared resource root
+- process-tree RSS 16 GiB, `POLARS_MAX_THREADS=2`, 한 번에 하나의 heavy stage와 10,800초
+  timeout
+
+preflight는 exact-50 parent를 다시 열고 scoped 회사만 `READY`, `selected == held`,
+pending/failed 0인지 확인한다. `EXPLICIT_SUBSET`은 범위 밖 45사를 완료나 PASS로 승격하지
+않는다. 부모 collection, package view, 선택 history와 source 파일이 바뀌면 이후 request와
+GO가 무효다. 각 GO는 config, source HEAD, preflight, 정확한 cohort, parent receipt와 output
+root를 모두 hash로 결속한다.
+
+worker는 부모가 shared heavy lock을 보유한 채 전달한 일회성 pipe capability가 있어야만
+실행된다. 각 stage는 별도 process group에서 OPS 감시기를 사용한다. 실패·timeout·RSS 초과나
+부분 output은 그대로 실패 증거로 남고 같은 stage의 자동 재시도나 덮어쓰기를 막는다. 성공
+receipt는 output의 전체 regular-file 집합, 각 hash와 크기를 고정하며 모든 후속 stage가 이를
+다시 확인한다. runner는 독립 수락 기록을 스스로 생성하지 않는다.
+
+공통 producer 순서는 다음과 같다.
+
+1. metadata publication 확인 또는 별도 fresh exact-50 metadata 발행
+2. `prepare_analysis` annual 5 FY (`include_year_end_balances=True`)
+3. `prepare_analysis` quarterly를 회사별 명시 `quarter_input_years` 범위로 실행
+   (`include_quarter_source_evidence=True`)
+4. package view와 exact histories를 사용한 generic quality
+5. metadata·quality·history·annual/quarterly analysis를 고정한 generic identity
+6. annual 31 metrics와 annual dataset v2
+7. attested quarterly analysis를 쓰는 quarterly 17 metrics
+8. combined dataset v3
+
+### exact config와 실행 CLI
+
+실제 실행 config는 다음 최상위 shape를 사용한다. 아래 한 회사·한 snapshot 항목을 승인된
+scope와 exact-50 metadata source 수만큼 반복한다. `<...>`는 실행 전에 실제 absolute
+path나 lowercase hash로 모두 치환해야 하며 runner는 placeholder, 상대 경로와 누락 pin을
+거부한다.
+
+```json
+{
+  "schema_version": "universe50-financial-ops-config-v1",
+  "universe_id": "<exact-parent-universe-id>",
+  "dataset_id": "<new-financial-dataset-id>",
+  "financial_as_of": "2026-10-10",
+  "metadata_observation_cutoff": "2026-10-13T23:59:59Z",
+  "collection_scope_mode": "EXPLICIT_SUBSET",
+  "first5": ["TXN", "HD", "JNJ", "CVX", "NEE"],
+  "companies": [{
+    "ticker": "TXN",
+    "cik": "0000097476",
+    "input_years": [2021, 2022, 2023, 2024, 2025],
+    "display_years": [2022, 2023, 2024, 2025],
+    "quarter_input_years": [2021, 2022, 2023, 2024, 2025, 2026],
+    "history_output_root": "/absolute/fresh/history/TXN-t3v2-run",
+    "history_root": "/absolute/fresh/history/TXN-t3v2-run/panels",
+    "build_manifest": "/absolute/exact50/companies/TXN/build_manifest.json",
+    "build_manifest_sha256": "<64-hex>",
+    "history_manifest_sha256": "<64-hex>",
+    "collector_source_commit_sha": "<40-hex>",
+    "plan_sha256": "<64-hex>",
+    "intake_sha256": "<64-hex>"
+  }],
+  "collection": {
+    "manifest": "/absolute/exact50/collection_manifest.json",
+    "manifest_sha256": "<64-hex>",
+    "parent_company_count": 50
+  },
+  "package_view": {
+    "root": "/absolute/package-view/archives",
+    "manifest_sha256": "<64-hex>"
+  },
+  "metadata": {
+    "mode": "PUBLISH_EXACT50",
+    "snapshots": [{
+      "ticker": "TXN",
+      "cik": "0000097476",
+      "path": "/absolute/cached/submissions/CIK0000097476.json",
+      "sha256": "<64-hex>",
+      "observed_at": "2026-10-10T00:00:00Z",
+      "source": "sec_submissions",
+      "source_url": "<original-source-url-or-null>"
+    }],
+    "kdp_acquisition_evidence": {
+      "path": "/absolute/KDP-operation-evidence.json",
+      "sha256": "<64-hex>",
+      "completed_at": "2026-10-13T14:45:00.965796Z"
+    }
+  },
+  "source": {
+    "checkout": "/absolute/clean/integration-checkout",
+    "head": "<40-hex-final-integration-SHA>",
+    "module_sha256s": {
+      "analysis": "<64-hex>",
+      "company_metadata": "<64-hex>",
+      "metric_quality": "<64-hex>",
+      "metric_identity": "<64-hex>",
+      "annual_metrics": "<64-hex>",
+      "annual_dataset_v2": "<64-hex>",
+      "quarterly_metrics": "<64-hex>",
+      "combined_dataset_v3": "<64-hex>",
+      "resource_ops": "<64-hex>",
+      "package_view": "<64-hex>",
+      "runner": "<64-hex>"
+    }
+  },
+  "outputs": {
+    "metadata": "/absolute/fresh/output/metadata",
+    "annual_analysis": "/absolute/fresh/output/annual-analysis",
+    "quarterly_analysis": "/absolute/fresh/output/quarterly-analysis",
+    "quality_indexes": "/absolute/fresh/output/quality-indexes",
+    "quality_bindings": "/absolute/fresh/output/quality-bindings",
+    "quality": "/absolute/fresh/output/quality",
+    "identity": "/absolute/fresh/output/identity",
+    "annual_metrics": "/absolute/fresh/output/annual-metrics",
+    "annual_dataset_v2": "/absolute/fresh/output/annual-dataset-v2",
+    "quarterly_metrics": "/absolute/fresh/output/quarterly-metrics",
+    "combined_dataset_v3": "/absolute/fresh/output/combined-dataset-v3"
+  },
+  "execution_root": "/absolute/fresh/execution-evidence",
+  "resource_root": "/absolute/shared-resource-lock-root",
+  "limits": {
+    "process_tree_rss_kib": 16777216,
+    "polars_max_threads": 2,
+    "one_heavy_process": true,
+    "timeout_seconds": 10800
+  }
+}
+```
+
+기존 first-five metadata를 쓸 때는 `metadata`를
+`{"mode":"EXISTING_PUBLICATION","root":"/absolute/root","manifest_sha256":"<64-hex>"}`로
+바꾼다. `history_output_root`는 build marker의 전체 출력 root이고, `history_root`는
+`history_manifest.json`이 실제로 있는 consumer `panels` publication root다. 예를 들어
+accepted CVX는 `.../CVX-t3v2-exact50-t3v2-20261017-e`와 그 아래 `panels`를 각각
+기록한다. runner는 두 경로를 합치거나 하나에서 다른 하나를 추론하지 않고 build marker의
+`output_root`, `publication`, `history_manifest`와 각각 정확히 비교한다.
+
+`input_years`와 `display_years`는 연간 publication의 5-input/4-display 계약이다.
+`quarter_input_years`는 분기 analysis에만 사용하는 별도 fiscal-year 범위다. 첫 해는 연간
+입력의 첫 해와 같고, 연속된 정수이며, 연간 마지막 해를 포함해야 한다. 마지막 fiscal year는
+각 회사의 governed History 감사 결과에서 명시한다. calendar 2026이라는 이유로 끝 연도를
+2026으로 추론하지 않는다. 예를 들어 실제 날짜가 2026년이어도 FY2027로 보고된 회사는
+`quarter_input_years`에 2027을 포함해야 한다. 이 분리는 연간 최신 4개 표시, 분기 기간 분류,
+reported/derived 산술 또는 source selection 정책을 바꾸지 않는다.
+
+final 50 실행은 `collection_scope_mode=FULL`, 회사 50개와 다음 선언을 추가로 요구한다.
+
+```json
+"first5_financial_acceptance": {
+  "path": "/absolute/lead/first5-financial-acceptance.json",
+  "sha256": "<64-hex>"
+}
+```
+
+부분집합 config에는 이 필드를 넣을 수 없다. runner는 acceptance를 생성하지 않으며 FULL
+preflight, request, GO 검증과 worker 시작 때마다 path/hash와 내부 증거를 다시 연다.
+
+### first-five local acceptance artifact v1
+
+리드는 first-five 전체 public chain의 별도 독립 검증과 로컬 인수가 끝난 뒤에만 아래 exact
+schema를 작성한다. `companies` 순서는 항상 TXN, HD, JNJ, CVX, NEE다. `first5_config`는
+실제로 사용한 `EXPLICIT_SUBSET` config이고 FULL config와 source HEAD, module pins,
+financial·metadata cutoff, exact-50 collection parent, metadata 및 다섯 회사의 모든
+history/build pin이 같아야 한다.
+
+```json
+{
+  "schema_version": "universe50-first5-financial-acceptance-v1",
+  "status": "LOCALLY_ACCEPTED_FIRST5_FINANCIAL",
+  "source_head": "<40-hex-final-integration-SHA>",
+  "financial_as_of": "2026-10-10",
+  "metadata_observation_cutoff": "2026-10-13T23:59:59Z",
+  "collection": {
+    "manifest": "/absolute/exact50/collection_manifest.json",
+    "manifest_sha256": "<64-hex>",
+    "parent_company_count": 50
+  },
+  "companies": [
+    {"ticker": "TXN", "cik": "<10-digit>"},
+    {"ticker": "HD", "cik": "<10-digit>"},
+    {"ticker": "JNJ", "cik": "<10-digit>"},
+    {"ticker": "CVX", "cik": "<10-digit>"},
+    {"ticker": "NEE", "cik": "<10-digit>"}
+  ],
+  "first5_config": {"path": "/absolute/first5-config.json", "sha256": "<64-hex>"},
+  "stage_receipts": {
+    "annual-analysis": {"path": "/absolute/receipts/annual-analysis.json", "sha256": "<64-hex>"},
+    "quarterly-analysis": {"path": "/absolute/receipts/quarterly-analysis.json", "sha256": "<64-hex>"},
+    "quality": {"path": "/absolute/receipts/quality.json", "sha256": "<64-hex>"},
+    "identity": {"path": "/absolute/receipts/identity.json", "sha256": "<64-hex>"},
+    "annual-metrics": {"path": "/absolute/receipts/annual-metrics.json", "sha256": "<64-hex>"},
+    "annual-dataset-v2": {"path": "/absolute/receipts/annual-dataset-v2.json", "sha256": "<64-hex>"},
+    "quarterly-metrics": {"path": "/absolute/receipts/quarterly-metrics.json", "sha256": "<64-hex>"},
+    "combined-dataset-v3": {"path": "/absolute/receipts/combined-dataset-v3.json", "sha256": "<64-hex>"}
+  },
+  "publication_manifests": [
+    {"name": "metadata", "root": "<absolute-root>", "manifest": "<absolute-manifest>", "manifest_sha256": "<64-hex>"},
+    {"name": "quality", "root": "<absolute-root>", "manifest": "<absolute-manifest>", "manifest_sha256": "<64-hex>"},
+    {"name": "identity", "root": "<absolute-root>", "manifest": "<absolute-manifest>", "manifest_sha256": "<64-hex>"},
+    {"name": "annual_metrics", "root": "<absolute-root>", "manifest": "<absolute-manifest>", "manifest_sha256": "<64-hex>"},
+    {"name": "annual_dataset_v2", "root": "<absolute-root>", "manifest": "<absolute-manifest>", "manifest_sha256": "<64-hex>"},
+    {"name": "quarterly_metrics", "root": "<absolute-root>", "manifest": "<absolute-manifest>", "manifest_sha256": "<64-hex>"},
+    {"name": "combined_dataset_v3", "root": "<absolute-root>", "manifest": "<absolute-manifest>", "manifest_sha256": "<64-hex>"},
+    {"name": "annual_analysis:TXN", "root": "<absolute-root>", "manifest": "<absolute-manifest>", "manifest_sha256": "<64-hex>"},
+    {"name": "quarterly_analysis:TXN", "root": "<absolute-root>", "manifest": "<absolute-manifest>", "manifest_sha256": "<64-hex>"}
+  ]
+}
+```
+
+`publication_manifests`의 마지막 두 행은 같은 순서로 HD, JNJ, CVX, NEE까지 반복해 정확히
+17개다. fresh metadata를 first-five 실행에서 새로 발행했다면 `stage_receipts`에는
+`metadata` receipt도 추가해 정확히 9개다. 각 receipt는 PASS/source HEAD/stage/output root와
+전체 output 파일 hash를 다시 검증한다. 각 manifest 행의 root·manifest 경로와 hash는
+first-five config에서 계산한 exact 목록과 순서까지 같아야 한다. 누락·추가·변조·partial
+output이나 다른 parent/config는 FULL 실행을 거부한다.
+
+모든 명령은 clean configured checkout에서 같은 interpreter와 `PYTHONPATH=src:.`를 사용한다.
+
+```bash
+python tools/universe50_financial_ops.py preflight --config /absolute/config.json
+python tools/universe50_financial_ops.py request-stage --config /absolute/config.json --stage annual-analysis
+python tools/universe50_financial_ops.py run-stage --config /absolute/config.json --stage annual-analysis --go-file /absolute/operator-go/annual-analysis.json
+```
+
+fresh metadata mode는 `metadata` stage부터 요청한다. 이후 stage 이름은
+`annual-analysis`, `quarterly-analysis`, `quality`, `identity`, `annual-metrics`,
+`annual-dataset-v2`, `quarterly-metrics`, `combined-dataset-v3`다. 각 stage마다 먼저
+`request-stage`를 실행하고, 리드/운영자가 그 request의 source HEAD, config/preflight hash,
+scope, parent receipts와 outputs를 그대로 복사한 아래 GO를 별도 경로에 작성한 뒤
+`run-stage`를 호출한다.
+
+```json
+{
+  "schema_version": "universe50-financial-stage-go-v1",
+  "status": "GO",
+  "stage": "annual-analysis",
+  "source_head": "<40-hex-final-integration-SHA>",
+  "config_sha256": "<64-hex>",
+  "request_sha256": "<64-hex>",
+  "scope_companies": [{"ticker": "TXN", "cik": "0000097476"}],
+  "first5_financial_acceptance": null,
+  "parent_receipts": [],
+  "outputs": ["/absolute/fresh/output/annual-analysis"]
+}
+```
+
+runner는 GO를 생성하거나 승인하지 않는다. request와 byte-for-byte 의미가 다른 GO, 이미
+시도한 stage, 기존 output과 실패 후 재실행은 모두 거부한다.
+
+## metadata 시간축
+
+기존 PEP 포함 metadata publication은 덮어쓰지 않는다. runner는 기존 immutable publication을
+명시 hash로 재사용하는 mode와, original 49 cached SEC root observation에 KDP cached root를
+더해 새 exact-50 publication을 만드는 mode를 분리한다. 새 mode는 50개 absolute source
+path/hash, 고유 CIK/ticker, 원래 `observed_at`, KDP를 정확히 한 번, KDP prepare 완료 증거
+`2026-10-13T14:45:00.965796Z`와 그 파일 hash를 요구한다.
+
+모든 observation과 acquisition evidence는 별도 metadata cutoff 이하여야 한다. 발행 뒤
+public `CompanyMetadataReader`의 정확한 50개 CIK/ticker를 collection parent의 50개와 다시
+비교한다. `financial_as_of`를 metadata cutoff로 재사용하거나 timestamp를 조작하지 않는다.
+이 metadata는 current observation이며 2026-10-10 당시 historical universe membership을
+증명하지 않는다. 기존 first-five metadata publication도 명시 hash와 같은 reader 검증을
+통해 계속 사용할 수 있다.
+
+## 900d351 독립 FAIL과 좁은 보정 계약
+
+독립 검증은 `900d351`에서 네 실행 경계 결함을 확인했다. 보고서는
+`work/universe50_quarterly_20261010/resumption_20261017_t3v2/independent_financial_integration_900d351/report.json`
+(SHA-256 `648a6200db3e2112cfdfca54c69705ba6f22624d91344c776cbed6ae570f3bcd`)에
+보존한다. 리드의 F1–F3 보정 계약 SHA-256은
+`f6311eb994ba306854d7686cf16547b0bfd36faabce9ec36ad1ba341f9475e5f`, F4 추가
+분기 범위 계약 SHA-256은
+`80903f4b8cd753ddb2abec76929529590539f02485269a44e3c8d69f511ad504`다.
+
+- F1: FULL 실행은 리드가 별도로 작성한 exact first-five local acceptance와 그 stage
+  receipt·publication manifest hash를 preflight, request, GO, worker마다 다시 검증한다.
+- F2: 선택 READY marker의 build output root와 consumer panels publication root를 구분하고,
+  history manifest·plan·intake·financial cutoff까지 config와 정확히 결속한다.
+- F3: supervisor는 accepted OPS가 요구하는 T3V2 parent PID namespace와 financial
+  capability namespace를 함께 전달한다. 직접 worker 호출은 계속 거부한다.
+- F4: 연간 fiscal 범위를 분기 분석에 재사용하지 않는다. 회사별 명시
+  `quarter_input_years`가 이후 FY2026 분기와 calendar 2026에 놓인 FY2027 분기를 포함할 수
+  있어야 하며, 최종 8 calendar-quarter bucket의 reported/derived/source-date 의미는 기존
+  producer가 그대로 결정한다.
+
+이 보정은 runner, 합성 검증과 이 전달 문서에만 적용하며 공개 analysis·History·분기 계산
+정책을 바꾸지 않는다. actual financial GO는 여전히 없다.
+
+## 검증과 실행 전 gate
+
+source 후보는 최소한 다음을 통과해야 한다.
+
+- fresh synthetic quality → identity → annual31 → annual v2 → quarterly17 → combined v3
+- foreign/stale/same-company unrelated quarterly parent와 다른 history parent 거부
+- metadata cutoff 이후 observation, 잘못된 KDP evidence, exact-50 membership 차이 거부
+- first-five publication 뒤 범위 밖 회사 진행에도 기존 publication 재열기 안정성
+- legacy annual/quarterly와 v1/v2/v3, explicit save/load 및 관련 golden·HTTP 회귀
+- unit/screening tests, Ruff와 clean diff 검사
+- 연간 FY2025 종료 뒤 FY2026 분기와 연간 FY2026 종료 뒤 calendar 2026에 놓인 FY2027
+  분기가 명시 분기 범위와 공개 quarterly producer를 거쳐 최종 8개 bucket에 보존되는 회귀
+
+그 뒤 별도 검증자가 정확한 clean SHA를 검증해 PASS해야 리드가 actual stage GO 여부를
+판단한다. actual Raw/history payload 읽기, SEC network, production DB, live UI, main 병합,
+push·PR와 scheduler 변경은 이 source 구현·합성 검증 단계에서 수행하지 않는다.
+
+## AVAILABLE TTM source snapshot 보정
+
+2026-10-17 source `9b6e7ec…`의 synthetic public chain에서 AVAILABLE TTM의 REPORTED
+입력은 중첩 `source_lineage`에 검증된 `source_snapshot_id`를 보존하면서도 준비된 입력의
+top-level 필드에는 같은 값을 싣지 않았다. strict quarterly reader는 이 준비된 입력을 원본
+identity로 다시 검증하므로, combined v3 재열기에서 동일 원본을 서로 다른 identity로 판단해
+거부했다. 독립 blocker 보고서 SHA-256은
+`ca6aff664b4e36a95ae07b7d31155c0c53b97d9c39a13cf188935ea7f07f0435`, 좁은 보정
+계약 SHA-256은 `7f2687a2e773f8f5eb2a41df7d00f5008bcb74a38c51824c2d0b757a8d65f921`다.
+
+구현 후보는 REPORTED quarter를 준비할 때 이미 검증된 중첩 snapshot identity를 top-level에도
+복사한다. TTM 공식, 값, 기간·calendar bucket, basis와 null-basis 판단, source kind,
+derived Q4 공식·입력, observation/publication ID 규칙은 바꾸지 않는다. consumer의 전체 raw
+identity 비교도 그대로 유지하므로 실제 snapshot이나 raw anchor가 달라진 입력은 계속
+fail-closed다. synthetic public producer → quarterly reader → combined v3 → v3 reader 양성,
+snapshot 충돌 음성, eligible derived Q4와 null-basis 회귀를 구현자 검사 대상으로 둔다.
+
+이 상태는 source/synthetic 구현 후보이며 독립 검증과 리드의 로컬 수락 전이다. actual Raw,
+History, financial, metadata 실행과 기존 publication 재작성은 승인되지 않았고 계속
+`NOT_READY`다.
+
+## 2026-10-18 current snapshot correction
+
+위 후보·FAIL·RUNNING 기록은 발생 당시 상태로 보존한다. 현재 original financial source
+`4357c83…`의 first-five 8 stages와 17 manifests는 PASS다. R8 actual H5는 semantic
+annual 620·quarter 680 records까지 PASS했으며 public annual·quarter·v2·v3와 seal은
+**PENDING**이다. 따라서 canonical first-five financial acceptance, later-45, FULL50와
+live rollout은 아직 없다. R8은 auditor `dir_fd` boundary만 수리했고 R9는 기존 accepted
+FULL50 107-manifest helper로 plan routing만 고쳤다. 둘 다 producer 4357, 회계 공식,
+period·unit·manual-Q4 의미를 바꾸지 않는다. 다음 gate와 운영 순서는
+[2026-10-18 재개 상태](universe50-resumption-20261018.md)에 둔다.

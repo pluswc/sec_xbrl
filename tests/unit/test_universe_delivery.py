@@ -162,11 +162,12 @@ def _mark_collection_ready(collection_manifest: Path) -> None:
     publication = output_root / "panels"
     publication.mkdir(parents=True)
     data_path = publication / "fixture.parquet"
-    data_path.write_bytes(b"fixture-history-data")
+    pl.DataFrame({"fixture_id": ["fixture"]}).write_parquet(data_path)
     data_sha = hashlib.sha256(data_path.read_bytes()).hexdigest()
     history_manifest = _write(
         publication / "history_manifest.json",
         {
+            "version": HISTORY_VERSION,
             "plan": plan,
             "source_intake": str(intake_path.absolute()),
             "views": ["AS_FILED", "LATEST_REPORTED"],
@@ -176,6 +177,8 @@ def _mark_collection_ready(collection_manifest: Path) -> None:
                         "fixture": {
                             "path": "fixture.parquet",
                             "sha256": data_sha,
+                            "count": 1,
+                            "json_fields": [],
                         }
                     }
                 }

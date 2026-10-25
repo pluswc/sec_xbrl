@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -10,12 +11,26 @@ import pytest
 from lxml import html as lxml_html
 
 from sec_xbrl import collection_operations as operations
+from sec_xbrl import source_bindings as source_binding_module
 from sec_xbrl.facts.layer1 import _stable_id
 from sec_xbrl.history import HISTORY_VERSION
+from sec_xbrl.metric_quality import (
+    CONFIG_SCHEMA_VERSION,
+    GenericMetricQualityReader,
+    prepare_generic_metric_quality,
+    publish_generic_metric_quality,
+)
 from sec_xbrl.source_bindings import (
+    BINDINGS_NAME,
     SEC_TRANSFORM_NAMESPACE,
     SourceBindingsReader,
+    SourceBindingsV2Reader,
     publish_source_bindings,
+    publish_source_bindings_v2,
+    write_source_indexes_v2,
+)
+from sec_xbrl.source_bindings import (
+    MANIFEST_NAME as SOURCE_BINDINGS_MANIFEST_NAME,
 )
 
 
@@ -25,10 +40,14 @@ def _write(path: Path, payload: object) -> Path:
     return path
 
 
-def _fixture(tmp_path: Path) -> dict[str, Path]:
-    ticker = "TEST"
-    cik = "0000000123"
-    accession = "0000000123-26-000001"
+def _fixture(
+    tmp_path: Path,
+    *,
+    ticker: str = "TEST",
+    cik: str = "0000000123",
+    accession: str = "0000000123-26-000001",
+    parser_version: str = "m2-layer1-v5",
+) -> dict[str, Path]:
     primary_document = "test.htm"
     config = _write(
         tmp_path / "config.json",
@@ -81,7 +100,7 @@ def _fixture(tmp_path: Path) -> dict[str, Path]:
         run_root=tmp_path / "operations",
         existing_plans={ticker: plan},
     )
-    local_plan = json.loads((collection.parent / "companies/TEST/plan.json").read_text())
+    local_plan = json.loads((collection.parent / f"companies/{ticker}/plan.json").read_text())
 
     primary = b"""<html xmlns=\"http://www.w3.org/1999/xhtml\"
  xmlns:ix=\"http://www.xbrl.org/2013/inlineXBRL\"
@@ -130,7 +149,7 @@ def _fixture(tmp_path: Path) -> dict[str, Path]:
     )
     snapshot = (
         collection.parent
-        / "companies/TEST/intake/snapshots"
+        / f"companies/{ticker}/intake/snapshots"
         / cik
         / accession.replace("-", "")
     )
@@ -140,7 +159,7 @@ def _fixture(tmp_path: Path) -> dict[str, Path]:
         {
             "cik": cik,
             "accession": accession,
-            "layer1_parser_version": "m2-layer1-v5",
+            "layer1_parser_version": parser_version,
             "package_sha256": package_sha,
         },
     )
@@ -175,7 +194,7 @@ def _fixture(tmp_path: Path) -> dict[str, Path]:
             "filing_id": [filing_id, filing_id],
         }
     ).write_parquet(snapshot / "context.parquet")
-    intake = collection.parent / "companies/TEST/intake/history_intake.json"
+    intake = collection.parent / f"companies/{ticker}/intake/history_intake.json"
     _write(
         intake,
         {
@@ -268,6 +287,7 @@ def _fixture(tmp_path: Path) -> dict[str, Path]:
         "correction": correction_index,
         "package": package,
         "snapshot": snapshot,
+        "intake": intake,
     }
 
 
@@ -349,3 +369,669 @@ def test_reader_rejects_changed_package_or_raw_table(tmp_path: Path) -> None:
     facts.write_parquet(paths["snapshot"] / "fact.parquet")
     with pytest.raises(ValueError, match="file integrity mismatch"):
         SourceBindingsReader(publication.root).verify_all()
+
+
+def _mixed_v2_fixture(tmp_path: Path) -> dict[str, object]:
+    first = _fixture(
+        tmp_path / "first",
+        ticker="FIVE",
+        cik="0000000123",
+        accession="0000000123-26-000001",
+        parser_version="m2-layer1-v5",
+    )
+    second = _fixture(
+        tmp_path / "second",
+        ticker="SIX",
+        cik="0000000456",
+        accession="0000000456-26-000002",
+        parser_version="m2-layer1-v6",
+    )
+    config = _write(
+        tmp_path / "mixed-config.json",
+        {
+            "schema_version": 1,
+            "universe_id": "mixed-source-binding-fixture",
+            "purpose": "fixture",
+            "as_of_date": "2026-10-08",
+            "source_observed_at": "2026-10-08T00:00:00+00:00",
+            "collection": {
+                "completed_fiscal_years": 4,
+                "analytical_fiscal_years": 3,
+                "include_subsequent_quarters": True,
+            },
+            "companies": [
+                {"ticker": "FIVE", "cik": "0000000123", "groups": ["fixture"]},
+                {"ticker": "SIX", "cik": "0000000456", "groups": ["fixture"]},
+            ],
+        },
+    )
+    mixed = operations.prepare_universe(
+        config_path=config,
+        run_root=tmp_path / "mixed-run",
+        existing_plans={
+            "FIVE": Path(first["collection"]).parent / "companies/FIVE/plan.json",
+            "SIX": Path(second["collection"]).parent / "companies/SIX/plan.json",
+        },
+    )
+    for ticker, source in (("FIVE", first), ("SIX", second)):
+        plan = json.loads(
+            (mixed.parent / f"companies/{ticker}/plan.json").read_text()
+        )
+        original_intake = json.loads(Path(source["intake"]).read_text())
+        original_intake["plan"] = plan
+        _write(
+            mixed.parent / f"companies/{ticker}/intake/history_intake.json",
+            original_intake,
+        )
+    packages = tmp_path / "mixed-packages"
+    for source in (first, second):
+        package = Path(source["package"])
+        destination = packages / package.relative_to(Path(source["packages"]))
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(package, destination)
+    return {"collection": mixed, "packages": packages, "first": first, "second": second}
+
+
+def test_v2_mixed_profiles_are_derived_from_each_snapshot_and_reopened(
+    tmp_path: Path,
+) -> None:
+    paths = _mixed_v2_fixture(tmp_path)
+    indexes = write_source_indexes_v2(
+        collection_manifest=Path(paths["collection"]),
+        package_root=Path(paths["packages"]),
+        destination=tmp_path / "indexes",
+    )
+    publication = publish_source_bindings_v2(
+        collection_manifest=Path(paths["collection"]),
+        package_root=Path(paths["packages"]),
+        duration_source_index=indexes.duration_path,
+        correction_source_index=indexes.correction_path,
+        destination=tmp_path / "bindings-v2",
+        producer_revision="b" * 40,
+    )
+
+    reader = SourceBindingsV2Reader(publication.root)
+    reader.verify_all()
+
+    with pytest.raises(ValueError, match="unsupported source-binding publication"):
+        SourceBindingsReader(publication.root)
+
+    assert [row["parser_version"] for row in reader.manifest["parser_profiles"]] == [
+        "m2-layer1-v5",
+        "m2-layer1-v6",
+    ]
+    assert reader.manifest["collection_scope_mode"] == "FULL"
+    assert reader.manifest["counts"]["filings"] == 2
+
+
+def test_v2_requires_explicit_subset_and_rejects_unknown_parser(tmp_path: Path) -> None:
+    paths = _mixed_v2_fixture(tmp_path)
+    subset = ({"ticker": "FIVE", "cik": "0000000123"},)
+    indexes = write_source_indexes_v2(
+        collection_manifest=Path(paths["collection"]),
+        package_root=Path(paths["packages"]),
+        destination=tmp_path / "subset-indexes",
+        collection_scope_companies=subset,
+    )
+    publication = publish_source_bindings_v2(
+        collection_manifest=Path(paths["collection"]),
+        package_root=Path(paths["packages"]),
+        duration_source_index=indexes.duration_path,
+        correction_source_index=indexes.correction_path,
+        destination=tmp_path / "subset-bindings",
+        producer_revision="c" * 40,
+        collection_scope_companies=subset,
+    )
+    reader = SourceBindingsV2Reader(publication.root)
+    reader.verify_all()
+    assert reader.manifest["collection_scope_mode"] == "EXPLICIT_SUBSET"
+    assert reader.manifest["scope_companies"] == list(subset)
+
+    unknown = Path(paths["second"]["snapshot"]) / "layer1_manifest.json"
+    payload = json.loads(unknown.read_text())
+    payload["layer1_parser_version"] = "m2-layer1-v7-self-declared"
+    _write(unknown, payload)
+    with pytest.raises(ValueError, match="known snapshot/package profile"):
+        write_source_indexes_v2(
+            collection_manifest=Path(paths["collection"]),
+            package_root=Path(paths["packages"]),
+            destination=tmp_path / "rejected-indexes",
+        )
+    assert not (tmp_path / "rejected-indexes").exists()
+
+
+def test_v2_independent_scan_rejects_incomplete_candidate_index(tmp_path: Path) -> None:
+    paths = _mixed_v2_fixture(tmp_path)
+    indexes = write_source_indexes_v2(
+        collection_manifest=Path(paths["collection"]),
+        package_root=Path(paths["packages"]),
+        destination=tmp_path / "indexes",
+    )
+    payload = json.loads(indexes.duration_path.read_text())
+    payload["duration_facts"].pop()
+    _write(indexes.duration_path, payload)
+
+    with pytest.raises(ValueError, match="differs from primary document"):
+        publish_source_bindings_v2(
+            collection_manifest=Path(paths["collection"]),
+            package_root=Path(paths["packages"]),
+            duration_source_index=indexes.duration_path,
+            correction_source_index=indexes.correction_path,
+            destination=tmp_path / "rejected-bindings",
+            producer_revision="d" * 40,
+        )
+    assert not (tmp_path / "rejected-bindings").exists()
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _build_ready_histories(
+    paths: dict[str, object],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    selected_tickers: tuple[str, ...] | None = None,
+) -> dict[str, Path]:
+    def build(**kwargs: object) -> Path:
+        output_root = Path(kwargs["output_root"])
+        intake_path = Path(kwargs["intake_manifest"])
+        intake = json.loads(intake_path.read_text())
+        publication = output_root / "panels"
+        company = intake["plan"]["companies"][0]
+        relative = (
+            Path(company["cik"])
+            / "LATEST_REPORTED/QTD_3M/rows.parquet"
+        )
+        info = operations.history._write_records(
+            publication / relative, ({"row_id": company["ticker"]},)
+        )
+        _write(
+            publication / "history_manifest.json",
+            {
+                "version": operations.history.HISTORY_VERSION,
+                "plan": intake["plan"],
+                "views": list(kwargs["views"]),
+                "source_intake": str(intake_path.absolute()),
+                "tables": [{"files": {"rows": {**info, "path": str(relative)}}}],
+            },
+        )
+        return publication
+
+    monkeypatch.setattr(operations.history, "build_history", build)
+    output = tmp_path / "histories"
+    operations.build_universe(
+        manifest_path=Path(paths["collection"]),
+        output_root=output,
+        selected_tickers=selected_tickers,
+    )
+    selected = selected_tickers or ("FIVE", "SIX")
+    return {
+        ticker: output / ticker / "panels/history_manifest.json"
+        for ticker in selected
+    }
+
+
+def _quality_config(
+    paths: dict[str, object],
+    histories: dict[str, Path],
+    destination: Path,
+    *,
+    companies: tuple[dict[str, str], ...],
+) -> Path:
+    collection = json.loads(Path(paths["collection"]).read_text())
+    collection_index = {row["ticker"]: row for row in collection["companies"]}
+    return _write(
+        destination,
+        {
+            "schema_version": CONFIG_SCHEMA_VERSION,
+            "financial_as_of": "2026-10-08",
+            "collection_scope_companies": list(companies),
+            "source_provenance": [
+                {
+                    "ticker": company["ticker"],
+                    "cik": company["cik"],
+                    "collector_source_commit_sha": (
+                        "1d3a068feb74b43145df3abcb506b1285cdf6353"
+                        if company["ticker"] == "FIVE"
+                        else "4077e87097c294ed779186b613157839f215a63e"
+                    ),
+                    "plan_sha256": collection_index[company["ticker"]]["plan_sha256"],
+                    "intake_sha256": _sha256(
+                        Path(paths["collection"]).parent
+                        / f"companies/{company['ticker']}/intake/history_intake.json"
+                    ),
+                    "history_manifest_sha256": _sha256(histories[company["ticker"]]),
+                }
+                for company in companies
+            ],
+        },
+    )
+
+
+def test_generic_quality_subset_pass_reopens_all_source_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _mixed_v2_fixture(tmp_path)
+    histories = _build_ready_histories(
+        paths, tmp_path, monkeypatch, selected_tickers=("FIVE",)
+    )
+    companies = ({"ticker": "FIVE", "cik": "0000000123"},)
+    config = _quality_config(
+        paths, histories, tmp_path / "quality-config.json", companies=companies
+    )
+    publication = prepare_generic_metric_quality(
+        config_path=config,
+        collection_manifest=Path(paths["collection"]),
+        package_root=Path(paths["packages"]),
+        history_manifests=histories,
+        source_index_destination=tmp_path / "quality-indexes",
+        source_binding_destination=tmp_path / "quality-bindings",
+        destination=tmp_path / "quality",
+        producer_revision="e" * 40,
+    )
+
+    reader = GenericMetricQualityReader(
+        publication.root, manifest_sha256=_sha256(publication.manifest_path)
+    )
+    result = reader.verify_sources(
+        collection_manifest=Path(paths["collection"]),
+        history_manifest_sha256s={"FIVE": _sha256(histories["FIVE"])},
+        financial_as_of="2026-10-08",
+        expected_companies=companies,
+    )
+
+    assert result["state"] == "PASS"
+    assert result["filing_count"] == 1
+    assert reader.manifest["collection_scope_mode"] == "EXPLICIT_SUBSET"
+    assert reader.manifest["assurance_scope"] == "RAW_TRANSFORM_SOURCE_CONFORMANCE_ONLY"
+    assert reader.manifest["full_financial_semantic_assurance"] is False
+    assert (
+        reader.manifest["collector_provenance_assurance"]
+        == "CONFIG_DECLARED_NOT_SOURCE_VERIFIED"
+    )
+    assert (
+        reader.manifest["collector_provenance_granularity"]
+        == "COMPANY_CONFIG_DECLARATION"
+    )
+    status = operations.read_universe_status(manifest_path=Path(paths["collection"]))
+    assert {row.ticker: row.state for row in status.companies} == {
+        "FIVE": "READY",
+        "SIX": "RAW_COMPLETE",
+    }
+
+
+def test_generic_quality_subset_ignores_unselected_missing_intake(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _mixed_v2_fixture(tmp_path)
+    histories = _build_ready_histories(
+        paths, tmp_path, monkeypatch, selected_tickers=("FIVE",)
+    )
+    outside_intake = (
+        Path(paths["collection"]).parent
+        / "companies/SIX/intake/history_intake.json"
+    )
+    outside_intake.unlink()
+    companies = ({"ticker": "FIVE", "cik": "0000000123"},)
+    config = _quality_config(
+        paths, histories, tmp_path / "subset-config.json", companies=companies
+    )
+
+    publication = prepare_generic_metric_quality(
+        config_path=config,
+        collection_manifest=Path(paths["collection"]),
+        package_root=Path(paths["packages"]),
+        history_manifests=histories,
+        source_index_destination=tmp_path / "subset-indexes",
+        source_binding_destination=tmp_path / "subset-bindings",
+        destination=tmp_path / "subset-quality",
+        producer_revision="e" * 40,
+    )
+
+    status = operations.read_universe_status(manifest_path=Path(paths["collection"]))
+    assert {row.ticker: row.state for row in status.companies} == {
+        "FIVE": "READY",
+        "SIX": "PREPARED",
+    }
+    assert GenericMetricQualityReader(publication.root).verify_sources(
+        collection_manifest=Path(paths["collection"]),
+        history_manifest_sha256s={"FIVE": _sha256(histories["FIVE"])},
+        financial_as_of="2026-10-08",
+        expected_companies=companies,
+    )["state"] == "PASS"
+
+
+def test_quality_reader_never_reparses_inline_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _mixed_v2_fixture(tmp_path)
+    histories = _build_ready_histories(
+        paths, tmp_path, monkeypatch, selected_tickers=("FIVE",)
+    )
+    companies = ({"ticker": "FIVE", "cik": "0000000123"},)
+    config = _quality_config(
+        paths, histories, tmp_path / "reader-config.json", companies=companies
+    )
+    publication = prepare_generic_metric_quality(
+        config_path=config,
+        collection_manifest=Path(paths["collection"]),
+        package_root=Path(paths["packages"]),
+        history_manifests=histories,
+        source_index_destination=tmp_path / "reader-indexes",
+        source_binding_destination=tmp_path / "reader-bindings",
+        destination=tmp_path / "reader-quality",
+        producer_revision="e" * 40,
+    )
+
+    def forbidden_reparse(*args: object, **kwargs: object) -> object:
+        raise AssertionError("quality reader must not parse SEC inline source")
+
+    monkeypatch.setattr(source_binding_module, "_extract_source_rows", forbidden_reparse)
+    assert GenericMetricQualityReader(publication.root).verify_sources(
+        collection_manifest=Path(paths["collection"]),
+        history_manifest_sha256s={"FIVE": _sha256(histories["FIVE"])},
+        financial_as_of="2026-10-08",
+        expected_companies=companies,
+    )["state"] == "PASS"
+
+
+def test_generic_quality_full_mixed_v5_v6_fresh_chain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _mixed_v2_fixture(tmp_path)
+    histories = _build_ready_histories(paths, tmp_path, monkeypatch)
+    companies = (
+        {"ticker": "FIVE", "cik": "0000000123"},
+        {"ticker": "SIX", "cik": "0000000456"},
+    )
+    config = _quality_config(
+        paths, histories, tmp_path / "mixed-quality-config.json", companies=companies
+    )
+    publication = prepare_generic_metric_quality(
+        config_path=config,
+        collection_manifest=Path(paths["collection"]),
+        package_root=Path(paths["packages"]),
+        history_manifests=histories,
+        source_index_destination=tmp_path / "mixed-quality-indexes",
+        source_binding_destination=tmp_path / "mixed-quality-bindings",
+        destination=tmp_path / "mixed-quality",
+        producer_revision="e" * 40,
+    )
+    reader = GenericMetricQualityReader(publication.root)
+
+    assert reader.verify_sources(
+        collection_manifest=Path(paths["collection"]),
+        history_manifest_sha256s={
+            ticker: _sha256(path) for ticker, path in histories.items()
+        },
+        financial_as_of="2026-10-08",
+        expected_companies=companies,
+    )["state"] == "PASS"
+    assert reader.manifest["collection_scope_mode"] == "FULL"
+    assert [row["parser_version"] for row in reader.manifest["parser_profiles"]] == [
+        "m2-layer1-v5",
+        "m2-layer1-v6",
+    ]
+    assert reader.manifest["filing_count"] == 2
+
+
+def test_quality_publisher_rejects_jointly_omitted_source_indexes_and_bindings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _mixed_v2_fixture(tmp_path)
+    histories = _build_ready_histories(paths, tmp_path, monkeypatch)
+    companies = (
+        {"ticker": "FIVE", "cik": "0000000123"},
+        {"ticker": "SIX", "cik": "0000000456"},
+    )
+    config = _quality_config(
+        paths, histories, tmp_path / "joint-omission-config.json", companies=companies
+    )
+    indexes = write_source_indexes_v2(
+        collection_manifest=Path(paths["collection"]),
+        package_root=Path(paths["packages"]),
+        destination=tmp_path / "joint-omission-indexes",
+    )
+    publication = publish_source_bindings_v2(
+        collection_manifest=Path(paths["collection"]),
+        package_root=Path(paths["packages"]),
+        duration_source_index=indexes.duration_path,
+        correction_source_index=indexes.correction_path,
+        destination=tmp_path / "joint-omission-bindings",
+        producer_revision="e" * 40,
+    )
+
+    duration = json.loads(indexes.duration_path.read_text())
+    duration["duration_facts"] = []
+    duration["format_counts"] = {key: 0 for key in duration["format_counts"]}
+    _write(indexes.duration_path, duration)
+    correction = json.loads(indexes.correction_path.read_text())
+    correction["facts"] = []
+    correction["fact_count"] = 0
+    _write(indexes.correction_path, correction)
+    bindings_path = publication.root / BINDINGS_NAME
+    binding_records = json.loads(bindings_path.read_text())
+    binding_records["bindings"] = []
+    binding_records["binding_count"] = 0
+    _write(bindings_path, binding_records)
+    manifest_path = publication.root / SOURCE_BINDINGS_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text())
+    manifest["candidate_inputs"]["duration_source_index"]["sha256"] = _sha256(
+        indexes.duration_path
+    )
+    manifest["candidate_inputs"]["correction_source_index"]["sha256"] = _sha256(
+        indexes.correction_path
+    )
+    manifest["counts"]["duration_bindings"] = 0
+    manifest["counts"]["approved_transform_corrections"] = 0
+    manifest["files"][BINDINGS_NAME] = {
+        "sha256": _sha256(bindings_path),
+        "size": bindings_path.stat().st_size,
+    }
+    identity = {key: value for key, value in manifest.items() if key != "publication_id"}
+    manifest["publication_id"] = "source-bindings-v2-" + hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, indent=2, sort_keys=True).encode()
+    ).hexdigest()[:24]
+    _write(manifest_path, manifest)
+
+    SourceBindingsV2Reader(publication.root).verify_all()
+    with pytest.raises(ValueError, match="producer completeness scan differs"):
+        publish_generic_metric_quality(
+            config_path=config,
+            collection_manifest=Path(paths["collection"]),
+            source_binding_publication=publication.root,
+            history_manifests=histories,
+            destination=tmp_path / "joint-omission-quality",
+            producer_revision="e" * 40,
+        )
+    assert not (tmp_path / "joint-omission-quality").exists()
+
+
+def test_generic_quality_accepts_legitimate_zero_governed_source_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _mixed_v2_fixture(tmp_path)
+    for fixture_name in ("first", "second"):
+        source = paths[fixture_name]
+        source_package = Path(source["package"])
+        package = Path(paths["packages"]) / source_package.relative_to(
+            Path(source["packages"])
+        )
+        with zipfile.ZipFile(package) as archive:
+            primary = archive.read("test.htm")
+        primary = primary.replace(b"ixt-sec:duryear", b"ixt-sec:datedaymonthyear")
+        primary = primary.replace(b">Nasdaq<", b">Not governed<")
+        with zipfile.ZipFile(package, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("test.htm", primary)
+        snapshot_manifest = Path(source["snapshot"]) / "layer1_manifest.json"
+        snapshot = json.loads(snapshot_manifest.read_text())
+        snapshot["package_sha256"] = _sha256(package)
+        _write(snapshot_manifest, snapshot)
+
+    histories = _build_ready_histories(paths, tmp_path, monkeypatch)
+    companies = (
+        {"ticker": "FIVE", "cik": "0000000123"},
+        {"ticker": "SIX", "cik": "0000000456"},
+    )
+    config = _quality_config(
+        paths, histories, tmp_path / "zero-source-config.json", companies=companies
+    )
+    publication = prepare_generic_metric_quality(
+        config_path=config,
+        collection_manifest=Path(paths["collection"]),
+        package_root=Path(paths["packages"]),
+        history_manifests=histories,
+        source_index_destination=tmp_path / "zero-source-indexes",
+        source_binding_destination=tmp_path / "zero-source-bindings",
+        destination=tmp_path / "zero-source-quality",
+        producer_revision="e" * 40,
+    )
+    report = json.loads(publication.report_path.read_text())
+    assert report["duration_fact_count"] == 0
+    assert report["approved_lexical_repair_count"] == 0
+    assert GenericMetricQualityReader(publication.root).verify_sources(
+        collection_manifest=Path(paths["collection"]),
+        history_manifest_sha256s={
+            ticker: _sha256(path) for ticker, path in histories.items()
+        },
+        financial_as_of="2026-10-08",
+        expected_companies=companies,
+    )["state"] == "PASS"
+
+
+def test_generic_quality_rejects_history_scope_and_publishes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _mixed_v2_fixture(tmp_path)
+    histories = _build_ready_histories(
+        paths, tmp_path, monkeypatch, selected_tickers=("FIVE",)
+    )
+    companies = ({"ticker": "FIVE", "cik": "0000000123"},)
+    config = _quality_config(
+        paths, histories, tmp_path / "quality-config.json", companies=companies
+    )
+    with pytest.raises(ValueError, match="accepted history manifests differ"):
+        prepare_generic_metric_quality(
+            config_path=config,
+            collection_manifest=Path(paths["collection"]),
+            package_root=Path(paths["packages"]),
+            history_manifests={**histories, "SIX": histories["FIVE"]},
+            source_index_destination=tmp_path / "failed-indexes",
+            source_binding_destination=tmp_path / "failed-bindings",
+            destination=tmp_path / "failed-quality",
+            producer_revision="e" * 40,
+        )
+    assert not (tmp_path / "failed-quality").exists()
+
+
+def test_generic_quality_rejects_same_company_history_not_attested_by_ready_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _mixed_v2_fixture(tmp_path)
+    histories = _build_ready_histories(
+        paths, tmp_path, monkeypatch, selected_tickers=("FIVE",)
+    )
+    original = json.loads(histories["FIVE"].read_text())
+    forged = _write(
+        tmp_path / "foreign-history/history_manifest.json",
+        {
+            **original,
+            "version": "NOT_A_HISTORY_PUBLICATION",
+            "source_intake": str(tmp_path / "unrelated-intake.json"),
+            "tables": [],
+        },
+    )
+    supplied = {"FIVE": forged}
+    companies = ({"ticker": "FIVE", "cik": "0000000123"},)
+    config = _quality_config(
+        paths, supplied, tmp_path / "forged-config.json", companies=companies
+    )
+
+    with pytest.raises(ValueError, match="differs from READY build"):
+        prepare_generic_metric_quality(
+            config_path=config,
+            collection_manifest=Path(paths["collection"]),
+            package_root=Path(paths["packages"]),
+            history_manifests=supplied,
+            source_index_destination=tmp_path / "forged-indexes",
+            source_binding_destination=tmp_path / "forged-bindings",
+            destination=tmp_path / "forged-quality",
+            producer_revision="e" * 40,
+        )
+    assert not (tmp_path / "forged-quality").exists()
+
+
+def test_generic_quality_rejects_cutoff_before_any_output(tmp_path: Path) -> None:
+    paths = _mixed_v2_fixture(tmp_path)
+    config = _write(
+        tmp_path / "wrong-cutoff.json",
+        {
+            "schema_version": CONFIG_SCHEMA_VERSION,
+            "financial_as_of": "2026-10-09",
+            "collection_scope_companies": [
+                {"ticker": "FIVE", "cik": "0000000123"}
+            ],
+            "source_provenance": [
+                {
+                    "ticker": "FIVE",
+                    "cik": "0000000123",
+                    "collector_source_commit_sha": "f" * 40,
+                    "plan_sha256": "a" * 64,
+                    "intake_sha256": "b" * 64,
+                    "history_manifest_sha256": "c" * 64,
+                }
+            ],
+        },
+    )
+    with pytest.raises(ValueError, match="cutoff differs"):
+        prepare_generic_metric_quality(
+            config_path=config,
+            collection_manifest=Path(paths["collection"]),
+            package_root=Path(paths["packages"]),
+            history_manifests={},
+            source_index_destination=tmp_path / "cutoff-indexes",
+            source_binding_destination=tmp_path / "cutoff-bindings",
+            destination=tmp_path / "cutoff-quality",
+            producer_revision="f" * 40,
+        )
+    assert not (tmp_path / "cutoff-quality").exists()
+
+
+def test_generic_quality_rejects_raw_normalization_mismatch_without_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _mixed_v2_fixture(tmp_path)
+    histories = _build_ready_histories(
+        paths, tmp_path, monkeypatch, selected_tickers=("FIVE",)
+    )
+    companies = ({"ticker": "FIVE", "cik": "0000000123"},)
+    config = _quality_config(
+        paths, histories, tmp_path / "quality-config.json", companies=companies
+    )
+    facts_path = Path(paths["first"]["snapshot"]) / "fact.parquet"
+    facts = pl.read_parquet(facts_path).with_columns(
+        pl.when(pl.col("raw_value") == "P1Y6M")
+        .then(pl.lit("P9Y"))
+        .otherwise(pl.col("raw_value"))
+        .alias("raw_value"),
+        pl.when(pl.col("value_text") == "P1Y6M")
+        .then(pl.lit("P9Y"))
+        .otherwise(pl.col("value_text"))
+        .alias("value_text"),
+    )
+    facts.write_parquet(facts_path)
+
+    with pytest.raises(ValueError, match="conformance did not pass"):
+        prepare_generic_metric_quality(
+            config_path=config,
+            collection_manifest=Path(paths["collection"]),
+            package_root=Path(paths["packages"]),
+            history_manifests=histories,
+            source_index_destination=tmp_path / "mismatch-indexes",
+            source_binding_destination=tmp_path / "mismatch-bindings",
+            destination=tmp_path / "mismatch-quality",
+            producer_revision="f" * 40,
+        )
+    assert not (tmp_path / "mismatch-quality").exists()

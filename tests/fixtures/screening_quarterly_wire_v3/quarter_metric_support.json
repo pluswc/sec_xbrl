@@ -1,0 +1,135 @@
+{
+  "fixture_kind": "SYNTHETIC_QUARTER_SCHEMA_FIXTURE_V3",
+  "records": [
+    {
+      "available_bucket_count": 8,
+      "cik": "0000000001",
+      "definition_version": "quarter-reported-core-v1",
+      "fixed_bucket_count": 8,
+      "metric_id": "quarter_revenue",
+      "source_kind_counts": {
+        "REPORTED": 8
+      },
+      "ticker": "SYNTH1",
+      "unavailable_bucket_count": 0,
+      "unavailable_reason_counts": {}
+    },
+    {
+      "available_bucket_count": 2,
+      "cik": "0000000001",
+      "definition_version": "quarter-derived-additive-v1",
+      "fixed_bucket_count": 8,
+      "metric_id": "quarter_cfo",
+      "source_kind_counts": {
+        "DERIVED_QUARTER": 1,
+        "REPORTED": 1,
+        "UNAVAILABLE": 6
+      },
+      "ticker": "SYNTH1",
+      "unavailable_bucket_count": 6,
+      "unavailable_reason_counts": {
+        "INPUT_NOT_REPORTED": 6
+      }
+    },
+    {
+      "available_bucket_count": 0,
+      "cik": "0000000001",
+      "definition_version": "quarter-reported-core-v1",
+      "fixed_bucket_count": 8,
+      "metric_id": "quarter_gross_profit",
+      "source_kind_counts": {
+        "REPORTED": 1,
+        "UNAVAILABLE": 7
+      },
+      "ticker": "SYNTH1",
+      "unavailable_bucket_count": 8,
+      "unavailable_reason_counts": {
+        "INPUT_NOT_REPORTED": 7,
+        "MAPPING_REVIEW_REQUIRED": 1
+      }
+    },
+    {
+      "available_bucket_count": 0,
+      "cik": "0000000001",
+      "definition_version": "quarter-ttm-v1",
+      "fixed_bucket_count": 8,
+      "metric_id": "ttm_revenue",
+      "source_kind_counts": {
+        "DERIVED_METRIC": 1,
+        "UNAVAILABLE": 7
+      },
+      "ticker": "SYNTH1",
+      "unavailable_bucket_count": 8,
+      "unavailable_reason_counts": {
+        "INPUTS_NOT_COMPATIBLE": 1,
+        "INSUFFICIENT_CONTIGUOUS_QUARTERS": 7
+      }
+    },
+    {
+      "available_bucket_count": 0,
+      "cik": "0000000002",
+      "definition_version": "quarter-reported-core-v1",
+      "fixed_bucket_count": 8,
+      "metric_id": "quarter_revenue",
+      "source_kind_counts": {
+        "REPORTED": 1,
+        "UNAVAILABLE": 7
+      },
+      "ticker": "SYNTH2",
+      "unavailable_bucket_count": 8,
+      "unavailable_reason_counts": {
+        "NO_FILING_AS_OF_CUTOFF": 7,
+        "UNSUPPORTED_FISCAL_QUARTER_DURATION": 1
+      }
+    },
+    {
+      "available_bucket_count": 0,
+      "cik": "0000000002",
+      "definition_version": "quarter-derived-additive-v1",
+      "fixed_bucket_count": 8,
+      "metric_id": "quarter_cfo",
+      "source_kind_counts": {
+        "UNAVAILABLE": 8
+      },
+      "ticker": "SYNTH2",
+      "unavailable_bucket_count": 8,
+      "unavailable_reason_counts": {
+        "NO_FILING_AS_OF_CUTOFF": 7,
+        "UNSUPPORTED_FISCAL_QUARTER_DURATION": 1
+      }
+    },
+    {
+      "available_bucket_count": 0,
+      "cik": "0000000002",
+      "definition_version": "quarter-reported-core-v1",
+      "fixed_bucket_count": 8,
+      "metric_id": "quarter_gross_profit",
+      "source_kind_counts": {
+        "UNAVAILABLE": 8
+      },
+      "ticker": "SYNTH2",
+      "unavailable_bucket_count": 8,
+      "unavailable_reason_counts": {
+        "NO_FILING_AS_OF_CUTOFF": 7,
+        "UNSUPPORTED_FISCAL_QUARTER_DURATION": 1
+      }
+    },
+    {
+      "available_bucket_count": 0,
+      "cik": "0000000002",
+      "definition_version": "quarter-ttm-v1",
+      "fixed_bucket_count": 8,
+      "metric_id": "ttm_revenue",
+      "source_kind_counts": {
+        "UNAVAILABLE": 8
+      },
+      "ticker": "SYNTH2",
+      "unavailable_bucket_count": 8,
+      "unavailable_reason_counts": {
+        "INPUTS_NOT_COMPATIBLE": 1,
+        "NO_FILING_AS_OF_CUTOFF": 7
+      }
+    }
+  ],
+  "schema_version": "quarter-metric-support-v1"
+}
