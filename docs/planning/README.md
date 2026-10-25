@@ -145,9 +145,11 @@ source `a83a3b2…`의 실제 AAPL 단일 후보와 full reference 동등성은 
 2026-10-25 후속 [quarter cell delta v1](../implementation/history-quarter-cell-delta-20261025.md)은
 고정된 as-of·정책 아래 strictly-later 단일 `10-Q`의 disjoint fiscal suffix를 private
 capability로 증명해 unchanged final cell을 native Parquet으로 재사용하고, 새 column과
-파생 dependency closure만 기존 규칙으로 계산하는 opt-in source 후보다. cached Q1→Q2의
-FAST full-oracle 동등성은 확인했으나 실제 AAPL 시간·RSS, 독립 검증, 로컬 수락과 운영
-반영은 아직 완료되지 않았다.
+파생 dependency closure만 기존 규칙으로 계산한다. 실제 AAPL 22→23 한 회에서 quarter
+publisher 67.07%, 공통 앞단을 포함한 전체 22.88%가 짧았고 RSS는 0.214% 증가했다.
+31개 파일·31,230개 record의 full reference 동등성, 독립 25건 PASS와 ROOT 로컬 수락을
+확인했다. 수락 범위는 opt-in source와 이 bounded actual pair이며 `main` 병합과 운영
+runtime 반영은 아직 완료되지 않았다.
 
 ## 증거와 재현 — 임시 디렉터리에 의존하지 않는 인계
 

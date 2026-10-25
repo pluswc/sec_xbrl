@@ -13,6 +13,13 @@ History publication을 명시적으로 받아 재사용한다. 기본 `build_his
 Q4/YTD 파생 규칙을 바꾸지 않는다. 과거 50개 회사의 완료 검증과 109단계 독립 감사도
 다시 실행하지 않았다.
 
+2026-10-25의 좁은 후속 구현은 고정 as-of·정책의 strictly-later 비수정 `10-Q`에서
+dependency proof가 성립할 때 quarter publisher의 unchanged cell과 기존 derived cell을
+재사용한다. 최종 수락 상태와 실제 측정은
+[History quarter cell delta v1](history-quarter-cell-delta-20261025.md)에 기록한다. 아래의
+dirty period class 전체 재생성 설명은 이 FAST 조건을 증명하지 못한 입력에 적용되는
+보수적 fallback이며, 이 문서의 기존 append 수락 범위는 그대로다.
+
 ## 재사용 계약
 
 재사용은 다음 조건을 모두 증명할 때만 허용한다.
