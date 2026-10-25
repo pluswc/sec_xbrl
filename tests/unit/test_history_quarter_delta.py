@@ -148,6 +148,7 @@ def test_delta_derivation_reuses_exact_unchanged_cell_and_counts_removal(tmp_pat
     prior_metric = deepcopy(derived[0])
     prior_cell = deepcopy(first_target["extra_cells"][0])
     metric_id = prior_metric["derived_metric_id"]
+    scoped_metric_id = ("TEST", "AS_FILED", metric_id)
     assert first_metrics["derived_recomputed_cells"] == 1
 
     later["inputs_unchanged"] = True
@@ -159,8 +160,8 @@ def test_delta_derivation_reuses_exact_unchanged_cell_and_counts_removal(tmp_pat
         grouped,
         {key: set()},
         spill,
-        prior_derived_cells={metric_id: prior_cell},
-        prior_derived_metrics={metric_id: prior_metric},
+        prior_derived_cells={scoped_metric_id: prior_cell},
+        prior_derived_metrics={scoped_metric_id: prior_metric},
         delta_metrics=reused_metrics,
     )
     assert tuple(reused) == (prior_metric,)
@@ -175,8 +176,8 @@ def test_delta_derivation_reuses_exact_unchanged_cell_and_counts_removal(tmp_pat
         {},
         {key: set()},
         spill,
-        prior_derived_cells={metric_id: prior_cell},
-        prior_derived_metrics={metric_id: prior_metric},
+        prior_derived_cells={scoped_metric_id: prior_cell},
+        prior_derived_metrics={scoped_metric_id: prior_metric},
         delta_metrics=removed_metrics,
     )
     assert removed_metrics["derived_removed_cells"] == 1
@@ -219,8 +220,8 @@ def test_delta_derivation_reuses_exact_unchanged_cell_and_counts_removal(tmp_pat
             actual_grouped,
             {key: set()},
             actual_spill,
-            prior_derived_cells={metric_id: prior_cell},
-            prior_derived_metrics={metric_id: prior_metric},
+            prior_derived_cells={scoped_metric_id: prior_cell},
+            prior_derived_metrics={scoped_metric_id: prior_metric},
             delta_metrics=actual_metrics,
         )
         assert actual_metrics["derived_reused_cells"] == 1
@@ -235,8 +236,8 @@ def test_delta_derivation_reuses_exact_unchanged_cell_and_counts_removal(tmp_pat
             grouped,
             {key: set()},
             spill,
-            prior_derived_cells={metric_id: corrupted},
-            prior_derived_metrics={metric_id: prior_metric},
+            prior_derived_cells={scoped_metric_id: corrupted},
+            prior_derived_metrics={scoped_metric_id: prior_metric},
             delta_metrics=defaultdict(int),
         )
 
@@ -289,3 +290,16 @@ def test_delta_native_reuse_filters_derived_and_rebinds_only_publication(tmp_pat
             tmp_path / "owned" / "bad.parquet",
             publication=publication,
         )
+
+
+def test_delta_cell_identity_is_scoped_by_table_and_view() -> None:
+    index: dict[tuple[str, str, str], set[str]] = {}
+    as_filed = ("AAPL", "AS_FILED", "QTD_3M")
+    latest = ("AAPL", "LATEST_REPORTED", "QTD_3M")
+    quarters._delta_bind_cell_target(index, as_filed, "shared-cell")
+    quarters._delta_bind_cell_target(index, latest, "shared-cell")
+
+    assert quarters._delta_route_cell_target(index, as_filed, "shared-cell") == as_filed
+    assert quarters._delta_route_cell_target(index, latest, "shared-cell") == latest
+    with pytest.raises(quarters._QuarterDeltaFallback, match="identity is duplicated"):
+        quarters._delta_bind_cell_target(index, as_filed, "shared-cell")

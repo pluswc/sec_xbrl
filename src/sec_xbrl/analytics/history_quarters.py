@@ -812,6 +812,34 @@ class _DeltaMetadataMap(dict[str, dict[str, Any]]):
         return tuple(self.values())
 
 
+def _delta_bind_cell_target(
+    index: MutableMapping[tuple[str, str, str], set[str]],
+    table_key: tuple[str, str, str],
+    cell_id: str,
+) -> None:
+    """Bind a cell identity inside its table; identities may repeat by view."""
+    identities = index.setdefault(table_key, set())
+    if cell_id in identities:
+        raise _QuarterDeltaFallback("quarter delta cell identity is duplicated")
+    identities.add(cell_id)
+
+
+def _delta_route_cell_target(
+    index: Mapping[tuple[str, str, str], set[str]],
+    source_key: tuple[str, str, str],
+    cell_id: str,
+) -> tuple[str, str, str]:
+    """Resolve one source cell within its ticker/view output scope."""
+    matches = tuple(
+        target_key
+        for target_key, identities in index.items()
+        if target_key[:2] == source_key[:2] and cell_id in identities
+    )
+    if len(matches) != 1:
+        raise _QuarterDeltaFallback("quarter delta output identity is unproven")
+    return matches[0]
+
+
 def _new_delta_target(table: Mapping[str, Any], period_class: str, spill: Any) -> dict[str, Any]:
     return {
         "table": {
@@ -1107,8 +1135,8 @@ def _spill_reported_delta(
 
     additive_records = spill.sequence()
     target_indexes: dict[tuple[str, str, str], int] = {}
-    previous_cell_targets: dict[str, tuple[str, str, str]] = {}
-    new_cell_targets: dict[str, tuple[str, str, str]] = {}
+    previous_cell_targets: dict[tuple[str, str, str], set[str]] = {}
+    new_cell_targets: dict[tuple[str, str, str], set[str]] = {}
 
     def ensure_target(table: Mapping[str, Any]) -> tuple[tuple[str, str, str], dict[str, Any]]:
         key = _delta_table_key(table)
@@ -1155,9 +1183,7 @@ def _spill_reported_delta(
             raise _QuarterDeltaFallback("quarter delta cell coordinate is duplicated")
         materialized[key].add(coordinate)
         cell_id = str(cell["fiscal_time_series_cell_id"])
-        if cell_id in new_cell_targets:
-            raise _QuarterDeltaFallback("quarter delta cell identity is duplicated")
-        new_cell_targets[cell_id] = key
+        _delta_bind_cell_target(new_cell_targets, key, cell_id)
         target["cell_buffer"].append(cell)
         target["cell_buffer_bytes"] += _delta_value_size(cell, _DELTA_CHUNK_MAX_BYTES)
         lineage = cell.get("value_lineage")
@@ -1252,9 +1278,7 @@ def _spill_reported_delta(
                 raise _QuarterDeltaFallback("previous final cell coordinate is duplicated")
             materialized[key].add(coordinate)
             final_cell_id = str(cell_id)
-            if final_cell_id in previous_cell_targets:
-                raise _QuarterDeltaFallback("previous final cell identity is duplicated")
-            previous_cell_targets[final_cell_id] = key
+            _delta_bind_cell_target(previous_cell_targets, key, final_cell_id)
             direct_count += 1
 
         native_path = (
@@ -1281,9 +1305,10 @@ def _spill_reported_delta(
             accepted=frozenset({"DERIVED"}),
         ):
             cell_id = str(cell["fiscal_time_series_cell_id"])
-            if cell_id in prior_derived_cells:
+            derived_key = (key[0], key[1], cell_id)
+            if derived_key in prior_derived_cells:
                 raise _QuarterDeltaFallback("previous derived cell identity is duplicated")
-            prior_derived_cells[cell_id] = cell
+            prior_derived_cells[derived_key] = cell
             table_derived_count += 1
         if table_derived_count != derived_count:
             raise _QuarterDeltaFallback("previous derived cell count changed")
@@ -1398,10 +1423,14 @@ def _spill_reported_delta(
         for source_cell_id, row_id, source_column_id in rows:
             final_cell_id = _id("reclassified-cell", source_cell_id, PERIOD_RULE)
             if str(source_column_id) in added_columns:
-                target_key = new_cell_targets.get(final_cell_id)
+                target_key = _delta_route_cell_target(
+                    new_cell_targets, _source_key, final_cell_id
+                )
             else:
-                target_key = previous_cell_targets.get(final_cell_id)
-            if target_key is None or target_key not in targets:
+                target_key = _delta_route_cell_target(
+                    previous_cell_targets, _source_key, final_cell_id
+                )
+            if target_key not in targets:
                 raise _QuarterDeltaFallback("quarter delta output order is unproven")
             target = targets[target_key]
             if final_cell_id in target["cell_order"]:
@@ -1417,9 +1446,10 @@ def _spill_reported_delta(
         _history_dataset_path(previous_final.root, derived_info), derived_info
     ):
         metric_id = str(metric["derived_metric_id"])
-        if metric_id in prior_derived_metrics:
+        derived_key = (str(metric.get("ticker")), str(metric.get("view")), metric_id)
+        if derived_key in prior_derived_metrics:
             raise _QuarterDeltaFallback("previous derived metric identity is duplicated")
-        prior_derived_metrics[metric_id] = metric
+        prior_derived_metrics[derived_key] = metric
     if set(prior_derived_cells) != set(prior_derived_metrics):
         raise _QuarterDeltaFallback("previous derived cells and metrics disagree")
     for key, target in targets.items():
@@ -1919,7 +1949,7 @@ def _derive_quarter_targets(
     """Keep candidate source aliases within the derivation phase."""
     derived = [] if spill is None else spill.sequence()
     resolve = _resolve_additive_locator if spill is None else spill.resolve
-    retained_derived_ids: set[str] = set()
+    retained_derived_ids: set[tuple[str, str, str]] = set()
     for ticker, view in sorted({(key[0], key[1]) for key in targets}):
         qtd_key = (ticker, view, "QTD_3M")
         qtd = targets.get(qtd_key)
@@ -1958,13 +1988,14 @@ def _derive_quarter_targets(
                 quarter,
                 _scope(later["value_lineage"]),
             )
+            derived_key = (ticker, view, metric_id)
             reusable = (
                 reusable
-                and metric_id in prior_derived_metrics
-                and metric_id in prior_derived_cells
+                and derived_key in prior_derived_metrics
+                and derived_key in prior_derived_cells
             )
             if reusable:
-                metric = prior_derived_metrics[metric_id]
+                metric = prior_derived_metrics[derived_key]
             else:
                 metric = derive_quarter(later, earlier, quarter=quarter)
             if metric is None:
@@ -1974,7 +2005,7 @@ def _derive_quarter_targets(
             if (row_id, column_id) in materialized[qtd_key]:
                 continue
             if reusable:
-                prior_cell = prior_derived_cells[metric_id]
+                prior_cell = prior_derived_cells[derived_key]
                 if (
                     metric.get("derived_metric_id") != metric_id
                     or prior_cell.get("fiscal_time_series_cell_id") != metric_id
@@ -2001,7 +2032,7 @@ def _derive_quarter_targets(
                 qtd["extra_rows"].setdefault(row_id, source_row)
                 derived.append(metric)
                 qtd["extra_cells"].append(prior_cell)
-                retained_derived_ids.add(metric_id)
+                retained_derived_ids.add(derived_key)
                 if delta_metrics is not None:
                     delta_metrics["derived_reused_cells"] += 1
                 continue
@@ -2023,12 +2054,14 @@ def _derive_quarter_targets(
                                   "fiscal_time_series_column_id": column_id, "value_status": "DERIVED", "value_numeric": metric["value_numeric"],
                                   "value_text": None, "comparability_status": "COMPATIBLE_INPUTS", "comparability_reason": metric["basis_compatibility"],
                                   "definition": definition, "binding": binding, "value_lineage": value})
-            retained_derived_ids.add(str(metric["derived_metric_id"]))
+            retained_derived_ids.add(derived_key)
             if delta_metrics is not None:
                 delta_metrics["derived_recomputed_cells"] += 1
     if prior_derived_metrics is not None and delta_metrics is not None:
         delta_metrics["derived_removed_cells"] = sum(
-            1 for metric_id in prior_derived_metrics if metric_id not in retained_derived_ids
+            1
+            for derived_key in prior_derived_metrics
+            if derived_key not in retained_derived_ids
         )
     return derived
 
