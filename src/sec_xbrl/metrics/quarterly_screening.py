@@ -1667,11 +1667,13 @@ def _inventory_missing_reason(
     inventory: list[dict[str, Any]], bucket: tuple[int, int]
 ) -> str:
     row = next(
-        item
-        for item in inventory
-        if (item["calendar_year"], item["calendar_quarter"]) == bucket
+        (item for item in inventory
+         if (item["calendar_year"], item["calendar_quarter"]) == bucket),
+        None,
     )
-    return "NO_FILING_AS_OF_CUTOFF" if row["bucket_status"] == "NO_FILING_AS_OF_CUTOFF" else "INPUT_NOT_REPORTED"
+    # Lookback inputs extend beyond the eight display inventory buckets. Absence
+    # of a metric there cannot assert that no filing existed at the cutoff.
+    return "NO_FILING_AS_OF_CUTOFF" if row is not None and row["bucket_status"] == "NO_FILING_AS_OF_CUTOFF" else "INPUT_NOT_REPORTED"
 
 
 def _unavailable_observation(

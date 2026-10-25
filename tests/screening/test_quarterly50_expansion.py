@@ -279,3 +279,23 @@ def test_expanded_catalog_cannot_silently_downgrade_to_legacy(tmp_path, catalog)
     write_json(path, manifest)
     with pytest.raises(ValueError, match="catalog"):
         QuarterlyScreeningMetricReader(root)
+
+
+@pytest.mark.parametrize("short_history", [False, True])
+def test_sparse_lookback_outside_display_stays_unavailable(short_history):
+    columns, cells, traces = _inputs()
+    cells = [cell for cell in cells if (
+        cell["fiscal_year"] >= 2026 if short_history
+        else not (cell["row_id"] == "cost" and cell["fiscal_year"] < 2025)
+    )]
+    ids = {cell["cell_id"] for cell in cells}
+    traces = [trace for trace in traces if trace["cell_id"] in ids]
+    observations, inventory = _records((columns, cells, traces))
+    assert len(inventory) == 8
+    assert len(observations) == 41 * 8
+    if short_history:
+        assert _row(observations, "ttm_revenue")["availability_status"] == "UNAVAILABLE"
+    else:
+        missing = _row(observations, "quarter_cost", 2024, 4)
+        assert missing["availability_status"] == "UNAVAILABLE"
+        assert missing["reason"] == "INPUT_NOT_REPORTED"
