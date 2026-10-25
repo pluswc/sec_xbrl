@@ -714,13 +714,23 @@ def build_history(*, intake_manifest: Path, output_root: Path,
         mode=validation_mode, state_root=validation_state_root
     )
     staging.rename(destination)
-    from sec_xbrl.analytics.history_quarters import publish_quarter_history
+    from sec_xbrl.analytics.history_quarters import (
+        _make_quarter_delta_capability,
+        publish_quarter_history,
+    )
+    delta_capability = None
+    if append_info is not None:
+        delta_capability = _make_quarter_delta_capability(
+            publication=destination,
+            previous_history=append_info["previous_history"],
+            previous_reported=append_info["previous_reported"],
+            dirty_period_classes=frozenset(dirty_period_classes),
+            append_payload=append_info["payload"],
+        )
     result = publish_quarter_history(
         publication=destination, output_root=output_root, reuse_roots=True,
         validation_mode=validation_mode, validation_state_root=validation_state_root,
-        previous_history=None if append_info is None else append_info["previous_history"],
-        previous_reported=None if append_info is None else append_info["previous_reported"],
-        dirty_period_classes=None if append_info is None else frozenset(dirty_period_classes),
+        _delta_capability=delta_capability,
     )
     if append_info is not None:
         from sec_xbrl.history_reuse import write_reuse_receipt

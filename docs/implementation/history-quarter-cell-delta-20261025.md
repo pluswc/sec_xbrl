@@ -17,6 +17,11 @@ AAPL 시간·RSS 측정, 독립 검증, 로컬 수락, 운영 반영과 `main` �
 한다. 각 source cell, source row와 source column은 타입을 보존해 비교한다. Parquet
 round-trip의 list/tuple 차이와 schema union의 부재/null padding만 기존 계약대로 허용하며
 `True`, `1`, `1.0`, candidate lineage와 provenance 차이는 같은 값으로 취급하지 않는다.
+델타 입력은 public path 인자로 활성화하지 않는다. strict append prefix, producer code와
+rule identity, 현재 input fingerprint와 T1~T4 root를 검증한 builder가 현재 reported
+manifest SHA에 묶어 발급한 private capability가 있을 때만 활성화한다. capability가 없거나
+다른 publication/input/root에 재사용되면 모든 이전 path와 dirty class를 버리고 full
+producer를 실행한다.
 
 일치한 reported cell은 기존 final cell의 ID·순서·payload를 재사용하고, 허용된
 `prior_candidate_publication` 경로만 현재 불변 reported publication으로 다시 묶는다.

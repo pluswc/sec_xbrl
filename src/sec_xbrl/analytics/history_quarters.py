@@ -21,6 +21,7 @@ import zlib
 from collections import Counter, defaultdict, deque
 from collections.abc import Mapping, MutableMapping, Sequence
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -527,6 +528,94 @@ class _QuarterDeltaFallback(ValueError):
     """Use the unchanged full quarter producer when delta proof is incomplete."""
 
 
+_QUARTER_DELTA_TOKEN = object()
+
+
+@dataclass(frozen=True, slots=True)
+class _QuarterDeltaCapability:
+    """Private proof minted only after the append builder validates its prefix."""
+
+    token: object
+    publication: Path
+    publication_manifest_sha256: str
+    previous_history: Path
+    previous_reported: Path
+    dirty_period_classes: frozenset[str]
+    input_fingerprint: str
+    operational_roots: tuple[tuple[str, str], ...]
+    producer_code_identity: str
+
+
+def _make_quarter_delta_capability(
+    *,
+    publication: Path,
+    previous_history: Path,
+    previous_reported: Path,
+    dirty_period_classes: frozenset[str],
+    append_payload: Mapping[str, Any],
+) -> _QuarterDeltaCapability:
+    """Bind a validated append plan to the immutable reported publication."""
+    from sec_xbrl.history_reuse import _producer_code_identity
+
+    publication = Path(publication).absolute()
+    manifest_path = publication / "history_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    roots = manifest.get("operational_roots")
+    if (
+        append_payload.get("mode") != "STRICTLY_LATER_SINGLE_CIK_APPEND_V1"
+        or manifest.get("history_append_reuse") != append_payload
+        or not isinstance(roots, dict)
+        or set(roots) != {"t1", "t2", "t3", "t4"}
+        or append_payload.get("previous_history") != str(Path(previous_history).absolute())
+        or append_payload.get("previous_reported") != str(Path(previous_reported).absolute())
+        or append_payload.get("dirty_period_classes") != sorted(dirty_period_classes)
+        or append_payload.get("producer_code_identity") != _producer_code_identity()
+    ):
+        raise ValueError("quarter delta requires a validated append capability")
+    return _QuarterDeltaCapability(
+        token=_QUARTER_DELTA_TOKEN,
+        publication=publication,
+        publication_manifest_sha256=hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        previous_history=Path(previous_history).absolute(),
+        previous_reported=Path(previous_reported).absolute(),
+        dirty_period_classes=frozenset(dirty_period_classes),
+        input_fingerprint=str(manifest["input_fingerprint"]),
+        operational_roots=tuple(sorted((str(key), str(value)) for key, value in roots.items())),
+        producer_code_identity=str(append_payload["producer_code_identity"]),
+    )
+
+
+def _quarter_delta_inputs(
+    capability: _QuarterDeltaCapability | None,
+    *,
+    publication: Path,
+    publication_manifest_sha256: str,
+    input_fingerprint: str,
+    operational_roots: Mapping[str, Path],
+) -> tuple[Path, Path, frozenset[str]] | None:
+    """Return proven delta inputs; unsupported or stale callers get full mode."""
+    if not (
+        capability is not None
+        and capability.token is _QUARTER_DELTA_TOKEN
+        and capability.publication == Path(publication).absolute()
+        and capability.publication_manifest_sha256 == publication_manifest_sha256
+        and capability.input_fingerprint == input_fingerprint
+        and capability.operational_roots
+        == tuple(
+            sorted(
+                (str(key), str(path.absolute()))
+                for key, path in operational_roots.items()
+            )
+        )
+    ):
+        return None
+    return (
+        capability.previous_history,
+        capability.previous_reported,
+        capability.dirty_period_classes,
+    )
+
+
 def _delta_typed_equal(left: Any, right: Any) -> bool:
     """Typed equality with the established Parquet schema-union boundary."""
     if isinstance(left, Mapping) and isinstance(right, Mapping):
@@ -888,6 +977,8 @@ def _spill_reported_delta(
                 if "prior_candidate_publication" in cell:
                     cell["prior_candidate_publication"] = str(publication.absolute())
                 period_class = prior_key[2]
+                if period_class != table["period_class"]:
+                    changes[f"{table['period_class']}->{period_class}"] += 1
                 column = {
                     **old_column,
                     "period_class": period_class,
@@ -1641,7 +1732,8 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
                             validation_state_root: Path | None = None,
                             previous_history: Path | None = None,
                             previous_reported: Path | None = None,
-                            dirty_period_classes: frozenset[str] | None = None) -> Path:
+                            dirty_period_classes: frozenset[str] | None = None,
+                            _delta_capability: _QuarterDeltaCapability | None = None) -> Path:
     """Upgrade reported period evidence and materialize governed quarter cells."""
     old = HistoryPublicationReader(publication, _recovery_access=_recovery_access)
     if _recovery_access is None:
@@ -1666,6 +1758,31 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
     input_fingerprint = observed.identity["layer2_run_fingerprint"]
     if (reuse_roots or operational_root is not None) and input_fingerprint != old.manifest["input_fingerprint"]:
         raise ValueError("reused period publications do not match reported panels")
+    delta_inputs = _quarter_delta_inputs(
+        _delta_capability,
+        publication=publication,
+        publication_manifest_sha256=hashlib.sha256(
+            (old.root / "history_manifest.json").read_bytes()
+        ).hexdigest(),
+        input_fingerprint=input_fingerprint,
+        operational_roots=roots,
+    )
+    if delta_inputs is not None:
+        previous_history, previous_reported, dirty_period_classes = delta_inputs
+    else:
+        if previous_history is not None or previous_reported is not None or dirty_period_classes is not None:
+            print(
+                json.dumps(
+                    {
+                        "stage": "QUARTER_CELL_DELTA_FULL_FALLBACK",
+                        "reason": "validated append capability is unavailable",
+                    }
+                ),
+                flush=True,
+            )
+        previous_history = None
+        previous_reported = None
+        dirty_period_classes = None
     _check_history_storage()
     staging = Path(tempfile.mkdtemp(prefix=".panels.partial-", dir=output_root))
     chunk_root = staging / ".chunks"
@@ -1686,6 +1803,26 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
         prior_derived_cells = None
         prior_derived_metrics = None
         delta_mode = previous_history is not None and previous_reported is not None and dirty_period_classes is not None
+
+        def full_delta_fallback(exc: _QuarterDeltaFallback) -> Path:
+            print(
+                json.dumps(
+                    {"stage": "QUARTER_CELL_DELTA_FULL_FALLBACK", "reason": str(exc)}
+                ),
+                flush=True,
+            )
+            spill.close()
+            shutil.rmtree(staging)
+            return publish_quarter_history(
+                publication=publication,
+                output_root=output_root,
+                reuse_roots=True,
+                operational_root=operational_root,
+                _recovery_access=_recovery_access,
+                validation_mode=validation_mode,
+                validation_state_root=validation_state_root,
+            )
+
         if delta_mode:
             try:
                 prior_reported_reader = HistoryPublicationReader(previous_reported)
@@ -1716,36 +1853,24 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
                     metrics=delta_metrics,
                 )
             except _QuarterDeltaFallback as exc:
-                print(
-                    json.dumps({"stage": "QUARTER_CELL_DELTA_FULL_FALLBACK", "reason": str(exc)}),
-                    flush=True,
-                )
-                spill.close()
-                shutil.rmtree(staging)
-                return publish_quarter_history(
-                    publication=publication,
-                    output_root=output_root,
-                    reuse_roots=True,
-                    operational_root=operational_root,
-                    _recovery_access=_recovery_access,
-                    validation_mode=validation_mode,
-                    validation_state_root=validation_state_root,
-                    previous_history=previous_history,
-                    previous_reported=None,
-                    dirty_period_classes=dirty_period_classes,
-                )
+                return full_delta_fallback(exc)
         else:
             for table in old.manifest["tables"]:
                 _spill_reported_table(old, table, publication, by_fact, targets, materialized, changes, spill, additive_by_pair)
-        derived = _derive_quarter_targets(
-            targets,
-            additive_by_pair,
-            materialized,
-            spill,
-            prior_derived_cells=prior_derived_cells,
-            prior_derived_metrics=prior_derived_metrics,
-            delta_metrics=delta_metrics if delta_mode else None,
-        )
+        try:
+            derived = _derive_quarter_targets(
+                targets,
+                additive_by_pair,
+                materialized,
+                spill,
+                prior_derived_cells=prior_derived_cells,
+                prior_derived_metrics=prior_derived_metrics,
+                delta_metrics=delta_metrics if delta_mode else None,
+            )
+        except _QuarterDeltaFallback as exc:
+            if not delta_mode:
+                raise
+            return full_delta_fallback(exc)
         if delta_mode:
             for name in (
                 "compared_cells",
