@@ -18,6 +18,7 @@ import sys
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from sec_xbrl.screening.common import canonical_json, digest_value
@@ -676,6 +677,30 @@ def _v3_snapshot(
     return collector.snapshot()
 
 
+def _capture_prospective_inputs(collector: _Collector, config: dict, *, prefix: str):
+    """Capture declared bytes, never issue a semantic acceptance proof.
+
+    The governed identity/quality reader replays the full prospective proof once.
+    This closure independently binds its exact declarations before/after that
+    replay. Repeating the semantic resolver during every snapshot would multiply
+    whole-cohort IO; a declaration differing from replay cannot publish.
+    """
+    declaration = config.get("prospective_selection")
+    if declaration is None:
+        return None
+    _add_declaration_file(collector, declaration, f"{prefix}_PROSPECTIVE_MANIFEST_PIN")
+    manifest = collector.json(Path(declaration["path"]), f"{prefix}_PROSPECTIVE_MANIFEST")
+    _add_declaration_file(collector, manifest["config"], f"{prefix}_PROSPECTIVE_CONFIG_PIN")
+    prospective_config = collector.json(Path(manifest["config"]["path"]), f"{prefix}_PROSPECTIVE_CONFIG")
+    storage = None
+    if "storage_reuse" in prospective_config:
+        origin_storage = prospective_config["storage_reuse"]
+        _add_declaration_file(collector, origin_storage, f"{prefix}_PROSPECTIVE_STORAGE_PIN")
+        registry = collector.json(Path(origin_storage["path"]), f"{prefix}_PROSPECTIVE_STORAGE")
+        storage = SimpleNamespace(companies={row["ticker"]:row for row in registry["companies"]}, controls={})
+    return SimpleNamespace(companies=manifest["companies"], controls=manifest["controls"], storage_reuse=storage)
+
+
 def _discover_identity(
     collector: _Collector,
     config_path: Path,
@@ -700,6 +725,18 @@ def _discover_identity(
         (row.get("ticker"), row.get("cik")) for row in request_rows
     ]:
         raise ValueError("source closure collection membership differs")
+    from sec_xbrl.metric_quality import _configured_storage_reuse
+    prospective = _capture_prospective_inputs(collector, config, prefix=prefix)
+    if prospective is not None:
+        for name,declaration in prospective.controls.items():
+            _add_declaration_file(collector,declaration,f"{prefix}_PROSPECTIVE:{name}")
+    if prospective is not None and prospective.storage_reuse is not None:
+        for ticker, company in prospective.storage_reuse.companies.items():
+            for index, entry in enumerate(company["histories"]):
+                if "retained_diagnostics" in entry:
+                    collector.inventory(Path(entry["history_manifest"]["path"]).parent,
+                        f"{prefix}_PROSPECTIVE_TOPOLOGY:{ticker}:{index}",
+                        expected_files=set(entry["payload_inventory"]) | set(entry["retained_diagnostics"]))
     scoped = {(row["ticker"], row["cik"]) for row in config["companies"]}
     for row in rows:
         ticker = str(row.get("ticker"))
@@ -731,7 +768,7 @@ def _discover_identity(
         if build_path.exists():
             build = collector.json(build_path, f"{prefix}_STATUS_BUILD:{ticker}")
             _add_status_history(collector, build, f"{prefix}_STATUS_HISTORY:{ticker}")
-        elif (ticker, str(row.get("cik"))) in scoped:
+        elif (ticker, str(row.get("cik"))) in scoped and not (prospective and ticker in prospective.companies):
             raise ValueError(f"{ticker}: scoped source closure build is missing")
 
     metadata_root = Path(config["metadata_root"])
@@ -753,9 +790,11 @@ def _discover_identity(
 
     storage = None
     if "storage_reuse" in config:
-        from sec_xbrl.financial_storage_reuse import resolve_storage_reuse
-        storage = resolve_storage_reuse(config["storage_reuse"], collection_manifest=collection_path,
-                                        scope_companies=config["companies"])
+        declared_parent = collector.json(Path(config["storage_reuse"]["path"]), f"{prefix}_CONFIGURED_STORAGE")
+        if prospective is not None and declared_parent["collection_manifest"]["path"] != str(collection_path):
+            storage = prospective.storage_reuse
+        else:
+            storage = _configured_storage_reuse(config, collection_path)
         for name, declaration in storage.controls.items():
             _add_declaration_file(collector, declaration, f"{prefix}_STORAGE_REUSE:{name}")
         for ticker, company in storage.companies.items():
@@ -775,6 +814,9 @@ def _discover_identity(
     for company in config["companies"]:
         ticker = company["ticker"]
         selected = selection.companies.get(ticker) if selection else None
+        equivalent = prospective.companies.get(ticker) if prospective else None
+        if equivalent:
+            selected = {"build_manifest":equivalent["origin_build_manifest"]}
         build_path = (Path(selected["build_manifest"]["path"]) if selected else
                       collection_path.parent / "companies" / ticker / "build_manifest.json")
         build = collector.json(build_path, f"{prefix}_SCOPED_BUILD:{ticker}")
@@ -792,7 +834,9 @@ def _discover_identity(
             history_root,
             f"{prefix}_HISTORY:{ticker}",
             check_recovery=True,
-            storage_entry=storage_history(storage, ticker, history_root / "history_manifest.json"),
+            storage_entry=(storage_history(storage, ticker, history_root / "history_manifest.json")
+                or storage_history(prospective.storage_reuse if prospective else None,
+                                   ticker, history_root / "history_manifest.json")),
         )
         _add_analysis(
             collector,
@@ -963,10 +1007,12 @@ def _add_quality_evidence(
         expected.add("history_selection_controls")
     if "storage_reuse_controls" in evidence:
         expected.add("storage_reuse_controls")
+    if "prospective_selection_controls" in evidence:
+        expected.add("prospective_selection_controls")
     if set(evidence) != expected:
         raise ValueError("quality evidence source closure roles differ")
     for name, declaration in evidence.items():
-        if name in {"history_manifests", "collection_build_manifests", "history_selection_controls", "storage_reuse_controls"}:
+        if name in {"history_manifests", "collection_build_manifests", "history_selection_controls", "storage_reuse_controls", "prospective_selection_controls"}:
             if not isinstance(declaration, dict):
                 raise TypeError("quality grouped evidence is malformed")
             for ticker, item in sorted(declaration.items()):

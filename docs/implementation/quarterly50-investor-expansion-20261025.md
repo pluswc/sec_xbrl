@@ -238,6 +238,34 @@ foci; the main append API's correction-overlay handoff needs a separate scoped
 assessment. Baseline 50-company connection takes precedence over that phase.
 
 
+## Approved phase 3 prospective selection (source implemented; acceptance pending)
+
+ROOT approved the source-only next slice after independent acceptance of
+19967586. The original collections, History, prepared bundles and receipts remain
+immutable. A new canonical collection proves current complete eligible filings;
+a prospective companion may identify an unchanged accepted History as
+SELECTION_EQUIVALENT while its collection remains RAW_COMPLETE. New compact
+analysis publications have the exact current cutoff and explicit origin links.
+Ordinary AnalysisClient and metric parent cutoff checks remain strict.
+
+Reuse requires exact complete eligible inventories, current Raw digests, unchanged
+completed calendar spine, profiles, review and quality settings, and explicit
+ROOT policy compatibility evidence pinned to each origin analysis manifest.
+Legacy v1 manifests did not retain selector source hashes: no historical code
+hash equality or old checkout freshness is asserted. The compatibility approval
+binds relevant current selector/mapper/period policy module hashes and exact
+origin configuration, quality overlay, review cutoff and rules. ROOT materializes
+actual approvals only after source freeze and independent policy seam review.
+
+Changed inventories use the existing strict one-filing append proof, with
+`require_append_reuse=True` prohibiting full fallback. Changed as-of rebuilds
+current selected tables; it cannot claim the fixed-cutoff quarter fast path.
+Approved fiscal focus corrections are applied to analytical filing copies after
+Raw validation and before observation, ledger and coverage construction; Raw
+records are unchanged. Exact correction artifact and source evidence hashes are
+required. No new correction approval is inferred.
+
+
 ## Ordinary accepted storage reuse — additive source milestone
 
 The 19967586 completed-recovery shortcut covers only publications with the real
@@ -393,3 +421,125 @@ compatibility/migration controls bind the final immutable source without rewriti
 baseline registries, historical approvals or receipts. Public build operations
 remain sequential against their shared collection status output; no concurrency
 API is added.
+
+## Prospective batch and current routine reuse — final phase 3 source contract
+
+The public producer is `sec_xbrl.prospective_selection`:
+
+- `publish_prospective_selection(config_path=Path, destination=Path)` writes a new
+  `prospective_selection_manifest.json` after complete proof replay.
+- `prepare_reselected_analysis_batch(prospective_selection={path, sha256},
+  destinations={ticker: {ANNUAL: Path, QUARTERLY: Path}})` resolves that proof once
+  for the whole batch, stages every requested target, rechecks all current active
+  control, Raw, governed History, origin analysis and producer code bytes plus exact
+  source/Raw/History topology, then exposes the new targets. The single-target
+  `prepare_reselected_analysis` delegates to this boundary. No caller-supplied
+  trusted proof or global reuse cache exists. A filesystem rename failure can leave
+  new targets for diagnosis; no cross-directory atomic transaction is claimed.
+
+The config schema is `prospective-selection-config-v1`, with exact
+`current_collection`, `discovery_summary` path/SHA pins, `financial_as_of`, optional
+origin `storage_reuse` pin, and explicit companies. Each company supplies ticker,
+CIK, `origin_collection`, `origin_history_manifest`, `origin_annual_analysis`,
+`origin_quarterly_analysis`, `current_policy` pins and optional
+`origin_history_selection`. A shared accepted selection companion is replayed
+once against its original complete company scope, preserving its exact existing
+approval/recovery/build pins. No original marker or receipt is rewritten.
+
+Each `current_policy` artifact has schema
+`prospective-policy-compatibility-v1`, status `ROOT_APPROVED`, exact
+`origin_analyses` pins, `current_collection`, `financial_as_of`,
+`discovery_summary`, `raw_inventory`, `current_policy_source_sha256s`, `rules`,
+and `ANNUAL`/`QUARTERLY` selection settings. Exported helpers
+`prospective_policy_sources`, `prospective_rule_versions`,
+`prospective_raw_inventory` and `analysis_selection_policy` define those exact
+fields. ROOT approval must bind the current collection/cutoff/completeness proof,
+not just an origin analysis. Missing legacy selector hashes remain explicitly
+unknown; current producer closure is distinct from this historical compatibility
+assessment.
+
+Completeness reuses the existing SEC submissions adapter and filing selector.
+Content-addressed root/archive snapshots must cover the root's complete archive
+membership, counts and date ranges one-to-one. Current eligible FilingRefs and
+Raw origin locators must exactly equal the original inventory. An omitted
+amendment or newly filed older-period filing fails even when every new control
+pin is internally coherent. Cutoff advancement must remain inside the same
+completed calendar-quarter display spine. Profiles, review cutoff, quality overlay
+and rule versions require exact approved equality.
+
+Prepared publications receive new publication IDs, selection-event IDs and
+prepared cell IDs. They preserve origin prepared IDs and the original trace in
+explicit origin links. Raw/History fact IDs, contexts, units, actual periods and
+values stay unchanged. New selection cutoff, original selection cutoff and
+actual financial period dates are separate. Consumers still require exact new
+analysis as-of; no blanket earlier-than-cutoff exception is introduced. Identity
+per-company replay checks only that company's prepared bundle; it does not
+resolve all companies again. A sealed invocation proof is forwarded to nested
+quality verification. Source closure snapshots capture declarations and bytes;
+the governed reader performs the complete semantic proof replay once, and the
+existing before/after/publish freshness boundaries remain.
+
+Both new quality and identity configs pin the same optional
+`prospective_selection`. Their optional `storage_reuse` may pin a current-collection
+v2 registry for the 12 new READY builds, while the prospective config pins an
+original-collection registry for unchanged accepted History. Each History lookup
+uses only its exact manifest-bound entry from the corresponding verified proof.
+The new collection truthfully reports RAW_COMPLETE for unchanged companies,
+History SELECTION_EQUIVALENT separately, and current prepared analysis READY;
+actual new builds retain genuine READY markers. Financial readiness counts
+separate READY and selection-equivalent companies.
+
+The additional normalized evidence kind `ACCEPTED_CURRENT_ROUTINE_HISTORY` is
+accepted ONLY within explicit financial storage-proof v2. Its existing
+`accepted-financial-storage-evidence-v1` wrapper envelope pins history/build,
+exact declared payload hashes, and `historical_controls={acceptance, report}`.
+The acceptance JSON must equal `{status: ROOT_APPROVED,
+kind: ACCEPTED_CURRENT_ROUTINE_HISTORY, build_manifest: <pin>,
+history_manifest: <pin>, validation_report: <pin>}`. The native report must match
+that genuine READY marker's storage_validation report/level/reason, current
+public History.validate code identity/rules, scope, manifest, declared file set,
+counts, schema metadata, current file identities and complete checked/reused
+coverage. Parquet schema fingerprints are checked from metadata without decoding
+cells. Only completed ROUTINE_INITIAL/CHANGED/UNCHANGED levels are eligible;
+full_storage_validation and semantic_validation remain false. This reuses normal
+completed lightweight validation and makes no full typed audit claim. Changed
+controls, producer identity, payload, schema or inventory fail closed. V1 and
+ordinary public History validation defaults remain unchanged. ROOT creates new
+final-source compatibility/migration registries; baseline registries remain fixed.
+
+## Actual compatibility findings and release limits
+
+The accepted UNP source-binding fix filters relevance with the existing duration
+and correction transform/lexical allowlists before requiring a source id. Nine
+unrelated optional-id SEC metadata tags no longer block financial quality;
+in-scope missing-id rows still reject. The accepted PCAR signed-zero fix applies
+the already-declared source sign to numwordsen lexical nil zero. Exact Raw,
+numeric, text and nil conformance remains; no allowlist or Raw values change.
+ROOT preserved the completed 1097-filing source indexes/bindings and published
+quality using those same outputs, without XML regeneration.
+
+ROOT reported actual baseline quality, identity, annual 31 metrics, annual dataset
+and quarterly 41 publication PASS. Actual availability inspection found all nine
+TTM metrics unavailable because reported/derived quarterly inputs carry no
+nonempty declared basis_version. Canonical mapping, unit and contiguous dates do
+not establish reviewed accounting basis. Existing legacy quarter/QoQ arithmetic
+has a separate arithmetic-only assurance, but the TTM contract remains stricter.
+TTM operational release is therefore paused pending a separately approved basis
+compatibility policy or genuine upstream reviewed basis evidence. No basis label
+is fabricated and no TTM arithmetic policy is changed by this phase 3 slice.
+Combined v3 actual acceptance and latest 12/38 execution remain ROOT-owned.
+
+
+Final phase 3 source validation: 150 focused tests PASS in 49.02 s, including
+19 prospective tests and 12 current-routine evidence tests. Coverage includes one
+whole-proof replay per batch/identity invocation, local per-company replay,
+precommit Raw/History mutation and inventory rejection, coherently pinned omitted
+amendment/late filing rejection, archive membership, current-code/native file
+metadata and schema rejection, callback-free completed routine reuse, mixed
+current/origin proof routing, the exact-cutoff quality → identity → annual31 →
+quarter41 → v3 flow, and affected legacy source-closure/identity/selection
+contracts. Ruff and diff checks PASS. The previously frozen strict append slice
+4064fad1beeaa065062c327a895d8eb009ae7eef also received independent PASS and ROOT
+source acceptance. This final additive source freeze still requires separate
+independent read-only review and ROOT acceptance before actual latest execution;
+no main merge, live runtime release or TTM operational acceptance is claimed.

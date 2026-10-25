@@ -106,7 +106,13 @@ def resolve_storage_reuse(declaration: dict, *, collection_manifest: Path,
                 raise TypeError("storage reuse acceptance witness is malformed")
             HistoryPublicationReader(root)  # enforce any public recovery gate
             declared = _declared_publication_files(root, manifest)
-            if prior.get("schema_version") == "accepted-financial-storage-evidence-v1":
+            if prior.get("kind") == "ACCEPTED_CURRENT_ROUTINE_HISTORY":
+                if not v2:
+                    raise ValueError("current routine evidence requires explicit v2 scope")
+                historical = _current_routine_evidence(prior, pins=pins, declared=declared)
+                controls.update({f"{ticker}:{history_index}:CURRENT:{name}": pin
+                                 for name,pin in historical.items()})
+            elif prior.get("schema_version") == "accepted-financial-storage-evidence-v1":
                 historical = _normalized_evidence(prior, pins=pins, declared=declared,
                                                   ticker=ticker, cik=cik)
                 controls.update({f"{ticker}:{history_index}:HISTORICAL:{name}": pin
@@ -260,4 +266,95 @@ def _normalized_evidence(value: dict, *, pins: dict, declared: dict,
             raise ValueError("historical first financial config History/build provenance differs")
     else:
         raise ValueError("unsupported normalized historical storage evidence kind")
+    return controls
+
+
+def current_history_validation_identity(manifest: dict) -> str:
+    """Exact current public History.validate identity, without validating records."""
+    from dataclasses import asdict
+
+    from sec_xbrl import history
+    from sec_xbrl.history_validation import validation_code_identity
+    return validation_code_identity(sources=tuple(sorted(Path(history.__file__).parent.rglob("*.py"))),
+        rules={"history_version":history.HISTORY_VERSION,
+               "layer2_rules":asdict(history._history_layer2_rule_versions()),
+               "period_rule":manifest.get("period_rule"),"derivation_rule":manifest.get("derivation_rule")})
+
+
+def _current_routine_evidence(value: dict, *, pins: dict, declared: dict) -> dict:
+    """Reuse completed routine checks; never assert a historical full typed audit."""
+    from sec_xbrl.history_validation import (
+        VALIDATION_POLICY_VERSION,
+        _canonical_hash,
+        _manifest_inventory,
+        _safe_identity,
+        _scope_key,
+    )
+    if (set(value) != {"schema_version","kind","history_manifest","build_manifest",
+                       "declared_payload_sha256s","historical_controls"}
+        or value.get("schema_version") != "accepted-financial-storage-evidence-v1"
+        or value["history_manifest"] != pins["history_manifest"]
+        or value["build_manifest"] != pins["build_manifest"]
+        or value["declared_payload_sha256s"] != declared
+        or not isinstance(value["historical_controls"],dict)
+        or set(value["historical_controls"]) != {"acceptance","report"}):
+        raise ValueError("current routine evidence scope differs")
+    controls={name:_pin(pin) for name,pin in value["historical_controls"].items()}
+    if controls["acceptance"] != pins["acceptance"]:
+        raise ValueError("current routine acceptance differs")
+    approval=read_json(Path(controls["acceptance"]["path"]))
+    expected={"status":"ROOT_APPROVED","kind":"ACCEPTED_CURRENT_ROUTINE_HISTORY",
+              "build_manifest":pins["build_manifest"],"history_manifest":pins["history_manifest"],
+              "validation_report":controls["report"]}
+    if approval != expected:
+        raise ValueError("current routine ROOT approval does not bind exact controls")
+    report=read_json(Path(controls["report"]["path"]))
+    build=read_json(Path(pins["build_manifest"]["path"]))
+    manifest=read_json(Path(pins["history_manifest"]["path"]))
+    root=Path(pins["history_manifest"]["path"]).parent
+    level=report.get("validation_level")
+    native_result=report.get("result",{})
+    allowed={"ROUTINE_INITIAL","ROUTINE_CHANGED","ROUTINE_UNCHANGED"}
+    marker=build.get("storage_validation",{})
+    if (report.get("version") != 1 or report.get("policy_version") != VALIDATION_POLICY_VERSION
+        or report.get("code_identity") != current_history_validation_identity(manifest)
+        or report.get("scope_key") != _scope_key(manifest)
+        or report.get("publication_root") != str(root)
+        or report.get("manifest_sha256") != pins["history_manifest"]["sha256"]
+        or report.get("full_storage_validation") is not False or report.get("semantic_validation") is not False
+        or level not in allowed or report.get("validation_reason") != level
+        or marker != {"level":level,"reason":level,"report":controls["report"]["path"],"detailed_fallback":False}
+        or native_result.get("level") != level or native_result.get("reason") != level
+        or native_result.get("detailed_fallback") is not False
+        or native_result.get("state_path") != controls["report"]["path"]
+        or native_result.get("declared_files") != declared):
+        raise ValueError("current routine native report is stale, incomplete or not genuine READY evidence")
+    inventory=_manifest_inventory(manifest)
+    files=report.get("files")
+    if not isinstance(files,dict) or set(files) != set(inventory):
+        raise ValueError("current routine native file scope differs")
+    checked=native_result.get("checked_files")
+    reused=native_result.get("reused_files")
+    hashed=native_result.get("hashed_files")
+    if (not all(isinstance(group,list) and len(group)==len(set(group)) for group in (checked,reused,hashed))
+        or set(checked) & set(reused) or set(checked) | set(reused) != set(inventory)
+        or not set(hashed) <= set(inventory)):
+        raise ValueError("current routine completed file coverage differs")
+    if any(type(native_result.get(key)) is not int or native_result[key] < 0
+           for key in ("sampled_rows", "decoded_json_values")):
+        raise ValueError("current routine sample counters are invalid")
+    for relative,entry in inventory.items():
+        row=files[relative]
+        expected_file={"identity":list(_safe_identity(root/relative)),"sha256":entry["info"]["sha256"],
+                       "count":entry["info"]["count"],"json_fields":entry["info"].get("json_fields"),
+                       "table_key":entry["table_key"],"role":entry["role"]}
+        if (not isinstance(row,dict) or set(row) != set(expected_file)|{"schema_fingerprint"}
+            or any(row.get(key)!=item for key,item in expected_file.items())
+            or (relative in checked and not isinstance(row.get("schema_fingerprint"),str))):
+            raise ValueError("current routine file identity/count/schema metadata differs")
+        if row["schema_fingerprint"] is not None:
+            import polars as pl
+            schema = pl.read_parquet_schema(root / relative)
+            if row["schema_fingerprint"] != _canonical_hash([(name, str(dtype)) for name, dtype in schema.items()]):
+                raise ValueError("current routine Parquet schema fingerprint differs")
     return controls

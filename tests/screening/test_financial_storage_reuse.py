@@ -320,3 +320,98 @@ def test_invocation_storage_proof_cannot_be_mutated_or_cross_bound(tmp_path,monk
     proof.companies["FIVE"]["histories"][0]["retained_diagnostics"].append("forged")
     with pytest.raises(ValueError,match="untrusted|mutated"):
         operations.read_universe_status(manifest_path=collection,validation_mode="financial_sources",storage_reuse=_pin(path),_verified_storage_reuse=proof)
+
+
+def _current_routine_proof(tmp_path, monkeypatch, *, unchanged=False):
+    prepared, proof = _proof(tmp_path, monkeypatch)
+    value = json.loads(proof.read_text())
+    entry = value["companies"][0]["histories"][0]
+    root = Path(entry["history_manifest"]["path"]).parent
+    result = history.HistoryPublicationReader(root).validate(mode="routine", state_root=tmp_path/"current-validation")
+    assert result.level == "ROUTINE_INITIAL"
+    if unchanged:
+        result = history.HistoryPublicationReader(root).validate(mode="routine", state_root=tmp_path/"current-validation")
+        assert result.level == "ROUTINE_UNCHANGED"
+    _as_v2(proof)
+    value = json.loads(proof.read_text())
+    entry = value["companies"][0]["histories"][0]
+    build_path = Path(entry["build_manifest"]["path"])
+    build = json.loads(build_path.read_text())
+    build["storage_validation"] = {"level":result.level,"reason":result.reason,
+                                   "report":result.state_path,"detailed_fallback":False}
+    write_json(build_path, build)
+    entry["build_manifest"] = _pin(build_path)
+    report = Path(result.state_path)
+    acceptance = Path(entry["acceptance"]["path"])
+    write_json(acceptance, {"status":"ROOT_APPROVED","kind":"ACCEPTED_CURRENT_ROUTINE_HISTORY",
+                           "build_manifest":entry["build_manifest"],"history_manifest":entry["history_manifest"],
+                           "validation_report":_pin(report)})
+    entry["acceptance"] = _pin(acceptance)
+    wrapper = Path(entry["previous_validation"]["path"])
+    write_json(wrapper, {"schema_version":"accepted-financial-storage-evidence-v1",
+                        "kind":"ACCEPTED_CURRENT_ROUTINE_HISTORY","history_manifest":entry["history_manifest"],
+                        "build_manifest":entry["build_manifest"],"declared_payload_sha256s":build["declared_files"],
+                        "historical_controls":{"acceptance":entry["acceptance"],"report":_pin(report)}})
+    entry["previous_validation"] = _pin(wrapper)
+    write_json(proof, value)
+    return prepared, proof, report
+
+
+def test_current_routine_v2_reuses_completed_light_checks_without_full_typed_claim(tmp_path, monkeypatch):
+    prepared, proof, _ = _current_routine_proof(tmp_path, monkeypatch)
+    def forbidden(*args, **kwargs): raise AssertionError("completed routine proof must not decode again")
+    monkeypatch.setattr(history.HistoryPublicationReader, "verify_all", forbidden)
+    monkeypatch.setattr(history.HistoryPublicationReader, "validate", forbidden)
+    verified = resolve_storage_reuse(_pin(proof), collection_manifest=Path(prepared.paths["collection"]),
+                                    scope_companies=list(COHORT))
+    entry = storage_history(verified, "FIVE", prepared.histories["FIVE"])
+    verify_financial_history_source(prepared.histories["FIVE"].parent, storage_entry=entry)
+    wrapper = json.loads(Path(entry["previous_validation"]["path"]).read_text())
+    report = json.loads(Path(wrapper["historical_controls"]["report"]["path"]).read_text())
+    assert report["full_storage_validation"] is False
+    assert report["semantic_validation"] is False
+
+
+@pytest.mark.parametrize("defect", ["v1", "code", "file_scope", "count", "schema", "schema_wrong", "identity", "level", "approval", "marker"])
+def test_current_routine_evidence_fails_closed_on_incompatible_control_or_native_scope(tmp_path, monkeypatch, defect):
+    prepared, proof, report_path = _current_routine_proof(tmp_path, monkeypatch)
+    value = json.loads(proof.read_text());entry = value["companies"][0]["histories"][0]
+    wrapper_path = Path(entry["previous_validation"]["path"])
+    wrapper = json.loads(wrapper_path.read_text())
+    report = json.loads(report_path.read_text())
+    file = next(iter(report["files"]))
+    if defect == "v1":
+        value["schema_version"] = "financial-history-storage-reuse-v1"
+        value.pop("diagnostic_policy");entry.pop("retained_diagnostics")
+    elif defect == "code": report["code_identity"] = "0"*64
+    elif defect == "file_scope": report["files"].pop(file)
+    elif defect == "count": report["files"][file]["count"] += 1
+    elif defect == "schema": report["files"][file]["schema_fingerprint"] = None
+    elif defect == "schema_wrong": report["files"][file]["schema_fingerprint"] = "0"*64
+    elif defect == "identity": report["files"][file]["identity"][0] += 1
+    elif defect == "level": report["validation_level"] = "DETAILED"
+    elif defect == "approval": pass
+    elif defect == "marker":
+        build_path = Path(entry["build_manifest"]["path"])
+        build = json.loads(build_path.read_text());build["storage_validation"]["reason"] = "UNCOMPLETED"
+        write_json(build_path,build);entry["build_manifest"]=_pin(build_path);wrapper["build_manifest"]=entry["build_manifest"]
+    write_json(report_path,report)
+    approval_path=Path(entry["acceptance"]["path"])
+    approval=json.loads(approval_path.read_text())
+    approval["validation_report"]=_pin(report_path);approval["build_manifest"]=entry["build_manifest"]
+    if defect == "approval": approval["status"]="PROPOSED"
+    write_json(approval_path,approval);entry["acceptance"]=_pin(approval_path)
+    wrapper["historical_controls"]={"acceptance":entry["acceptance"],"report":_pin(report_path)}
+    write_json(wrapper_path,wrapper);entry["previous_validation"]=_pin(wrapper_path)
+    write_json(proof,value)
+    with pytest.raises(ValueError):
+        resolve_storage_reuse(_pin(proof),collection_manifest=Path(prepared.paths["collection"]),scope_companies=list(COHORT))
+
+
+def test_current_routine_unchanged_report_reuses_complete_native_file_scope(tmp_path, monkeypatch):
+    prepared, proof, _ = _current_routine_proof(tmp_path, monkeypatch, unchanged=True)
+    def forbidden(*args, **kwargs): raise AssertionError("no repeated completed validation")
+    monkeypatch.setattr(history.HistoryPublicationReader,"verify_all",forbidden)
+    verified=resolve_storage_reuse(_pin(proof),collection_manifest=Path(prepared.paths["collection"]),
+                                  scope_companies=list(COHORT))
+    assert storage_history(verified,"FIVE",prepared.histories["FIVE"]) is not None
