@@ -778,6 +778,9 @@ def _discover_identity(
         build_path = (Path(selected["build_manifest"]["path"]) if selected else
                       collection_path.parent / "companies" / ticker / "build_manifest.json")
         build = collector.json(build_path, f"{prefix}_SCOPED_BUILD:{ticker}")
+        from sec_xbrl.collection_operations import history_build_controls
+        for name,declaration in history_build_controls(build).items():
+            _add_declaration_file(collector,declaration,f"{prefix}_BUILD_CONTROL:{ticker}:{name}")
         collector.file(
             Path(str(build.get("intake_manifest", ""))),
             f"{prefix}_SCOPED_INTAKE:{ticker}",
@@ -836,6 +839,9 @@ def _add_status_history(collector: _Collector, build: dict[str, Any], role: str)
     history._check_recovery_access(publication)
     _add_recovery_gate_files(collector, publication, role)
     manifest_path = Path(str(build.get("history_manifest", "")))
+    from sec_xbrl.collection_operations import history_build_controls
+    for name,declaration in history_build_controls(build).items():
+        _add_declaration_file(collector,declaration,f"{role}:BUILD_CONTROL:{name}")
     manifest = collector.json(manifest_path, f"{role}:MANIFEST")
     declared = _history_declarations(manifest)
     if build.get("declared_files") != declared:

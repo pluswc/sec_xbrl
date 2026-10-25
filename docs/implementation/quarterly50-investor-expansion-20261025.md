@@ -347,3 +347,49 @@ Baseline uses its frozen v2 source and immutable v2 approval artifact. Later pha
 History/collector changes intentionally require a NEW ROOT compatibility registry
 bound to the final phase3 source; accepted payload hashes may be reused, while the
 baseline registry and old receipts remain immutable.
+
+
+## Strict append and approved correction carryforward — source slice
+
+This separate phase3 source slice exposes `build_history(require_append_reuse=True)`
+and a public `build_universe(history_build_options=...)` forwarding boundary.
+Without options all existing defaults remain. With options, keys must match the
+exact selected ticker scope, and every entry requires `previous_history_manifest`
+and `previous_reuse_evidence` path/SHA256 pins plus `require_append_reuse: true`.
+An optional `fiscal_focus_corrections` path/SHA256 pin forwards the existing approved
+correction artifact. The collector checks pins before and after the producer,
+requires the exact strict reuse result, writes its genuine READY attestation, and
+replays active control pins in later status/source closure checks. It does not
+fabricate READY markers for the unchanged 38 companies.
+
+A failed prefix, changed rules or other append proof error raises before full
+producers when require_append_reuse is true. Legacy callers retain their existing
+explicitly reported full fallback behavior. The current cutoff change conservatively
+rebuilds current History selection tables; no fixed-cutoff quarter fast path is
+claimed. T1–T4 prefix inputs still require the established exact one-filing suffix
+and pinned migration/code compatibility proof.
+
+The accession-scoped fiscal focus registry is ported from accepted source
+fbbe26203c4976fdc4867d27eeec180be930b98b. No new company correction or approval is
+inferred. Its existing v1/v2 artifact/approval/source/inline-context checks remain.
+After Raw validation the producer applies the exact approved registry once to
+analytical filing copies, feeding observations, append ledger inputs and coverage.
+Raw records remain immutable; reported/effective focus and artifact lineage stay
+separate. The period rule is exactly `period-fiscal-boundaries-v2+fiscal-focus:`
+plus the ORIGINAL artifact SHA, matching accepted corrected prefixes. A different
+artifact SHA rejects reuse; the adapter cannot silently full-fallback.
+
+Validation: 27 focused tests PASS in 0.42 s, including generic synthetic CIK and
+accession correction fixtures, effective coverage/ledger copies, same approved
+rule equality versus changed-hash rejection, public collector READY/control
+forwarding and no-full-producer callback on required append failure. Relevant
+existing incremental prefix tests pass. Ruff/diff PASS. This is source-only;
+independent acceptance and actual 12-company builds remain pending.
+
+ROOT will wait for the final prospective source freeze before building the 12.
+The all-package producer identity would change as later source is added, so this
+intermediate freeze is not an instruction to rerun completed validation. New
+compatibility/migration controls bind the final immutable source without rewriting
+baseline registries, historical approvals or receipts. Public build operations
+remain sequential against their shared collection status output; no concurrency
+API is added.
