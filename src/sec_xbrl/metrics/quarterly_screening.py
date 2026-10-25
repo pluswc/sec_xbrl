@@ -249,7 +249,95 @@ TTM_DEFINITION = {
     "status": "ACTIVE",
 }
 
-METRIC_DEFINITIONS = (*REPORTED_DEFINITIONS, *GENERIC_DEFINITIONS, TTM_DEFINITION)
+LEGACY_DEFINITIONS = (*REPORTED_DEFINITIONS, *GENERIC_DEFINITIONS, TTM_DEFINITION)
+CATALOG_VERSION = "quarterly-investor-41-v1"
+
+# Existing definitions retain their exact identities. Added duration rows consume
+# the same already-approved reported/M8 prepared values, never SEC packages.
+REPORTED_DEFINITIONS = (*REPORTED_DEFINITIONS, *(
+    _reported_definition(
+        "quarter_" + row_id, label, category, "QTD_3M",
+        allowed_source_kinds=("REPORTED", "DERIVED_QUARTER"),
+        rule_version="approved-core-cumulative-difference-v1",
+        definition_version="quarter-core-reported-or-m8-v1",
+    )
+    for row_id, label, category in (
+        ("cost", "분기 매출원가", "PROFITABILITY"),
+        ("research", "분기 연구개발비", "OTHER_REPORTED"),
+        ("cfi", "분기 투자활동 현금흐름", "CASH_FLOW"),
+        ("cff", "분기 재무활동 현금흐름", "CASH_FLOW"),
+        ("repurchases", "분기 자사주 취득 지출", "OTHER_REPORTED"),
+        ("stock_compensation", "분기 주식보상비용", "OTHER_REPORTED"),
+    )
+), *(
+    _reported_definition("quarter_" + row_id, label, category, "INSTANT")
+    for row_id, label, category in (
+        ("receivables", "분기말 매출채권", "OTHER_REPORTED"),
+        ("inventory", "분기말 재고자산", "OTHER_REPORTED"),
+        ("debt", "분기말 직접 보고 결합 차입금", "FINANCIAL_STABILITY"),
+        ("equity", "분기말 자본", "FINANCIAL_STABILITY"),
+    )
+))
+
+
+def _expanded_pair(
+    metric_id: str, label: str, first: str, second: str, *,
+    instant: bool = False, difference: bool = False,
+) -> dict[str, Any]:
+    definition = _generic_definition(
+        "quarter_" + metric_id, label,
+        "FINANCIAL_STABILITY" if instant else "PROFITABILITY",
+        "SAME_PERIOD_NET_DEBT" if difference else "SAME_PERIOD_RATIO",
+        (("DEBT" if difference else "NUMERATOR", "quarter_" + first,
+          "NONNEGATIVE" if instant else "FINITE"),
+         ("CASH" if difference else "DENOMINATOR", "quarter_" + second,
+          "NONNEGATIVE" if difference else "POSITIVE")),
+        first + (" - " if difference else " * 100 / ") + second,
+        "quarter-" + metric_id.replace("_", "-") + "-v1",
+        unit_kind="MONEY" if difference else "PERCENT",
+    )
+    if instant:
+        definition["observation_basis"] = "INSTANT"
+    if difference:
+        definition["input_contract"]["denominator_policy"] = "NOT_APPLICABLE"
+    return definition
+
+
+GENERIC_DEFINITIONS = (*GENERIC_DEFINITIONS,
+    _expanded_pair("net_margin", "분기 순이익률", "net_income", "revenue"),
+    _expanded_pair("fcf_margin", "표준화 분기 FCF 마진", "standardized_fcf", "revenue"),
+    _expanded_pair("current_ratio", "분기말 유동비율", "current_assets", "current_liabilities", instant=True),
+    _expanded_pair("liabilities_to_equity", "분기말 부채비율", "liabilities", "equity", instant=True),
+    _expanded_pair("liabilities_to_assets", "분기말 총부채/자산", "liabilities", "assets", instant=True),
+    _expanded_pair("net_debt", "분기말 순차입금", "debt", "cash", instant=True, difference=True),
+)
+TTM_DEFINITIONS = (TTM_DEFINITION, *(
+    {**TTM_DEFINITION, "metric_id": "ttm_" + row_id, "label_ko": label,
+     "category": category, "input_metric_id": "quarter_" + row_id}
+    for row_id, label, category in (
+        ("operating_income", "최근 4개 분기 영업이익 합계", "PROFITABILITY"),
+        ("net_income", "최근 4개 분기 순이익 합계", "PROFITABILITY"),
+        ("cfo", "최근 4개 분기 영업활동 현금흐름 합계", "CASH_FLOW"),
+        ("standardized_fcf", "최근 4개 분기 표준화 FCF 합계", "CASH_FLOW"),
+    )
+))
+TTM_MARGIN_DEFINITIONS = tuple(
+    {**_generic_definition(
+        "ttm_" + metric_id, label, "PROFITABILITY", "TTM_PERIOD_SUM_RATIO",
+        (("NUMERATOR", "quarter_" + numerator, "FINITE"),
+         ("DENOMINATOR", "quarter_revenue", "FINITE")),
+        "SUM(4 quarter " + numerator + ") * 100 / SUM(4 quarter revenue)",
+        "quarter-ttm-" + metric_id.replace("_", "-") + "-v1",
+    ), "observation_basis": "TTM"}
+    for metric_id, label, numerator in (
+        ("gross_margin", "최근 4개 분기 매출총이익률", "gross_profit"),
+        ("operating_margin", "최근 4개 분기 영업이익률", "operating_income"),
+        ("net_margin", "최근 4개 분기 순이익률", "net_income"),
+        ("fcf_margin", "최근 4개 분기 표준화 FCF 마진", "standardized_fcf"),
+    )
+)
+METRIC_DEFINITIONS = (*REPORTED_DEFINITIONS, *GENERIC_DEFINITIONS,
+                      *TTM_DEFINITIONS, *TTM_MARGIN_DEFINITIONS)
 DEFINITION_BY_ID = {row["metric_id"]: row for row in METRIC_DEFINITIONS}
 
 
@@ -363,6 +451,7 @@ def publish_quarterly_screening_metrics(
         }
         manifest = {
             "schema_version": VERSION,
+            "catalog_version": CATALOG_VERSION,
             "publication_id": publication_id,
             "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             "fixture_kind": config["fixture_kind"],
@@ -450,7 +539,11 @@ class QuarterlyMetricReader:
             raise ValueError("quarterly payload file set changed")
         if any(path.is_symlink() for path in self.root.iterdir()):
             raise ValueError("quarterly publication cannot contain symlinks")
-        if self.definitions != list(METRIC_DEFINITIONS):
+        if self.manifest.get("catalog_version") not in {None, CATALOG_VERSION}:
+            raise ValueError("unsupported quarterly metric catalog")
+        expected_definitions = (METRIC_DEFINITIONS if self.manifest.get("catalog_version") == CATALOG_VERSION
+                                else LEGACY_DEFINITIONS)
+        if self.definitions != list(expected_definitions):
             raise ValueError("quarterly definitions differ from governed producer definitions")
         ciks = self.manifest.get("universe", {}).get("ciks")
         if not isinstance(ciks, list) or ciks != sorted(set(ciks)):
@@ -488,6 +581,7 @@ class QuarterlyMetricReader:
         expected_support = _support_rows(
             [{"cik": cik, "ticker": next(row["ticker"] for row in self.support if row["cik"] == cik)} for cik in ciks],
             self.observations,
+            definitions=self.definitions,
         )
         if expected_support != self.support:
             raise ValueError("quarterly support differs from observations")
@@ -740,11 +834,15 @@ def build_quarterly_company_records(
     inventory = _period_inventory(ticker, cik, spine, direct_all)
     output: list[dict[str, Any]] = []
     output_by_metric_bucket: dict[tuple[str, int, int], dict[str, Any]] = {}
+    display_keys = {(row["calendar_year"], row["calendar_quarter"]) for row in spine}
+    internal_keys = display_keys | {(row["calendar_year"], row["calendar_quarter"])
+                                    for values in direct_all.values() for row in values}
+    internal_spine = [{"calendar_year": y, "calendar_quarter": q} for y, q in sorted(internal_keys)]
     for definition in REPORTED_DEFINITIONS:
         grouped: dict[tuple[int, int], list[dict[str, Any]]] = {}
         for row in direct_all[definition["metric_id"]]:
             grouped.setdefault((row["calendar_year"], row["calendar_quarter"]), []).append(row)
-        for bucket in spine:
+        for bucket in internal_spine:
             key = (bucket["calendar_year"], bucket["calendar_quarter"])
             choices = grouped.get(key, [])
             if len(choices) == 1:
@@ -759,7 +857,8 @@ def build_quarterly_company_records(
                     reason="MULTIPLE_CANDIDATES" if choices else _inventory_missing_reason(inventory, key),
                     candidate_evidence=choices,
                 )
-            output.append(selected)
+            if key in display_keys:
+                output.append(selected)
             output_by_metric_bucket[(definition["metric_id"], *key)] = selected
 
     fiscal_index: dict[tuple[str, int, str], dict[str, Any]] = {}
@@ -776,7 +875,7 @@ def build_quarterly_company_records(
                 else:
                     fiscal_index[coordinate] = row
     for definition in GENERIC_DEFINITIONS:
-        for bucket in spine:
+        for bucket in internal_spine:
             key = (bucket["calendar_year"], bucket["calendar_quarter"])
             row = _generic_observation(
                 ticker=ticker,
@@ -788,21 +887,28 @@ def build_quarterly_company_records(
                 fiscal_index=fiscal_index,
                 inventory=inventory,
             )
-            output.append(row)
+            if key in display_keys:
+                output.append(row)
             output_by_metric_bucket[(definition["metric_id"], *key)] = row
-    for bucket in spine:
-        key = (bucket["calendar_year"], bucket["calendar_quarter"])
-        output.append(
-            _ttm_observation(
-                ticker=ticker,
-                cik=cik,
-                financial_as_of=financial_as_of,
-                bucket=key,
+            if row["availability_status"] == "AVAILABLE":
+                coordinate = (definition["metric_id"], row["fiscal_year"], row["fiscal_quarter"])
+                if coordinate in fiscal_conflicts:
+                    continue
+                if coordinate in fiscal_index:
+                    fiscal_index.pop(coordinate)
+                    fiscal_conflicts.add(coordinate)
+                else:
+                    fiscal_index[coordinate] = row
+    for definition in (*TTM_DEFINITIONS, *TTM_MARGIN_DEFINITIONS):
+        for bucket in spine:
+            key = (bucket["calendar_year"], bucket["calendar_quarter"])
+            row = (_ttm_margin_observation if definition.get("input_contract") else _ttm_observation)(
+                ticker=ticker, cik=cik, financial_as_of=financial_as_of,
+                definition=definition, bucket=key,
                 current_by_bucket=output_by_metric_bucket,
-                fiscal_index=fiscal_index,
-                inventory=inventory,
+                fiscal_index=fiscal_index, inventory=inventory,
             )
-        )
+            output.append(row)
     output.sort(key=lambda row: (row["metric_id"], row["calendar_year"], row["calendar_quarter"]))
     return output, inventory
 
@@ -1112,6 +1218,9 @@ def _reported_source(
         "derivation_inputs": [],
         "compatibility_policy": None,
     }
+    if metric_id == "quarter_debt":
+        for field in ("raw_concept_is_standard", "raw_concept_data_type", "raw_concept_period_type"):
+            source[field] = copy.deepcopy(lineage.get(field))
     for field in _SOURCE_ELIGIBILITY_FIELDS:
         source[field] = copy.deepcopy(lineage.get(field))
     return source
@@ -1252,16 +1361,17 @@ def _statement_evidence(
         and evidence.get("cik") == _source_cik(lineage)
         and evidence.get("accession") == lineage.get("accession")
         and evidence.get("source_network_type") == "PRE"
-        and statement_type in (evidence.get("statement_types") or [])
+        and (statement_type in (evidence.get("statement_types") or [])
+             or cell.get("row_id") == "equity" and "EQ" in (evidence.get("statement_types") or []))
         and isinstance(evidence.get("role_uri"), str)
         and evidence["role_uri"]
     ]
 
 
 def _statement_type(row_id: str) -> str:
-    if row_id in {"revenue", "gross_profit", "operating_income", "net_income"}:
+    if row_id in {"revenue", "cost", "research", "gross_profit", "operating_income", "net_income"}:
         return "IS"
-    if row_id in {"cfo", "capex"}:
+    if row_id in {"cfo", "capex", "cfi", "cff", "repurchases", "stock_compensation"}:
         return "CF"
     return "BS"
 
@@ -1340,6 +1450,18 @@ def _derived_quarter_reasons(
     return reasons
 
 
+def _direct_combined_debt(source: dict[str, Any]) -> bool:
+    return (
+        source.get("source_kind") == "REPORTED"
+        and source.get("raw_concept_qname") == "us-gaap:DebtLongtermAndShorttermCombinedAmount"
+        and source.get("raw_concept_is_standard") is True
+        and source.get("raw_concept_data_type") == "xbrli:monetaryItemType"
+        and source.get("raw_concept_period_type") == "instant"
+        and source.get("period_class") == "INSTANT"
+        and source.get("dimensions") == []
+    )
+
+
 def _reported_anchor_reasons(
     source: dict[str, Any], financial_as_of: str, expected_cik: str
 ) -> list[str]:
@@ -1392,7 +1514,9 @@ def _reported_anchor_reasons(
         reasons.append("RECAST_REVIEW_REQUIRED")
     if source.get("quality_blocking") or source.get("quality_status") == "BLOCK":
         reasons.append("QUALITY_BLOCKED")
-    if not source.get("primary_statement_evidence"):
+    if not source.get("primary_statement_evidence") and not (
+        source.get("canonical_metric_id") == "quarter_debt" and _direct_combined_debt(source)
+    ):
         reasons.append("PRIMARY_STATEMENT_EVIDENCE_MISSING")
     snapshot = source.get("source_snapshot_id")
     if (
@@ -1457,7 +1581,7 @@ def _prepared_arithmetic_reasons(row: dict[str, Any]) -> list[str]:
         if not isinstance(source, dict):
             reasons.append("DERIVATION_INPUTS_INCOMPLETE")
             continue
-        reasons.extend(_arithmetic_source_reasons(source))
+        reasons.extend(_prepared_arithmetic_reasons(source) if source.get("source_kind") == "DERIVED_METRIC" else _arithmetic_source_reasons(source))
     return _unique(reasons)
 
 
@@ -1613,7 +1737,7 @@ def _generic_observation(
     current = current_by_bucket.get((current_metric, *bucket))
     second: dict[str, Any] | None = None
     if current is not None and current.get("availability_status") == "AVAILABLE":
-        if kind == "SAME_PERIOD_DIFFERENCE" or kind == "SAME_PERIOD_RATIO":
+        if kind.startswith("SAME_PERIOD_"):
             second = current_by_bucket.get((declarations[1]["metric_id"], *bucket))
         else:
             year = current.get("fiscal_year")
@@ -1627,16 +1751,23 @@ def _generic_observation(
                 second = fiscal_index.get((declarations[1]["metric_id"], prior_year, f"Q{prior_q}"))
     reasons = _generic_input_reasons(current, second, kind)
     value = None
+    if (kind == "SAME_PERIOD_NET_DEBT" and current is not None
+        and not _direct_combined_debt(current.get("source_lineage") or {})):
+        reasons.append("DIRECT_COMBINED_DEBT_UNAVAILABLE")
     if not reasons and current is not None and second is not None:
         first_value = Decimal(current["value"])
         second_value = Decimal(second["value"])
-        if kind == "SAME_PERIOD_DIFFERENCE":
-            if second_value < 0:
+        if kind in {"SAME_PERIOD_DIFFERENCE", "SAME_PERIOD_NET_DEBT"}:
+            if kind == "SAME_PERIOD_NET_DEBT" and (first_value < 0 or second_value < 0):
+                reasons.append("NEGATIVE_INPUT")
+            elif second_value < 0:
                 reasons.append("CAPEX_SIGN_UNCERTAIN")
             else:
                 value = _decimal_string(_exact_subtract(first_value, second_value))
         elif second_value <= 0:
-            reasons.append("NON_POSITIVE_DENOMINATOR")
+            reasons.append("NEGATIVE_EQUITY" if definition["metric_id"] == "quarter_liabilities_to_equity" and second_value < 0 else "NON_POSITIVE_DENOMINATOR")
+        elif definition["observation_basis"] == "INSTANT" and first_value < 0:
+            reasons.append("NEGATIVE_NUMERATOR")
         elif kind.endswith("GROWTH") and first_value < 0:
             reasons.append("NEGATIVE_CURRENT_VALUE")
         else:
@@ -1662,6 +1793,16 @@ def _generic_observation(
         basis_version=current.get("basis_version"),
         compatibility_policy=ARITHMETIC_POLICY,
     )
+    if kind == "SAME_PERIOD_NET_DEBT":
+        source = current["source_lineage"]
+        note_allowed = not source.get("primary_statement_evidence")
+        record["source_lineage"]["debt_input_policy"] = (
+            "EXACT_STANDARD_COMBINED_DEBT_NOTE_ALLOWANCE" if note_allowed else "TYPED_PRIMARY_BS")
+        record["source_lineage"]["debt_note_locator"] = (
+            {field: copy.deepcopy(source.get(field)) for field in
+             ("source_id", "source_fact_id", "source_snapshot_id", "source_filing_id", "context_id", "raw_concept_qname")}
+            if note_allowed else None)
+        record["observation_id"] = _observation_id(record)
     return record
 
 
@@ -1736,6 +1877,9 @@ def _endpoint_source(row: dict[str, Any]) -> dict[str, Any] | None:
         return None
     if row.get("source_kind") == "REPORTED":
         return lineage
+    if row.get("source_kind") == "DERIVED_METRIC" and row.get("metric_id") == "quarter_standardized_fcf":
+        endpoints = [_endpoint_source(item) for item in lineage.get("derivation_inputs") or []]
+        return endpoints[0] if len(endpoints) == 2 and all(endpoints) else None
     if row.get("source_kind") != "DERIVED_QUARTER":
         return None
     matches = [
@@ -1808,14 +1952,22 @@ def _derived_output_base(
     return record
 
 
+def _ttm_semantic_binding(row: dict[str, Any]) -> Any:
+    if row.get("metric_id") == "quarter_standardized_fcf":
+        return [(item.get("metric_id"), _ttm_semantic_binding(item))
+                for item in row["source_lineage"]["derivation_inputs"]]
+    return [row.get("company_canonical_concept_id"), row.get("canonical_mapping_version")]
+
+
 def _ttm_observation(
     *, ticker: str, cik: str, financial_as_of: str, bucket: tuple[int, int],
     current_by_bucket: dict[tuple[str, int, int], dict[str, Any]],
     fiscal_index: dict[tuple[str, int, str], dict[str, Any]],
     inventory: list[dict[str, Any]],
+    definition: dict[str, Any] = TTM_DEFINITION,
 ) -> dict[str, Any]:
-    definition = TTM_DEFINITION
-    current = current_by_bucket.get(("quarter_revenue", *bucket))
+    source_metric = definition["input_metric_id"]
+    current = current_by_bucket.get((source_metric, *bucket))
     inputs: list[dict[str, Any]] = []
     if current is not None and current.get("availability_status") == "AVAILABLE":
         year, quarter = current["fiscal_year"], int(current["fiscal_quarter"][1])
@@ -1825,7 +1977,7 @@ def _ttm_observation(
             y, q0 = divmod(absolute, 4)
             coordinates.append((y, f"Q{q0 + 1}"))
         inputs = [
-            fiscal_index.get(("quarter_revenue", y, q))
+            fiscal_index.get((source_metric, y, q))
             for y, q in coordinates
         ]
     reasons = []
@@ -1837,6 +1989,8 @@ def _ttm_observation(
             reasons.extend(_prepared_arithmetic_reasons(row))
         if any(a["period_end"] != b["period_start"] for a, b in pairwise(prepared)):
             reasons.append("INPUTS_NOT_CONTIGUOUS")
+        if len({canonical_json(_ttm_semantic_binding(row)) for row in prepared}) != 1:
+            reasons.append("INPUTS_NOT_COMPATIBLE")
         bases = [row.get("basis_version") for row in prepared]
         if (
             any(not isinstance(value, str) or not value for value in bases)
@@ -1878,12 +2032,56 @@ def _ttm_observation(
     )
 
 
+def _ttm_margin_observation(
+    *, ticker: str, cik: str, financial_as_of: str, definition: dict[str, Any],
+    bucket: tuple[int, int], current_by_bucket: dict[tuple[str, int, int], dict[str, Any]],
+    fiscal_index: dict[tuple[str, int, str], dict[str, Any]],
+    inventory: list[dict[str, Any]],
+) -> dict[str, Any]:
+    aggregates = [
+        _ttm_observation(
+            ticker=ticker, cik=cik, financial_as_of=financial_as_of, bucket=bucket,
+            definition={**TTM_DEFINITION, "metric_id": "ttm_" + item["metric_id"].removeprefix("quarter_"),
+                        "input_metric_id": item["metric_id"]},
+            current_by_bucket=current_by_bucket, fiscal_index=fiscal_index, inventory=inventory,
+        ) for item in definition["input_contract"]["inputs"]
+    ]
+    reasons = [item["reason"] for item in aggregates if item["availability_status"] != "AVAILABLE"]
+    numerator, denominator = aggregates
+    inputs = []
+    if not reasons:
+        first = numerator["source_lineage"]["derivation_inputs"]
+        second = denominator["source_lineage"]["derivation_inputs"]
+        for a, b in zip(first, second):
+            reasons.extend(_generic_input_reasons(a, b, "SAME_PERIOD_RATIO"))
+        if Decimal(denominator["value"]) <= 0:
+            reasons.append("NON_POSITIVE_DENOMINATOR")
+        inputs = [{**copy.deepcopy(row), "input_role": role + "_Q" + str(i + 1)}
+                  for role, rows in (("NUMERATOR", first), ("DENOMINATOR", second))
+                  for i, row in enumerate(rows)]
+    if reasons:
+        return _unavailable_observation(
+            ticker=ticker, cik=cik, definition=definition, financial_as_of=financial_as_of,
+            bucket=bucket, reason=_unique(reasons)[0], candidate_evidence=aggregates,
+        )
+    record = _derived_output_base(
+        ticker=ticker, cik=cik, financial_as_of=financial_as_of, definition=definition,
+        bucket=bucket, current=inputs[3], inputs=inputs,
+        value=_decimal_string(_percentage(Decimal(numerator["value"]), Decimal(denominator["value"]), subtract_one=False)),
+        basis_version=inputs[0]["basis_version"], compatibility_policy=ARITHMETIC_POLICY,
+    )
+    record["source_lineage"]["period_sums"] = {"NUMERATOR": numerator["value"], "DENOMINATOR": denominator["value"]}
+    record["observation_id"] = _observation_id(record)
+    return record
+
+
 def _support_rows(
-    companies: list[dict[str, Any]], observations: list[dict[str, Any]]
+    companies: list[dict[str, Any]], observations: list[dict[str, Any]],
+    *, definitions: Iterable[dict[str, Any]] = METRIC_DEFINITIONS,
 ) -> list[dict[str, Any]]:
     result = []
     for company in sorted(companies, key=lambda row: row["cik"]):
-        for definition in METRIC_DEFINITIONS:
+        for definition in definitions:
             rows = [
                 row
                 for row in observations
