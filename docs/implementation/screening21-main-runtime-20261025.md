@@ -24,9 +24,9 @@ Live 확인은 상태·catalog·회사 목록·기존 저장 결과를 읽는 GE
 명시적 저장과 재열기 동작은 private journal copy에서만 확인한다. 원본 journal에 시험
 POST를 쓰거나 restore를 덮어쓰지 않는다. Private copy에서 다음을 대조한다.
 
-- 기존 screen·revision·run·decision 및 두 catalog entry의 재열기
+- 기존 revision 4건·run 4건의 context 재열기와 두 catalog entry 조회
+- 21개 회사 detail 열기·닫기와 두 회사 비교 화면
 - 새 screen의 명시적 저장, 결과 저장, service 재시작 뒤 동일 record 재열기
-- 회사 목록과 선택한 회사의 기존 source trace·값이 전환 전과 같은지
 - SQLite integrity, table별 row count와 content digest
 
 Rollback은 새 backend와 bridge를 정지한 뒤, 전환 전 process record의 PID·명령·source
@@ -49,10 +49,10 @@ Private UAT는 main source를 `18866` backend와 Windows `18865` bridge에서 �
 Live 전환에서는 이전 backend PID `936135`와 Windows bridge PID `39812`의 명령·port 및
 process identity를 확인한 뒤 종료했다. 새 main backend PID `1630774`는 `18766`에서
 `src/sec_xbrl/screening/cli.py`를 사용하고, 새 Windows bridge PID `31944`는 main bridge와
-main `PYTHONPATH`로 `18765`를 사용한다. 두 process 모두 기존 catalog, 원본 journal과
-`--require-existing-store`를 유지한다. Live browser GET-only 확인은 21개 회사 detail,
-두 회사 비교, 기존 4 revisions·4 runs 재열기에서 PASS했고 JavaScript error와 실패 HTTP는
-0건이었다.
+main `PYTHONPATH`로 `18765`를 사용한다. Backend는 기존 catalog와 원본 journal을
+`--require-existing-store`로 열고, bridge는 main code로 `18765` 요청을 backend `18766`에
+전달한다. Live browser GET-only 확인은 21개 회사 detail, 두 회사 비교, 기존 4
+revisions·4 runs 재열기에서 PASS했고 JavaScript error와 실패 HTTP는 0건이었다.
 
 원본 journal의 전후 SHA-256은 모두
 `e486bb5e504d51272837ed9dc00de267529f74a20c40403b0abd85e480be0997`이다. 모든 table의
