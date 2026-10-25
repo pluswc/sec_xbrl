@@ -640,3 +640,49 @@ owns the three actual DOM caption checks by final-JS overlay, without restarting
 the backend or rereading Raw. Baseline quarterly/YoY UAT remains accepted as
 reported above. TTM strict basis policy, its unaccepted execution status and the
 human policy question remain unchanged; actual latest12 builds remain held.
+
+
+## 2026-10-26 final local handoff — source accepted; policy decision required
+
+ROOT accepted source freeze `d3591dccf1287c7231221372d6c80b8675209ad2` as
+`SOURCE_SYNTHETIC_LOCALLY_ACCEPTED_NOT_LATEST_ACTUAL_OR_TTM_RELEASE` after the
+independent repair PASS at `865d6a1d589a9241b9ae274164d3859cf52d5ee4` and final
+caption/UI PASS at d359. The original 9477 P1 FAIL remains preserved separately.
+The final handoff commit is documentation only: accepted Python/source/test bytes
+remain d359, so this status update does not create another producer code identity
+transition.
+
+ROOT accepted the baseline at
+`1edec6d8ad682ae2dabb82b02b9986068d91e7e4` as
+`LOCALLY_ACCEPTED_BASELINE_NON_TTM_CONNECTION`. All six actual stages completed:
+quality, identity, annual31 metrics, annual dataset, quarterly41 metrics and v3.
+Private 50-company quarterly revenue/YoY creation, restart/reopen and the original
+21-company saved-context reopen passed, preserving original catalog/journal and
+live21 hashes. Explicit save remains the only persistent user action.
+
+The final d359 front-end CSS/JS overlay on that already accepted 1edec6 baseline
+backend passed actual visual/DOM checks at 1464, 768 and 390px. First period-column
+widths were 234, 234 and 121px respectively; Korean periods remained readable.
+All four governed basis captions (instant, quarter, TTM and annual fallback) were
+correct. These checks establish the scoped front-end corrections against the
+baseline backend; they are **not** latest full-stack/end-to-end acceptance, and do
+not accept TTM execution or make unavailable values available.
+
+The human TTM basis-policy choice is **REQUIRED AND PENDING**. Actual nine-TTM
+availability remains zero under the unchanged strict declared-basis contract.
+No new arithmetic-only compatibility policy or invented basis label is approved.
+Latest12 History and prospective38 actual execution are **NOT STARTED**: they stay
+held to avoid repeating global producer code-identity checks if the required TTM
+choice changes source. Latest12 Raw, latest50 metadata, all1109 new canonical
+control intakes and the package view are already prepared and preserved.
+
+No live21 switch, original catalog/journal mutation, main merge, push, instruction
+or design-system edit, or deletion accompanies this handoff. Required next action
+is the human policy choice; any accounting/source implementation follows its own
+approval, freeze and independent verification before latest actual execution.
+
+Optional operator records are
+`work/quarterly50_expansion_20261025/lead_phase3_source_acceptance.json` and
+`work/quarterly50_expansion_20261025/lead_baseline_quarterly_connection_acceptance.json`.
+They supplement this tracked, self-contained status and are not prerequisites or
+sole authority for understanding scope, acceptance or outstanding decisions.

@@ -1,6 +1,6 @@
 # 계획 등록부 — 단일 진입점
 
-2026-10-25 승인된 [50사 분기·TTM·스크리닝 확대](../implementation/quarterly50-investor-expansion-20261025.md)는 41개 정의와 기존 17개 호환성을 구현한다. Source/synthetic 구현과 실제 cached 연결·SEC 갱신·운영 release는 별도 상태다. 첫 freeze `455b2bae80…`는 독립 PASS·source/synthetic 인수를 마쳤고, additive History 선택·완료 recovery 증거 재사용 `19967586`도 독립 PASS·source/synthetic 수락을 마쳤다. 실제 ordinary publication에는 별도 명시적 ROOT 승인 storage 증거 재사용을 구현하며, 새 15개와 관련 105개 focused 검사는 PASS했다. e3ace1b7e2는 독립 PASS·source/synthetic 수락 뒤 실제 IO 범위 문제를 확인해 publication 전에 중단했다. 별도 v2는 보존된 비소비 diagnostics의 topology만 감시하고 모든 governed bytes를 계속 검증한다. 89개 focused 검사 PASS이며 v2 독립 검증·실제 50사 연결은 별도 대기 상태다.
+2026-10-26 갱신: [50사 분기·TTM·스크리닝 확대](../implementation/quarterly50-investor-expansion-20261025.md)의 source `d3591dccf1287c7231221372d6c80b8675209ad2`는 독립 repair/UI PASS 뒤 ROOT가 source/synthetic 로컬 수락했다. Baseline `1edec6d8ad682ae2dabb82b02b9986068d91e7e4`의 6단계 실제 연결과 private 50사 분기·YoY 생성/재시작 재열기·기존 21사 context 재열기는 PASS다. Front `d359`를 baseline backend `1edec6`에 overlay한 1464/768/390px 기간표·4종 basis caption 확인도 PASS지만 latest end-to-end 인수는 아니다. 실제 TTM은 basis 증거 부재로 가용 0이며 실행·release 미수락이다. **필수 사용자 TTM 정책 선택 대기**이며, 이후 source 변경으로 global code identity 검사를 반복하지 않도록 latest12 History와 prospective38 실행은 아직 시작하지 않았다. Latest12 Raw·latest50 metadata·1109 intakes·package view는 준비됐다. Live21/catalog/journal은 보존됐고 main 병합·push는 하지 않았다.
 
 2026-10-25 운영 후속: [21사 screening main runtime 전환](../implementation/screening21-main-runtime-20261025.md)은
 기존 두 catalog entry, SQLite journal과 export를 보존한 채 accepted `main` source로
