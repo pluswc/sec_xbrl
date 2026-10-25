@@ -556,3 +556,11 @@ routine cases in 12.68 s (29 previously accepted storage cases deselected),
 including the new producer-code mutation-before-commit guard. The prior full
 150-case affected-contract run remains applicable; this additive correction has
 20 prospective cases. No actual company semantic validation was repeated.
+
+
+ROOT's private baseline UI observation found the expected unavailable-metric
+execution rejection exposed its English backend text. A scoped display mapping
+now renders the known `metric is unavailable for execution:` error in Korean:
+“현재 자료에서 실행할 수 없는 지표가 포함돼 있습니다. 사용 가능한 지표를 선택해 주세요.”
+Backend errors, execution validation and TTM availability policy are unchanged.
+This is a presentation correction, not TTM execution acceptance.

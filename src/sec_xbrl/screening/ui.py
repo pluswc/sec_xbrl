@@ -21,7 +21,7 @@ JS = r'''const S={screens:[],runs:[],decisions:[],catalog:[],companies:[],compan
 async function api(path,options={}){const r=await fetch(path,{headers:{"Content-Type":"application/json"},...options}),b=await r.json().catch(()=>({error:`요청 오류 ${r.status}`}));if(!r.ok)throw new Error(b.error||"요청에 실패했습니다.");return b}
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function toast(m){const e=$("#toast");e.textContent=m;e.classList.add("visible");setTimeout(()=>e.classList.remove("visible"),1800)}
-function fail(e){$("#criteria-error").hidden=false;$("#criteria-error").textContent=e.message||String(e)}
+function fail(e){const m=e.message||String(e);$("#criteria-error").hidden=false;$("#criteria-error").textContent=m.startsWith("metric is unavailable for execution:")?"현재 자료에서 실행할 수 없는 지표가 포함돼 있습니다. 사용 가능한 지표를 선택해 주세요.":m}
 function categoryLabel(v){return ({GROWTH:"성장성",PROFITABILITY:"수익성",CASH_FLOW:"현금흐름",FINANCIAL_STABILITY:"재무안정성",OTHER_REPORTED:"공시항목"})[v]||v}
 function aggregateLabel(v){return ({PASS:"조건 충족",FAIL:"조건 미충족",UNDETERMINED:"자료 확인 필요"})[v]||v}
 function decisionLabel(v){return ({INTEREST:"관심",HOLD:"보류",EXCLUDE:"제외"})[v]||v||"기록 없음"}
