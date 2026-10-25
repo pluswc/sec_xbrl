@@ -719,6 +719,7 @@ def build_history(*, intake_manifest: Path, output_root: Path,
         publication=destination, output_root=output_root, reuse_roots=True,
         validation_mode=validation_mode, validation_state_root=validation_state_root,
         previous_history=None if append_info is None else append_info["previous_history"],
+        previous_reported=None if append_info is None else append_info["previous_reported"],
         dirty_period_classes=None if append_info is None else frozenset(dirty_period_classes),
     )
     if append_info is not None:

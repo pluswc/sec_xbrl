@@ -18,7 +18,7 @@ import sqlite3
 import stat
 import tempfile
 import zlib
-from collections import defaultdict
+from collections import Counter, defaultdict, deque
 from collections.abc import Mapping, MutableMapping, Sequence
 from copy import deepcopy
 from datetime import date, datetime, time, timedelta
@@ -374,6 +374,16 @@ class _QuarterSpill:
             self.directory_fd = None
 
     def resolve(self, locator):
+        if "additive" in locator:
+            record = _SpillSequence(_SpillMap(self, locator["additive"]))[locator["cell_key"]]
+            cell, column, row = record["cell"], record["column"], record["row"]
+            if (
+                cell["fiscal_time_series_column_id"] != column["fiscal_time_series_column_id"]
+                or cell["fiscal_time_series_row_id"] != row["fiscal_time_series_row_id"]
+                or not approved_additive(cell)
+            ):
+                raise ValueError("quarter additive delta locator changed")
+            return cell, column, row
         cell = _SpillMap(self, locator["cells"])[locator["cell_key"]]
         column = locator["reclassified_column"]
         _SpillMap(self, locator["columns"])[locator["column_id"]]
@@ -513,6 +523,72 @@ def _copy_reclassified_cell(original):
     return cell, value
 
 
+class _QuarterDeltaFallback(ValueError):
+    """Use the unchanged full quarter producer when delta proof is incomplete."""
+
+
+def _delta_typed_equal(left: Any, right: Any) -> bool:
+    """Typed equality with the established Parquet schema-union boundary."""
+    if isinstance(left, Mapping) and isinstance(right, Mapping):
+        keys = set(left) | set(right)
+        return all(_delta_typed_equal(left.get(key), right.get(key)) for key in keys)
+    if isinstance(left, (tuple, list)) and isinstance(right, (tuple, list)):
+        return len(left) == len(right) and all(
+            _delta_typed_equal(a, b) for a, b in zip(left, right, strict=True)
+        )
+    return type(left) is type(right) and left == right
+
+
+def _delta_scalar_rows(root: Path, info: dict[str, Any], fields: tuple[str, ...]) -> tuple[tuple[Any, ...], ...]:
+    """Read only compact scalar routing fields from one attested dataset."""
+    import polars as pl
+
+    path = _history_dataset_path(root, info)
+    frame = pl.scan_parquet(path, parallel="none", low_memory=True, rechunk=False)
+    schema = frame.collect_schema()
+    if any(field not in schema for field in fields):
+        raise _QuarterDeltaFallback("quarter delta routing field is unavailable")
+    rows = frame.select(fields).collect(engine="streaming").iter_rows()
+    result = tuple(tuple(row) for row in rows)
+    if len(result) != info["count"]:
+        raise _QuarterDeltaFallback("quarter delta routing count changed")
+    return result
+
+
+def _delta_table_key(table: Mapping[str, Any]) -> tuple[str, str, str]:
+    return str(table["ticker"]), str(table["view"]), str(table["period_class"])
+
+
+def _new_delta_target(table: Mapping[str, Any], period_class: str, spill: Any) -> dict[str, Any]:
+    return {
+        "table": {
+            **table,
+            "period_class": period_class,
+            "scope": {**table["scope"], "period_class": period_class},
+        },
+        "columns": spill.mapping(),
+        "rows": spill.mapping(),
+        "cell_chunks": [],
+        "cell_buffer": [],
+        "extra_columns": spill.mapping(),
+        "extra_rows": spill.mapping(),
+        "extra_cells": spill.sequence(),
+    }
+
+
+def _flush_delta_cells(target: dict[str, Any], chunk_root: Path, target_index: int) -> None:
+    buffer = target["cell_buffer"]
+    if not buffer:
+        return
+    path = chunk_root / f"delta-{target_index:04d}-{len(target['cell_chunks']):06d}-cells.parquet"
+    plan = _stage_records(path, tuple(buffer))
+    try:
+        target["cell_chunks"].append({**_finalize_staged_records(plan), "path": path})
+    finally:
+        plan.cleanup()
+    buffer.clear()
+
+
 def _spill_reported_table(old, table, publication, by_fact, targets, materialized, changes, spill, additive):
     """Reclassify one fully decoded cell at a time; retain only disk references."""
     source = {}
@@ -608,6 +684,300 @@ def _spill_reported_table(old, table, publication, by_fact, targets, materialize
     _quarter_progress("QUARTER_SPILL_END", table, count, started_at)
 
 
+def _delta_reclassify_cell(
+    original: dict[str, Any],
+    *,
+    table: Mapping[str, Any],
+    publication: Path,
+    by_fact: Mapping[tuple[str, str], dict[str, Any]],
+    old_column: dict[str, Any],
+    changes: MutableMapping[str, int],
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    """Run the unchanged full-producer transformation for one dirty occurrence."""
+    cell, value = _copy_reclassified_cell(original)
+    period_class = str(table["period_class"])
+    if value is not None and value.get("selected_source_fact_id"):
+        source = by_fact.get((value["source_filing_id"], value["selected_source_fact_id"]))
+        if source is None or source["comparative_type"] != "CURRENT_FOCUS":
+            raise ValueError("selected cell is not attested by corrected current-focus T1")
+        for name in (
+            "value_numeric", "value_text", "context_start_date", "context_end_date",
+            "context_instant_date", "context_id", "unit_id", "raw_concept_id",
+            "raw_concept_qname", "raw_concept_namespace_uri", "company_canonical_concept_id",
+            "filed_date", "source_snapshot_id", "accession",
+        ):
+            if source.get(name) != value.get(name):
+                raise ValueError("selected cell differs from corrected T1 source")
+        for name in (
+            "unit_numerator_measures", "unit_denominator_measures",
+            "canonical_dimension_signature",
+        ):
+            if json.dumps(_sequence(source.get(name)), sort_keys=True) != json.dumps(
+                _sequence(value.get(name)), sort_keys=True
+            ):
+                raise ValueError("selected cell measurement scope differs from corrected T1")
+        if (
+            value.get("selection_view") != table["view"]
+            or value.get("selection_as_of_date") != table["scope"]["selection_as_of_date"]
+        ):
+            raise ValueError("selected cell view/as-of disagrees with publication")
+        period_class = source["period_class"]
+        if period_class != table["period_class"]:
+            changes[f"{table['period_class']}->{period_class}"] += 1
+        value.update(
+            period_class=period_class,
+            classification_rule_version=source["classification_rule_version"],
+            period_classification_reason=source.get("period_classification_reason"),
+        )
+        if cell.get("candidate_lineage"):
+            cell["prior_publication_candidate_lineage"] = cell.pop("candidate_lineage")
+            cell["prior_candidate_publication"] = str(publication.absolute())
+    column = {
+        **old_column,
+        "period_class": period_class,
+        "fiscal_time_series_column_id": _id(
+            "column",
+            (old_column["fiscal_year"], old_column["fiscal_quarter"], period_class),
+        ),
+    }
+    cell["fiscal_time_series_column_id"] = column["fiscal_time_series_column_id"]
+    cell["fiscal_time_series_cell_id"] = _id(
+        "reclassified-cell", cell.get("fiscal_time_series_cell_id"), PERIOD_RULE
+    )
+    return cell, column, str(period_class)
+
+
+def _spill_reported_delta(
+    *,
+    current: HistoryPublicationReader,
+    previous_reported: HistoryPublicationReader,
+    previous_final: HistoryPublicationReader,
+    publication: Path,
+    by_fact: Mapping[tuple[str, str], dict[str, Any]],
+    targets: dict[tuple[str, str, str], dict[str, Any]],
+    materialized: dict[tuple[str, str, str], Any],
+    changes: MutableMapping[str, int],
+    spill: _QuarterSpill,
+    additive: MutableMapping[tuple[str, str], Any],
+    chunk_root: Path,
+    dirty_period_classes: frozenset[str],
+    metrics: MutableMapping[str, int],
+) -> tuple[MutableMapping[str, Any], MutableMapping[str, Any]]:
+    """Reuse exact old final cells and rebuild only changed source occurrences."""
+    previous_tables = {_delta_table_key(table): table for table in previous_reported.manifest["tables"]}
+    current_keys = [_delta_table_key(table) for table in current.manifest["tables"]]
+    previous_keys = [_delta_table_key(table) for table in previous_reported.manifest["tables"]]
+    if [key for key in current_keys if key in previous_tables] != previous_keys:
+        raise _QuarterDeltaFallback("reported source table order is not append-compatible")
+
+    final_tables = {_delta_table_key(table): table for table in previous_final.manifest["tables"]}
+    final_locations: dict[str, deque[tuple[str, str, str]]] = defaultdict(deque)
+    final_reported_counts: Counter[tuple[str, str, str]] = Counter()
+    final_streams: dict[tuple[str, str, str], Any] = {}
+    final_consumed: Counter[tuple[str, str, str]] = Counter()
+    for key, table in final_tables.items():
+        info = table["files"]["cells"]
+        for cell_id, status in _delta_scalar_rows(
+            previous_final.root, info, ("fiscal_time_series_cell_id", "value_status")
+        ):
+            if status == "DERIVED":
+                continue
+            final_locations[str(cell_id)].append(key)
+            final_reported_counts[key] += 1
+        final_streams[key] = iter(
+            _iter_history_records(_history_dataset_path(previous_final.root, info), info)
+        )
+
+    additive_records = spill.sequence()
+    target_indexes: dict[tuple[str, str, str], int] = {}
+
+    def ensure_target(table: Mapping[str, Any], period_class: str) -> tuple[tuple[str, str, str], dict[str, Any]]:
+        key = (str(table["ticker"]), str(table["view"]), str(period_class))
+        if key not in targets:
+            targets[key] = _new_delta_target(table, period_class, spill)
+            materialized[key] = spill.mapping()
+            target_indexes[key] = len(target_indexes)
+        return key, targets[key]
+
+    def take_previous(key: tuple[str, str, str], expected_id: str) -> dict[str, Any]:
+        try:
+            cell = next(final_streams[key])
+        except (KeyError, StopIteration) as exc:
+            raise _QuarterDeltaFallback("previous final cell stream ended early") from exc
+        if cell.get("value_status") == "DERIVED" or cell.get("fiscal_time_series_cell_id") != expected_id:
+            raise _QuarterDeltaFallback("previous final cell order changed")
+        final_consumed[key] += 1
+        return cell
+
+    for table in current.manifest["tables"]:
+        source_key = _delta_table_key(table)
+        previous_table = previous_tables.get(source_key)
+        current_maps: dict[str, Any] = {}
+        previous_maps: dict[str, Any] = {}
+        for name in ("columns", "rows"):
+            current_maps[name] = spill.mapping()
+            for record in _iter_history_records(
+                _history_dataset_path(current.root, table["files"][name]), table["files"][name]
+            ):
+                current_maps[name][record[f"fiscal_time_series_{name[:-1]}_id"]] = record
+            if previous_table is not None:
+                previous_maps[name] = spill.mapping()
+                for record in _iter_history_records(
+                    _history_dataset_path(previous_reported.root, previous_table["files"][name]),
+                    previous_table["files"][name],
+                ):
+                    previous_maps[name][record[f"fiscal_time_series_{name[:-1]}_id"]] = record
+
+        previous_ids: Counter[str] = Counter()
+        previous_iter = iter(())
+        previous_next = None
+        if previous_table is not None:
+            previous_info = previous_table["files"]["cells"]
+            previous_ids.update(
+                str(row[0]) for row in _delta_scalar_rows(
+                    previous_reported.root, previous_info, ("fiscal_time_series_cell_id",)
+                )
+            )
+            previous_iter = iter(
+                _iter_history_records(
+                    _history_dataset_path(previous_reported.root, previous_info), previous_info
+                )
+            )
+            previous_next = next(previous_iter, None)
+
+        written_rows: set[tuple[tuple[str, str, str], str]] = set()
+        last_source_column: dict[tuple[tuple[str, str, str], str], str] = {}
+        current_info = table["files"]["cells"]
+        for original in _iter_history_records(
+            _history_dataset_path(current.root, current_info), current_info
+        ):
+            metrics["scanned_current_cells"] += 1
+            source_cell_id = str(original["fiscal_time_series_cell_id"])
+            source_column_id = str(original["fiscal_time_series_column_id"])
+            row_id = str(original["fiscal_time_series_row_id"])
+            old_column = current_maps["columns"][source_column_id]
+            old_row = current_maps["rows"][row_id]
+            existed = previous_ids[source_cell_id] > 0
+            unchanged = False
+            prior_key = None
+            prior_cell = None
+            if existed:
+                if previous_next is None or str(previous_next.get("fiscal_time_series_cell_id")) != source_cell_id:
+                    raise _QuarterDeltaFallback("reported cell order is not append-compatible")
+                previous_column_id = str(previous_next["fiscal_time_series_column_id"])
+                previous_row_id = str(previous_next["fiscal_time_series_row_id"])
+                try:
+                    unchanged = (
+                        _delta_typed_equal(original, previous_next)
+                        and _delta_typed_equal(old_column, previous_maps["columns"][previous_column_id])
+                        and _delta_typed_equal(old_row, previous_maps["rows"][previous_row_id])
+                    )
+                except KeyError as exc:
+                    raise _QuarterDeltaFallback("reported row or column identity changed") from exc
+                previous_ids[source_cell_id] -= 1
+                previous_next = next(previous_iter, None)
+                output_id = _id("reclassified-cell", source_cell_id, PERIOD_RULE)
+                if not final_locations[output_id]:
+                    raise _QuarterDeltaFallback("previous final cell locator is missing")
+                prior_key = final_locations[output_id].popleft()
+                prior_cell = take_previous(prior_key, output_id)
+                metrics["compared_cells"] += 1
+
+            if unchanged:
+                cell = dict(prior_cell)
+                if "prior_candidate_publication" in cell:
+                    cell["prior_candidate_publication"] = str(publication.absolute())
+                period_class = prior_key[2]
+                column = {
+                    **old_column,
+                    "period_class": period_class,
+                    "fiscal_time_series_column_id": _id(
+                        "column",
+                        (old_column["fiscal_year"], old_column["fiscal_quarter"], period_class),
+                    ),
+                }
+                metrics["reused_cells"] += 1
+            else:
+                cell, column, period_class = _delta_reclassify_cell(
+                    original,
+                    table=table,
+                    publication=publication,
+                    by_fact=by_fact,
+                    old_column=old_column,
+                    changes=changes,
+                )
+                key = (str(table["ticker"]), str(table["view"]), str(period_class))
+                if prior_key is not None and prior_key != key:
+                    raise _QuarterDeltaFallback("reported cell changed target partition")
+                metrics["regenerated_cells"] += 1
+
+            key, target = ensure_target(table, period_class)
+            if key[2] in dirty_period_classes:
+                column_id = str(column["fiscal_time_series_column_id"])
+                column_key = (key, column_id)
+                if last_source_column.get(column_key) != source_column_id:
+                    target["columns"][column_id] = column
+                    last_source_column[column_key] = source_column_id
+                row_key = (key, row_id)
+                if row_key not in written_rows:
+                    target["rows"][row_id] = old_row
+                    written_rows.add(row_key)
+                target["cell_buffer"].append(cell)
+                materialized[key][(row_id, column_id)] = True
+                if len(target["cell_buffer"]) == 32:
+                    _flush_delta_cells(target, chunk_root, target_indexes[key])
+            if approved_additive(cell):
+                additive_index = len(additive_records)
+                additive_records.append({
+                    "cell": cell,
+                    "column": column,
+                    "row": old_row,
+                    "inputs_unchanged": unchanged,
+                })
+                pair_key = (key[0], key[1])
+                if pair_key not in additive:
+                    additive[pair_key] = _SpillGroups(spill)
+                additive[pair_key].setdefault(
+                    (column["fiscal_year"], key[2], _scope(cell["value_lineage"]))
+                ).append(
+                    {
+                        "additive": additive_records.mapping.bucket,
+                        "cell_key": additive_index,
+                    }
+                )
+
+        if previous_next is not None or any(previous_ids.values()):
+            raise _QuarterDeltaFallback("reported source cell was removed")
+
+    if any(final_locations.values()) or final_consumed != final_reported_counts:
+        raise _QuarterDeltaFallback("previous final reported cells were not consumed exactly")
+    prior_derived_cells = spill.mapping()
+    for stream in final_streams.values():
+        for cell in stream:
+            if cell.get("value_status") != "DERIVED":
+                raise _QuarterDeltaFallback("previous final cell order changed")
+            cell_id = str(cell["fiscal_time_series_cell_id"])
+            if cell_id in prior_derived_cells:
+                raise _QuarterDeltaFallback("previous derived cell identity is duplicated")
+            prior_derived_cells[cell_id] = cell
+    prior_derived_metrics = spill.mapping()
+    derived_info = previous_final.manifest.get("derived_quarter")
+    if not isinstance(derived_info, dict):
+        raise _QuarterDeltaFallback("previous derived-quarter evidence is missing")
+    for metric in _iter_history_records(
+        _history_dataset_path(previous_final.root, derived_info), derived_info
+    ):
+        metric_id = str(metric["derived_metric_id"])
+        if metric_id in prior_derived_metrics:
+            raise _QuarterDeltaFallback("previous derived metric identity is duplicated")
+        prior_derived_metrics[metric_id] = metric
+    if set(prior_derived_cells) != set(prior_derived_metrics):
+        raise _QuarterDeltaFallback("previous derived cells and metrics disagree")
+    for target in targets.values():
+        _flush_delta_cells(target, chunk_root, target_indexes[_delta_table_key(target["table"])])
+    return prior_derived_cells, prior_derived_metrics
+
+
 def _assemble_spilled_table(target, staging, spill):
     table = {**target["table"], "files": {}}
     for key, column in target["extra_columns"].items():
@@ -649,6 +1019,93 @@ def _assemble_spilled_table(target, staging, spill):
         relative = Path(table["cik"]) / table["view"] / table["period_class"] / f"{name}.parquet"
         plan = _stage_records(staging / relative, records)
         table["files"][name] = {**_finalize_staged_records(plan), "path": str(relative)}
+    return table
+
+
+def _assemble_delta_table(target: dict[str, Any], staging: Path, spill: _QuarterSpill) -> dict[str, Any]:
+    """Assemble bounded delta chunks with the full producer's observable order."""
+    table = {**target["table"], "files": {}}
+    for key, column in target["extra_columns"].items():
+        target["columns"].setdefault(key, column)
+    for key, row in target["extra_rows"].items():
+        target["rows"].setdefault(key, row)
+    chunks = list(target["cell_chunks"])
+    if len(target["extra_cells"]):
+        path = staging / ".delta-chunks" / f"delta-derived-{table['view']}-{table['period_class']}.parquet"
+        plan = _stage_records(path, target["extra_cells"])
+        try:
+            chunks.append({**_finalize_staged_records(plan), "path": path})
+        finally:
+            plan.cleanup()
+
+    boundaries = _SpillGroups(spill)
+    unique = spill.mapping()
+    for info in chunks:
+        for cell in _iter_history_records(info["path"], info):
+            lineage = cell.get("value_lineage")
+            if isinstance(lineage, dict):
+                column_id = cell["fiscal_time_series_column_id"]
+                boundary = tuple(
+                    lineage.get(name)
+                    for name in ("context_start_date", "context_end_date", "context_instant_date")
+                )
+                if (column_id, boundary) not in unique:
+                    unique[column_id, boundary] = True
+                    boundaries.setdefault(column_id).append(boundary)
+
+    order = sorted(
+        (
+            (
+                column["fiscal_year"],
+                column["fiscal_quarter"] is None,
+                column["fiscal_quarter"] or 0,
+                table["period_class"],
+            ),
+            key,
+        )
+        for key, column in target["columns"].items()
+    )
+    columns = spill.sequence()
+    previous = None
+    for _, column_id in order:
+        column = target["columns"][column_id]
+        values = [
+            {
+                "context_start_date": start,
+                "context_end_date": end,
+                "context_instant_date": instant,
+                "value_status": "REPORTED",
+            }
+            for start, end, instant in sorted(
+                boundaries.get(column_id, ()),
+                key=lambda item: tuple(value or "" for value in item),
+            )
+        ]
+        rebuilt = _column(
+            (column["fiscal_year"], column["fiscal_quarter"], table["period_class"]),
+            column.get("fiscal_year_end_as_filed"),
+            _period_evidence(SimpleNamespace(values=values)),
+        )
+        annotated = _annotate_comparability(
+            (rebuilt,) if previous is None else (previous, rebuilt)
+        )[-1]
+        columns.append(annotated)
+        if rebuilt["column_status"] == "AVAILABLE":
+            previous = rebuilt
+
+    payloads = {"columns": columns, "rows": target["rows"].records()}
+    for name, records in payloads.items():
+        relative = Path(table["cik"]) / table["view"] / table["period_class"] / f"{name}.parquet"
+        plan = _stage_records(staging / relative, records)
+        try:
+            table["files"][name] = {**_finalize_staged_records(plan), "path": str(relative)}
+        finally:
+            plan.cleanup()
+    cell_relative = Path(table["cik"]) / table["view"] / table["period_class"] / "cells.parquet"
+    table["files"]["cells"] = {
+        **_concatenate_staged_records(staging / cell_relative, chunks),
+        "path": str(cell_relative),
+    }
     return table
 
 
@@ -943,10 +1400,20 @@ def _stage_quarter_bundle(bundle, *, key, table_index, chunk_index, chunk_root,
             plan.cleanup()
 
 
-def _derive_quarter_targets(targets, additive_by_pair, materialized, spill=None):
+def _derive_quarter_targets(
+    targets,
+    additive_by_pair,
+    materialized,
+    spill=None,
+    *,
+    prior_derived_cells=None,
+    prior_derived_metrics=None,
+    delta_metrics=None,
+):
     """Keep candidate source aliases within the derivation phase."""
     derived = [] if spill is None else spill.sequence()
     resolve = _resolve_additive_locator if spill is None else spill.resolve
+    retained_derived_ids: set[str] = set()
     for ticker, view in sorted({(key[0], key[1]) for key in targets}):
         qtd_key = (ticker, view, "QTD_3M")
         qtd = targets.get(qtd_key)
@@ -969,12 +1436,68 @@ def _derive_quarter_targets(targets, additive_by_pair, materialized, spill=None)
                 continue
             later, annual_column, source_row = resolve(choices[0])
             earlier = resolve(partners[0])[0]
-            metric = derive_quarter(later, earlier, quarter=quarter)
+            reusable = (
+                prior_derived_cells is not None
+                and prior_derived_metrics is not None
+                and choices[0].get("inputs_unchanged") is True
+                and partners[0].get("inputs_unchanged") is True
+            )
+            metric_id = _id(
+                "derived",
+                QUARTER_RULE,
+                [
+                    later["value_lineage"]["selected_source_fact_id"],
+                    earlier["value_lineage"]["selected_source_fact_id"],
+                ],
+                quarter,
+                _scope(later["value_lineage"]),
+            )
+            reusable = (
+                reusable
+                and metric_id in prior_derived_metrics
+                and metric_id in prior_derived_cells
+            )
+            if reusable:
+                metric = prior_derived_metrics[metric_id]
+            else:
+                metric = derive_quarter(later, earlier, quarter=quarter)
             if metric is None:
                 continue
             row_id = later["fiscal_time_series_row_id"]
             column_id = _id("column", (year, quarter, "QTD_3M"))
             if (row_id, column_id) in materialized[qtd_key]:
+                continue
+            if reusable:
+                prior_cell = prior_derived_cells[metric_id]
+                if (
+                    metric.get("derived_metric_id") != metric_id
+                    or prior_cell.get("fiscal_time_series_cell_id") != metric_id
+                    or prior_cell.get("fiscal_time_series_row_id") != row_id
+                    or prior_cell.get("fiscal_time_series_column_id") != column_id
+                    or prior_cell.get("value_status") != "DERIVED"
+                ):
+                    raise _QuarterDeltaFallback("previous derived cell binding changed")
+                column = _column(
+                    (year, quarter, "QTD_3M"),
+                    annual_column.get("fiscal_year_end_as_filed"),
+                    _period_evidence(
+                        SimpleNamespace(
+                            values=[
+                                {
+                                    **prior_cell["value_lineage"],
+                                    "value_status": "REPORTED",
+                                }
+                            ]
+                        )
+                    ),
+                )
+                qtd["extra_columns"].setdefault(column_id, column)
+                qtd["extra_rows"].setdefault(row_id, source_row)
+                derived.append(metric)
+                qtd["extra_cells"].append(prior_cell)
+                retained_derived_ids.add(metric_id)
+                if delta_metrics is not None:
+                    delta_metrics["derived_reused_cells"] += 1
                 continue
             metric.update(cik=qtd["table"]["cik"], ticker=ticker, fiscal_year=year, view=view)
             derived.append(metric)
@@ -994,6 +1517,13 @@ def _derive_quarter_targets(targets, additive_by_pair, materialized, spill=None)
                                   "fiscal_time_series_column_id": column_id, "value_status": "DERIVED", "value_numeric": metric["value_numeric"],
                                   "value_text": None, "comparability_status": "COMPATIBLE_INPUTS", "comparability_reason": metric["basis_compatibility"],
                                   "definition": definition, "binding": binding, "value_lineage": value})
+            retained_derived_ids.add(str(metric["derived_metric_id"]))
+            if delta_metrics is not None:
+                delta_metrics["derived_recomputed_cells"] += 1
+    if prior_derived_metrics is not None and delta_metrics is not None:
+        delta_metrics["derived_removed_cells"] = sum(
+            1 for metric_id in prior_derived_metrics if metric_id not in retained_derived_ids
+        )
     return derived
 
 
@@ -1110,6 +1640,7 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
                             validation_mode: str = "routine",
                             validation_state_root: Path | None = None,
                             previous_history: Path | None = None,
+                            previous_reported: Path | None = None,
                             dirty_period_classes: frozenset[str] | None = None) -> Path:
     """Upgrade reported period evidence and materialize governed quarter cells."""
     old = HistoryPublicationReader(publication, _recovery_access=_recovery_access)
@@ -1139,6 +1670,8 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
     staging = Path(tempfile.mkdtemp(prefix=".panels.partial-", dir=output_root))
     chunk_root = staging / ".chunks"
     chunk_root.mkdir()
+    delta_chunk_root = staging / ".delta-chunks"
+    delta_chunk_root.mkdir()
     spill = _QuarterSpill(chunk_root)
     try:
         by_fact = spill.mapping()
@@ -1149,15 +1682,96 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
         gc.collect()
         targets, additive_by_pair, materialized = {}, {}, {}
         changes = defaultdict(int)
-        for table in old.manifest["tables"]:
-            _spill_reported_table(old, table, publication, by_fact, targets, materialized, changes, spill, additive_by_pair)
-        derived = _derive_quarter_targets(targets, additive_by_pair, materialized, spill)
+        delta_metrics = defaultdict(int)
+        prior_derived_cells = None
+        prior_derived_metrics = None
+        delta_mode = previous_history is not None and previous_reported is not None and dirty_period_classes is not None
+        if delta_mode:
+            try:
+                prior_reported_reader = HistoryPublicationReader(previous_reported)
+                prior_final_reader = HistoryPublicationReader(previous_history)
+                prior_manifest_path = prior_reported_reader.root / "history_manifest.json"
+                if (
+                    prior_final_reader.manifest.get("supersedes_publication")
+                    != str(prior_reported_reader.root.absolute())
+                    or prior_final_reader.manifest.get("source_manifest_sha256")
+                    != hashlib.sha256(prior_manifest_path.read_bytes()).hexdigest()
+                ):
+                    raise _QuarterDeltaFallback(
+                        "previous final publication is not bound to previous reported input"
+                    )
+                prior_derived_cells, prior_derived_metrics = _spill_reported_delta(
+                    current=old,
+                    previous_reported=prior_reported_reader,
+                    previous_final=prior_final_reader,
+                    publication=publication,
+                    by_fact=by_fact,
+                    targets=targets,
+                    materialized=materialized,
+                    changes=changes,
+                    spill=spill,
+                    additive=additive_by_pair,
+                    chunk_root=delta_chunk_root,
+                    dirty_period_classes=dirty_period_classes,
+                    metrics=delta_metrics,
+                )
+            except _QuarterDeltaFallback as exc:
+                print(
+                    json.dumps({"stage": "QUARTER_CELL_DELTA_FULL_FALLBACK", "reason": str(exc)}),
+                    flush=True,
+                )
+                spill.close()
+                shutil.rmtree(staging)
+                return publish_quarter_history(
+                    publication=publication,
+                    output_root=output_root,
+                    reuse_roots=True,
+                    operational_root=operational_root,
+                    _recovery_access=_recovery_access,
+                    validation_mode=validation_mode,
+                    validation_state_root=validation_state_root,
+                    previous_history=previous_history,
+                    previous_reported=None,
+                    dirty_period_classes=dirty_period_classes,
+                )
+        else:
+            for table in old.manifest["tables"]:
+                _spill_reported_table(old, table, publication, by_fact, targets, materialized, changes, spill, additive_by_pair)
+        derived = _derive_quarter_targets(
+            targets,
+            additive_by_pair,
+            materialized,
+            spill,
+            prior_derived_cells=prior_derived_cells,
+            prior_derived_metrics=prior_derived_metrics,
+            delta_metrics=delta_metrics if delta_mode else None,
+        )
+        if delta_mode:
+            for name in (
+                "compared_cells",
+                "reused_cells",
+                "regenerated_cells",
+                "derived_reused_cells",
+                "derived_recomputed_cells",
+                "derived_removed_cells",
+            ):
+                delta_metrics[name] += 0
+            print(
+                json.dumps(
+                    {"stage": "QUARTER_CELL_DELTA", **dict(sorted(delta_metrics.items()))}
+                ),
+                flush=True,
+            )
         spill.checkpoint()
         built_tables: dict[tuple[str, str, str], dict[str, Any]] = {}
         for target_index, (key, target) in enumerate(sorted(targets.items())):
             if dirty_period_classes is not None and key[2] not in dirty_period_classes:
                 continue
-            table = _assemble_spilled_table(target, staging, spill)
+            table = (
+                _assemble_delta_table(target, staging, spill)
+                if delta_mode
+                else _assemble_spilled_table(target, staging, spill)
+            )
             built_tables[(str(key[0]), str(key[1]), str(key[2]))] = table
             print(
                 json.dumps(
@@ -1171,6 +1785,7 @@ def publish_quarter_history(*, publication: Path, output_root: Path, reuse_roots
                 ),
                 flush=True,
             )
+        shutil.rmtree(delta_chunk_root)
         _check_history_storage()
         derived_info = _finalize_staged_records(_stage_records(staging / "derived_quarter.parquet", derived))
         spill.close()
