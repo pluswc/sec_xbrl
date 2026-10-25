@@ -132,7 +132,7 @@ def _preflight_quality_inputs(
     readiness = _validate_status(
         collection_manifest=collection_manifest,
         parent_companies=parent,
-        expected_companies=companies,
+        expected_companies=companies, storage_reuse=config.get("storage_reuse"),
     )
     _validate_source_provenance(
         collection_manifest=collection_manifest,
@@ -147,6 +147,7 @@ def _preflight_quality_inputs(
         financial_as_of=config["financial_as_of"],
         readiness=readiness,
         selection=_configured_history_selection(config, collection_manifest),
+        storage_reuse=_configured_storage_reuse(config, collection_manifest),
     )
 
 
@@ -185,7 +186,7 @@ def publish_generic_metric_quality(
     readiness = _validate_status(
         collection_manifest=collection_manifest,
         parent_companies=parent_companies,
-        expected_companies=companies,
+        expected_companies=companies, storage_reuse=config.get("storage_reuse"),
     )
     _validate_source_provenance(
         collection_manifest=collection_manifest,
@@ -200,6 +201,7 @@ def publish_generic_metric_quality(
         financial_as_of=config["financial_as_of"],
         readiness=readiness,
         selection=_configured_history_selection(config, collection_manifest),
+        storage_reuse=_configured_storage_reuse(config, collection_manifest),
     )
 
     bindings = SourceBindingsV2Reader(Path(source_binding_publication))
@@ -281,6 +283,9 @@ def publish_generic_metric_quality(
     selection = _configured_history_selection(config, collection_manifest)
     if selection is not None:
         evidence_hashes["history_selection_controls"] = selection.controls
+    storage = _configured_storage_reuse(config, collection_manifest)
+    if storage is not None:
+        evidence_hashes["storage_reuse_controls"] = storage.controls
     parser_profiles = bindings.manifest["parser_profiles"]
     staging = destination.parent / f".{destination.name}.partial-{uuid.uuid4().hex}"
     try:
@@ -320,6 +325,8 @@ def publish_generic_metric_quality(
             "evidence_hashes": evidence_hashes,
             "files": {REPORT_NAME: _file_declaration(report_path)},
         }
+        if storage is not None:
+            manifest["storage_reuse"] = storage.declaration
         if selection is not None:
             manifest["history_selection"] = selection.declaration
             manifest["selected_history_evidence"] = selection.companies
@@ -525,6 +532,8 @@ class GenericMetricQualityReader:
         }
         if self.manifest.get("history_selection") is not None:
             expected_evidence.add("history_selection_controls")
+        if self.manifest.get("storage_reuse") is not None:
+            expected_evidence.add("storage_reuse_controls")
         if not isinstance(evidence, dict) or set(evidence) != expected_evidence:
             raise ValueError("generic metric quality evidence proof is invalid")
         _validate_evidence_declarations(evidence, expected_tickers=set(histories))
@@ -615,7 +624,7 @@ class GenericMetricQualityReader:
         readiness = _validate_status(
             collection_manifest=collection_manifest,
             parent_companies=parent,
-            expected_companies=companies,
+            expected_companies=companies, storage_reuse=self.manifest.get("storage_reuse"),
         )
         if list(readiness) != self.manifest.get("collection_status"):
             raise ValueError("generic metric quality collection status replay differs")
@@ -631,6 +640,10 @@ class GenericMetricQualityReader:
             or config["collection_scope_companies"] != list(companies)
         ):
             raise ValueError("generic metric quality config replay differs")
+        storage = _configured_storage_reuse(config, collection_manifest)
+        if (self.manifest.get("storage_reuse") != config.get("storage_reuse")
+            or evidence.get("storage_reuse_controls") != (storage.controls if storage else None)):
+            raise ValueError("generic quality storage reuse replay differs")
         selection = _configured_history_selection(config, collection_manifest)
         if (self.manifest.get("history_selection") != (selection.declaration if selection else None)
             or self.manifest.get("selected_history_evidence") != (selection.companies if selection else None)
@@ -667,6 +680,7 @@ class GenericMetricQualityReader:
             financial_as_of=financial_as_of,
             readiness=readiness,
             selection=_configured_history_selection(config, collection_manifest),
+            storage_reuse=_configured_storage_reuse(config, collection_manifest),
         )
         if histories != history_declarations:
             raise ValueError("generic metric quality history replay differs")
@@ -832,15 +846,25 @@ def _load_config(path: Path) -> dict[str, Any]:
         "collection_scope_companies": list(companies),
         "source_provenance": provenance,
     }
+    if "storage_reuse" in payload:
+        normalized["storage_reuse"] = selection_declaration(payload["storage_reuse"])
     if "history_selection" in payload:
         normalized["history_selection"] = selection_declaration(payload["history_selection"])
     return normalized
 
 
+def _configured_storage_reuse(config: dict[str, Any], collection_manifest: Path):
+    from sec_xbrl.financial_storage_reuse import resolve_storage_reuse
+    return (resolve_storage_reuse(config["storage_reuse"], collection_manifest=collection_manifest,
+                                  scope_companies=config["collection_scope_companies"])
+            if "storage_reuse" in config else None)
+
+
 def _configured_history_selection(config: dict[str, Any], collection_manifest: Path) -> HistorySelections | None:
     declaration = config.get("history_selection")
     return (resolve_history_selection(declaration, collection_manifest=collection_manifest,
-                                     scope_companies=config["collection_scope_companies"])
+                                     scope_companies=config["collection_scope_companies"],
+                                      storage_reuse=_configured_storage_reuse(config, collection_manifest))
             if declaration is not None else None)
 
 
@@ -849,6 +873,7 @@ def _validate_status(
     collection_manifest: Path,
     parent_companies: tuple[dict[str, str], ...],
     expected_companies: tuple[dict[str, str], ...],
+    storage_reuse: dict | None = None,
 ) -> tuple[dict[str, Any], ...]:
     collection = _read_json(collection_manifest)
     declared_companies = collection.get("companies")
@@ -859,7 +884,7 @@ def _validate_status(
         for item in declared_companies
         if isinstance(item, dict)
     }
-    status = read_universe_status(manifest_path=collection_manifest, validation_mode="financial_sources")
+    status = read_universe_status(manifest_path=collection_manifest, validation_mode="financial_sources", storage_reuse=storage_reuse)
     status_parent = tuple(
         sorted(
             ({"ticker": row.ticker, "cik": str(row.cik)} for row in status.companies),
@@ -964,6 +989,7 @@ def _validate_histories(
     provenance: dict[tuple[str, str], dict[str, str]],
     financial_as_of: str,
     readiness: tuple[dict[str, Any], ...],
+    storage_reuse: Any = None,
     selection: HistorySelections | None = None,
 ) -> dict[str, dict[str, str]]:
     expected_tickers = {row["ticker"] for row in expected_companies}
@@ -987,7 +1013,8 @@ def _validate_histories(
             or digest != ready["history_manifest_sha256"]
         ):
             raise ValueError("accepted history manifest differs from READY build")
-        verify_financial_history_source(path.parent)
+        from sec_xbrl.financial_storage_reuse import storage_history
+        verify_financial_history_source(path.parent, storage_entry=storage_history(storage_reuse, ticker, path))
         payload = _read_json(path)
         plan = payload.get("plan")
         plan_companies = plan.get("companies") if isinstance(plan, dict) else None
@@ -1037,7 +1064,7 @@ def _company_scope(value: Any, label: str) -> tuple[dict[str, str], ...]:
 
 def _verify_evidence_files(value: dict[str, Any]) -> None:
     for label, declaration in value.items():
-        if label in {"history_manifests", "collection_build_manifests", "history_selection_controls"}:
+        if label in {"history_manifests", "collection_build_manifests", "history_selection_controls", "storage_reuse_controls"}:
             if not isinstance(declaration, dict):
                 raise TypeError("history evidence declaration is invalid")
             for ticker, nested in declaration.items():
@@ -1061,12 +1088,13 @@ def _validate_evidence_declarations(
     declarations = [
         declaration
         for label, declaration in value.items()
-        if label not in {"history_manifests", "collection_build_manifests", "history_selection_controls"}
+        if label not in {"history_manifests", "collection_build_manifests", "history_selection_controls", "storage_reuse_controls"}
     ] + list(histories.values()) + list(builds.values())
     controls = value.get("history_selection_controls", {})
     if not isinstance(controls, dict):
         raise TypeError("History selection controls are malformed")
     declarations.extend(controls.values())
+    declarations.extend(value.get("storage_reuse_controls", {}).values())
     for declaration in declarations:
         if (
             not isinstance(declaration, dict)

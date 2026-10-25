@@ -1208,6 +1208,7 @@ def _company_status(
     run_root: Path,
     plan: dict[str, Any] | None,
     validation_mode: str = "routine",
+    storage_reuse: Any = None,
 ) -> CompanyStatus:
     ticker = company["ticker"]
     company_root = run_root / "companies" / ticker
@@ -1232,8 +1233,13 @@ def _company_status(
             build = _read_json(build_path)
             validation_state_root = company_root / "history-validation"
             if validation_mode == "financial_sources":
+                from sec_xbrl.financial_storage_reuse import storage_history, verify_storage_entry
                 from sec_xbrl.history_selection import completed_recovery_source
-                if completed_recovery_source(Path(build.get("publication", ""))):
+                approved = storage_history(storage_reuse, ticker, Path(str(build.get("history_manifest", ""))))
+                if approved is not None:
+                    verify_storage_entry(Path(build["publication"]), approved)
+                    validation_state_root = None
+                elif completed_recovery_source(Path(build.get("publication", ""))):
                     validation_state_root = None
             build_attestation_error = _validate_build_attestation(
                 build,
@@ -1301,19 +1307,26 @@ def _company_status(
 
 
 def read_universe_status(
-    *, manifest_path: Path, validation_mode: str = "routine"
+    *, manifest_path: Path, validation_mode: str = "routine", storage_reuse: dict | None = None
 ) -> UniverseStatus:
     """Read deterministic status without discovery, SEC, parser, or selection work."""
     if validation_mode not in {"routine", "financial_sources"}:
         raise ValueError("unsupported collection status validation mode")
     attested = _attest_run(manifest_path)
+    proof = None
+    if storage_reuse is not None:
+        if validation_mode != "financial_sources":
+            raise ValueError("storage reuse is limited to explicit financial source status")
+        from sec_xbrl.financial_storage_reuse import resolve_storage_reuse
+        proof = resolve_storage_reuse(storage_reuse, collection_manifest=manifest_path,
+                                      scope_companies=attested.manifest["companies"])
     companies = tuple(
         _company_status(
             company,
             request=attested.request,
             run_root=manifest_path.parent,
             plan=attested.plans.get(company["ticker"]),
-            validation_mode=validation_mode,
+            validation_mode=validation_mode, storage_reuse=proof,
         )
         for company in attested.manifest["companies"]
     )

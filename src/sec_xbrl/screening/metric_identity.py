@@ -221,7 +221,7 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
     )
     if sha256_file(collection_path) != config["collection_manifest_sha256"]:
         raise ValueError("generic metric collection manifest changed")
-    status = read_universe_status(manifest_path=collection_path, validation_mode="financial_sources")
+    status = read_universe_status(manifest_path=collection_path, validation_mode="financial_sources", storage_reuse=config.get("storage_reuse"))
     expected = tuple((row["ticker"], row["cik"]) for row in config["companies"])
     actual = tuple(
         sorted(((row.ticker, row.cik) for row in status.companies), key=lambda item: item[1])
@@ -278,6 +278,10 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
             {"ticker": ticker, "cik": cik, "observed_at": observed_at}
         )
 
+    from sec_xbrl.financial_storage_reuse import resolve_storage_reuse
+    storage = (resolve_storage_reuse(config["storage_reuse"], collection_manifest=collection_path,
+                                    scope_companies=config["companies"])
+               if "storage_reuse" in config else None)
     selection = (resolve_history_selection(config["history_selection"], collection_manifest=collection_path,
                                            scope_companies=config["companies"])
                  if "history_selection" in config else None)
@@ -285,7 +289,7 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
     history_hashes: dict[str, str] = {}
     for company in config["companies"]:
         source = _verify_company_sources(company, config["financial_as_of"], collection_path,
-                                         selected=selection.companies.get(company["ticker"]) if selection else None)
+                                         selected=selection.companies.get(company["ticker"]) if selection else None, storage_reuse=storage)
         company_sources.append(source)
         history_hashes[company["ticker"]] = source["history"]["manifest_sha256"]
 
@@ -301,6 +305,8 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
     quality = GenericMetricQualityReader(
         quality_root, manifest_sha256=config["quality_manifest_sha256"]
     )
+    if quality.manifest.get("storage_reuse") != config.get("storage_reuse"):
+        raise ValueError("quality and identity storage reuse companions differ")
     if quality.manifest.get("history_selection") != config.get("history_selection"):
         raise ValueError("quality and identity History selection companions differ")
     quality.verify_sources(
@@ -385,7 +391,7 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
 
 def _verify_company_sources(
     company: dict[str, Any], financial_as_of: str, collection_manifest: Path,
-    *, selected: dict[str, Any] | None = None,
+    *, selected: dict[str, Any] | None = None, storage_reuse: Any = None,
 ) -> dict[str, Any]:
     ticker, cik = company["ticker"], company["cik"]
     original_build_path = collection_manifest.parent / "companies" / ticker / "build_manifest.json"
@@ -411,7 +417,9 @@ def _verify_company_sources(
     ):
         raise ValueError(f"{ticker}: history identity differs from collection build")
     history = HistoryPublicationReader(history_root)
-    verify_financial_history_source(history_root)
+    from sec_xbrl.financial_storage_reuse import storage_history
+    verify_financial_history_source(history_root,
+        storage_entry=storage_history(storage_reuse, ticker, history_manifest))
 
     annual = _verify_analysis(
         company["annual_analysis_root"],
@@ -592,6 +600,8 @@ def _validate_config(value: Any) -> dict[str, Any]:
         "quality_manifest_sha256": _sha(value.get("quality_manifest_sha256"), "quality manifest SHA"),
         "companies": companies,
     }
+    if "storage_reuse" in value:
+        normalized["storage_reuse"] = selection_declaration(value["storage_reuse"])
     if "history_selection" in value:
         normalized["history_selection"] = selection_declaration(value["history_selection"])
     return normalized

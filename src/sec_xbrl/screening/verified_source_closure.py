@@ -751,11 +751,18 @@ def _discover_identity(
         expected_files={"company_metadata_manifest.json", *metadata_files},
     )
 
+    storage = None
+    if "storage_reuse" in config:
+        from sec_xbrl.financial_storage_reuse import resolve_storage_reuse
+        storage = resolve_storage_reuse(config["storage_reuse"], collection_manifest=collection_path,
+                                        scope_companies=config["companies"])
+        for name, declaration in storage.controls.items():
+            _add_declaration_file(collector, declaration, f"{prefix}_STORAGE_REUSE:{name}")
     selection = None
     if "history_selection" in config:
         from sec_xbrl.history_selection import resolve_history_selection
         selection = resolve_history_selection(config["history_selection"], collection_manifest=collection_path,
-                                              scope_companies=config["companies"])
+                                              scope_companies=config["companies"], storage_reuse=storage)
         for name, declaration in selection.controls.items():
             _add_declaration_file(collector, declaration, f"{prefix}_HISTORY_SELECTION:{name}")
     for company in config["companies"]:
@@ -936,10 +943,12 @@ def _add_quality_evidence(
     }
     if "history_selection_controls" in evidence:
         expected.add("history_selection_controls")
+    if "storage_reuse_controls" in evidence:
+        expected.add("storage_reuse_controls")
     if set(evidence) != expected:
         raise ValueError("quality evidence source closure roles differ")
     for name, declaration in evidence.items():
-        if name in {"history_manifests", "collection_build_manifests", "history_selection_controls"}:
+        if name in {"history_manifests", "collection_build_manifests", "history_selection_controls", "storage_reuse_controls"}:
             if not isinstance(declaration, dict):
                 raise TypeError("quality grouped evidence is malformed")
             for ticker, item in sorted(declaration.items()):

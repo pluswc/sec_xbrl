@@ -236,3 +236,64 @@ must retain the previously approved effective fiscal-focus corrections in its
 accepted prefix. Existing Raw metadata must not silently restore the prior bad
 foci; the main append API's correction-overlay handoff needs a separate scoped
 assessment. Baseline 50-company connection takes precedence over that phase.
+
+
+## Ordinary accepted storage reuse — additive source milestone
+
+The 19967586 completed-recovery shortcut covers only publications with the real
+engine COMPLETE/PASS gate. Actual metadata showed that most accepted ordinary
+History directories do not have that gate. No claim of full-50 performance or
+actual readiness follows from those synthetic tests. First-five attempts stopped
+without new publications; their completed work and old acceptances remain intact.
+The separate sparse-lookback fix bfeea89c63 preserves unavailable earlier inputs
+outside the eight display inventory buckets (26 focused tests PASS).
+
+ROOT approved an explicit optional `storage_reuse: {path, sha256}` in new quality
+and identity configs. Both must reference the same immutable artifact. No global
+registry or legacy-reader constructor override is introduced. Ordinary History
+readers and status defaults keep their established strict behavior. Financial
+status and source verification may reuse only the exact approved proof, and still
+hash every current declared payload and safe physical inventory. They do not
+redecode completed typed JSON cells or repeat historical company audits.
+
+`financial-history-storage-reuse-v1` has exactly `schema_version`,
+`status: ROOT_APPROVED`, `collection_manifest: {path, sha256}`,
+`current_policy_source_sha256s` and `companies`. Exported
+`financial_storage_policy_sources()` reports the fixed relevant current module
+hashes for ROOT's compatibility assessment; it asserts no old engine source hash
+or old checkout freshness. Each company has exact `ticker`, `cik`, and nonempty
+`histories`. Each History has exact `acceptance`, `previous_validation`,
+`build_manifest`, `history_manifest` pins and `payload_inventory` mapping every
+physical relative file to SHA256, including manifest and retained diagnostics.
+Unique original and selected History contexts may coexist for the same company;
+companies and History paths cannot duplicate. Current original plan, intake,
+views and READY build attestation remain bound by the existing validator.
+
+A prior native version-1 full DETAILED/DETAILED_FALLBACK storage receipt is accepted
+when its root, manifest and complete declared payload SHA map match. The explicit
+normalized alternative `accepted-financial-storage-evidence-v1` has exact `kind`,
+`history_manifest`, `build_manifest`, `declared_payload_sha256s`,
+`historical_controls` and `schema_version`. `FULL_TYPED_COMPANY_AUDIT` requires
+historical acceptance binding the pinned report and exact report company/output
+root/PASS metadata. Every selected declared payload must have matching physical
+SHA, all records consumed and schema/hash before/after checks in `all_file_results`.
+`ACCEPTED_FIRST5_FINANCIAL_CHAIN` requires the accepted first financial config and
+its exact company/build/History/plan/intake bindings. Historical controls pin the
+prior `acceptance` and `report` or `config`, and may pin completion/seal/recovery
+JSON witnesses. They are evidence blobs, without recursion into historical Raw,
+protected inventories or old source checkouts. Entry `acceptance` means prior
+historical acceptance; the outer ROOT_APPROVED artifact is current approval.
+This reuses past evidence and makes no new semantic audit claim.
+
+All current active controls and source inventories remain in the transitive
+source closure and full-byte freshness checks. Invalid approval, changed policy,
+missing or changed evidence, changed payloads, unknown extras, aliases and duplicate
+proofs fail closed. Inputs without a trusted proof retain established validation.
+
+Writer validation: 105 focused tests PASS (30.65 s), including 15 new tests for
+native/normalized proof forms, zero typed-decoder callbacks, strict default
+fallback, tamper rejection and new quality→identity replay. Metadata-only adapter
+checks passed for seven real contexts: first-five TXN, ordinary AMD, late-report
+LIN, and both original/corrected HON and CRM. Only pinned JSON report metadata was
+read; no actual History cell scan or company audit ran. Independent verification,
+ROOT local acceptance and actual full-50 publication remain separate and pending.

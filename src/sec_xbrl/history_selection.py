@@ -46,7 +46,7 @@ class HistorySelections:
 
 def resolve_history_selection(
     declaration: dict[str, str], *, collection_manifest: Path,
-    scope_companies: list[dict[str, Any]],
+    scope_companies: list[dict[str, Any]], storage_reuse: Any = None,
 ) -> HistorySelections:
     """Replay accepted replacement provenance without modifying collection status."""
     declaration = _pin(declaration)
@@ -107,7 +107,9 @@ def resolve_history_selection(
             or len(plan.get("companies", [])) != 1
             or plan["companies"][0].get("ticker") != ticker or plan["companies"][0].get("cik") != cik):
             raise ValueError("selected History must preserve the original plan, intake, views and company")
-        verify_financial_history_source(Path(build["publication"]))
+        from sec_xbrl.financial_storage_reuse import storage_history
+        verify_financial_history_source(Path(build["publication"]),
+            storage_entry=storage_history(storage_reuse, ticker, Path(pins["history_manifest"]["path"])))
         error = _validate_build_attestation(
             build, ticker=ticker, plan=plan, plan_sha256=sha256_file(plan_path),
             intake_path=intake_path, intake=_attest_intake(intake_path, plan),
@@ -179,7 +181,7 @@ def _retained_diagnostic(relative: str, declared: set[str]) -> bool:
                for name in declared)
 
 
-def verify_financial_history_source(root: Path) -> None:
+def verify_financial_history_source(root: Path, *, storage_entry: dict | None = None) -> None:
     """Reuse completed storage proof by current byte identity, never accounting inference.
 
     Ordinary/new publications retain the public detailed validation path. Only
@@ -191,7 +193,11 @@ def verify_financial_history_source(root: Path) -> None:
     from sec_xbrl.collection_operations import _declared_publication_files
 
     reader = history.HistoryPublicationReader(root)
-    if completed_recovery_source(root):
+    if storage_entry is not None:
+        from sec_xbrl.financial_storage_reuse import verify_storage_entry
+        verify_storage_entry(root, storage_entry)
+        _declared_publication_files(root, reader.manifest)
+    elif completed_recovery_source(root):
         _declared_publication_files(root, reader.manifest)
     else:
         reader.verify_all()
