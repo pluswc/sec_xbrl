@@ -205,7 +205,7 @@ v1 run을 열기 위해 v1 entry를 지우거나 v2 root로 바꾸지 않는다.
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 \
-PYTHONPATH=/home/plusbdw/.codex/worktrees/universe50-delivery-status-r5/sec_xbrl/src \
+PYTHONPATH=/home/plusbdw/user_work/projects/sec_xbrl/src \
 /home/plusbdw/user_work/projects/sec_xbrl/.venv/bin/python \
   -m sec_xbrl.screening serve \
   --catalog /home/plusbdw/user_work/projects/sec_xbrl/data/processed/screening_runs/20261009_usability/catalog_r3.json \
@@ -218,7 +218,10 @@ WSL backend는 `127.0.0.1:18766`, Windows browser bridge는
 `127.0.0.1:18765`다. 기존 문서의 `8884` 표기는 이전 explorer runtime이며 현재
 backend가 아니다. 재시작 전에는 journal의 SQLite consistent copy와 table별
 row/digest를 별도 private 경로에 기록한다. rollback은 새 runtime을 정지하고
-이전 accepted source `e84289a…`와 기존 journal 경로로 다시 시작한다. journal
+이전 accepted source `e84289a…`의 동결 checkout과 기존 journal 경로로 다시 시작한다.
+전환 전 process record의 PID·명령·source identity가 실제 process와 일치하는지 먼저
+확인한다. 이전 source 경로는
+`/home/plusbdw/.codex/worktrees/universe50-delivery-status-r5/sec_xbrl/src`다. journal
 복원이 필요하면 원본을 덮어쓰지 않고 consistent copy를 새 경로에 복원해 검증한
 뒤 그 경로를 명시한다.
 
@@ -226,17 +229,17 @@ Windows bridge의 현재 exact foreground restart 명령은 다음과 같다.
 
 ```powershell
 & "C:\Users\plusbdw\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe" `
-  "\\wsl.localhost\Ubuntu\home\plusbdw\.codex\worktrees\universe50-delivery-status-r5\sec_xbrl\examples\screening\windows-loopback-bridge.cjs" `
+  "\\wsl.localhost\Ubuntu\home\plusbdw\user_work\projects\sec_xbrl\examples\screening\windows-loopback-bridge.cjs" `
   --distribution "Ubuntu" `
   --linux-python "/home/plusbdw/user_work/projects/sec_xbrl/.venv/bin/python" `
-  --source-root "/home/plusbdw/.codex/worktrees/universe50-delivery-status-r5/sec_xbrl/src" `
+  --source-root "/home/plusbdw/user_work/projects/sec_xbrl/src" `
   --backend-port 18766 `
   --frontend-port 18765
 ```
 
-현재 persistent runtime의 backend process record/log locator는
-`work/screening21_stability_20261021/live-backend-process.json`, Windows bridge
-record는 app visualization의 `screening21-stability-20261021/bridge-18765.json`이다.
+현재 persistent runtime의 backend process record/log 근거는
+`work/main_runtime_rollout_20261025/live-process.json`, Windows bridge record는
+Windows visualization task의 `main-runtime-20261025/bridge-18765.json`이다.
 PID는 관찰값이므로 재시작 전에는 record의 명령·source·port와 현재 process를 함께
 대조한다.
 
