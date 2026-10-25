@@ -221,7 +221,12 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
     )
     if sha256_file(collection_path) != config["collection_manifest_sha256"]:
         raise ValueError("generic metric collection manifest changed")
-    status = read_universe_status(manifest_path=collection_path, validation_mode="financial_sources", storage_reuse=config.get("storage_reuse"))
+    from sec_xbrl.financial_storage_reuse import resolve_storage_reuse
+    storage = (resolve_storage_reuse(config["storage_reuse"], collection_manifest=collection_path,
+                                    scope_companies=config["companies"])
+               if "storage_reuse" in config else None)
+    status = read_universe_status(manifest_path=collection_path, validation_mode="financial_sources",
+                                  storage_reuse=config.get("storage_reuse"), _verified_storage_reuse=storage)
     expected = tuple((row["ticker"], row["cik"]) for row in config["companies"])
     actual = tuple(
         sorted(((row.ticker, row.cik) for row in status.companies), key=lambda item: item[1])
@@ -278,10 +283,6 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
             {"ticker": ticker, "cik": cik, "observed_at": observed_at}
         )
 
-    from sec_xbrl.financial_storage_reuse import resolve_storage_reuse
-    storage = (resolve_storage_reuse(config["storage_reuse"], collection_manifest=collection_path,
-                                    scope_companies=config["companies"])
-               if "storage_reuse" in config else None)
     selection = (resolve_history_selection(config["history_selection"], collection_manifest=collection_path,
                                            scope_companies=config["companies"], storage_reuse=storage)
                  if "history_selection" in config else None)
@@ -313,6 +314,7 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
         collection_manifest=collection_path,
         history_manifest_sha256s=history_hashes,
         financial_as_of=config["financial_as_of"],
+        _verified_storage_reuse=storage,
         expected_companies=tuple(
             {"ticker": row["ticker"], "cik": row["cik"]} for row in config["companies"]
         ),

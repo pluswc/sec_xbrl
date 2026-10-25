@@ -1307,19 +1307,25 @@ def _company_status(
 
 
 def read_universe_status(
-    *, manifest_path: Path, validation_mode: str = "routine", storage_reuse: dict | None = None
+    *, manifest_path: Path, validation_mode: str = "routine", storage_reuse: dict | None = None,
+    _verified_storage_reuse: Any = None,
 ) -> UniverseStatus:
     """Read deterministic status without discovery, SEC, parser, or selection work."""
     if validation_mode not in {"routine", "financial_sources"}:
         raise ValueError("unsupported collection status validation mode")
+    if _verified_storage_reuse is not None and storage_reuse is None:
+        raise ValueError("verified storage proof requires an explicit financial declaration")
     attested = _attest_run(manifest_path)
     proof = None
     if storage_reuse is not None:
         if validation_mode != "financial_sources":
             raise ValueError("storage reuse is limited to explicit financial source status")
-        from sec_xbrl.financial_storage_reuse import resolve_storage_reuse
-        proof = resolve_storage_reuse(storage_reuse, collection_manifest=manifest_path,
-                                      scope_companies=attested.manifest["companies"])
+        from sec_xbrl.financial_storage_reuse import checked_storage_reuse, resolve_storage_reuse
+        proof = (checked_storage_reuse(_verified_storage_reuse, collection_manifest=manifest_path,
+                                      declaration=storage_reuse)
+                 if _verified_storage_reuse is not None else
+                 resolve_storage_reuse(storage_reuse, collection_manifest=manifest_path,
+                                       scope_companies=attested.manifest["companies"]))
     companies = tuple(
         _company_status(
             company,

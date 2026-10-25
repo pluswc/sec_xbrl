@@ -297,3 +297,53 @@ checks passed for seven real contexts: first-five TXN, ordinary AMD, late-report
 LIN, and both original/corrected HON and CRM. Only pinned JSON report metadata was
 read; no actual History cell scan or company audit ran. Independent verification,
 ROOT local acceptance and actual full-50 publication remain separate and pending.
+
+
+## Explicit v2 financial input scope — separate additive milestone
+
+ROOT accepted e3ace1b7e2 source/synthetic after the combined ordinary selected
+History regression repaired bcbc4ab591. The actual full-50 attempt then exposed an
+IO scope issue and stopped before publication: 100.35 GiB of approved physical
+History inventories included 94.03 GiB of nonconsumed retained producer diagnostics
+and 6.32 GiB of governed manifests/payloads. No actual v1 performance or full-50
+publication acceptance is claimed. Existing data and diagnostics remain preserved.
+
+ROOT approved `financial-history-storage-reuse-v2` as an explicit new input scope.
+Its fields are the same as v1 plus exact
+`diagnostic_policy: NONCONSUMED_TOPOLOGY_ONLY`. Each History entry adds
+`retained_diagnostics`, a sorted unique list of recognized relative diagnostic file
+paths. `payload_inventory` must contain exactly `history_manifest.json` and all
+current build-declared table/derived files, with full SHA256 hashes. The exact
+union must match the safe physical file inventory. Known retained partial/spill
+producer diagnostics are preserved, but their bodies, sizes and content hashes
+are neither financial inputs nor financial freshness claims. Unknown files,
+aliases, unsafe topology, missing declared files, missing diagnostic members and
+changed governed bytes still fail closed. V1 and ordinary default physical
+verification behavior remain unchanged.
+
+The active financial source closure includes every governed input byte and all
+active controls/source bindings/Raw inputs. For v2 only, retained diagnostic
+bodies are excluded from file hashing; their safe names and physical topology
+remain monitored at freshness boundaries. Diagnostic content changes alone cannot
+change selected financial results. This policy does not relax any governed
+History, Raw, plan, intake, endpoint, mapping, period, or analysis identity.
+
+Financial preflight resolves an immutable, sealed per-invocation storage proof
+once and passes it through status, selected History and source verification.
+Identity can pass the same exact bound proof into quality source replay. Proof
+mutation, wrong parents and wrong declarations are rejected; no global cache or
+persistent skip capability exists. Full current-byte freshness boundaries remain.
+
+Writer validation: 89 focused tests PASS in 26.25 s; 29 storage tests include v1
+compatibility, explicit v2 no-diagnostic-hash assertions, stable financial closure
+fingerprints across diagnostic body mutation, combined original/selected ordinary
+routing, topology/core/approval tamper rejection and one resolution per preflight.
+Ruff and diff checks PASS. Independent review, current ROOT compatibility approval
+and actual baseline full-50 connection remain separate from these source tests.
+The expected byte-scope reduction is measured from existing inventory metadata;
+no new runtime improvement is asserted before the operator run.
+
+Baseline uses its frozen v2 source and immutable v2 approval artifact. Later phase3
+History/collector changes intentionally require a NEW ROOT compatibility registry
+bound to the final phase3 source; accepted payload hashes may be reused, while the
+baseline registry and old receipts remain immutable.

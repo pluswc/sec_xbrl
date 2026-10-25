@@ -77,6 +77,22 @@ def _proof(tmp_path, monkeypatch, *, kind="FULL_TYPED_COMPANY_AUDIT"):
     return prepared,proof
 
 
+
+def _as_v2(path):
+    value=json.loads(path.read_text())
+    value["schema_version"]="financial-history-storage-reuse-v2"
+    value["diagnostic_policy"]="NONCONSUMED_TOPOLOGY_ONLY"
+    diagnostics=set()
+    for company in value["companies"]:
+        for entry in company["histories"]:
+            root=Path(entry["history_manifest"]["path"]).parent
+            diagnostic=root/".chunks/quarter-spill.records"
+            diagnostic.parent.mkdir(exist_ok=True);diagnostic.write_bytes(b"retained producer diagnostic")
+            entry["retained_diagnostics"]=[str(diagnostic.relative_to(root))]
+            diagnostics.add(diagnostic)
+    write_json(path,value)
+    return diagnostics
+
 def _forbidden(*args,**kwargs):
     raise AssertionError("completed typed decoder must not run")
 
@@ -97,8 +113,22 @@ def test_ordinary_accepted_source_uses_exact_byte_proof_without_typed_decoder(tm
         operations.read_universe_status(manifest_path=collection,storage_reuse=_pin(path))
 
 
-def test_new_quality_identity_binds_storage_proof_and_replays_historical_controls(tmp_path,monkeypatch):
+@pytest.mark.parametrize("v2",[False,True])
+def test_new_quality_identity_binds_storage_proof_and_replays_historical_controls(tmp_path,monkeypatch,v2):
     prepared,path=_proof(tmp_path,monkeypatch)
+    diagnostics=_as_v2(path) if v2 else set()
+    from sec_xbrl import financial_storage_reuse as storage_module
+    from sec_xbrl.screening import verified_source_closure as closure
+    real_sha=storage_module.sha256_file
+    real_read=closure._read_stable
+    def digest(source):
+        assert Path(source) not in diagnostics,"diagnostic body was hashed"
+        return real_sha(source)
+    def read(source,**kwargs):
+        assert Path(source) not in diagnostics,"diagnostic body entered active financial closure"
+        return real_read(source,**kwargs)
+    monkeypatch.setattr(storage_module,"sha256_file",digest)
+    monkeypatch.setattr(closure,"_read_stable",read)
     monkeypatch.setattr(history.HistoryPublicationReader,"verify_all",_forbidden)
     config=json.loads((tmp_path/"quality-config.json").read_text())
     config["storage_reuse"]=_pin(path)
@@ -117,6 +147,14 @@ def test_new_quality_identity_binds_storage_proof_and_replays_historical_control
     reader=metric_identity.GenericMetricIdentityReader(identity.root)
     assert reader.manifest["readiness"]=="READY"
     assert quality.manifest["storage_reuse"]==_pin(path)
+    before=closure._Collector()
+    closure._discover_identity(before,identity_path,metric_identity._validate_config(identity_config),prefix="TOPOLOGY")
+    for diagnostic in diagnostics: diagnostic.write_bytes(b"changed unconsumed diagnostic body of different size")
+    after=closure._Collector()
+    closure._discover_identity(after,identity_path,metric_identity._validate_config(identity_config),prefix="TOPOLOGY")
+    assert before.snapshot().fingerprint==after.snapshot().fingerprint
+    assert not diagnostics & {Path(record.path) for record in after.snapshot().files}
+    assert metric_identity.GenericMetricIdentityReader(identity.root).publication_id==reader.publication_id
     wrong=copy.deepcopy(identity_config);wrong.pop("storage_reuse")
     with pytest.raises((AssertionError,ValueError)):
         metric_identity._verify_configured_sources(metric_identity._validate_config(wrong))
@@ -163,7 +201,8 @@ def test_storage_reuse_rejects_changed_or_unaccepted_sources(tmp_path,monkeypatc
 
 
 
-def test_ordinary_selected_history_and_storage_reuse_share_proof_without_decoder(tmp_path,monkeypatch):
+@pytest.mark.parametrize("v2",[False,True])
+def test_ordinary_selected_history_and_storage_reuse_share_proof_without_decoder(tmp_path,monkeypatch,v2):
     from tests.screening.test_generic_metric_identity_integration import (
         FINANCIAL_AS_OF,
         _quarterly_analysis,
@@ -191,6 +230,7 @@ def test_ordinary_selected_history_and_storage_reuse_share_proof_without_decoder
     write_json(storage_path,{"schema_version":"financial-history-storage-reuse-v1","status":"ROOT_APPROVED",
                             "collection_manifest":_pin(collection),"current_policy_source_sha256s":financial_storage_policy_sources(),
                             "companies":[{**COHORT[0],"histories":histories}]})
+    if v2: _as_v2(storage_path)
     selected_manifest=Path(selection["history_manifest"]["path"])
     years=(2021,2022,2023,2024,2025)
     annual=_analysis_bundle(tmp_path/"combined-selected-annual",years,ticker="FIVE",cik=COHORT[0]["cik"],
@@ -215,3 +255,68 @@ def test_ordinary_selected_history_and_storage_reuse_share_proof_without_decoder
     reader=metric_identity.GenericMetricIdentityReader(identity.root)
     assert reader.companies[0]["history"]["root"]==str(selected_manifest.parent)
     assert reader.manifest["config"]["storage_reuse"]==_pin(storage_path)
+
+
+def test_v2_resolves_storage_once_per_financial_preflight(tmp_path,monkeypatch):
+    prepared,path=_proof(tmp_path,monkeypatch);diagnostics=_as_v2(path)
+    config=json.loads((tmp_path/"quality-config.json").read_text());config["storage_reuse"]=_pin(path)
+    from sec_xbrl import financial_storage_reuse as storage_module
+    real=storage_module.resolve_storage_reuse
+    count=0
+    def resolve(*args,**kwargs):
+        nonlocal count
+        count+=1
+        return real(*args,**kwargs)
+    monkeypatch.setattr(storage_module,"resolve_storage_reuse",resolve)
+    monkeypatch.setattr(history.HistoryPublicationReader,"verify_all",_forbidden)
+    metric_quality._preflight_quality_inputs(config=config,collection_manifest=Path(prepared.paths["collection"]),
+                                             history_manifests=prepared.histories)
+    assert count==1
+    assert all(path.exists() for path in diagnostics)
+
+
+@pytest.mark.parametrize("v2",[False,True])
+def test_retained_diagnostic_content_policy_is_explicit(tmp_path,monkeypatch,v2):
+    prepared,path=_proof(tmp_path,monkeypatch)
+    diagnostic=prepared.histories["FIVE"].parent/".chunks/quarter-spill.records"
+    if v2: _as_v2(path)
+    else:
+        diagnostic.parent.mkdir();diagnostic.write_bytes(b"retained")
+        value=json.loads(path.read_text());value["companies"][0]["histories"][0]["payload_inventory"][".chunks/quarter-spill.records"]=sha256_file(diagnostic);write_json(path,value)
+    proof=resolve_storage_reuse(_pin(path),collection_manifest=Path(prepared.paths["collection"]),scope_companies=list(COHORT))
+    entry=storage_history(proof,"FIVE",prepared.histories["FIVE"])
+    diagnostic.write_bytes(b"changed body")
+    if v2:
+        verify_financial_history_source(prepared.histories["FIVE"].parent,storage_entry=entry)
+    else:
+        with pytest.raises(ValueError,match="changed"):
+            verify_financial_history_source(prepared.histories["FIVE"].parent,storage_entry=entry)
+
+
+@pytest.mark.parametrize("defect",["core","alias","unknown","listed_unknown","missing_diagnostic","active_excluded","scope"])
+def test_v2_retained_diagnostic_policy_still_rejects_unsafe_or_changed_governed_sources(tmp_path,monkeypatch,defect):
+    prepared,path=_proof(tmp_path,monkeypatch);diagnostics=_as_v2(path)
+    value=json.loads(path.read_text());entry=value["companies"][0]["histories"][0]
+    root=prepared.histories["FIVE"].parent
+    if defect=="core":
+        name=next(name for name in entry["payload_inventory"] if name!="history_manifest.json");(root/name).write_bytes(b"changed")
+    elif defect=="alias":
+        diagnostic=next(iter(diagnostics));diagnostic.unlink();diagnostic.symlink_to(path)
+    elif defect in {"unknown","listed_unknown"}:
+        (root/"unknown.txt").write_text("unknown")
+        if defect=="listed_unknown": entry["retained_diagnostics"].append("unknown.txt");entry["retained_diagnostics"].sort()
+    elif defect=="missing_diagnostic": next(iter(diagnostics)).unlink()
+    elif defect=="active_excluded": entry["retained_diagnostics"].append("history_manifest.json");entry["retained_diagnostics"].sort()
+    else: value["diagnostic_policy"]="SKIP_ANYTHING"
+    write_json(path,value)
+    with pytest.raises(ValueError):
+        resolve_storage_reuse(_pin(path),collection_manifest=Path(prepared.paths["collection"]),scope_companies=list(COHORT))
+
+
+def test_invocation_storage_proof_cannot_be_mutated_or_cross_bound(tmp_path,monkeypatch):
+    prepared,path=_proof(tmp_path,monkeypatch);_as_v2(path)
+    collection=Path(prepared.paths["collection"])
+    proof=resolve_storage_reuse(_pin(path),collection_manifest=collection,scope_companies=list(COHORT))
+    proof.companies["FIVE"]["histories"][0]["retained_diagnostics"].append("forged")
+    with pytest.raises(ValueError,match="untrusted|mutated"):
+        operations.read_universe_status(manifest_path=collection,validation_mode="financial_sources",storage_reuse=_pin(path),_verified_storage_reuse=proof)

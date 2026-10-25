@@ -1,7 +1,9 @@
 """Explicit ROOT-approved storage proof reuse for financial attestation only.
 
 The legacy typed decoder stays unchanged. This boundary reuses a pinned completed
-storage check, verifies all current bytes, and makes no new semantic audit claim.
+storage check and verifies governed input bytes. V1 also hashes retained physical
+files; explicit V2 checks their safe topology only. Neither makes a new semantic
+audit claim.
 """
 from __future__ import annotations
 
@@ -10,9 +12,18 @@ from pathlib import Path
 from typing import Any
 
 from sec_xbrl.history_selection import _pin
-from sec_xbrl.screening.common import read_json, require_cik, require_ticker, sha256_file
+from sec_xbrl.screening.common import (
+    digest_value,
+    read_json,
+    require_cik,
+    require_ticker,
+    sha256_file,
+)
 
 VERSION = "financial-history-storage-reuse-v1"
+VERSION_V2 = "financial-history-storage-reuse-v2"
+DIAGNOSTIC_POLICY = "NONCONSUMED_TOPOLOGY_ONLY"
+_ISSUER = object()
 _POLICY = ("history.py", "history_validation.py", "collection_operations.py",
            "history_selection.py", "financial_storage_reuse.py")
 
@@ -27,6 +38,8 @@ class FinancialStorageReuse:
     declaration: dict[str, str]
     companies: dict[str, dict[str, Any]]
     controls: dict[str, dict[str, str]]
+    _issuer: object
+    _seal: str
 
 
 def resolve_storage_reuse(declaration: dict, *, collection_manifest: Path,
@@ -40,9 +53,14 @@ def resolve_storage_reuse(declaration: dict, *, collection_manifest: Path,
 
     declaration = _pin(declaration)
     payload = read_json(Path(declaration["path"]))
-    if (not isinstance(payload, dict) or set(payload) != {
-        "schema_version", "status", "collection_manifest", "current_policy_source_sha256s", "companies"
-    } or payload.get("schema_version") != VERSION or payload.get("status") != "ROOT_APPROVED"
+    fields = {"schema_version", "status", "collection_manifest", "current_policy_source_sha256s", "companies"}
+    v2 = isinstance(payload, dict) and payload.get("schema_version") == VERSION_V2
+    if v2:
+        fields.add("diagnostic_policy")
+    if (not isinstance(payload, dict) or set(payload) != fields
+        or payload.get("schema_version") not in {VERSION, VERSION_V2}
+        or (v2 and payload.get("diagnostic_policy") != DIAGNOSTIC_POLICY)
+        or payload.get("status") != "ROOT_APPROVED"
         or payload.get("current_policy_source_sha256s") != financial_storage_policy_sources()):
         raise ValueError("storage reuse requires exact ROOT-approved current policy compatibility")
     collection_pin = _pin(payload["collection_manifest"])
@@ -69,9 +87,10 @@ def resolve_storage_reuse(declaration: dict, *, collection_manifest: Path,
         result[ticker] = {"ticker":ticker, "cik":cik, "histories":[]}
         seen = set()
         for history_index, history_entry in enumerate(histories):
-            if not isinstance(history_entry, dict) or set(history_entry) != {
-                "acceptance", "previous_validation", "build_manifest", "history_manifest", "payload_inventory"
-            }:
+            history_fields = {"acceptance", "previous_validation", "build_manifest", "history_manifest", "payload_inventory"}
+            if v2:
+                history_fields.add("retained_diagnostics")
+            if not isinstance(history_entry, dict) or set(history_entry) != history_fields:
                 raise ValueError("storage reuse History fields differ")
             history_path = history_entry["history_manifest"].get("path")
             if history_path in seen:
@@ -105,19 +124,17 @@ def resolve_storage_reuse(declaration: dict, *, collection_manifest: Path,
             if not isinstance(inventory, dict) or not set(declared) <= set(inventory) or inventory.get("history_manifest.json") != pins["history_manifest"]["sha256"]:
                 raise ValueError("storage reuse physical payload inventory is incomplete")
             from sec_xbrl.history_selection import _retained_diagnostic
-            extras = set(inventory) - set(declared) - {"history_manifest.json"}
-            if any(not _retained_diagnostic(relative, set(declared)) for relative in extras):
-                raise ValueError("storage reuse inventory includes an unknown retained payload")
-            actual = {}
-            for path in root.rglob("*"):
-                if path.is_symlink() or (not path.is_dir() and not path.is_file()):
-                    raise ValueError("storage reuse physical aliases or unsafe entries are prohibited")
-                if path.is_file():
-                    actual[str(path.relative_to(root))] = sha256_file(path)
-                elif path.is_dir() and not any(path.iterdir()):
-                    raise ValueError("storage reuse unknown empty directory")
-            if actual != inventory:
-                raise ValueError("storage reuse physical inventory or current payload bytes changed")
+            diagnostics = history_entry.get("retained_diagnostics") if v2 else None
+            if v2:
+                if (not isinstance(diagnostics, list) or diagnostics != sorted(set(diagnostics))
+                    or set(inventory) != set(declared) | {"history_manifest.json"}
+                    or any(not _retained_diagnostic(name, set(declared)) for name in diagnostics)):
+                    raise ValueError("v2 storage reuse diagnostic scope is unsafe or differs")
+            else:
+                extras = set(inventory) - set(declared) - {"history_manifest.json"}
+                if any(not _retained_diagnostic(relative, set(declared)) for relative in extras):
+                    raise ValueError("storage reuse inventory includes an unknown retained payload")
+            _verify_payload_inventory(root, inventory, diagnostics)
             company = parent[(ticker,cik)]
             plan_path = Path(company["plan_path"])
             plan = read_json(plan_path)
@@ -138,7 +155,7 @@ def resolve_storage_reuse(declaration: dict, *, collection_manifest: Path,
             controls[f"{ticker}:{history_index}:plan"]=_pin({"path":str(plan_path),"sha256":company["plan_sha256"]})
             controls[f"{ticker}:{history_index}:intake"]=_pin({"path":str(intake),"sha256":build["intake_sha256"]})
             result[ticker]["histories"].append({**history_entry, **pins})
-    return FinancialStorageReuse(declaration,result,controls)
+    return FinancialStorageReuse(declaration,result,controls,_ISSUER,digest_value([declaration,result,controls]))
 
 
 def verify_storage_entry(root: Path, entry: dict) -> None:
@@ -146,16 +163,37 @@ def verify_storage_entry(root: Path, entry: dict) -> None:
     history = _pin(entry["history_manifest"])
     if Path(history["path"]).parent != root.resolve():
         raise ValueError("storage reuse History root differs")
-    actual = {}
+    _verify_payload_inventory(root, entry["payload_inventory"], entry.get("retained_diagnostics"))
+
+
+def _verify_payload_inventory(root: Path, inventory: dict, diagnostics: list[str] | None) -> None:
+    actual = set()
+    excluded = set(diagnostics or ())
     for path in root.rglob("*"):
         if path.is_symlink() or (not path.is_dir() and not path.is_file()):
             raise ValueError("storage reuse unsafe inventory")
         if path.is_file():
-            actual[str(path.relative_to(root))] = sha256_file(path)
+            relative = str(path.relative_to(root))
+            actual.add(relative)
+            if relative not in excluded and (relative not in inventory or sha256_file(path) != inventory[relative]):
+                raise ValueError("storage reuse current payload bytes changed")
         elif path.is_dir() and not any(path.iterdir()):
             raise ValueError("storage reuse unknown empty directory")
-    if actual != entry["payload_inventory"]:
+    if actual != set(inventory) | excluded or set(inventory) & excluded:
         raise ValueError("storage reuse current inventory changed")
+
+
+def checked_storage_reuse(value: FinancialStorageReuse, *, collection_manifest: Path,
+                          declaration: dict | None = None) -> FinancialStorageReuse:
+    """Accept only an intact proof minted in this invocation, without global cache."""
+    if (not isinstance(value, FinancialStorageReuse) or value._issuer is not _ISSUER
+        or value._seal != digest_value([value.declaration,value.companies,value.controls])
+        or value.controls["COLLECTION"]["path"] != str(collection_manifest.resolve())
+        or (declaration is not None and value.declaration != declaration)):
+        raise ValueError("untrusted or mutated per-invocation storage proof")
+    _pin(value.declaration)
+    _pin(value.controls["COLLECTION"])
+    return value
 
 
 def storage_history(proof: FinancialStorageReuse | None, ticker: str, manifest: Path) -> dict | None:

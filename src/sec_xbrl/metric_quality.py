@@ -129,10 +129,12 @@ def _preflight_quality_inputs(
     provenance = {
         (row["ticker"], row["cik"]): row for row in config["source_provenance"]
     }
+    storage = _configured_storage_reuse(config, collection_manifest)
+    selection = _configured_history_selection(config, collection_manifest, storage_reuse=storage)
     readiness = _validate_status(
         collection_manifest=collection_manifest,
         parent_companies=parent,
-        expected_companies=companies, storage_reuse=config.get("storage_reuse"),
+        expected_companies=companies, storage_reuse=config.get("storage_reuse"), verified_storage=storage,
     )
     _validate_source_provenance(
         collection_manifest=collection_manifest,
@@ -146,8 +148,8 @@ def _preflight_quality_inputs(
         provenance=provenance,
         financial_as_of=config["financial_as_of"],
         readiness=readiness,
-        selection=_configured_history_selection(config, collection_manifest),
-        storage_reuse=_configured_storage_reuse(config, collection_manifest),
+        selection=selection,
+        storage_reuse=storage,
     )
 
 
@@ -183,10 +185,12 @@ def publish_generic_metric_quality(
         raise ValueError("generic quality scope is outside parent collection")
     if config["financial_as_of"] != request.get("as_of_date"):
         raise ValueError("generic quality cutoff differs from collection")
+    storage = _configured_storage_reuse(config, collection_manifest)
+    selection = _configured_history_selection(config, collection_manifest, storage_reuse=storage)
     readiness = _validate_status(
         collection_manifest=collection_manifest,
         parent_companies=parent_companies,
-        expected_companies=companies, storage_reuse=config.get("storage_reuse"),
+        expected_companies=companies, storage_reuse=config.get("storage_reuse"), verified_storage=storage,
     )
     _validate_source_provenance(
         collection_manifest=collection_manifest,
@@ -200,8 +204,8 @@ def publish_generic_metric_quality(
         provenance=provenance,
         financial_as_of=config["financial_as_of"],
         readiness=readiness,
-        selection=_configured_history_selection(config, collection_manifest),
-        storage_reuse=_configured_storage_reuse(config, collection_manifest),
+        selection=selection,
+        storage_reuse=storage,
     )
 
     bindings = SourceBindingsV2Reader(Path(source_binding_publication))
@@ -280,10 +284,8 @@ def publish_generic_metric_quality(
             for row in readiness
         },
     }
-    selection = _configured_history_selection(config, collection_manifest)
     if selection is not None:
         evidence_hashes["history_selection_controls"] = selection.controls
-    storage = _configured_storage_reuse(config, collection_manifest)
     if storage is not None:
         evidence_hashes["storage_reuse_controls"] = storage.controls
     parser_profiles = bindings.manifest["parser_profiles"]
@@ -595,6 +597,7 @@ class GenericMetricQualityReader:
         history_manifest_sha256s: dict[str, str],
         financial_as_of: str,
         expected_companies: tuple[dict[str, str], ...],
+        _verified_storage_reuse: Any = None,
     ) -> dict[str, Any]:
         """Reopen the exact parent collection, histories, source bytes, and Raw."""
         collection_manifest = _regular_file(collection_manifest, "collection manifest")
@@ -621,10 +624,20 @@ class GenericMetricQualityReader:
             or _sha256(request_path) != self.manifest.get("collection_request_sha256")
         ):
             raise ValueError("generic metric quality parent collection differs")
+        config_declaration = evidence.get("config")
+        if not isinstance(config_declaration, dict):
+            raise TypeError("generic quality config evidence is invalid")
+        config = _load_config(Path(str(config_declaration.get("path"))))
+        if _verified_storage_reuse is None:
+            storage = _configured_storage_reuse(config, collection_manifest)
+        else:
+            from sec_xbrl.financial_storage_reuse import checked_storage_reuse
+            storage = checked_storage_reuse(_verified_storage_reuse, collection_manifest=collection_manifest,
+                                            declaration=config.get("storage_reuse"))
         readiness = _validate_status(
             collection_manifest=collection_manifest,
             parent_companies=parent,
-            expected_companies=companies, storage_reuse=self.manifest.get("storage_reuse"),
+            expected_companies=companies, storage_reuse=self.manifest.get("storage_reuse"), verified_storage=storage,
         )
         if list(readiness) != self.manifest.get("collection_status"):
             raise ValueError("generic metric quality collection status replay differs")
@@ -640,11 +653,10 @@ class GenericMetricQualityReader:
             or config["collection_scope_companies"] != list(companies)
         ):
             raise ValueError("generic metric quality config replay differs")
-        storage = _configured_storage_reuse(config, collection_manifest)
         if (self.manifest.get("storage_reuse") != config.get("storage_reuse")
             or evidence.get("storage_reuse_controls") != (storage.controls if storage else None)):
             raise ValueError("generic quality storage reuse replay differs")
-        selection = _configured_history_selection(config, collection_manifest)
+        selection = _configured_history_selection(config, collection_manifest, storage_reuse=storage)
         if (self.manifest.get("history_selection") != (selection.declaration if selection else None)
             or self.manifest.get("selected_history_evidence") != (selection.companies if selection else None)
             or evidence.get("history_selection_controls") != (selection.controls if selection else None)):
@@ -679,8 +691,8 @@ class GenericMetricQualityReader:
             provenance=provenance,
             financial_as_of=financial_as_of,
             readiness=readiness,
-            selection=_configured_history_selection(config, collection_manifest),
-            storage_reuse=_configured_storage_reuse(config, collection_manifest),
+            selection=selection,
+            storage_reuse=storage,
         )
         if histories != history_declarations:
             raise ValueError("generic metric quality history replay differs")
@@ -860,11 +872,17 @@ def _configured_storage_reuse(config: dict[str, Any], collection_manifest: Path)
             if "storage_reuse" in config else None)
 
 
-def _configured_history_selection(config: dict[str, Any], collection_manifest: Path) -> HistorySelections | None:
+_UNRESOLVED_STORAGE = object()
+
+
+def _configured_history_selection(config: dict[str, Any], collection_manifest: Path,
+                                  *, storage_reuse: Any = _UNRESOLVED_STORAGE) -> HistorySelections | None:
     declaration = config.get("history_selection")
+    if storage_reuse is _UNRESOLVED_STORAGE:
+        storage_reuse = _configured_storage_reuse(config, collection_manifest)
     return (resolve_history_selection(declaration, collection_manifest=collection_manifest,
                                      scope_companies=config["collection_scope_companies"],
-                                      storage_reuse=_configured_storage_reuse(config, collection_manifest))
+                                      storage_reuse=storage_reuse)
             if declaration is not None else None)
 
 
@@ -873,7 +891,7 @@ def _validate_status(
     collection_manifest: Path,
     parent_companies: tuple[dict[str, str], ...],
     expected_companies: tuple[dict[str, str], ...],
-    storage_reuse: dict | None = None,
+    storage_reuse: dict | None = None, verified_storage: Any = None,
 ) -> tuple[dict[str, Any], ...]:
     collection = _read_json(collection_manifest)
     declared_companies = collection.get("companies")
@@ -884,7 +902,7 @@ def _validate_status(
         for item in declared_companies
         if isinstance(item, dict)
     }
-    status = read_universe_status(manifest_path=collection_manifest, validation_mode="financial_sources", storage_reuse=storage_reuse)
+    status = read_universe_status(manifest_path=collection_manifest, validation_mode="financial_sources", storage_reuse=storage_reuse, _verified_storage_reuse=verified_storage)
     status_parent = tuple(
         sorted(
             ({"ticker": row.ticker, "cik": str(row.cik)} for row in status.companies),

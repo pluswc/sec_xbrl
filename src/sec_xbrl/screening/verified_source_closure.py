@@ -758,6 +758,13 @@ def _discover_identity(
                                         scope_companies=config["companies"])
         for name, declaration in storage.controls.items():
             _add_declaration_file(collector, declaration, f"{prefix}_STORAGE_REUSE:{name}")
+        for ticker, company in storage.companies.items():
+            for index, entry in enumerate(company["histories"]):
+                if "retained_diagnostics" in entry:
+                    root = Path(entry["history_manifest"]["path"]).parent
+                    collector.inventory(root, f"{prefix}_STORAGE_V2_TOPOLOGY:{ticker}:{index}",
+                        expected_files=set(entry["payload_inventory"]) | set(entry["retained_diagnostics"]))
+    from sec_xbrl.financial_storage_reuse import storage_history
     selection = None
     if "history_selection" in config:
         from sec_xbrl.history_selection import resolve_history_selection
@@ -782,6 +789,7 @@ def _discover_identity(
             history_root,
             f"{prefix}_HISTORY:{ticker}",
             check_recovery=True,
+            storage_entry=storage_history(storage, ticker, history_root / "history_manifest.json"),
         )
         _add_analysis(
             collector,
@@ -841,7 +849,8 @@ def _add_status_history(collector: _Collector, build: dict[str, Any], role: str)
 
 
 def _add_history(
-    collector: _Collector, root: Path, role: str, *, check_recovery: bool
+    collector: _Collector, root: Path, role: str, *, check_recovery: bool,
+    storage_entry: dict | None = None,
 ) -> None:
     root = Path(os.path.abspath(root))
     if check_recovery:
@@ -863,6 +872,9 @@ def _add_history(
     for path in physical_files:
         relative = str(path.relative_to(root))
         if relative not in governed_files:
+            diagnostics = storage_entry.get("retained_diagnostics") if storage_entry else None
+            if diagnostics is not None and relative in diagnostics:
+                continue  # Explicit v2 nonconsumed producer diagnostics: topology only.
             collector.file(path, f"{role}:RETAINED_PHYSICAL:{relative}")
     if check_recovery:
         _add_recovery_gate_files(collector, root, role)

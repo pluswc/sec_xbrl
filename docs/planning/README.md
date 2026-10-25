@@ -1,6 +1,6 @@
 # 계획 등록부 — 단일 진입점
 
-2026-10-25 승인된 [50사 분기·TTM·스크리닝 확대](../implementation/quarterly50-investor-expansion-20261025.md)는 41개 정의와 기존 17개 호환성을 구현한다. Source/synthetic 구현과 실제 cached 연결·SEC 갱신·운영 release는 별도 상태다. 첫 freeze `455b2bae80…`는 독립 PASS·source/synthetic 인수를 마쳤고, additive History 선택·완료 recovery 증거 재사용 `19967586`도 독립 PASS·source/synthetic 수락을 마쳤다. 실제 ordinary publication에는 별도 명시적 ROOT 승인 storage 증거 재사용을 구현하며, 새 15개와 관련 105개 focused 검사는 PASS했다. 해당 후속의 독립 검증·실제 50사 연결은 별도 대기 상태다.
+2026-10-25 승인된 [50사 분기·TTM·스크리닝 확대](../implementation/quarterly50-investor-expansion-20261025.md)는 41개 정의와 기존 17개 호환성을 구현한다. Source/synthetic 구현과 실제 cached 연결·SEC 갱신·운영 release는 별도 상태다. 첫 freeze `455b2bae80…`는 독립 PASS·source/synthetic 인수를 마쳤고, additive History 선택·완료 recovery 증거 재사용 `19967586`도 독립 PASS·source/synthetic 수락을 마쳤다. 실제 ordinary publication에는 별도 명시적 ROOT 승인 storage 증거 재사용을 구현하며, 새 15개와 관련 105개 focused 검사는 PASS했다. e3ace1b7e2는 독립 PASS·source/synthetic 수락 뒤 실제 IO 범위 문제를 확인해 publication 전에 중단했다. 별도 v2는 보존된 비소비 diagnostics의 topology만 감시하고 모든 governed bytes를 계속 검증한다. 89개 focused 검사 PASS이며 v2 독립 검증·실제 50사 연결은 별도 대기 상태다.
 
 2026-10-25 운영 후속: [21사 screening main runtime 전환](../implementation/screening21-main-runtime-20261025.md)은
 기존 두 catalog entry, SQLite journal과 export를 보존한 채 accepted `main` source로
