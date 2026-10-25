@@ -1,0 +1,356 @@
+# 로컬 기업 스크리닝 대시보드 이용 가이드
+
+2026-10-09 실제 21사 publication, 최종 제품 SHA, 독립 S01–S08 결과와 현재
+loopback 운영 locator는
+[완료·로컬 인수 기록](../implementation/screening-dashboard-completion.md)에 있다.
+이 문서의 명령은 fresh checkout에서도 쓰는 일반 절차다. 현재 runtime의 ignored
+`RUNNING.md`는 해당 로컬 실행의 재시작 정보이며 이 가이드를 대신하지 않는다.
+
+## 조건과 결과를 따로 저장하기 — 2026-10-17 후속 구현
+
+1. 조건을 편집하고 **시험 실행**을 누릅니다. 이 동작은 저장 이력을 만들지 않습니다.
+2. 조건 자체를 재사용하려면 **조건 저장**을 누릅니다. 같은 내용과 자료 문맥을 다시 저장해도
+   새 버전은 만들지 않습니다. `저장 조건 버전`에서 버전을 고른 뒤 **불러오기**를
+   누르면 당시 조건·기간·정렬·준비 자료가 복원됩니다. 과거 저장 문맥이 없는
+   조건은 단일 과거 실행 자료를 사용하거나 현재 자료로 연다고 안내합니다.
+3. 당시 결과를 보관하려면 시험 실행 후 **결과 저장**을 누릅니다. 조건을 따로
+   저장하지 않아도 됩니다. 조건을 수정했으면 다시 시험 실행해야 합니다.
+4. **이력**에서 저장 결과를 골라 **열기**를 누릅니다. 현재 데이터로 다시 계산하지
+   않고 저장 당시의 조건과 결과를 표시합니다. 다운로드와 관심상태 기록은
+   저장한 결과에서 가능합니다.
+
+기존 이력은 그대로 유지합니다. 새 결과만을 위해 내부에 보관한 조건은 조건 목록에
+중복 표시하지 않습니다. 구현·검증·운영 반영 상태는
+[전달 계약](../implementation/screening-explicit-save-delivery.md)을 확인하세요.
+
+## 경계와 준비물
+
+이 대시보드는 준비된 annual `AnalysisClient` bundle을 screening 전용 immutable
+publication으로 한 번 발행한 뒤 읽는다. 일반 화면 query와 실행은 screening
+publication만 읽는다. service 시작과 `status`의 integrity 단계는 선언된
+completion/metadata/analysis parent의 manifest, prepared file hash와 U5 snapshot을
+read-only로 다시 대조한다. 이 단계도 SEC 문서나 Raw XML을 읽지 않고 Arelle,
+filing selection, recast 또는 metric 계산을 실행하지 않는다. 재무값·period·
+mapping·quality와 trace는 upstream publication의 값을 그대로 보존한다.
+
+v1에서 실행 가능한 지표는 실제 prepared coverage가 있는 직접 보고 annual
+`revenue`, `cfo`, `operating_income`, `net_income`이다. `revenue_growth`와
+`operating_margin`은 기존 metric policy의 `ACTUAL_PERIOD_REQUIRED` 때문에
+비활성 상태와 사유만 보인다. 임계값은 사용자가 입력한 조건이며 제품의 투자
+추천이나 매수 기준이 아니다.
+
+R1 dataset v2는 기존 v1을 그대로 보존하면서 21개 reported monetary 지표와
+10개 governed derived 지표를 추가한다. 각 지표는 실제 support matrix가 있는
+회사·연도만 실행 가능하다. 비율은 `%`의 percentage point, 금액은 raw USD다.
+기존 네 reported 지표의 `annual-core-reported-v1` 조건은 v2에서도 그대로
+호환된다.
+
+필요한 입력은 다음과 같다.
+
+- overall `READY` 회사-universe completion publication
+- completion과 같은 CIK를 가진 회사 metadata publication
+- completion의 각 governed history manifest hash에 묶인 회사별 `ANNUAL`
+  analysis bundle
+- 전체 company membership을 정확히 선언한 prepare config
+
+config 형태는
+[`prepare_config.example.json`](../../examples/screening/prepare_config.example.json)을
+참고한다. 예시는 구조 설명용 한 회사만 적었으며 실제 config는 completion의
+전체 CIK를 중복 없이 정확히 선언해야 한다. 모든 경로는 실행 환경의 절대
+경로로 바꾼다.
+
+## publication 준비와 확인
+
+main 프로젝트의 Python 환경을 사용하되 현재 checkout의 `src`를 먼저 import한다.
+
+```bash
+PYTHONPATH="$PWD/src" .venv/bin/python -m sec_xbrl.screening prepare \
+  --config /absolute/run/prepare_config.json \
+  --destination /absolute/run/screening_dataset_v1
+
+PYTHONPATH="$PWD/src" .venv/bin/python -m sec_xbrl.screening status \
+  --dataset /absolute/run/screening_dataset_v1
+```
+
+목적지는 새 경로여야 한다. publisher는 completion/metadata/analysis manifest,
+모든 analysis data file, history binding과 21개의 U5 snapshot을 검증하고 새
+목적지에 원자적으로 발행한다. 기존 publication을 고치거나 덮어쓰지 않는다.
+`status`는 SEC/parser/metric 계산 없이 자체 manifest/file hash/count/unique grain,
+prepared parent의 exact file set/hash, source snapshot의 cell/context/trace identity를
+다시 확인한다. source anchor가 없거나 바뀐 `ACTUAL_PREPARED` publication은
+자체 JSON을 일관되게 다시 hash했더라도 거부한다.
+
+### R1 expanded metric와 dataset v2
+
+먼저 각 회사의 새 `ANNUAL` analysis bundle을 12개 FY monetary row와 9개 INSTANT
+monetary row profile, `include_year_end_balances=True`로 준비한다. INSTANT는 unique FY
+end-exclusive와 날짜가 정확히 같은 값만 포함한다. 기존 v1 analysis를 덮어쓰지
+않는다.
+
+metric config는
+[`metric_prepare_config.example.json`](../../examples/screening/metric_prepare_config.example.json)을
+따른다. 예시는 한 회사만 보이지만 actual config는 v1 identity dataset의 전체
+CIK/ticker membership을 정확히 한 번씩 선언해야 한다. 각 analysis manifest
+SHA-256과 v1 identity dataset manifest SHA-256도 caller가 고정한다.
+
+```bash
+PYTHONPATH="$PWD/src" .venv/bin/python -m sec_xbrl.screening metrics \
+  --config /absolute/run/metric_prepare_config.json \
+  --destination /absolute/run/screening_metrics_v1
+```
+
+publisher/admin 검증에서는 `ScreeningMetricReader(root).verify_governed_sources()`로
+prepared parent cell·trace 재결합과 formula를 검증한다. 일반 dataset reader와
+HTTP serving은 이 deep audit을 호출하지 않으며 frozen metric publication의
+hash/ID와 copied row만 검증한다.
+
+이어서
+[`prepare_config_v2.example.json`](../../examples/screening/prepare_config_v2.example.json)을
+사용해 v2를 발행한다.
+
+```bash
+PYTHONPATH="$PWD/src" .venv/bin/python -m sec_xbrl.screening prepare-v2 \
+  --config /absolute/run/prepare_config_v2.json \
+  --destination /absolute/run/screening_dataset_v2
+
+PYTHONPATH="$PWD/src" .venv/bin/python -m sec_xbrl.screening status \
+  --dataset /absolute/run/screening_dataset_v2
+```
+
+catalog에는 v1과 v2를 별도 `dataset_id`로 함께 등록한다. v2의
+`GET /api/metric-catalog?dataset_id=...`는 label/category/unit/period,
+definition version, source kind, formula/input IDs, company·period coverage와 business
+unavailable reasons를 반환한다. 기존 run은 결합된 v1 publication을 계속 읽고 새
+dataset으로 자동 이동하지 않는다.
+v2 config는 metric manifest와 v1 identity dataset manifest의 SHA-256을 각각
+선언해야 하며 publisher는 둘의 exact identity source가 같은지도 확인한다.
+`status`는 v2 config의 원래 path/hash/content와 dataset scope/count/version/source를
+재결합해 publication ID를 재계산한다. config 또는 manifest 한쪽만 바꾼 publication은
+서비스 catalog에 열리지 않는다.
+
+출력은 다음과 같다.
+
+- `screening_dataset_manifest.json`: publication, 입력과 모든 파일 digest
+- `companies.json`: financial prepared target CIK
+- `metadata_inventory.json`: 준비되지 않은 `UNKNOWN_SIC` 후보를 포함한 metadata
+- `metric_support.json`: 회사별 지원·불가 지표와 reason
+- `metric_observations.json`: 실제 연간 값·blank·기간·quality·lineage
+- `source_snapshots/<CIK>/<snapshot-id>.json`: 원본 U5 canonical snapshot
+
+`context_end_date`는 upstream Arelle/XBRL duration context의 **exclusive end**를
+그대로 보존한다. 화면도 이 규칙을 표시하며 실제 소스 값을 임의로 하루
+변환하지 않는다. upstream admin quality overlay가 없으면
+`quality_status: null`을 `NOT_DECLARED`로 보여주며 `CLEAR`를 만들지 않는다.
+
+## service 시작
+
+발행본을 catalog에 등록한다. 형태는
+[`catalog.example.json`](../../examples/screening/catalog.example.json)과 같다.
+
+```bash
+PYTHONPATH="$PWD/src" .venv/bin/python -m sec_xbrl.screening serve \
+  --catalog /absolute/run/catalog.json \
+  --store /absolute/run/user_journal.sqlite \
+  --exports /absolute/run/exports \
+  --require-existing-store \
+  --host 127.0.0.1 --port 8765
+```
+
+`--require-existing-store`는 기존 journal을 다시 여는 운영 실행용이다. 지정한
+파일이 없거나 SQLite integrity/version 검사를 통과하지 못하면 store 초기화나
+migration 전에 실패한다. 새 설치와 격리된 test에서 새 journal을 만들 때만 이
+옵션을 생략한다. 시작 로그는 실제 Python executable, import한 CLI module,
+catalog, journal, export root와 catalog dataset ID를 JSON으로 남긴다.
+
+브라우저에서 `http://127.0.0.1:8765/`를 연다. service는 loopback 주소만
+허용하고 state-changing browser request의 `Origin`이 같은 local service인지
+검사한다. 인터넷 연결, 로그인, cloud sync는 없다. journal과 export 경로는
+symlink를 통과하지 않는 로컬 경로를 사용한다.
+
+### Windows 브라우저에서 WSL service 열기
+
+일반 경로는 위의 Linux/WSL `127.0.0.1` 주소를 직접 여는 것이다. Windows
+브라우저가 그 주소에 연결되지 않는 환경에서는 제공된 선택형 loopback
+adapter를 쓸 수 있다. 먼저 WSL에서 service를 위와 같이 `127.0.0.1`의 backend
+port로 실행한다. 그 다음 **Windows PowerShell**에서 Windows Node.js로 다음을
+실행한다.
+
+```powershell
+node "\\wsl.localhost\<DISTRO>\path\to\checkout\examples\screening\windows-loopback-bridge.cjs" `
+  --distribution "<DISTRO>" `
+  --linux-python "/absolute/linux/project/.venv/bin/python" `
+  --source-root "/absolute/linux/checkout/src" `
+  --backend-port 8765 `
+  --frontend-port 8884
+```
+
+`<DISTRO>`와 두 Linux 경로는 설치 환경의 실제 값으로 바꾼다. 이후 Windows
+브라우저에서 `http://127.0.0.1:8884/`를 연다. frontend와 backend port는 서로
+달라야 한다. adapter는 Windows `127.0.0.1`에만 bind하고 `wsl.exe`가 실행한
+Python relay도 기존 WSL `127.0.0.1` backend에만 연결한다. `0.0.0.0`, 외부 URL,
+proxy 설정, `netsh` 또는 네트워크 설정 변경은 사용하지 않는다.
+
+adapter는 `GET`/`POST`와 대시보드·API·등록 export 경로만 허용하고 request body
+1 MiB, response body 32 MiB 한도를 둔다. Windows frontend의 `Host`를 정확히
+검사하며 `POST`는 같은 frontend origin을 반드시 요구한다. 검사를 통과한 뒤에만
+relay가 `Host`/`Origin`을 WSL backend의 loopback origin으로 바꾸므로 기존
+service의 CSRF 검사가 그대로 적용된다. XLSX/CSV bytes, status,
+`Content-Type`/`Content-Disposition`은 요청 ID와 함께 전달된다. 종료할 때는
+PowerShell에서 `Ctrl+C`를 눌러 Windows listener와 relay를 함께 닫는다.
+
+### 현재 21사 runtime의 표준 재시작 경로
+
+현재 동결된 21사 history는 아래 v1/v2 catalog 두 entry를 함께 사용한다. 과거
+v1 run을 열기 위해 v1 entry를 지우거나 v2 root로 바꾸지 않는다.
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 \
+PYTHONPATH=/home/plusbdw/.codex/worktrees/universe50-delivery-status-r5/sec_xbrl/src \
+/home/plusbdw/user_work/projects/sec_xbrl/.venv/bin/python \
+  -m sec_xbrl.screening serve \
+  --catalog /home/plusbdw/user_work/projects/sec_xbrl/data/processed/screening_runs/20261009_usability/catalog_r3.json \
+  --store /home/plusbdw/user_work/projects/sec_xbrl/data/processed/screening_runs/20261009_initial/user_journal.sqlite \
+  --exports /home/plusbdw/user_work/projects/sec_xbrl/data/processed/screening_runs/20261009_initial/exports \
+  --require-existing-store --host 127.0.0.1 --port 18766
+```
+
+WSL backend는 `127.0.0.1:18766`, Windows browser bridge는
+`127.0.0.1:18765`다. 기존 문서의 `8884` 표기는 이전 explorer runtime이며 현재
+backend가 아니다. 재시작 전에는 journal의 SQLite consistent copy와 table별
+row/digest를 별도 private 경로에 기록한다. rollback은 새 runtime을 정지하고
+이전 accepted source `e84289a…`와 기존 journal 경로로 다시 시작한다. journal
+복원이 필요하면 원본을 덮어쓰지 않고 consistent copy를 새 경로에 복원해 검증한
+뒤 그 경로를 명시한다.
+
+Windows bridge의 현재 exact foreground restart 명령은 다음과 같다.
+
+```powershell
+& "C:\Users\plusbdw\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe" `
+  "\\wsl.localhost\Ubuntu\home\plusbdw\.codex\worktrees\universe50-delivery-status-r5\sec_xbrl\examples\screening\windows-loopback-bridge.cjs" `
+  --distribution "Ubuntu" `
+  --linux-python "/home/plusbdw/user_work/projects/sec_xbrl/.venv/bin/python" `
+  --source-root "/home/plusbdw/.codex/worktrees/universe50-delivery-status-r5/sec_xbrl/src" `
+  --backend-port 18766 `
+  --frontend-port 18765
+```
+
+현재 persistent runtime의 backend process record/log locator는
+`work/screening21_stability_20261021/live-backend-process.json`, Windows bridge
+record는 app visualization의 `screening21-stability-20261021/bridge-18765.json`이다.
+PID는 관찰값이므로 재시작 전에는 record의 명령·source·port와 현재 process를 함께
+대조한다.
+
+주요 HTTP 경계는 다음과 같다.
+
+| 동작 | endpoint |
+| --- | --- |
+| service/dataset 상태 | `GET /api/status` |
+| 지표 지원·시계열 | `GET /api/availability`, `GET /api/series` |
+| 지표 정의·coverage | `GET /api/metric-catalog?dataset_id=...` |
+| metadata/SIC peer | `GET /api/metadata`, `GET /api/peers` |
+| 조건 저장·revision | `GET/POST /api/screens`, `POST /api/screens/{id}/revisions` |
+| 시험 실행·결과 저장 | `POST /api/preview`, `POST /api/results` |
+| 전체 저장 조건 버전 | `GET /api/screen-revisions` |
+| legacy 실행·재열기·trace | `GET/POST /api/runs`, `GET /api/runs/{id}`, `GET /api/runs/{id}/trace` |
+| 실행 비교 | `GET /api/run-comparison` |
+| 판단 journal | `GET/POST /api/decisions` |
+| full/selected export | `POST /api/runs/{id}/exports` |
+
+화면에서 조건 이름, 전체/SIC/CIK universe, 고정 FY 또는 최신 완료 FY,
+여러 AND predicate, column set과 정렬을 revision으로 저장한다. 저장 완료 표시는
+SQLite commit 뒤에만 나온다. 서버와 브라우저를 닫은 뒤 같은 journal로 다시
+실행하면 저장 조건, frozen run, 판단 event를 다시 연다.
+
+새 screen config의 `columns`에는 화면 group 이름 `company`, `sic`, `aggregate`,
+`predicates`, `decision`을 사용한다. 기존 API와 과거 journal의 `ticker`, `name`,
+`cik`은 `company` group으로, `sic_code`, `sic_description`은 `sic` group으로
+읽기 전용 표시 호환된다. 과거 revision JSON은 변환하거나 덮어쓰지 않으며,
+명시적으로 생략한 group은 계속 숨긴다.
+
+## 판정과 화면 읽기
+
+각 predicate는 `PASS`, `FAIL`, `UNDETERMINED`와 reason을 가진다. 누락,
+`MULTIPLE_CANDIDATES`, `UNAVAILABLE`, quality block은 0으로 바뀌지 않는다. 하나의
+유효 `FAIL`이 있으면 aggregate는 `FAIL`, 모든 predicate가 유효 `PASS`이고
+blocking/unknown이 없으면 `PASS`, 나머지는 `UNDETERMINED`다.
+
+상단 context strip은 financial as-of, 기간, universe, saved revision, 짧은 run과
+review 상태를 보여준다. 긴 publication/hash와 parser·mapping·selection·period·
+metric version vector는 `자료 출처·버전`에서
+확인한다. 결과 행을 열면 값, unit, 실제 period start/context end, mapping,
+Fact/accession과 전체 prepared trace가 오른쪽 패널에 나온다. 같은 FY label의 두
+회사가 같은 날짜라는 뜻은 아니다.
+
+관심·보류·제외는 사용자의 별도 append-only `DecisionEvent`다. 수정하면 이전
+event를 참조하는 새 event가 생기며 재무값이나 query PASS를 바꾸지 않는다.
+old run을 열어도 full rows/hash는 그대로이고 같은 revision을 새 dataset에
+실행하면 별도 run이 생긴다. `CACHE_FUTURE_UPDATE_FIXTURE`는 화면과 비교 결과에서
+그 label을 유지하며 live refresh로 표시하지 않는다.
+
+full/selected CSV와 XLSX는 별도 `screen-run-export-v1`이다. export는 run/revision/
+universe/publication/date/version, 전 row의 status·unknown·reason과 순서를
+보존한다. CSV와 XLSX의 text는 formula로 실행되지 않는다. 같은 immutable
+목적지 이름을 다시 쓰려 하면 실패한다. 직접 Python API에서는 caller가 매번 새
+목적지를 제공해야 한다. 화면과 HTTP API는 요청마다 안전한 새 파일 이름을
+발급하므로 같은 full export를 다시 받거나 같은 run에서 다른 selected subset을
+받아도 이전 파일과 `ExportManifest`를 덮어쓰지 않는다.
+
+긴 `record_json` 또는 metadata가 Excel cell 한계를 넘으면 XLSX는
+`screen-run-xlsx-long-text-v1`을 사용한다. 원래 cell의 JSON descriptor와
+`LongText` sheet의 stable key, 순서 있는 chunk, chunk count, 전체 SHA-256으로
+원문을 손실 없이 재조립할 수 있다. 각 chunk는 16,000 Unicode codepoint와
+32,000 UTF-16 code unit 이하이고, 짧은 text는 계속 cell에 직접 들어간다.
+XLSX export manifest의 `xlsx_encoding_version`으로 이 표현을 확인할 수 있으며,
+재조립한 canonical payload hash는 같은 run export hash와 일치해야 한다.
+
+## backup과 restore
+
+```bash
+PYTHONPATH="$PWD/src" .venv/bin/python -m sec_xbrl.screening backup \
+  --store /absolute/run/user_journal.sqlite \
+  --destination /absolute/backup/screening-journal-20261009
+
+PYTHONPATH="$PWD/src" .venv/bin/python -m sec_xbrl.screening restore \
+  --backup /absolute/backup/screening-journal-20261009 \
+  --destination /absolute/restored/user_journal.sqlite
+```
+
+backup은 SQLite online backup, integrity check와 file hash가 있는 manifest를
+만든다. restore는 새 빈 목적지에서만 성공한다. 기존 journal을 reset·삭제하거나
+덮어쓰는 명령은 제공하지 않는다. integrity check는 revision의 연속 번호와
+같은 screen 내 직전 parent, first-revision shape, 파생 ID, foreign-key orphan,
+run/universe, decision/run/이전 event, export/run 관계를 함께 검사한다. 따라서
+손상된 append-only chain은 backup되지 않으며, backup DB와 manifest를 함께 다시
+hash했더라도 restore의 관계 검사에서 거부된다.
+
+## S01–S08 실제 인수 실행
+
+최종 인수는
+[`screening-dashboard-user-acceptance.md`](../implementation/screening-dashboard-user-acceptance.md)의
+순서를 따른다.
+
+1. 실제 21사 publication에서 지원 matrix를 확인하고 별도 독립 oracle의 CIK,
+   선택 값과 예상 집합 hash를 고정한다.
+2. 전체 21사·SIC 미분류 포함 revision을 저장하고 재시작·blank restore 뒤 다시
+   연다. 이후 별도 SIC revision의 target CIK를 frozen snapshot과 대조한다.
+3. 실행 결과가 모든 target을 한 번씩 보존하고 count 식과 독립 oracle을
+   만족하는지 확인한다.
+4. reported positive control의 실제 날짜, unit, Fact/accession과 full trace를
+   DOM과 JSON에서 대조한다.
+5. 실제 날짜가 다른 SIC peer를 비교하고 `UNKNOWN_SIC` 후보가 metadata query에
+   남는지 확인한다.
+6. 관심→보류 두 event와 restart readback을 확인한다.
+7. frozen old run과 별도 `CACHE_FUTURE_UPDATE_FIXTURE` run을 비교한다. 실제 값이
+   같은 재발행 control은 `NO_VERSION_CHANGE`/data identity 차이를 사실대로
+   기록하고, 값 변화 control은 synthetic/cache label로 별도 실행한다.
+8. full/selected CSV/XLSX 네 파일을 canonical run과 재대조한다.
+9. zero result, invalid metric, missing, synthetic save failure, keyboard focus,
+   1,440px/1,024px 화면을 확인한다.
+
+독립 expected 결과는 screening executor를 호출해 만들지 않는다. browser 자동
+검사 결과, 독립 검증, lead 로컬 인수, 사용자의 직접 walkthrough와 원격 merge는
+서로 다른 상태로 보고한다.
+
+저장 당시 자료와 현재 등록된 자료가 다르면 저장 결과 열기를 중단합니다.
+저장 기록이 삭제된 것은 아닙니다. 관리자가 당시 publication 등록을 복구하면
+다시 열 수 있습니다. 상세 시계열·동종기업 비교에도 당시 자료 검증을 적용합니다.

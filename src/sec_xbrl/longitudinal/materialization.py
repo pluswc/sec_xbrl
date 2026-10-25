@@ -398,7 +398,7 @@ class OperationalLayer2Publisher:
         counts = _validate_candidate(run, normalized)
         destination = self.root / run.run_version
         if destination.exists():
-            return self._existing_publication(destination, run, counts)
+            return self._existing_publication(destination, run, counts, normalized)
 
         self.root.mkdir(parents=True, exist_ok=True)
         staging_root = self.root / ".staging"
@@ -426,7 +426,7 @@ class OperationalLayer2Publisher:
                 json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
             )
             if destination.exists():
-                return self._existing_publication(destination, run, counts)
+                return self._existing_publication(destination, run, counts, normalized)
             os.replace(temporary, destination)
             return Layer2Publication(
                 run_root=destination,
@@ -440,7 +440,11 @@ class OperationalLayer2Publisher:
             raise
 
     def _existing_publication(
-        self, destination: Path, run: Layer2Run, counts: Mapping[str, int]
+        self,
+        destination: Path,
+        run: Layer2Run,
+        counts: Mapping[str, int],
+        datasets: Mapping[str, Sequence[Mapping[str, Any]]],
     ) -> Layer2Publication:
         manifest = _read_publication_manifest(destination / self.manifest_name)
         if (
@@ -451,6 +455,30 @@ class OperationalLayer2Publisher:
             raise Layer2MaterializationError(
                 f"run_version already belongs to a different operational publication: {destination}"
             )
+        if {"analysis_exploration_node", "analysis_exploration_edge"} <= set(counts):
+            try:
+                existing = Layer2PublicationReader().load(destination)
+            except Layer2PublicationValidationError as exc:
+                raise Layer2MaterializationError(
+                    f"existing operational exploration graph fails validation: {destination}"
+                ) from exc
+            expected_versions = {
+                str(row.get("exploration_graph_rule_version"))
+                for name in ("analysis_exploration_node", "analysis_exploration_edge")
+                for row in datasets[name]
+                if row.get("exploration_graph_rule_version")
+            }
+            existing_versions = {
+                str(row.get("exploration_graph_rule_version"))
+                for name in ("analysis_exploration_node", "analysis_exploration_edge")
+                for row in existing.datasets[name]
+                if row.get("exploration_graph_rule_version")
+            }
+            if expected_versions and existing_versions != expected_versions:
+                raise Layer2MaterializationError(
+                    "run_version already belongs to a different exploration graph rule version; "
+                    "use a new output and run_version"
+                )
         return Layer2Publication(
             run_root=destination,
             manifest_path=destination / self.manifest_name,
@@ -553,6 +581,7 @@ def _validate_candidate(
                     f"{dataset} row is not canonical JSON serializable"
                 ) from exc
         counts[dataset] = len(rows)
+    _validate_exploration_graph_references(datasets)
     if "capability_inventory" in datasets:
         covered_ciks = {str(row.get("cik")) for row in datasets["capability_inventory"]}
         missing_ciks = sorted(input_ciks - covered_ciks)
@@ -562,6 +591,63 @@ def _validate_candidate(
                 + ", ".join(missing_ciks)
             )
     return dict(sorted(counts.items()))
+
+
+def _validate_exploration_graph_references(
+    datasets: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> None:
+    """Resolve every T3 edge inside the same atomic graph candidate.
+
+    Row-level nonempty checks cannot establish graph integrity: endpoints are
+    meaningful only when they resolve to actual nodes in the paired dataset.
+    Older valid fixtures may omit filing metadata, so filing equality is
+    enforced whenever the edge declares it and between endpoints whenever both
+    declare it.
+    """
+    node_dataset = "analysis_exploration_node"
+    edge_dataset = "analysis_exploration_edge"
+    present = {name for name in (node_dataset, edge_dataset) if name in datasets}
+    if not present:
+        return
+    if present != {node_dataset, edge_dataset}:
+        raise Layer2MaterializationError(
+            "exploration graph requires paired node and edge datasets"
+        )
+
+    nodes = {
+        str(row["analysis_exploration_node_id"]): row
+        for row in datasets[node_dataset]
+    }
+    for edge in datasets[edge_dataset]:
+        endpoint_nodes: list[Mapping[str, Any]] = []
+        for endpoint_field in ("from_node_id", "to_node_id"):
+            endpoint_id = str(edge[endpoint_field])
+            node = nodes.get(endpoint_id)
+            if node is None:
+                raise Layer2MaterializationError(
+                    f"analysis_exploration_edge {endpoint_field} does not resolve in the same candidate: "
+                    f"{endpoint_id}"
+                )
+            if str(node.get("cik")) != str(edge.get("cik")):
+                raise Layer2MaterializationError(
+                    f"analysis_exploration_edge {endpoint_field} resolves to a different CIK"
+                )
+            endpoint_nodes.append(node)
+
+        edge_filing = edge.get("source_filing_id")
+        endpoint_filings = tuple(node.get("source_filing_id") for node in endpoint_nodes)
+        if edge_filing is not None and edge_filing != "":
+            if any(value != edge_filing for value in endpoint_filings):
+                raise Layer2MaterializationError(
+                    "analysis_exploration_edge endpoint filing disagrees with edge scope"
+                )
+        elif (
+            all(value is not None and value != "" for value in endpoint_filings)
+            and endpoint_filings[0] != endpoint_filings[1]
+        ):
+            raise Layer2MaterializationError(
+                "analysis_exploration_edge endpoints resolve to different filings"
+            )
 
 
 def _validate_analytical_fact(

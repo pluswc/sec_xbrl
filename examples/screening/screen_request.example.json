@@ -1,0 +1,38 @@
+{
+  "name": "FY2025 매출·현금흐름 검증 예시",
+  "example_purpose": "TEST_ONLY_NOT_INVESTMENT_RECOMMENDATION",
+  "content": {
+    "universe": {
+      "mode": "ALL_PREPARED"
+    },
+    "predicates": [
+      {
+        "metric_id": "revenue",
+        "operator": "GTE",
+        "threshold": "50000000000",
+        "definition_version": "annual-core-reported-v1"
+      },
+      {
+        "metric_id": "cfo",
+        "operator": "GT",
+        "threshold": "0",
+        "definition_version": "annual-core-reported-v1"
+      }
+    ],
+    "period_policy": {
+      "mode": "FIXED_FISCAL_YEAR",
+      "fiscal_year": 2025
+    },
+    "columns": [
+      "company",
+      "sic",
+      "aggregate",
+      "predicates",
+      "decision"
+    ],
+    "sort": {
+      "column": "ticker",
+      "direction": "ASC"
+    }
+  }
+}

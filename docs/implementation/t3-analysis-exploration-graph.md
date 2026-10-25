@@ -19,6 +19,24 @@ T3는 reader-attested T1 `reported_period_observation`과 T2
 - T3는 filing을 선택하지 않고, amendment/recast/Q4/합계/driver/비율을
   계산하거나 추정하지 않는다.
 
+## 참조 무결성 v2
+
+`analysis-t3-exploration-graph-v2` producer는 observation에서 만든 concept
+endpoint에 실제 발행 `CONCEPT` node와 동일한 ID 공식을 사용한다. 모든 edge의
+`from_node_id`와 `to_node_id`는 같은 atomic publication의 실제 node로 resolve해야
+하며 CIK와, 명시된 경우 filing scope도 일치해야 한다. node/edge 중 한 dataset만
+있는 후보, dangling endpoint와 cross-CIK/cross-filing 참조는 발행 전에
+fail-closed한다. 공용 `Layer2PublicationReader`도 전체 node/edge dataset을 교차
+검증하므로 파일을 변경해 manifest count만 유지한 operational/canonical
+publication을 소비하지 않는다.
+
+이 수리는 Raw identity, 값, role/network, Axis scope나 traversal 의미를 바꾸지
+않는다. 정상 cycle과 여러 lens·filing·typed scope는 그대로 허용한다. 구조적으로
+완전한 legacy v1 graph도 읽을 수 있지만, endpoint가 없는 기존 결함 v1 graph는
+거부된다. 새 운영 재생성은 새 output/run version을 사용하며 자세한 승인·보존
+경계는 [T3 참조 무결성 수리 전달](universe50-t3-reference-repair-delivery.md)을
+따른다.
+
 ## 운영 Parquet 데이터셋
 
 ### `analysis_exploration_node`

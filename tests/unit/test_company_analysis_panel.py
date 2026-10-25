@@ -25,9 +25,17 @@ ROOT = "node:total"
 AXIS = "node:product-axis"
 MEMBER = "node:data-center"
 DETAIL_NODE = "node:detail"
+STATEMENT_ROOT = "node:statement-root"
+REVENUE_CONCEPT = "node:revenue-concept"
 
 
-def _graph(tmp_path, *, snapshot_id: str = "snap:q3"):
+def _graph(
+    tmp_path,
+    *,
+    snapshot_id: str = "snap:q3",
+    foreign_same_fact: bool = False,
+    duplicate_same_fact: bool = False,
+):
     run = Layer2Run(
         "t5-fixture",
         "fixture",
@@ -52,6 +60,24 @@ def _graph(tmp_path, *, snapshot_id: str = "snap:q3"):
             "filed_date": "2023-11-21",
             "context_id": f"ctx:{TOTAL}",
             "unit_id": "unit:usd",
+            "raw_qname": "us-gaap:Revenues",
+        },
+        {
+            "cik": CIK,
+            "analysis_exploration_node_id": STATEMENT_ROOT,
+            "node_kind": "CONCEPT",
+            "origin": "STANDARD_CONCEPT",
+            "raw_id": "concept:statement-root",
+            "source_filing_id": FILING,
+            "raw_qname": "us-gaap:StatementOfIncomeAbstract",
+        },
+        {
+            "cik": CIK,
+            "analysis_exploration_node_id": REVENUE_CONCEPT,
+            "node_kind": "CONCEPT",
+            "origin": "STANDARD_CONCEPT",
+            "raw_id": "concept:revenue",
+            "source_filing_id": FILING,
             "raw_qname": "us-gaap:Revenues",
         },
         {
@@ -100,6 +126,20 @@ def _graph(tmp_path, *, snapshot_id: str = "snap:q3"):
         },
         {
             "cik": CIK,
+            "analysis_exploration_edge_id": "edge:primary-is",
+            "edge_kind": "STATEMENT_COMPONENT",
+            "from_node_id": STATEMENT_ROOT,
+            "to_node_id": REVENUE_CONCEPT,
+            "scope_kind": None,
+            "source_network_type": "PRE",
+            "source_relationship_edge_id": "rel:primary-is",
+            "source_filing_id": FILING,
+            "role_definition": "Consolidated Statements of Income",
+            "role_uri": "http://example.com/role/primary-income",
+            "order": "1",
+        },
+        {
+            "cik": CIK,
             "analysis_exploration_edge_id": "edge:member",
             "edge_kind": "FACT_SCOPE",
             "from_node_id": AXIS,
@@ -117,6 +157,56 @@ def _graph(tmp_path, *, snapshot_id: str = "snap:q3"):
             "order": None,
         },
     )
+    if foreign_same_fact:
+        nodes += (
+            {
+                "cik": CIK,
+                "analysis_exploration_node_id": "node:foreign-bridge",
+                "node_kind": "CONCEPT",
+                "origin": "STANDARD_CONCEPT",
+                "raw_id": "concept:foreign-bridge",
+                "raw_qname": "us-gaap:Revenues",
+            },
+            {
+                **nodes[0],
+                "analysis_exploration_node_id": "node:foreign-same-fact",
+                "source_filing_id": "filing:other",
+            },
+        )
+        edges += (
+            {
+                "cik": CIK,
+                "analysis_exploration_edge_id": "edge:foreign-same-fact",
+                "edge_kind": "FACT_SCOPE",
+                "from_node_id": ROOT,
+                "to_node_id": "node:foreign-bridge",
+                "scope_kind": "FOREIGN_FIXTURE",
+                "order": None,
+            },
+            {
+                "cik": CIK,
+                "analysis_exploration_edge_id": "edge:foreign-same-fact-detail",
+                "edge_kind": "FACT_SCOPE",
+                "from_node_id": "node:foreign-bridge",
+                "to_node_id": "node:foreign-same-fact",
+                "scope_kind": "FOREIGN_FIXTURE",
+                "order": None,
+            },
+        )
+    if duplicate_same_fact:
+        nodes += (
+            {
+                **nodes[5],
+                "analysis_exploration_node_id": "node:detail-duplicate",
+            },
+        )
+        edges += (
+            {
+                **edges[3],
+                "analysis_exploration_edge_id": "edge:fact-duplicate",
+                "to_node_id": "node:detail-duplicate",
+            },
+        )
     published = OperationalLayer2Publisher(tmp_path / "graph").publish(
         run, {"analysis_exploration_node": nodes, "analysis_exploration_edge": edges}
     )
@@ -206,6 +296,23 @@ def test_panel_separates_statement_and_custom_dimension_detail_with_full_lineage
     assert detail["unit_numerator_measures"] == ("iso4217:USD",)
     assert detail["raw_concept_taxonomy_family"] == "us-gaap"
     assert len(panel.bindings[1]["relationship_navigation"]) == 3
+    assert panel.bindings[0]["primary_statement_evidence"] == [
+        {
+            "statement_types": ("IS",),
+            "cik": CIK,
+            "analysis_exploration_edge_id": "edge:primary-is",
+            "edge_kind": "STATEMENT_COMPONENT",
+            "from_node_id": STATEMENT_ROOT,
+            "to_node_id": REVENUE_CONCEPT,
+            "scope_kind": None,
+            "source_network_type": "PRE",
+            "source_relationship_edge_id": "rel:primary-is",
+            "source_filing_id": FILING,
+            "role_definition": "Consolidated Statements of Income",
+            "role_uri": "http://example.com/role/primary-income",
+            "order": "1",
+        }
+    ]
     assert (
         panel.definitions[1]["parent_analysis_line_id"] == panel.definitions[0]["analysis_line_id"]
     )
@@ -267,6 +374,14 @@ def test_cached_graph_indexes_are_defensive_and_refresh_for_new_publication(tmp_
             "exploration": graph, "cik": CIK, "fiscal_year": 2024, "fiscal_quarter": 3,
             "period_class": "QTD_3M", "view": "LATEST_REPORTED", "as_of_date": "2023-11-21"}
     first = builder.build(**args)
+    nodes, facts, _duplicate_fact_node_ids, _placement = builder._graph_indexes(graph)
+    raw_root = next(
+        row
+        for row in graph.datasets[builder._graph_reader.node_dataset]
+        if row["analysis_exploration_node_id"] == ROOT
+    )
+    assert nodes[ROOT] is raw_root
+    assert facts[(FILING, TOTAL)] is raw_root
     expected = deepcopy(first)
     first.bindings[1]["relationship_navigation"][0]["mutated"] = True
     first.values[0]["value_numeric"] = "changed"
@@ -277,3 +392,125 @@ def test_cached_graph_indexes_are_defensive_and_refresh_for_new_publication(tmp_
     with pytest.raises(CompanyAnalysisPanelError, match="source_snapshot_id"):
         builder.build(**{**args, "exploration": other})
     assert builder._indexed_graph is other
+
+
+def test_target_scoped_panel_is_exactly_equal_to_full_traversal(
+    tmp_path, monkeypatch
+) -> None:
+    graph = _graph(tmp_path / "graph", foreign_same_fact=True)
+    rows = (
+        _selected(TOTAL),
+        _selected(
+            DETAIL,
+            dimensions=(("axis:product", "member:data-center", None, "EXPLICIT", False),),
+            value="14514000000",
+        ),
+        _selected(
+            "fact:selected-but-absent",
+            dimensions=(("axis:product", "member:absent", None, "EXPLICIT", False),),
+        ),
+    )
+    args = {
+        "selected_rows": rows,
+        "exploration": graph,
+        "cik": CIK,
+        "fiscal_year": 2024,
+        "fiscal_quarter": 3,
+        "period_class": "QTD_3M",
+        "view": "LATEST_REPORTED",
+        "as_of_date": "2023-11-21",
+        "analysis_view_id": "nvda-q3",
+    }
+    candidate = CompanyAnalysisPanelBuilder().build(**args)
+
+    def legacy_paths(self, publication, *, root_node_ids, target_node_ids):
+        targets = set(target_node_ids)
+        for root_index, root in enumerate(root_node_ids):
+            for path in self.traverse(publication, root_node_ids=(root,)):
+                if path["node"]["analysis_exploration_node_id"] in targets:
+                    yield root_index, path
+
+    monkeypatch.setattr(
+        "sec_xbrl.longitudinal.exploration_graph.ExplorationGraphReader._iter_selected_fact_paths",
+        legacy_paths,
+    )
+    baseline = CompanyAnalysisPanelBuilder().build(**args)
+
+    assert candidate == baseline
+    assert [row["selected_source_fact_id"] for row in candidate.values] == [
+        TOTAL,
+        DETAIL,
+    ]
+    assert all(row["source_filing_id"] == FILING for row in candidate.values)
+
+
+def test_target_scope_keeps_every_node_for_a_duplicate_filing_fact_key(
+    tmp_path, monkeypatch
+) -> None:
+    graph = _graph(tmp_path / "graph", duplicate_same_fact=True)
+    rows = (
+        _selected(TOTAL),
+        _selected(
+            DETAIL,
+            dimensions=(("axis:product", "member:data-center", None, "EXPLICIT", False),),
+            value="14514000000",
+        ),
+    )
+    args = {
+        "selected_rows": rows,
+        "exploration": graph,
+        "cik": CIK,
+        "fiscal_year": 2024,
+        "fiscal_quarter": 3,
+        "period_class": "QTD_3M",
+        "view": "LATEST_REPORTED",
+        "as_of_date": "2023-11-21",
+        "analysis_view_id": "nvda-q3",
+    }
+    builder = CompanyAnalysisPanelBuilder()
+    candidate = builder.build(**args)
+    _nodes, facts, duplicate_fact_node_ids, _placement = builder._graph_indexes(graph)
+    assert facts[(FILING, DETAIL)]["analysis_exploration_node_id"] == "node:detail-duplicate"
+    assert duplicate_fact_node_ids[(FILING, DETAIL)] == (
+        DETAIL_NODE,
+        "node:detail-duplicate",
+    )
+
+    selected_keys = {(FILING, TOTAL), (FILING, DETAIL)}
+
+    def legacy_paths(self, publication, *, root_node_ids, target_node_ids):
+        del target_node_ids
+        for root_index, root in enumerate(root_node_ids):
+            for path in self.traverse(publication, root_node_ids=(root,)):
+                node = path["node"]
+                key = (str(node.get("source_filing_id")), str(node.get("source_fact_id")))
+                if node.get("node_kind") == "FACT" and key in selected_keys:
+                    yield root_index, path
+
+    monkeypatch.setattr(
+        "sec_xbrl.longitudinal.exploration_graph.ExplorationGraphReader._iter_selected_fact_paths",
+        legacy_paths,
+    )
+    baseline = CompanyAnalysisPanelBuilder().build(**args)
+
+    assert candidate == baseline
+    assert len(candidate.values) == 3
+    assert {
+        tuple(row["navigation_path_node_ids"])
+        for row in candidate.bindings
+        if row["source_fact_id"] == DETAIL
+    } == {
+        (ROOT, AXIS, MEMBER, DETAIL_NODE),
+        (ROOT, AXIS, MEMBER, "node:detail-duplicate"),
+    }
+
+
+@pytest.mark.parametrize(
+    "dimensions",
+    ((), (("axis:product", "member:orphan", None, "EXPLICIT", False),)),
+)
+def test_target_scope_preserves_missing_root_and_dimension_orphan_error(
+    tmp_path, dimensions
+) -> None:
+    with pytest.raises(CompanyAnalysisPanelError, match="not present"):
+        _build(tmp_path, (_selected("fact:missing-root", dimensions=dimensions),))

@@ -27,7 +27,7 @@ def test_cached_nvda_q3_revenue_has_parallel_standard_and_custom_lenses(tmp_path
         root,
         corpus_run_id=root.name,
         ciks=("1045810",),
-        run_version="t3-nvda-exploration-regression-v1",
+        run_version="t3-nvda-exploration-reference-repair-v2",
         rules=Layer2RuleVersions("period-v1", "mapping-v1", "recast-v1", "selection-v1"),
     )
     t1 = VersionedObservationPanelPipeline().publish(release, output_root=tmp_path / "t1")
@@ -39,6 +39,17 @@ def test_cached_nvda_q3_revenue_has_parallel_standard_and_custom_lenses(tmp_path
     )
     publication = Layer2PublicationReader().load(result.publication.run_root)
     reader = ExplorationGraphReader()
+    nodes = publication.records(reader.node_dataset)
+    edges = publication.records(reader.edge_dataset)
+    node_ids = {row["analysis_exploration_node_id"] for row in nodes}
+    assert all(
+        edge[endpoint] in node_ids
+        for edge in edges
+        for endpoint in ("from_node_id", "to_node_id")
+    )
+    assert {
+        row["exploration_graph_rule_version"] for row in (*nodes, *edges)
+    } == {"analysis-t3-exploration-graph-v2"}
     roots = reader.roots_for_fact(
         publication, cik="0001045810", fiscal_year=2024, fiscal_quarter=3,
         raw_concept_qname="us-gaap:Revenues",

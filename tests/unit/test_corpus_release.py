@@ -161,6 +161,97 @@ def test_declared_cohort_fails_closed_when_a_declared_snapshot_is_not_complete(t
         )
 
 
+def _load_cohort(sources: tuple[CohortSource, ...]):
+    return CohortReleaseAdapter().load(
+        sources,
+        cohort_id="fixture-cohort-v1",
+        ciks=("320193",),
+        run_version="fixture-t1-v1",
+        rules=RULES,
+    )
+
+
+def _cohort_root(parent: Path, name: str, accession: str, filed: str) -> Path:
+    root = parent / name
+    _write_snapshot(root, "0000320193", accession, "10-Q", filed, "2025-03-29")
+    return root
+
+
+def test_declared_cohort_accepts_distinct_same_leaf_source_roots_without_changing_fingerprint(
+    tmp_path: Path,
+) -> None:
+    first = _cohort_root(tmp_path / "first", "intake", "0000320193-25-000001", "2025-05-01")
+    second = _cohort_root(tmp_path / "second", "intake", "0000320193-25-000002", "2025-06-01")
+    same_leaf = _load_cohort(
+        (
+            CohortSource(first, "intake", (CohortSnapshotReference("320193", "0000320193-25-000001"),)),
+            CohortSource(second, "intake", (CohortSnapshotReference("320193", "0000320193-25-000002"),)),
+        )
+    )
+
+    named_first = _cohort_root(tmp_path / "named", "first-run", "0000320193-25-000001", "2025-05-01")
+    named_second = _cohort_root(tmp_path / "named", "second-run", "0000320193-25-000002", "2025-06-01")
+    uniquely_named = _load_cohort(
+        (
+            CohortSource(named_first, "first-run", (CohortSnapshotReference("320193", "0000320193-25-000001"),)),
+            CohortSource(named_second, "second-run", (CohortSnapshotReference("320193", "0000320193-25-000002"),)),
+        )
+    )
+
+    assert [row.accession for row in same_leaf.layer2_run.inputs] == [
+        "0000320193-25-000001",
+        "0000320193-25-000002",
+    ]
+    assert same_leaf.layer2_run.fingerprint == uniquely_named.layer2_run.fingerprint
+
+
+def test_declared_cohort_rejects_repeated_physical_root_through_relative_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _cohort_root(tmp_path / "relative", "intake", "0000320193-25-000001", "2025-05-01")
+    _write_snapshot(root, "0000320193", "0000320193-25-000002", "10-Q", "2025-06-01", "2025-03-29")
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(CorpusReleaseError, match="duplicate cohort source root"):
+        _load_cohort(
+            (
+                CohortSource(Path("relative/intake"), "intake", (CohortSnapshotReference("320193", "0000320193-25-000001"),)),
+                CohortSource(Path("relative/../relative/intake"), "intake", (CohortSnapshotReference("320193", "0000320193-25-000002"),)),
+            )
+        )
+
+
+def test_declared_cohort_preserves_relative_source_root_support(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _cohort_root(tmp_path / "relative", "intake", "0000320193-25-000001", "2025-05-01")
+    monkeypatch.chdir(tmp_path)
+    release = _load_cohort(
+        (CohortSource(Path("relative/intake"), "intake", (CohortSnapshotReference("320193", "0000320193-25-000001"),)),)
+    )
+    assert release.layer2_run.inputs[0].accession == "0000320193-25-000001"
+
+
+def test_declared_cohort_rejects_duplicate_snapshot_across_same_leaf_roots(tmp_path: Path) -> None:
+    first = _cohort_root(tmp_path / "first", "intake", "0000320193-25-000001", "2025-05-01")
+    second = _cohort_root(tmp_path / "second", "intake", "0000320193-25-000001", "2025-05-01")
+    reference = (CohortSnapshotReference("320193", "0000320193-25-000001"),)
+    with pytest.raises(CorpusReleaseError, match="duplicate or missing cohort snapshot identity"):
+        _load_cohort((CohortSource(first, "intake", reference), CohortSource(second, "intake", reference)))
+
+
+def test_declared_cohort_revalidates_second_same_leaf_source_integrity(tmp_path: Path) -> None:
+    first = _cohort_root(tmp_path / "first", "intake", "0000320193-25-000001", "2025-05-01")
+    second = _cohort_root(tmp_path / "second", "intake", "0000320193-25-000002", "2025-06-01")
+    (second / "snapshots/0000320193/000032019325000002/unit.parquet").unlink()
+    with pytest.raises(CorpusReleaseError, match="snapshot"):
+        _load_cohort(
+            (
+                CohortSource(first, "intake", (CohortSnapshotReference("320193", "0000320193-25-000001"),)),
+                CohortSource(second, "intake", (CohortSnapshotReference("320193", "0000320193-25-000002"),)),
+            )
+        )
+
+
 def test_raw_filing_index_returns_all_exact_period_candidates_and_loads_one_snapshot(
     tmp_path: Path,
 ) -> None:

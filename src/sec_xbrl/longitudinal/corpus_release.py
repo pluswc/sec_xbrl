@@ -289,7 +289,7 @@ class CohortReleaseAdapter:
         source_rows = tuple(sources)
         if not source_rows:
             raise CorpusReleaseError("a cohort requires at least one explicit source run")
-        seen_source_ids: set[str] = set()
+        seen_source_roots: set[Path] = set()
         seen_inputs: set[tuple[str, str]] = set()
         snapshots: list[CorpusSnapshot] = []
         for source in source_rows:
@@ -301,9 +301,10 @@ class CohortReleaseAdapter:
                 or root.is_symlink()
             ):
                 raise CorpusReleaseError("cohort source must be an explicit non-symlink run_id directory")
-            if source.run_id in seen_source_ids:
-                raise CorpusReleaseError(f"duplicate cohort source run_id: {source.run_id}")
-            seen_source_ids.add(source.run_id)
+            resolved_root = root.resolve(strict=True)
+            if resolved_root in seen_source_roots:
+                raise CorpusReleaseError(f"duplicate cohort source root: {resolved_root}")
+            seen_source_roots.add(resolved_root)
             if not source.snapshots:
                 raise CorpusReleaseError(f"cohort source has no snapshot references: {source.run_id}")
             for reference in source.snapshots:

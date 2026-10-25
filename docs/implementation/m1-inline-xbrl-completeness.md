@@ -148,9 +148,64 @@ transform names still fail closed; registration does not suppress validation.
 
 The registered `boolballotbox` transform follows the SEC EFM ballot-box rule:
 `☐` is `false`, while `☑` and `☒` are `true`. Other values are rejected rather
-than coerced. Because this expands the set of filings that can be parsed,
-successful snapshots and parse-state events use the distinct Layer 1 parser
-version `m2-layer1-v2`; existing `m2-layer1-v1` artifacts remain immutable.
+than coerced. The registered `durweek` transform accepts only the SEC decimal
+lexical grammar, converts the magnitude to days, and truncates fractional days
+toward zero. It emits a negative duration only when the truncated day count is
+nonzero. Unknown transform names and invalid lexical values still fail closed.
+
+The 2026-10-13 metadata-coverage repair registers the SEC 2015
+`countrynameen` and `edgarprovcountryen` QNames and replaces the partial
+state/province and exchange lists with the complete SEC-staff name/code tables.
+`countrynameen` emits ISO country codes, while `edgarprovcountryen` emits the
+distinct EDGAR jurisdiction codes; for example, United Kingdom is `GB` and
+`X0`, respectively. State/province and exchange values include the standard
+Nebraska (`NE`), Indiana (`IN`), and Chicago Stock Exchange (`CHX`) cases.
+Matching uses the SEC-staff lexical grammar, and an unsupported name, malformed
+suffix, wrong namespace, or unregistered transform still fails closed. The
+governing public-domain reference is the
+[Arelle EDGAR SEC transform module](https://github.com/Arelle/EDGAR/blob/master/transform/__init__.py),
+retrieved 2026-10-13 at SHA-256
+`2296586f945ffd95ab37d3d4147c4e45f42ce4e5f397f61143e053208adefbf1`;
+the jurisdiction vocabulary is also governed by the
+[May 2026 EDGAR XBRL Guide](https://www.sec.gov/files/edgar/filer-information/specifications/xbrl-guide-2026-05-15.pdf).
+The checked-in test fixture records the source identity and bounded controls;
+tests never fetch either reference.
+
+The taxonomy/transform gate forces every selected Fact value to be evaluated
+before acceptance because Arelle may defer an Inline transformation until that
+property is read. It rejects `xmlSchema:valueError`, transformation-value
+errors, a Fact with Arelle `xValid=INVALID`, and Arelle's internal
+`InvalidValue` sentinel. The same gate runs again after Fact extraction and
+before any table is published. Ordinary nonfatal validation warnings remain
+available as evidence and do not by themselves fail ingestion.
+
+Because each supported transform expands the set of filings that can be parsed,
+successful snapshots and parse-state events use a distinct Layer 1 parser
+version. `boolballotbox` introduced `m2-layer1-v2`; `durweek` introduces
+`m2-layer1-v3`. The subsequent
+[numeric-duration conformance delivery](sec-duration-conformance-delivery.md)
+corrects the SEC-staff component arithmetic and strict lexical handling for
+`durday`, `durmonth`, and `duryear` and first introduced `m2-layer1-v4`. The
+same delivery's cohort diagnostic then found four supported SEC lexical forms
+missing from the partial local registry, so the complete candidate advances to
+`m2-layer1-v5`. Existing v1 through v4 artifacts remain immutable; correction
+requires a fresh v5 destination under the same three Layer 1 quality gates.
+
+The metadata transform coverage above advances new snapshots to
+`m2-layer1-v6`. It changes no Raw table schema, numeric duration behavior, nil
+handling, accounting selection, or period rule. Existing valid v5 snapshots
+remain immutable and retain their recorded parser version. New 50-company
+source-run intake may reuse a fully attested same-schema v5 snapshot or ingest
+a new v6 snapshot; it verifies the complete atomic layout, hashes, row counts,
+references, CIK/accession and filing metadata before allowing exactly v5 or v6.
+It does not relabel either version. Versions v1 through v4 and unknown versions
+are not eligible for this new-cohort reuse path. Historical `RawFilingIndex`
+and `CorpusReleaseAdapter` archive reads retain their existing behavior.
+
+This parser repair does not reinterpret an as-filed value. In particular, a
+custom concept declared as `xbrli:timeItemType` with untransformed month-name
+text remains a strict validation failure. A later policy decision about that
+source issue cannot be inferred from metadata transform support.
 
 ## Validation procedure
 

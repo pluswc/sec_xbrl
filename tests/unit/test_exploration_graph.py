@@ -4,6 +4,8 @@ import hashlib
 from pathlib import Path
 from types import MappingProxyType
 
+import pytest
+
 from sec_xbrl.filing.layer1_ingestion import Layer1SnapshotManifest
 from sec_xbrl.longitudinal import (
     CorpusRelease,
@@ -18,6 +20,8 @@ from sec_xbrl.longitudinal import (
     OperationalLayer2Publisher,
     VersionedObservationPanelPipeline,
 )
+from sec_xbrl.longitudinal.exploration_graph import ExplorationGraphError
+from sec_xbrl.longitudinal.materialization import Layer2PublicationValidationError
 
 
 def _release() -> CorpusRelease:
@@ -55,7 +59,7 @@ def _release() -> CorpusRelease:
     input_row = Layer1SnapshotInput(cik, accession, "10-Q", "2025-05-01", "2025-03-29", "snap:one", hashlib.sha256(accession.encode()).hexdigest())
     snapshot = CorpusSnapshot(input_row, manifest, Path("/fixture/layer1_manifest.json"), MappingProxyType({}), MappingProxyType({name: len(rows) for name, rows in tables.items()}), MappingProxyType({name: tuple(MappingProxyType(dict(row)) for row in rows) for name, rows in tables.items()}))
     rules = Layer2RuleVersions("period-v1", "mapping-v1", "recast-v1", "selection-v1")
-    return CorpusRelease(Path("/fixture"), "fixture", (cik,), (snapshot,), Layer2Run("t3-exploration-fixture-v1", "fixture", (input_row,), rules))
+    return CorpusRelease(Path("/fixture"), "fixture", (cik,), (snapshot,), Layer2Run("t3-exploration-fixture-reference-repair-v2", "fixture", (input_row,), rules))
 
 
 def test_t3_keeps_independent_lenses_and_network_evidence(tmp_path: Path) -> None:
@@ -68,6 +72,19 @@ def test_t3_keeps_independent_lenses_and_network_evidence(tmp_path: Path) -> Non
     )
     publication = Layer2PublicationReader().load(result.publication.run_root)
     reader = ExplorationGraphReader()
+    nodes_by_id = {
+        row["analysis_exploration_node_id"]: row
+        for row in publication.records(reader.node_dataset)
+    }
+    assert all(
+        edge[endpoint] in nodes_by_id
+        for edge in publication.records(reader.edge_dataset)
+        for endpoint in ("from_node_id", "to_node_id")
+    )
+    assert {
+        row["exploration_graph_rule_version"]
+        for row in (*publication.records(reader.node_dataset), *publication.records(reader.edge_dataset))
+    } == {"analysis-t3-exploration-graph-v2"}
     roots = reader.roots_for_fact(publication, cik="0000320193", fiscal_year=2025, fiscal_quarter=1, raw_concept_qname="us-gaap:Revenues")
     total = next(row for row in roots if row["source_fact_id"] == "fact:total")
     paths = reader.traverse(publication, root_node_ids=(total["analysis_exploration_node_id"],), max_depth=4)
@@ -81,7 +98,27 @@ def test_t3_keeps_independent_lenses_and_network_evidence(tmp_path: Path) -> Non
     statement = [row for row in graph_edges if row["edge_kind"] == "STATEMENT_COMPONENT"]
     assert {row["source_network_type"] for row in statement} == {"PRE", "CAL"}
     assert all(row["role_uri"] == "http://example.com/role/income" for row in statement)
+    assert any(
+        row["source_network_type"] == "CAL"
+        and row["from_node_id"] != row["to_node_id"]
+        and row["target_role_uri"] == "http://example.com/role/detail"
+        for row in statement
+    )
     assert any(row["edge_kind"] == "MEMBER_HIERARCHY" and row["source_network_type"] == "DEF" for row in graph_edges)
+    concept = next(
+        row for row in nodes_by_id.values()
+        if row["node_kind"] == "CONCEPT" and row["raw_id"] == "concept:revenue"
+    )
+    concept_paths = reader.traverse(
+        publication,
+        root_node_ids=(concept["analysis_exploration_node_id"],),
+        max_depth=1,
+    )
+    assert {
+        row["incoming_edge"].get("scope_kind")
+        for row in concept_paths
+        if row["incoming_edge"] is not None
+    } >= {"TOTAL_FACT", "CONCEPT_AXIS_LENS"}
     assert result.node_count and result.edge_count
 
 
@@ -105,3 +142,334 @@ def test_reader_keeps_alternative_paths_but_stops_a_cycle(tmp_path: Path) -> Non
     )
     assert len(rows) == 3  # root + two alternative A→B paths; B→A is cycle-stopped.
     assert [row["node"]["analysis_exploration_node_id"] for row in rows].count(node_b) == 2
+
+
+def test_reader_borrows_attested_rows_but_returns_nested_isolated_values(tmp_path: Path) -> None:
+    release = _release()
+    cik = "0000320193"
+    published = OperationalLayer2Publisher(tmp_path / "graph").publish(
+        release.layer2_run,
+        {
+            "analysis_exploration_node": (
+                {
+                    "cik": cik,
+                    "analysis_exploration_node_id": "node:a",
+                    "node_kind": "CONCEPT",
+                    "origin": "STANDARD_CONCEPT",
+                    "raw_id": "a",
+                    "raw_qname": "us-gaap:A",
+                    "nested_evidence": {"items": ["immutable"]},
+                },
+                {
+                    "cik": cik,
+                    "analysis_exploration_node_id": "node:b",
+                    "node_kind": "CONCEPT",
+                    "origin": "STANDARD_CONCEPT",
+                    "raw_id": "b",
+                    "raw_qname": "us-gaap:B",
+                },
+                {
+                    "cik": cik,
+                    "analysis_exploration_node_id": "node:fact",
+                    "node_kind": "FACT",
+                    "origin": "STANDARD_CONCEPT",
+                    "raw_id": "fact:one",
+                    "raw_qname": "us-gaap:Revenues",
+                    "source_fact_id": "fact:one",
+                    "source_filing_id": "filing:one",
+                    "accession": "0000320193-25-000001",
+                    "filed_date": "2025-05-01",
+                    "context_id": "qtd",
+                    "fiscal_year": 2025,
+                    "fiscal_quarter": 1,
+                    "period_class": "QTD_3M",
+                    "nested_evidence": {"items": ["fact-immutable"]},
+                },
+            ),
+            "analysis_exploration_edge": (
+                {
+                    "cik": cik,
+                    "analysis_exploration_edge_id": "edge:a-b",
+                    "edge_kind": "STATEMENT_COMPONENT",
+                    "source_network_type": "PRE",
+                    "from_node_id": "node:a",
+                    "to_node_id": "node:b",
+                    "nested_evidence": {"roles": ["IS"]},
+                },
+            ),
+        },
+    )
+    publication = Layer2PublicationReader().load(published.run_root)
+    reader = ExplorationGraphReader()
+    nodes, outgoing, edges = reader._indexes(publication)
+
+    source_node = next(
+        row
+        for row in publication.datasets[reader.node_dataset]
+        if row["analysis_exploration_node_id"] == "node:a"
+    )
+    assert nodes["node:a"] is source_node
+    assert edges is publication.datasets[reader.edge_dataset]
+    assert outgoing["node:a"][0] is edges[0]
+
+    traversed = reader.traverse(publication, root_node_ids=("node:a",))
+    traversed[0]["node"]["nested_evidence"]["items"].append("changed")
+    traversed[1]["incoming_edge"]["nested_evidence"]["roles"].append("CF")
+    assert publication.datasets[reader.node_dataset][0]["nested_evidence"] == {
+        "items": ["immutable"]
+    }
+    assert publication.datasets[reader.edge_dataset][0]["nested_evidence"] == {
+        "roles": ["IS"]
+    }
+    assert reader.traverse(publication, root_node_ids=("node:a",))[0]["node"][
+        "nested_evidence"
+    ] == {"items": ["immutable"]}
+    roots = reader.roots_for_fact(
+        publication,
+        cik=cik,
+        fiscal_year=2025,
+        fiscal_quarter=1,
+        raw_concept_qname="us-gaap:Revenues",
+    )
+    roots[0]["nested_evidence"]["items"].append("changed")
+    assert nodes["node:fact"]["nested_evidence"] == {"items": ["fact-immutable"]}
+
+
+def test_reader_refreshes_borrowed_index_and_keeps_every_diamond_path(tmp_path: Path) -> None:
+    release = _release()
+    cik = "0000320193"
+
+    def graph(root: Path, suffix: str):
+        nodes = tuple(
+            {
+                "cik": cik,
+                "analysis_exploration_node_id": f"node:{name}:{suffix}",
+                "node_kind": "CONCEPT",
+                "origin": "STANDARD_CONCEPT",
+                "raw_id": name,
+                "raw_qname": f"us-gaap:{name.upper()}",
+            }
+            for name in ("a", "b", "c", "d")
+        )
+        edges = tuple(
+            {
+                "cik": cik,
+                "analysis_exploration_edge_id": f"edge:{left}-{right}:{suffix}",
+                "edge_kind": "STATEMENT_COMPONENT",
+                "source_network_type": "PRE",
+                "from_node_id": f"node:{left}:{suffix}",
+                "to_node_id": f"node:{right}:{suffix}",
+            }
+            for left, right in (("a", "b"), ("a", "c"), ("b", "d"), ("c", "d"), ("d", "a"))
+        )
+        result = OperationalLayer2Publisher(root).publish(
+            release.layer2_run,
+            {"analysis_exploration_node": nodes, "analysis_exploration_edge": edges},
+        )
+        return Layer2PublicationReader().load(result.run_root)
+
+    first = graph(tmp_path / "first", "one")
+    second = graph(tmp_path / "second", "two")
+    reader = ExplorationGraphReader()
+    paths = reader.traverse(first, root_node_ids=("node:a:one",))
+    assert [row["path_node_ids"] for row in paths] == [
+        ("node:a:one",),
+        ("node:a:one", "node:b:one"),
+        ("node:a:one", "node:c:one"),
+        ("node:a:one", "node:b:one", "node:d:one"),
+        ("node:a:one", "node:c:one", "node:d:one"),
+    ]
+    first_node = reader._nodes["node:a:one"]
+    reader._incoming = {"node:old": ("node:stale",)}
+    reader.traverse(second, root_node_ids=("node:a:two",))
+    assert reader._indexed_publication is second
+    assert reader._incoming is None
+    assert "node:a:one" not in reader._nodes
+    assert reader._nodes["node:a:two"] is second.datasets[reader.node_dataset][0]
+    assert first_node is first.datasets[reader.node_dataset][0]
+
+
+def test_selected_fact_paths_prune_only_unreachable_branches_and_keep_path_evidence(
+    tmp_path: Path,
+) -> None:
+    release = _release()
+    cik = "0000320193"
+    names = ("root-a", "root-b", "left", "right", "join", "dead", "dead-end")
+    nodes = [
+        {
+            "cik": cik,
+            "analysis_exploration_node_id": f"node:{name}",
+            "node_kind": "CONCEPT",
+            "origin": "STANDARD_CONCEPT",
+            "raw_id": name,
+            "raw_qname": f"us-gaap:{name}",
+        }
+        for name in names
+    ]
+    for name in ("target", "isolated"):
+        nodes.append(
+            {
+                "cik": cik,
+                "analysis_exploration_node_id": f"node:{name}",
+                "node_kind": "FACT",
+                "origin": "STANDARD_CONCEPT",
+                "raw_id": f"fact:{name}",
+                "raw_qname": "us-gaap:Revenues",
+                "source_fact_id": f"fact:{name}",
+                "source_filing_id": "filing:one",
+                "accession": "0000320193-25-000001",
+                "filed_date": "2025-05-01",
+                "context_id": f"ctx:{name}",
+            }
+        )
+    nodes.append(
+        {
+            "cik": cik,
+            "analysis_exploration_node_id": "123",
+            "node_kind": "CONCEPT",
+            "origin": "STANDARD_CONCEPT",
+            "raw_id": "numeric-looking-id",
+            "raw_qname": "us-gaap:NumericLookingId",
+        }
+    )
+
+    def edge(identity: str, left: str, right: str, role: str) -> dict:
+        return {
+            "cik": cik,
+            "analysis_exploration_edge_id": f"edge:{identity}",
+            "edge_kind": "STATEMENT_COMPONENT",
+            "source_network_type": "PRE",
+            "from_node_id": f"node:{left}",
+            "to_node_id": f"node:{right}",
+            "role_uri": role,
+            "target_role_uri": f"{role}/target",
+        }
+
+    edges = (
+        edge("a-left-one", "root-a", "left", "role:one"),
+        edge("a-left-two", "root-a", "left", "role:two"),
+        edge("a-right", "root-a", "right", "role:right"),
+        edge("left-join", "left", "join", "role:left"),
+        edge("right-join", "right", "join", "role:right"),
+        edge("join-target", "join", "target", "role:target"),
+        edge("join-cycle", "join", "root-a", "role:cycle"),
+        edge("a-dead", "root-a", "dead", "role:dead"),
+        edge("dead-end", "dead", "dead-end", "role:dead"),
+        edge("b-join", "root-b", "join", "role:b"),
+    )
+    published = OperationalLayer2Publisher(tmp_path / "targeted").publish(
+        release.layer2_run,
+        {
+            "analysis_exploration_node": tuple(nodes),
+            "analysis_exploration_edge": edges,
+        },
+    )
+    publication = Layer2PublicationReader().load(published.run_root)
+    reader = ExplorationGraphReader()
+    roots = ("node:root-a", "node:root-b")
+    targets = ("node:target",)
+    expected = []
+    for root_index, root in enumerate(roots):
+        expected.extend(
+            (root_index, row)
+            for row in reader.traverse(publication, root_node_ids=(root,))
+            if row["node"]["analysis_exploration_node_id"] in targets
+        )
+    actual = list(
+        reader._iter_selected_fact_paths(
+            publication, root_node_ids=roots, target_node_ids=targets
+        )
+    )
+
+    assert actual == expected
+    assert len(actual) == 4  # two parallel roles, one diamond alternative, one second root
+    assert all("node:dead" not in row["path_node_ids"] for _, row in actual)
+    assert {
+        edge["role_uri"]
+        for _, row in actual
+        for edge in row["path_edges"]
+        if edge["from_node_id"] == "node:root-a"
+    } >= {"role:one", "role:two", "role:right"}
+    assert all(
+        edge["target_role_uri"]
+        for _, row in actual
+        for edge in row["path_edges"]
+    )
+    assert max(row["depth"] for _, row in actual) == 3
+    actual[0][1]["path_edges"][0]["role_uri"] = "mutated"
+    source_edge = next(
+        edge
+        for edge in publication.datasets[reader.edge_dataset]
+        if edge["analysis_exploration_edge_id"] == "edge:a-left-one"
+    )
+    assert source_edge["role_uri"] == "role:one"
+    assert list(
+        reader._iter_selected_fact_paths(
+            publication, root_node_ids=roots, target_node_ids=()
+        )
+    ) == []
+    assert list(
+        reader._iter_selected_fact_paths(
+            publication,
+            root_node_ids=("node:root-a",),
+            target_node_ids=("node:isolated",),
+        )
+    ) == []
+    with pytest.raises(ExplorationGraphError, match="root node"):
+        list(
+            reader._iter_selected_fact_paths(
+                publication,
+                root_node_ids=("node:missing",),
+                target_node_ids=targets,
+            )
+        )
+    with pytest.raises(ExplorationGraphError, match="root node"):
+        reader.traverse(publication, root_node_ids=(123,))  # type: ignore[arg-type]
+
+
+def test_reader_rejects_invalid_edge_even_when_target_scope_would_prune_it(
+    tmp_path: Path,
+) -> None:
+    import polars as pl
+
+    release = _release()
+    published = OperationalLayer2Publisher(tmp_path / "invalid-pruned").publish(
+        release.layer2_run,
+        {
+            "analysis_exploration_node": (
+                {
+                    "cik": "0000320193",
+                    "analysis_exploration_node_id": "node:root",
+                    "node_kind": "CONCEPT",
+                    "origin": "STANDARD_CONCEPT",
+                    "raw_id": "root",
+                    "raw_qname": "us-gaap:Root",
+                },
+                {
+                    "cik": "0000320193",
+                    "analysis_exploration_node_id": "node:dead",
+                    "node_kind": "CONCEPT",
+                    "origin": "STANDARD_CONCEPT",
+                    "raw_id": "dead",
+                    "raw_qname": "us-gaap:Dead",
+                },
+            ),
+            "analysis_exploration_edge": (
+                {
+                    "cik": "0000320193",
+                    "analysis_exploration_edge_id": "edge:dead",
+                    "edge_kind": "DIMENSION_LENS",
+                    "from_node_id": "node:root",
+                    "to_node_id": "node:dead",
+                },
+            ),
+        },
+    )
+    edge_path = next(published.run_root.rglob("analysis_exploration_edge.parquet"))
+    frame = pl.read_parquet(edge_path).with_columns(
+        pl.lit("node:missing").alias("to_node_id")
+    )
+    frame.write_parquet(edge_path)
+
+    with pytest.raises(Layer2PublicationValidationError, match="fail contract validation"):
+        Layer2PublicationReader().load(published.run_root)

@@ -16,7 +16,7 @@ from datetime import date
 from enum import StrEnum
 from typing import Any
 
-MAPPING_VERSION = "l2-m2-company-canonical-v3"
+MAPPING_VERSION = "l2-m2-company-canonical-v4"
 
 
 class MappingRelation(StrEnum):
@@ -806,6 +806,8 @@ def _standard_us_gaap_namespace_continuity(
     return bool(
         left.get("is_standard")
         and right.get("is_standard")
+        and str(left.get("taxonomy_family") or "").lower() == "us-gaap"
+        and str(right.get("taxonomy_family") or "").lower() == "us-gaap"
         and _is_annual_fasb_us_gaap_namespace(left.get("namespace_uri"))
         and _is_annual_fasb_us_gaap_namespace(right.get("namespace_uri"))
         and _standard_local_name(left)
@@ -817,7 +819,8 @@ def _standard_us_gaap_namespace_continuity(
 
 
 _ANNUAL_FASB_US_GAAP_NAMESPACE = re.compile(
-    r"^https?://fasb\.org/us-gaap/[0-9]{4}$", re.IGNORECASE
+    r"^https?://fasb\.org/us-gaap/(?P<version>[0-9]{4}(?:-[0-9]{2}-[0-9]{2})?)$",
+    re.IGNORECASE,
 )
 
 
@@ -829,7 +832,17 @@ def _is_annual_fasb_us_gaap_namespace(namespace_uri: object) -> bool:
     annual FASB namespace changes while leaving unversioned, look-alike, and
     company-extension namespaces outside automatic continuity.
     """
-    return bool(_ANNUAL_FASB_US_GAAP_NAMESPACE.fullmatch(str(namespace_uri or "")))
+    match = _ANNUAL_FASB_US_GAAP_NAMESPACE.fullmatch(str(namespace_uri or ""))
+    if match is None:
+        return False
+    version = match.group("version")
+    if "-" not in version:
+        return True
+    try:
+        date.fromisoformat(version)
+    except ValueError:
+        return False
+    return True
 
 
 def _standard_local_name(row: Mapping[str, Any]) -> str:

@@ -162,6 +162,15 @@ executable/inspection checklist is maintained in
   `DIMENSION_LENS`, `FACT_SCOPE`, and DEF-only `MEMBER_HIERARCHY`. It preserves
   independent Axis lenses as alternative paths, terminates cycles per path,
   and never selects a filing, aggregates values, or infers an economic driver.
+- every T3 edge endpoint resolves to an actual node in the same atomic
+  publication. Edge and endpoint CIKs match; explicit filing scope cannot
+  cross filings. A dangling endpoint, incomplete node/edge dataset pair, or
+  tampered operational/canonical publication fails closed without a partial
+  producer output.
+- T3 reference validation keeps normal cycles, parallel lenses, typed scopes,
+  multiple filings and structurally complete legacy graphs readable. New
+  producer rows declare `analysis-t3-exploration-graph-v2` and a concept root
+  can traverse actual `TOTAL_FACT` and `CONCEPT_AXIS_LENS` endpoints.
 
 ## M8 — Layer 3
 - analytical grouping preserves raw/company IDs.

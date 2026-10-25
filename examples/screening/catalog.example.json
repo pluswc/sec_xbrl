@@ -1,0 +1,9 @@
+{
+  "schema_version": "screening-catalog-v1",
+  "datasets": [
+    {
+      "dataset_id": "replace-with-frozen-cohort-id",
+      "root": "/absolute/path/to/screening-dataset"
+    }
+  ]
+}

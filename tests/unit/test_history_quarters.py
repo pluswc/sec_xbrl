@@ -1,10 +1,21 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
-from sec_xbrl.analytics.history_quarters import _has_materialized_cell, derive_quarter
+from sec_xbrl.analytics.history_quarters import (
+    _concatenate_staged_records,
+    _has_materialized_cell,
+    _merge_staged_rows,
+    _period_attestation_index,
+    _read_staged_record_at,
+    _read_staged_records,
+    _resolve_additive_locator,
+    derive_quarter,
+)
+from sec_xbrl.history import _sha256_file, _write_records
 from sec_xbrl.periods.logic import PeriodClassifier
 
 
@@ -85,3 +96,250 @@ def test_derived_gap_fill_never_replaces_materialized_report_or_conflict(status)
     cells = [{"fiscal_time_series_row_id": "r", "fiscal_time_series_column_id": "q4", "value_status": status}]
     assert _has_materialized_cell(cells, "r", "q4")
     assert not _has_materialized_cell(cells, "r", "q3")
+
+
+def test_staged_chunk_round_trip_checks_hash_and_count(tmp_path: Path) -> None:
+    path = tmp_path / "chunk.parquet"
+    records = ({"id": "one", "nested": {"source": ["fact-1"]}},)
+    info = _write_records(path, records)
+    assert _read_staged_records(path, info) == records
+    corrupted = path.read_bytes() + b"corrupt"
+    path.write_bytes(corrupted)
+    with pytest.raises(ValueError, match="integrity mismatch"):
+        _read_staged_records(path, info)
+
+
+def test_selected_staged_cell_slice_preserves_complete_ordered_payload(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "cells.parquet"
+    records = tuple(
+        {
+            "id": f"cell-{index}",
+            "value_lineage": {
+                "source": f"fact-{index}",
+                "nested": {"network": ["가😀" * 10_000, {"index": index}]},
+            },
+            "candidate_lineage": [
+                {"source_id": f"source-{index}", "evidence": ["PRE", "CAL"]}
+            ],
+        }
+        for index in range(3)
+    )
+    info = _write_records(path, records)
+    for index in (0, 1, 2):
+        assert _read_staged_record_at(path, info, index) == records[index]
+
+
+def test_selected_staged_cell_slice_rejects_bad_hash_count_schema_and_index(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "cells.parquet"
+    records = ({"id": "cell", "value_lineage": {"source": "fact"}},)
+    info = _write_records(path, records)
+    with pytest.raises(ValueError, match="integrity mismatch"):
+        _read_staged_record_at(path, {**info, "sha256": "0" * 64}, 0)
+    with pytest.raises(ValueError, match="count mismatch"):
+        _read_staged_record_at(path, {**info, "count": 2}, 0)
+    with pytest.raises(ValueError, match="schema mismatch"):
+        _read_staged_record_at(
+            path, {**info, "json_fields": [*info["json_fields"], "missing"]}, 0
+        )
+    with pytest.raises(ValueError, match="locator is invalid"):
+        _read_staged_record_at(path, info, 1)
+
+
+def test_selected_staged_cell_locator_rejects_reordered_identity(
+    tmp_path: Path,
+) -> None:
+    columns_path = tmp_path / "columns.parquet"
+    rows_path = tmp_path / "rows.parquet"
+    cells_path = tmp_path / "cells.parquet"
+    columns = (
+        {"fiscal_time_series_column_id": "column-1", "fiscal_quarter": 1},
+        {"fiscal_time_series_column_id": "column-2", "fiscal_quarter": 2},
+    )
+    rows = (
+        {"fiscal_time_series_row_id": "row-1"},
+        {"fiscal_time_series_row_id": "row-2"},
+    )
+    cells = []
+    for index, (column, row) in enumerate(zip(columns, rows), start=1):
+        cell = _cell("YTD_6M", str(index * 10), "2025-07-01")
+        cell.update(
+            fiscal_time_series_column_id=column["fiscal_time_series_column_id"],
+            fiscal_time_series_row_id=row["fiscal_time_series_row_id"],
+        )
+        cells.append(cell)
+    chunks = {
+        "columns": {**_write_records(columns_path, columns), "path": columns_path},
+        "rows": {**_write_records(rows_path, rows), "path": rows_path},
+        "cells": {**_write_records(cells_path, tuple(cells)), "path": cells_path},
+    }
+    selected, column, row = _resolve_additive_locator(
+        {
+            "chunks": chunks,
+            "cell_index": 1,
+            "column_id": "column-2",
+            "row_id": "row-2",
+        }
+    )
+    assert selected == cells[1]
+    assert column == columns[1]
+    assert row == rows[1]
+    with pytest.raises(ValueError, match="locator changed"):
+        _resolve_additive_locator(
+            {
+                "chunks": chunks,
+                "cell_index": 1,
+                "column_id": "column-1",
+                "row_id": "row-1",
+            }
+        )
+
+
+def test_unused_malformed_json_is_still_rejected_by_complete_final_read(
+    tmp_path: Path,
+) -> None:
+    import polars as pl
+
+    path = tmp_path / "cells.parquet"
+    pl.DataFrame(
+        [
+            {"id": "selected", "value_lineage": '{"source":"fact-1"}'},
+            {"id": "unused", "value_lineage": "{malformed"},
+        ]
+    ).write_parquet(path)
+    info = {
+        "count": 2,
+        "json_fields": ["value_lineage"],
+        "sha256": _sha256_file(path),
+    }
+    assert _read_staged_record_at(path, info, 0) == {
+        "id": "selected",
+        "value_lineage": {"source": "fact-1"},
+    }
+    with pytest.raises(__import__("json").JSONDecodeError):
+        _read_staged_records(path, info)
+
+
+def test_staged_row_collision_preserves_legacy_later_source_precedence() -> None:
+    rows = {
+        "same-row": {
+            "fiscal_time_series_row_id": "same-row",
+            "label": "earlier metadata",
+            "full_metadata": {"source": "first", "network": ["old-edge"]},
+        }
+    }
+    _merge_staged_rows(
+        rows,
+        (
+            {
+                "fiscal_time_series_row_id": "same-row",
+                "label": "later metadata",
+                "full_metadata": {"source": "second", "network": ["new-edge"]},
+            },
+            {
+                "fiscal_time_series_row_id": "new-row",
+                "label": "new row",
+                "full_metadata": {"source": "second", "network": ["new-row-edge"]},
+            },
+        ),
+    )
+    assert rows == {
+        "same-row": {
+            "fiscal_time_series_row_id": "same-row",
+            "label": "later metadata",
+            "full_metadata": {"source": "second", "network": ["new-edge"]},
+        },
+        "new-row": {
+            "fiscal_time_series_row_id": "new-row",
+            "label": "new row",
+            "full_metadata": {"source": "second", "network": ["new-row-edge"]},
+        },
+    }
+
+
+def test_staged_cell_concatenation_preserves_order_full_payload_and_schema(
+    tmp_path: Path,
+) -> None:
+    import polars as pl
+
+    chunks = []
+    record_groups = (
+            (
+                {
+                    "id": "first",
+                    "value_lineage": {"candidate": ["a", "b"]},
+                    "large_text": "가" * 20_000,
+                    "extra_metadata": "null",
+                    "mixed_bool": True,
+                    "mixed_number": 7,
+                },
+                {
+                    "id": "second",
+                    "value_lineage": {"candidate": ["c"]},
+                    "extra_metadata": "known",
+                    "mixed_bool": None,
+                    "mixed_number": None,
+                },
+            ),
+            (
+                {
+                    "id": "third",
+                    "value_lineage": {"candidate": ["d"]},
+                    "extra_metadata": {"network": ["later"]},
+                    "mixed_bool": [False, True],
+                    "mixed_number": {"reported": 7},
+                },
+            ),
+        )
+    for index, records in enumerate(record_groups):
+        path = tmp_path / f"chunk-{index}.parquet"
+        info = {**_write_records(path, records), "path": path}
+        chunks.append(info)
+    destination = tmp_path / "combined.parquet"
+    info = _concatenate_staged_records(destination, chunks)
+    actual = []
+    for row in pl.read_parquet(destination).to_dicts():
+        actual.append(
+            {
+                key: __import__("json").loads(value)
+                if key in info["json_fields"] and value is not None
+                else value
+                for key, value in row.items()
+            }
+        )
+    assert [row["id"] for row in actual] == ["first", "second", "third"]
+    assert actual[0]["large_text"] == "가" * 20_000
+    assert actual[0]["extra_metadata"] == "null"
+    assert actual[1]["extra_metadata"] == "known"
+    assert actual[2]["extra_metadata"] == {"network": ["later"]}
+    assert actual[0]["mixed_bool"] is True
+    assert actual[1]["mixed_bool"] is None
+    assert actual[2]["mixed_bool"] == [False, True]
+    assert actual[0]["mixed_number"] == 7
+    assert actual[1]["mixed_number"] is None
+    assert actual[2]["mixed_number"] == {"reported": 7}
+    legacy_path = tmp_path / "legacy-full-materialization.parquet"
+    legacy_records = tuple(row for group in record_groups for row in group)
+    legacy_info = _write_records(legacy_path, legacy_records)
+    assert tuple(actual) == _read_staged_records(legacy_path, legacy_info)
+    assert info["count"] == 3
+    assert info["sha256"]
+
+
+def test_period_attestation_index_projects_only_validated_fields() -> None:
+    source = {
+        "source_filing_id": "filing-1",
+        "source_fact_id": "fact-1",
+        "comparative_type": "CURRENT_FOCUS",
+        "period_class": "FY",
+        "classification_rule_version": "period-v1",
+        "value_numeric": "10",
+        "unused_large_payload": {"must": "not remain live"},
+    }
+    publication = type("Verified", (), {"records": lambda self, name: (source,)})()
+    index = _period_attestation_index(publication)
+    assert index[("filing-1", "fact-1")]["value_numeric"] == "10"
+    assert "unused_large_payload" not in index[("filing-1", "fact-1")]

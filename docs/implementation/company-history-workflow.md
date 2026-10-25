@@ -116,3 +116,478 @@ and raw stores are never overwritten.
 The implementation must be independently verified on a frozen revision before
 release. Operational run results are reported separately with actual filing,
 company, period and row counts; a code commit alone is not execution evidence.
+
+## Complete reported-stage recovery (2026-10-13 technical exception)
+
+`recover_reported_history` / `recover-reported` is a producer recovery boundary,
+not a reader permission to consume failed partial publications. It is limited
+to a **complete reported-only stage independently verified in full**. Failed
+Raw intake, missing chunks, incomplete tables, and policy-held filings remain
+ineligible. The lead authorized this narrow exception after repeated actual
+JNJ high-memory failures. The latest observed failure left all 12 reported
+panels and a staged manifest, without the publication rename, and exited by
+SIGKILL 137 at about 29.58 GiB peak RSS. A verifier-phase memory failure is a
+strong control-flow inference, not a traced stack or confirmed kernel OOM diagnosis. The implementation role was explicitly escalated to Astra;
+a separate Astra must independently verify the frozen candidate. This records
+a role decision, not a measured model speed/cost/quality claim.
+
+The public Python signature is:
+
+```python
+recover_reported_history(
+    *, staged_publication: Path, output_root: Path, intake_manifest: Path,
+    operational_root: Path, attestation: Path, expected_attestation_sha256: str,
+    trusted_exclusive_parent: bool,
+) -> Path
+```
+
+The caller supplies an **external independently pinned attestation file and its
+expected SHA-256**. Do not generate the expected attestation solely by reading
+the stage being recovered. The independent verifier must compare the complete
+source execution inventory, decode every field of every declared record,
+compare ordered execution logs and applicable authenticated prefix evidence,
+and attest all original intake/Raw/T1–T4 identities before issuing `PASS`.
+The attestation JSON has these required fields:
+
+- `version`: `reported-stage-recovery-v1`; `status`: `PASS`.
+- `generation_source_identity`, `recovery_source_identity`: distinct execution
+  identities expressed as full 40-character Git SHAs. They may be equal if the
+  same source produced and recovered a future run; neither changes parser
+  identities in Raw or operational publications.
+- `staged_manifest_sha256`, `intake_sha256`, `input_fingerprint`.
+- `plan`: exact original plan, including companies/CIKs/filing inventory and
+  `as_of_date`; `views`: exact ordered original views.
+- `tables`: exact ordered original table declarations, including identity,
+  scope and all three `columns`/`rows`/`cells` file declarations. Each file
+  includes its original `path`, `sha256`, `count`, `json_fields`, plus `schema`
+  as ordered `[column_name, str(polars_dtype)]` pairs. All expected paths must
+  be `CIK/view/period_class/name.parquet`. No inferred missing tables are allowed.
+- `operational_manifest_sha256`: independently pinned `t1`, `t2`, `t3`, `t4`
+  manifest digests at the **original** operational root.
+- `verification_report`, `source_execution_log`: each contains a `path` and
+  `sha256`. The log's ordered `PANEL_WRITTEN` JSON records must exactly agree
+  with table identities and row/cell counts. Other log lines may be non-JSON.
+  The report must also satisfy the full component contract below; byte-only,
+  metadata-only, unbound or incomplete reports cannot authorize recovery.
+- `required_prefixes`: ordered list of `{path, count, expected_sha256}` for
+  externally authenticated prefix controls; use `[]` only when the independent
+  execution contract requires no prefix comparison.
+
+The independently pinned verification report must contain:
+
+- `schema_version`: `independent-staged-reported-component-audit-v1`;
+  `verdict`: `PASS_STAGED_REPORTED_COMPONENT_ONLY`;
+  `verification_level`: `FULL_STAGED_REPORTED_PASS`; `history_ready`: `false`.
+- `fixture_kind`: `ACTUAL`, `CACHED_TEST` or `SYNTHETIC_TEST`, explicitly
+  distinguishing real component evidence from test fixture assertions.
+- `source_generation_sha`, `stage_manifest.sha256`, `source_intake.sha256`,
+  `input_fingerprint`, matching the pinned attestation exactly.
+- `counts.tables`, `counts.stage_files`, matching the complete expected inventory.
+- `full_verification`, with all five booleans true:
+  `all_reported_files_fully_decoded`, `all_ordered_records_hashed`,
+  `all_json_fields_decoded`, `all_physical_hashes_verified`,
+  `all_schema_counts_verified`.
+- `verified_files`, in manifest table order then `columns`, `rows`, `cells`
+  order: each exact attested file declaration (including physical schema),
+  plus `ordered_full_record_sha256` from the independent complete-record audit.
+  The report binds that digest to the exact file SHA/schema/count. Recovery
+  independently rehashes the bytes and decodes every JSON record; it does not
+  reinterpret the independent auditor's digest encoding. The actual component
+  auditor hashes ordered typed raw records (including exact encoded JSON text)
+  and separately validates all nested JSON. Test reports label their fixtures
+  and hash the complete ordered decoded fixture records.
+- `prefix_checks`: exactly one result per `required_prefixes` entry, preserving
+  its fields and adding `actual_sha256` equal to `expected_sha256` and
+  `status: PASS`. Missing, incomplete or mismatched prefix controls fail closed.
+
+These checks prevent accidentally using a byte-only report in place of full
+component evidence. Independence and the expected attestation hash remain an
+external workflow trust boundary; the program cannot determine who authored a
+report. An unbound draft is not executable recovery authorization.
+
+For the failed JNJ execution, completeness means 12 tables and 36 payload files.
+These numbers are an execution-specific expected inventory, not hard-coded
+company or period policy. Other complete executions require their independently
+established exact inventory.
+
+Use the frozen, independently accepted source revision on `PYTHONPATH`:
+
+```bash
+python -m sec_xbrl.history recover-reported \
+  --trusted-exclusive-parent \
+  --staged-publication /absolute/original/.panels.partial-complete \
+  --output-root /absolute/new-recovery-run \
+  --intake-manifest /absolute/original/history_intake.json \
+  --operational-root /absolute/original-operational-run \
+  --attestation /absolute/independent/attestation.json \
+  --expected-attestation-sha256 EXTERNALLY_PINNED_ATTESTATION_SHA256
+```
+
+The program verifies the complete stage inventory and file hashes, physical
+schemas, counts and all declared JSON fields; validates the complete selected
+Raw release using the existing adapter and each T1–T4 root with the public
+reader; then copies the original manifest and payload bytes into a **new**
+staging root. It repeats full copied-stage checks, atomically publishes
+`reported-panels`, and invokes the existing quarter producer with the exact
+original `operational_root`. The source failed stage is never renamed,
+promoted, relabeled or modified. An output inside an immutable source root is
+rejected. Existing output roots are rejected.
+
+The returned path is the new `panels` publication. A sibling
+`reported_recovery_receipt.json` records the pinned attestation, original stage
+manifest/intake hashes, original generation source, recovery source and output
+paths. It does not alter the original reported manifest bytes. The quarter
+manifest's `supersedes_publication` identifies the new reported parent while
+its `source_manifest_sha256` still identifies the unchanged original manifest.
+Recovery failures preserve the new transaction and all workspaces/chunks. No
+recovery artifact tree is recursively deleted, even when ownership still appears
+unchanged. The default public history reader denies the entire recovery subtree
+until its validated COMPLETE receipt exists. Presence of `panels` or a consumer
+manifest alone is not completion. The old failure evidence and source stage
+remain unchanged. See the dated retention decision below.
+
+### Memory and verification limits
+
+`HistoryPublicationReader.load` and `_records` keep their eager tuple/scalar
+contract. `verify_all` returns `None`, reads every declared reported and derived
+file, and fully JSON-decodes every declared field in every record. File hash
+failure precedes row-count failure, which precedes JSON-schema/decode failure.
+All path components, including ancestors and the manifest, reject symlinks.
+Unknown/duplicated/non-string JSON field declarations fail closed.
+
+Verification uses fresh nonparallel, low-memory Polars scans of 32-row slices,
+with exact slice count and physical schema checks. It does not use background
+batch prefetch, sampling or field projection. Producer files use 32-row groups.
+The bound applies to retained encoded rows; a single large nested record and
+native Parquet page/dictionary buffers can exceed it. It is **not a universal
+byte/RSS cap for arbitrary Parquet files**. Actual resource-gated verification
+is still required before accepting a large execution.
+
+Build-only graph/period/ledger owners are released before verification and
+quarter production. Quarter source-result, partition, candidate and assembly
+lifetimes are scoped separately. Encoded staging owns all fields before native
+merges, and boundary reconstruction iterates full decoded cell batches.
+Accounting rules, values, dimensions, IDs, candidate provenance and ordering
+remain governed by the existing producer contracts.
+
+
+### Recovery trust and transaction repair after source 655 review
+
+The old `65513173…` candidate failed independent review for hash/read and
+rollback ownership races. The attestation/report schema remains unchanged. The later retention decision
+below adds an explicit trusted-parent API/CLI acknowledgment. Evidence JSON and the execution log are now read through no-follow
+handles once, hashed as immutable bytes, and parsed from those same bytes.
+Original reported manifest bytes are copied from that authenticated buffer.
+Pinned inode/size/mtime/ctime and ancestor identities reject later exchanges or
+mutations before completion. Raw snapshot and T1–T4 trees are pinned around the
+existing public validators; returned operational manifest hashes must match the
+expected pins. No parser, schema, accounting or derivation policy changes.
+
+The destination's parent must already exist. Recovery exclusively creates the
+absent leaf via its held parent directory handle, retains its directory inode
+and handle, and checks ownership before writes, renames and receipts. The later
+retention decision removes rollback deletion entirely.
+Copies use no-follow source descriptors, hash the actual bytes streamed to new
+exclusive destination files, and check source identity before and after copying.
+Copied and reported manifests are rebound to their authenticated bytes. Scoped
+storage guards check source/output identity around quarter writing and final
+publication. They are inactive during ordinary history operations.
+
+Destination roots inside the failed stage, original operational root or any
+intake Raw source root are rejected. An existing requested output is rejected.
+Moved roots are left for explicit inspection. Linux no-follow and directory-FD
+facilities are required. No files are searched for or removed to repair an
+exchanged pathname. The initial directory binding has the explicit trusted-parent
+boundary defined below; mkdir/open is not claimed to provide atomic ownership.
+
+The source and output locations remain subject to the operational immutable-input
+and single-writer contracts. Identity guards detect exchanges at the validation
+and mutation boundaries; they are not a filesystem lock or a guarantee against
+an adversarial process continuously modifying the same user's files.
+
+
+### 2026-10-13 retention and NOT_READY decision after source b0aa FAIL
+
+Independent `b0aa40d…` review found two remaining P1 ownership races: replacement
+between successful mkdir and first open, and a replaced child deleted by recursive
+rollback. Its FAIL report SHA is
+`8a8b786795a83e8c3b67185b31f0013a7a9fb296aaab841c9a49f4db8a486947`.
+Both prior FAIL reports and their artifacts remain immutable. The lead authorized
+this narrower nonaccounting technical change under the existing 50-company task;
+it changes failure retention/readiness only, not Raw, values, accounting, period,
+source selection, scope or financial release policy.
+
+The operator must pass `trusted_exclusive_parent=True` (CLI
+`--trusted-exclusive-parent`) and ensure exclusive sole-writer use of the existing
+parent during initial creation. The program requires that parent to be owned by
+the effective user and not group/world writable; a dedicated mode-0700 parent is
+recommended. This is an operator contract, not a new interactive permission flow.
+A nonempty replacement is rejected before any transaction writes. Root, ancestor
+and captured descendant identities are checked at storage boundaries thereafter.
+No existing destination files are overwritten. **An empty same-UID replacement
+between mkdir and the first identity capture is outside this supported trust
+boundary.** Portable mkdir/open cannot prove atomic creation ownership. Protection
+against such an adversarial same-user process requires separately isolated OS
+ownership and is not claimed by this implementation.
+
+Before any reported payload is copied, recovery creates a permanent
+`.history-recovery-<transaction SHA256>/transaction.json` control directory and
+immutable NOT_READY metadata. Its hash-named parent binds the exact bytes, root
+inode/path, token, source-generation/recovery identities, attestation/report hashes
+and input fingerprint. Missing or malformed metadata fails closed once that
+control directory exists. Recovery metadata is not to be removed or edited;
+removing every trace of recovery metadata to disguise the root as a legacy
+publication violates the immutable-output/sole-writer contract.
+
+All default `HistoryPublicationReader` and `open_history_publication` access to
+that root or descendants is denied until the COMPLETE gate validates. This also
+applies to `allow_staging=True`, existing reader `load`/`verify_all` calls, and
+consumer APIs using those public readers. It is an API boundary, not a restriction
+on arbitrary operating-system reads. Internal reported/quarter verification uses
+an explicit root-bound capability, valid only in the active recovery context;
+there is no unscoped staging bypass. Legacy non-recovery reads are unchanged.
+
+After full reported and quarter verification, expected consumer provenance and
+source/root/descendant checks, the program atomically creates
+`reported_recovery_receipt.json` with an exclusive hard link from a new immutable
+temporary receipt. An existing receipt is never replaced. The receipt binds the
+transaction token/hash, authenticated source/report identities and both manifest
+hashes. Default reads check those bindings. Reported manifest/payload bytes remain
+identical; quarter parent paths remain the intended final output paths.
+
+Failures retain all newly created artifacts with no COMPLETE gate. Even an already
+written final consumer manifest remains NOT_READY. Recovery disables recursive
+cleanup, including TemporaryDirectory finalizers and quarter `.chunks` deletion.
+Publication directory renames use Linux `renameat2(RENAME_NOREPLACE)`; absent
+support fails closed with retained artifacts. Recovery JSON publication also uses
+exclusive creation/linking rather than replacing existing files.
+Successful recovery also retains these diagnostic chunks plus temporary JSON and
+receipt files, increasing disk usage beyond the declared payload. Paths include
+`panels/.chunks`, nested `.<file>.chunks-*` and `.receipt.partial-*`; they are not
+extra declared tables. No automatic deletion or cleanup is authorized. Outside
+recovery, existing workspace cleanup behavior remains unchanged. The superseded
+acceptance condition “no failed output directory remains” is now “failed artifacts
+remain non-consumable, no COMPLETE is published, and no source/unrelated data is
+overwritten or deleted.” New source freeze, independent PASS and lead GO remain
+required before actual recovery.
+
+
+### 2026-10-13 complete-reader gate repair after source 721 FAIL
+
+Independent source `7218940…` review found three gate defects: a structurally
+bound COMPLETE receipt could disguise reported-only tables as a completed
+consumer; a dangling receipt symlink could fall through to legacy behavior;
+and some immutable receipt locators/version fields were not compared. The FAIL
+report SHA is
+`9ad160be37b8c5d07aec2301625c570540ce39a095dfd2e16b08dbbaf0224a33`.
+That report and all previous source/failure evidence remain unchanged. The lead
+authorized this technical gate repair within the same nonaccounting scope.
+
+The producer and default gate now share the governed completed-consumer predicate:
+reported-only source kind, exact parent manifest hash and locator, matching
+plan/views/intake/fingerprint/operational parents, active period/derivation rule
+identities, completed quarterly status, complete nonduplicated company/view table
+inventory, and a valid declared derived-quarter artifact with its own hash,
+physical ordered field/type/JSON declaration schema of the selected quarter-rule
+producer and count. A valid zero-row governed derived file is
+allowed; absence of the artifact or reported-only status is not completion.
+This predicate uses metadata and native row count, not eager whole-record decode.
+Existing full bounded `verify_all` remains responsible for full declared-record
+JSON integrity. It does not recompute accounting in the reader.
+
+The control directory also retains the exact authenticated `attestation.json`
+and `verification_report.json` byte buffers. Their immutable transaction hashes
+bind them. Default gates recheck the existing FULL_STAGED_REPORTED report contract,
+source generation/input fingerprint and exact reported inventory from these local
+copies. Consumer reads therefore do not depend on reopening external attestation
+or report locators. Report locator fields remain optional under the existing
+report schema; if present, they must match the original source stage/intake.
+No new actual attestation or original source report is generated by this repair.
+
+Receipt and transaction key sets are exact: missing/extra fields, differing
+version/attestation/source-stage locators, incorrect string/hash/token/inode scalar
+types, and duplicate or non-standard JSON scalars are rejected. JSON is parsed
+from the same stable authenticated buffers used for its integrity checks. The
+full default gate also runs on the new temporary receipt before the exclusive
+atomic commit, so the producer cannot commit a receipt its default reader rejects.
+
+Identifier detection uses lstat/lexists semantics: dangling receipt/control
+symlinks, directories in place of files, and retained `.receipt.partial-*` entries
+cannot disguise a failed transaction as a legacy publication. Unsafe symbolic
+ancestors fail closed. Removing every recovery identifier is still outside the
+explicit immutable-output/sole-writer boundary; no registry/xattr/platform-isolation
+claim is added. Recovery artifact retention, the trusted-parent acknowledgment,
+source-generation identity, reported bytes, quarter values and normal legacy
+reader behavior remain unchanged. New independent source PASS and lead GO are
+still required before any actual recovery.
+
+
+### 2026-10-13 CLI capability-owner repair after actual source 2027 failure
+
+The guarded actual `2027e21…` recovery failed after publishing the new reported
+copy and before quarter production. The quarter reader demanded a not-yet-created
+COMPLETE receipt. The observed run exited 1 after 639.716 seconds, with GNU time
+max RSS 1,652,848 KiB, sampled process-tree peak 1,629,296 KiB and
+`resource_stop=false`. This was a traced lifecycle defect, not a resource stop.
+The failed new NOT_READY root, original reported stage, attestation/report and
+previous independent source evidence remain preserved. No retry is implied.
+
+The cause is the Python module entrypoint: `python -m sec_xbrl.history` executed
+recovery in `__main__`, while the quarter producer imported `sec_xbrl.history`.
+The two modules had separate ContextVars. An explicit capability created by the
+CLI therefore did not match the canonical reader's active capability. Earlier
+cached tests called the imported API and did not exercise this process entrypoint.
+The same failure was reproduced on the unchanged 2027 production bytes with only
+the existing offline NVDA two-filing fixture before applying the repair.
+
+The minimal repair delegates the `__main__` entrypoint to canonical
+`sec_xbrl.history.main()`. Recovery, quarter storage and reader guards now execute
+under the same module owner. Gate logic, identity checks, context lifetime,
+accounting rules and API/CLI arguments are unchanged. There is no global or
+unscoped bypass. Synthetic CLI tests cover own-root producer access, simultaneous
+default/cross-root denial and capability expiry after success/failure. The cached
+golden now also launches a fresh `python -m` subprocess and compares all declared
+records against the imported API and fresh build, retaining the intended parent
+locator differences only. A new freeze and independent re-audit are required
+before OPS may use a new actual destination.
+
+
+### 2026-10-14 bounded quarter production after actual source 5cd resource stop
+
+The lead approved a nonaccounting storage/lifetime repair after the guarded
+actual `5cd2438…` recovery exceeded its 16 GiB process-tree RSS stop. The sealed
+run reached 16,886,848 KiB at 971.578 seconds; wrapper exit 70 and child SIGTERM
+are observed. The log and GNU time report are empty, so there is no GNU maximum
+or traced allocation stack. The reported copy has 37 files, while the quarter
+partial has only `.chunks` and zero files. Source control flow and the late RSS
+rise strongly implicate first-table eager ingestion/repartition before its first
+staged write. This is a resource failure, not a proven accounting/data mismatch
+or confirmed kernel OOM. Original inputs, all failed roots, reports and prior
+source decisions remain immutable; no retry or cap increase is authorized here.
+
+The approved implementation uses a newly and exclusively created private
+`.panels.partial-*/.chunks/quarter-spill.sqlite`. Existing public T1 validation
+still runs in full. Its selected attestation fields are then copied to a disk
+index and its verified object released. Quarter production uses the existing
+full-field 32-record history iterator rather than public eager `load()`.
+Complete reported cells, row/column metadata, materialized-cell keys, every
+additive candidate reference, derived metrics/cells and period boundaries are
+spooled. No source record, candidate, flag or evidence field is sampled or
+projected away. Only the already-existing T1 attestation projection is retained.
+
+Private SQLite BLOB keys avoid SQL affinity/collation policy; canonical typed
+keys preserve string/null/numeric distinctions and Python equal numeric keys.
+Updates keep the first insertion ordinal. Source metadata for candidate resolution
+remains scoped to its original source table; later target metadata overwrites do
+not rebind earlier candidates. Duplicate candidates remain duplicate ambiguity,
+including equal-value records. Unavailable/direct cells still suppress gap filling.
+Derived extra rows/columns retain `setdefault` behavior. Derivation candidate
+filtering and payload construction use the existing formulas, IDs, scope tests,
+period rules and source bindings. `approved_additive` and `derive_quarter` are
+unchanged; the public Layer2 validator, parser and policy registry are unchanged.
+
+Replayable disk sequences feed the existing global JSON-field/schema inference
+and bounded encoder, including late nested-field promotion and exact large-integer
+representation. Final cells now use the bounded writer's 32-row groups. Therefore
+new consumer Parquet hashes may differ from the old producer despite identical
+ordered physical scalar/JSON values, schema, decoded values and provenance.
+Reported source bytes and original generation identity remain unchanged. This
+is a physical storage change only; manifests contain the new files' own hashes.
+There is no API/CLI argument, source parent locator or recovery receipt change.
+
+The spool is not a new public artifact or interchange format. Its non-executable
+private codec preserves scalar/container types, with temporal/Decimal fallback.
+It is never opened from an input-provided locator. Its file and ancestor identity
+are checked before mutation; changed ownership aborts without removing foreign
+files. Recovery retains spools, journals and encoded chunks on success/failure,
+with corresponding extra disk cost, under the existing trusted exclusive parent
+boundary. Normal publication keeps its prior success cleanup. Connections close
+on all exits; default readers remain denied until the existing validated COMPLETE
+gate. No recursive recovery cleanup or unscoped producer bypass is introduced.
+
+`QUARTER_SPILL_BEGIN`, `QUARTER_SPILL_FLUSH` (every 32 source cells) and
+`QUARTER_SPILL_END` log table identity, processed count and process maximum RSS
+(on the supported Linux execution host), never cell values. Existing external
+resource guards remain authoritative. The design bounds live record payloads,
+not arbitrary total memory: initial eager T1 validation, native Parquet
+pages/dictionaries, one indivisible large record (including a column's complete
+boundary evidence), fiscal-column ordering keys and small staging descriptors
+remain explicit limits. No constant-memory or actual-JNJ readiness claim follows
+from the small-fixture tests.
+
+Acceptance requires the relevant prior 253 unit controls plus spool ordering,
+complete nested evidence, duplicate ambiguity, typed scalar/global schema,
+ownership and NOT_READY failure controls; guarded offline cached two-filing API
+and fresh `python -m` recovery; and an old `a36ea059…` producer oracle comparing
+all 8 tables/25 files/4,686 panel records/42 derived records, complete ordered
+physical values, schemas and decoded provenance. Only intended parent locators
+may be normalized; physical Parquet SHA equality is not required for the new
+row groups. Tests use 2 GiB per-process hard address-space limits and sampled
+2 GiB process-group RSS/300-second stops, Polars 2 and BLAS/OMP/Rayon 1 threads.
+Address-space and sampled RSS limits are distinct, not a cgroup RSS guarantee.
+
+Reproduction: run the seven existing unit modules `test_history_recovery`,
+`test_history_workflow`, `test_history_quarters`, `test_c3_quarterly_policy`,
+`test_core_quarterly_coverage`, `test_quarterly_analysis_pivot`,
+`test_quarterly_derived_metrics`, plus `test_history_quarter_spill`, with pytest.
+Run `tests/integration/test_history_quarters_cached.py` only with the declared
+existing offline two-filing NVDA fixture under the guard. The old oracle reads
+the prior producer source from commit `a36ea05919672cb1eb44470bacfb23c4ac6f3e0b`
+and runs it against that newly generated small reported fixture, never actual
+JNJ. Use fresh temporary destinations. Run Ruff and `git diff --check`.
+Writer results and the next frozen SHA are separate from independent source
+verification, lead acceptance, and any newly authorized actual OPS execution.
+
+
+## 2026-10-15 SQLite ownership repair after source 951 FAIL
+
+Independent source review rejected `9515322417df9da118fc60fa539b75d27793847b`
+(report SHA256 `06d48bc7abc79f9a89fb0b2a97e98e14250c59a91bce7576c6138f9b4e47569a`).
+Its named database was reopened by SQLite after inode capture; a replacement
+symlink could modify an unrelated database before the later ownership check.
+The public synthetic recovery probe reproduces this defect. Earlier results,
+failed roots and unbound operational configurations remain immutable. No actual
+recovery is authorized by this repair or its writer tests.
+
+The lead approved this narrow non-accounting refinement: SQLite opens the empty
+filename, using its trusted standard VFS private temporary disk database, never
+a publication/input-supplied database pathname. `temp_store=FILE`, a 2 MiB page
+cache target and disabled mmap are set; a forced-memory `TEMP_STORE=3` build is
+rejected. These are cache controls, not a whole-process memory guarantee.
+SQLite documents [empty-filename temporary databases](https://www.sqlite.org/inmemorydb.html)
+and their [open/close lifetime](https://www.sqlite.org/c3ref/open.html).
+A Linux synthetic test confirms an unlinked disk file appears under spill load.
+This supported runtime trusts the installed SQLite VFS; it does not claim
+portable protection against arbitrary replacement VFS implementations or hostile
+same-user mutation outside the existing trusted-exclusive-parent boundary.
+
+The anonymous index is rebuildable scratch and may be reclaimed on close. This
+is the explicit exception to the previous retention wording: **all named
+recovery diagnostics remain retained**, including `.chunks/quarter-spill.records`.
+That journal is created exclusively with no-follow through the held directory
+FD and written only through its original held file FD. No pathname reopening
+can redirect its writes. Root/ancestor/inode and directory-entry stamps are
+checked before operations; detected replacements abort and preserve artifacts.
+No named SQLite database or SQLite sidecar is opened under the recovery root.
+Normal publication retains its existing success cleanup; recovery does not
+recursively delete named records, chunks or failed artifacts.
+
+Private journal frames contain an unsigned 64-bit payload length, SHA256 and
+complete typed payload. OPEN/BUCKET events establish the index; each PLANNED
+mutation retains the complete key/value; APPLIED records successful mutation,
+original key type and ordinal. Duplicate candidates and Python-equal numeric
+keys preserve prior ordering/overwrite behavior. CHECKPOINT records SQLite
+commit return and the writer fsyncs the journal before returning. A failed write
+may leave a truncated last frame; only complete hash-valid frames form the
+readable prefix. PLANNED without APPLIED is unconfirmed, not proof of rollback.
+These events are diagnostic evidence, never a COMPLETE/public readiness gate.
+The codec is private and non-executable; there is no external journal replay API.
+The journal increases retained disk usage in return for reconstructible evidence.
+
+Public API/CLI, parent locators, source-generation identities, release gates and
+accounting formulas are unchanged. Acceptance adds postcapture journal/ancestor/
+restored-path/sidecar attacks, foreign-byte preservation, complete typed index
+reconstruction and interrupted-frame tests to the existing 264 controls, plus
+the same guarded cached API/fresh CLI and full old-producer oracle. Independent
+review of the new frozen source and separate lead actual-execution approval are
+still required. Raw50 acceptance does not imply History/financial readiness.

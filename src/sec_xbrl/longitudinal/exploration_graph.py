@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import defaultdict, deque
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,7 +21,7 @@ from sec_xbrl.longitudinal.materialization import (
     VerifiedLayer2Publication,
 )
 
-EXPLORATION_GRAPH_RULE_VERSION = "analysis-t3-exploration-graph-v1"
+EXPLORATION_GRAPH_RULE_VERSION = "analysis-t3-exploration-graph-v2"
 
 
 class ExplorationGraphError(RuntimeError):
@@ -49,6 +49,26 @@ class ExplorationGraphPipeline:
         observation_rows = observations.records("reported_period_observation")
         relationship_rows = relationships.records("filing_relationship_edge")
         maps = _mapping_index(observations)
+        datasets = _graph_datasets(observation_rows, relationship_rows, maps)
+        publication = OperationalLayer2Publisher(Path(output_root)).publish(
+            _exploration_run(observations), datasets
+        )
+        return ExplorationGraphResult(
+            publication,
+            len(datasets["analysis_exploration_node"]),
+            len(datasets["analysis_exploration_edge"]),
+        )
+
+
+def _graph_datasets(
+    observation_rows: Iterable[Mapping[str, Any]],
+    relationship_rows: Iterable[Mapping[str, Any]],
+    maps: Mapping[str, Mapping[tuple[str, str], Mapping[str, Any]]],
+) -> dict[str, tuple[dict[str, Any], ...]]:
+    """Build graph rows without publishing, for an attested append merge."""
+    observation_rows = tuple(dict(row) for row in observation_rows)
+    relationship_rows = tuple(dict(row) for row in relationship_rows)
+    if True:  # Keep the original producer body as one exact nested block.
         nodes: dict[str, dict[str, Any]] = {}
         edges: dict[str, dict[str, Any]] = {}
 
@@ -161,14 +181,10 @@ class ExplorationGraphPipeline:
             else:
                 add_edge(_relationship_edge(row, "MEMBER_HIERARCHY", left, right))
 
-        datasets = {
-            "analysis_exploration_node": tuple(nodes.values()),
-            "analysis_exploration_edge": tuple(edges.values()),
-        }
-        publication = OperationalLayer2Publisher(Path(output_root)).publish(
-            _exploration_run(observations), datasets
-        )
-        return ExplorationGraphResult(publication, len(nodes), len(edges))
+    return {
+        "analysis_exploration_node": tuple(nodes.values()),
+        "analysis_exploration_edge": tuple(edges.values()),
+    }
 
 
 class ExplorationGraphReader:
@@ -179,19 +195,91 @@ class ExplorationGraphReader:
 
     def __init__(self) -> None:
         self._indexed_publication: VerifiedLayer2Publication | None = None
-        self._nodes: dict[str, dict[str, Any]] = {}
-        self._outgoing: dict[str, list[dict[str, Any]]] = {}
+        self._nodes: dict[str, Mapping[str, Any]] = {}
+        self._outgoing: dict[str, tuple[Mapping[str, Any], ...]] = {}
+        self._edges: tuple[Mapping[str, Any], ...] = ()
+        self._incoming: dict[str, tuple[str, ...]] | None = None
 
-    def _indexes(self, publication: VerifiedLayer2Publication):
+    def _indexes(
+        self, publication: VerifiedLayer2Publication
+    ) -> tuple[
+        dict[str, Mapping[str, Any]],
+        dict[str, tuple[Mapping[str, Any], ...]],
+        tuple[Mapping[str, Any], ...],
+    ]:
+        """Borrow one read-only index from an already attested publication.
+
+        The public ``records()`` API continues to return copies.  This private
+        serving index keeps references to the reader-owned MappingProxy rows
+        so T5 does not materialize the complete T3 graph more than once.
+        Public traversal results are converted back to isolated plain values.
+        """
         self._check(publication, None)
         if self._indexed_publication is not publication:
-            self._nodes = {str(row["analysis_exploration_node_id"]): dict(row) for row in publication.records(self.node_dataset)}
-            outgoing: dict[str, list[dict[str, Any]]] = defaultdict(list)
-            for edge in publication.records(self.edge_dataset):
-                outgoing[str(edge["from_node_id"])].append(dict(edge))
-            self._outgoing = {key: sorted(edges, key=lambda edge: str(edge["analysis_exploration_edge_id"])) for key, edges in outgoing.items()}
+            node_rows = publication.datasets[self.node_dataset]
+            edge_rows = publication.datasets[self.edge_dataset]
+            self._nodes = {
+                str(row["analysis_exploration_node_id"]): row for row in node_rows
+            }
+            outgoing: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+            for edge in edge_rows:
+                outgoing[str(edge["from_node_id"])].append(edge)
+            self._outgoing = {
+                key: tuple(
+                    sorted(
+                        edges,
+                        key=lambda edge: str(edge["analysis_exploration_edge_id"]),
+                    )
+                )
+                for key, edges in outgoing.items()
+            }
+            self._edges = edge_rows
+            self._incoming = None
             self._indexed_publication = publication
-        return self._nodes, self._outgoing
+        return self._nodes, self._outgoing, self._edges
+
+    def _iter_selected_fact_paths(
+        self,
+        publication: VerifiedLayer2Publication,
+        *,
+        root_node_ids: Iterable[str],
+        target_node_ids: Iterable[str],
+    ) -> Iterator[tuple[int, dict[str, Any]]]:
+        """Yield complete paths ending at selected FACTs, in full traversal order."""
+        self._check(publication, None)
+        nodes, outgoing, edges = self._indexes(publication)
+        roots = tuple(str(root) for root in root_node_ids)
+        for root in roots:
+            if root not in nodes:
+                raise ExplorationGraphError(
+                    "root node is outside the verified exploration graph"
+                )
+        targets = frozenset(
+            str(target)
+            for target in target_node_ids
+            if str(target) in nodes and nodes[str(target)].get("node_kind") == "FACT"
+        )
+        if not targets:
+            return
+        if self._incoming is None:
+            incoming: dict[str, list[str]] = defaultdict(list)
+            for edge in edges:
+                incoming[str(edge["to_node_id"])].append(str(edge["from_node_id"]))
+            self._incoming = {node_id: tuple(parents) for node_id, parents in incoming.items()}
+        relevant = set(targets)
+        pending = deque(targets)
+        while pending:
+            node_id = pending.popleft()
+            for parent in self._incoming.get(node_id, ()):
+                if parent not in relevant:
+                    relevant.add(parent)
+                    pending.append(parent)
+        for root_index, root in enumerate(roots):
+            if root not in relevant:
+                continue
+            for path in _walk_paths(nodes, outgoing, (root,), relevant=relevant):
+                if str(path["node"]["analysis_exploration_node_id"]) in targets:
+                    yield root_index, _plain_copy(path)
 
     def roots_for_fact(
         self,
@@ -204,16 +292,16 @@ class ExplorationGraphReader:
         period_class: str = "QTD_3M",
     ) -> tuple[dict[str, Any], ...]:
         self._check(publication, cik)
-        return tuple(sorted(
+        return _plain_copy(tuple(sorted(
             (
-                dict(row) for row in publication.records(self.node_dataset)
+                row for row in publication.datasets[self.node_dataset]
                 if row.get("node_kind") == "FACT" and row.get("cik") == cik
                 and row.get("raw_qname") == raw_concept_qname
                 and row.get("fiscal_year") == fiscal_year
                 and row.get("fiscal_quarter") == fiscal_quarter
                 and row.get("period_class") == period_class
             ), key=lambda row: (str(row.get("filed_date")), str(row.get("accession")), str(row.get("source_fact_id")))
-        ))
+        )))
 
     def traverse(
         self,
@@ -228,25 +316,21 @@ class ExplorationGraphReader:
         routes to the same node visible (e.g. distinct statement roles).
         """
         self._check(publication, None)
-        nodes, outgoing = self._indexes(publication)
-        result: list[dict[str, Any]] = []
-        queue: deque[tuple[str, tuple[str, ...], tuple[dict[str, Any], ...], int, dict[str, Any] | None]] = deque()
-        for root in root_node_ids:
+        nodes, outgoing, _edges = self._indexes(publication)
+        roots = tuple(root_node_ids)
+        for root in roots:
             if root not in nodes:
                 raise ExplorationGraphError("root node is outside the verified exploration graph")
-            queue.append((root, (root,), (), 0, None))
-        while queue:
-            node_id, path, path_edges, depth, incoming = queue.popleft()
-            result.append({"depth": depth, "path_node_ids": path, "path_edges": path_edges, "node": nodes[node_id], "incoming_edge": incoming})
-            if max_depth is not None and depth >= max_depth:
-                continue
-            for edge in sorted(outgoing.get(node_id, ()), key=lambda item: str(item["analysis_exploration_edge_id"])):
-                target = str(edge["to_node_id"])
-                if target in path:  # semantic/cyclic DEF or presentation paths terminate safely.
-                    continue
-                queue.append((target, path + (target,), path_edges + (edge,), depth + 1, edge))
-        from copy import deepcopy
-        return deepcopy(tuple(result))
+        return _plain_copy(
+            tuple(
+                _walk_paths(
+                    nodes,
+                    outgoing,
+                    roots,
+                    max_depth=max_depth,
+                )
+            )
+        )
 
     def _check(self, publication: VerifiedLayer2Publication, cik: str | None) -> None:
         if not publication.is_reader_attested:
@@ -255,6 +339,60 @@ class ExplorationGraphReader:
             raise ExplorationGraphError("publication has no exploration graph datasets")
         if cik is not None and cik not in publication.input_ciks:
             raise ExplorationGraphError("requested CIK is outside the verified publication")
+
+
+def _walk_paths(
+    nodes: Mapping[str, Mapping[str, Any]],
+    outgoing: Mapping[str, tuple[Mapping[str, Any], ...]],
+    roots: tuple[str, ...],
+    *,
+    relevant: set[str] | None = None,
+    max_depth: int | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Walk breadth-first simple paths, optionally excluding irrelevant nodes."""
+    queue: deque[
+        tuple[
+            str,
+            tuple[str, ...],
+            tuple[Mapping[str, Any], ...],
+            int,
+            Mapping[str, Any] | None,
+        ]
+    ] = deque((root, (root,), (), 0, None) for root in roots)
+    while queue:
+        node_id, path, path_edges, depth, incoming = queue.popleft()
+        yield {
+            "depth": depth,
+            "path_node_ids": path,
+            "path_edges": path_edges,
+            "node": nodes[node_id],
+            "incoming_edge": incoming,
+        }
+        if max_depth is not None and depth >= max_depth:
+            continue
+        for edge in sorted(
+            outgoing.get(node_id, ()),
+            key=lambda item: str(item["analysis_exploration_edge_id"]),
+        ):
+            target = str(edge["to_node_id"])
+            if target in path:  # semantic/cyclic DEF or presentation paths terminate safely.
+                continue
+            if relevant is not None and target not in relevant:
+                continue
+            queue.append(
+                (target, path + (target,), path_edges + (edge,), depth + 1, edge)
+            )
+
+
+def _plain_copy(value: Any) -> Any:
+    """Copy an attested nested value without deepcopying MappingProxy rows."""
+    if isinstance(value, Mapping):
+        return {key: _plain_copy(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return tuple(_plain_copy(item) for item in value)
+    if isinstance(value, list):
+        return [_plain_copy(item) for item in value]
+    return value
 
 
 def _check_upstreams(observations: VerifiedLayer2Publication, relationships: VerifiedLayer2Publication) -> None:
@@ -284,7 +422,13 @@ def _mapping_index(publication: VerifiedLayer2Publication) -> dict[str, dict[tup
 
 
 def _concept_node_id(row: Mapping[str, Any]) -> str:
-    return _id("concept", row.get("cik"), row.get("source_filing_id"), row.get("raw_concept_id"))
+    return _id(
+        "node",
+        row.get("cik"),
+        row.get("source_filing_id"),
+        "CONCEPT",
+        str(row["raw_concept_id"]),
+    )
 
 
 def _concept_node(row: Mapping[str, Any]) -> dict[str, Any]:

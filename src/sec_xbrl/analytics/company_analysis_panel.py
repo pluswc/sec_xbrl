@@ -42,17 +42,32 @@ class CompanyAnalysisPanelBuilder:
     def __init__(self) -> None:
         self._graph_reader = ExplorationGraphReader()
         self._indexed_graph: VerifiedLayer2Publication | None = None
-        self._indexes: tuple[dict[str, Any], dict[Any, Any], dict[Any, Any]] | None = None
+        self._indexes: tuple[
+            dict[str, Mapping[str, Any]],
+            dict[tuple[str, str], Mapping[str, Any]],
+            dict[tuple[str, str], tuple[str, ...]],
+            dict[tuple[str, str], list[dict[str, Any]]],
+        ] | None = None
 
     def _graph_indexes(self, exploration: VerifiedLayer2Publication):
         if self._indexed_graph is exploration:
             return self._indexes
-        nodes = {str(row["analysis_exploration_node_id"]): dict(row)
-                 for row in exploration.records(ExplorationGraphReader.node_dataset)}
-        facts = {(str(row.get("source_filing_id")), str(row.get("source_fact_id"))): row
-                 for row in nodes.values() if row.get("node_kind") == "FACT"}
+        nodes, _outgoing, edges = self._graph_reader._indexes(exploration)
+        facts: dict[tuple[str, str], Mapping[str, Any]] = {}
+        duplicate_fact_node_ids: dict[tuple[str, str], list[str]] = {}
+        for row in nodes.values():
+            if row.get("node_kind") != "FACT":
+                continue
+            key = (str(row.get("source_filing_id")), str(row.get("source_fact_id")))
+            previous = facts.get(key)
+            if previous is not None:
+                duplicates = duplicate_fact_node_ids.setdefault(
+                    key, [str(previous["analysis_exploration_node_id"])]
+                )
+                duplicates.append(str(row["analysis_exploration_node_id"]))
+            facts[key] = row
         placement: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        for edge in exploration.records(ExplorationGraphReader.edge_dataset):
+        for edge in edges:
             if edge.get("source_network_type") != "PRE":
                 continue
             kinds = tuple(kind for kind in ("IS", "BS", "CF", "EQ") if _qualifying_statement_role(edge, kind))
@@ -64,7 +79,12 @@ class CompanyAnalysisPanelBuilder:
                     key = (str(edge.get("source_filing_id")), str(node.get("raw_id")))
                     placement.setdefault(key, []).append({"statement_types": kinds, **dict(edge)})
         self._indexed_graph = exploration
-        self._indexes = (nodes, facts, placement)
+        self._indexes = (
+            nodes,
+            facts,
+            {key: tuple(node_ids) for key, node_ids in duplicate_fact_node_ids.items()},
+            placement,
+        )
         return self._indexes
 
     def build(
@@ -94,7 +114,7 @@ class CompanyAnalysisPanelBuilder:
         _validate_selection_scope(
             selected, cik, fiscal_year, fiscal_quarter, period_class, view, as_of_date
         )
-        nodes, facts, placement = self._graph_indexes(exploration)
+        nodes, facts, duplicate_fact_node_ids, placement = self._graph_indexes(exploration)
         definitions: list[dict[str, Any]] = []
         bindings: list[dict[str, Any]] = []
         values: list[dict[str, Any]] = []
@@ -103,6 +123,8 @@ class CompanyAnalysisPanelBuilder:
             for row in selected
             if row["selection_status"] == "SELECTED"
         }
+        root_selections: list[dict[str, Any]] = []
+        root_node_ids: list[str] = []
         for selection in _root_selections(selected):
             if selection["selection_status"] == "UNAVAILABLE":
                 definition, binding, value = _unavailable_line(
@@ -122,29 +144,51 @@ class CompanyAnalysisPanelBuilder:
                     "selected direct fact is not present in the attested exploration graph"
                 )
             _require_graph_fact_match(selection, root)
-            root_id = str(root["analysis_exploration_node_id"])
-            paths = self._graph_reader.traverse(exploration, root_node_ids=(root_id,))
-            for path in paths:
-                node = path["node"]
-                if node.get("node_kind") != "FACT":
-                    continue
-                path_fact_key = (str(node.get("source_filing_id")), str(node.get("source_fact_id")))
-                # T3 graph contains all as-filed facts.  Values enter this
-                # panel only if their exact direct observation was selected by
-                # T4-B for the requested view/as-of scope.
-                source = selected_by_fact.get(path_fact_key)
-                if source is None:
-                    continue
-                _require_graph_fact_match(source, node)
-                definition, binding, value = _reported_line(
-                    source, selection, path, nodes, analysis_view_id, analysis_view_version
+            root_selections.append(selection)
+            root_node_ids.append(str(root["analysis_exploration_node_id"]))
+        target_node_ids = tuple(
+            node_id
+            for key in selected_by_fact
+            if key in facts
+            for node_id in duplicate_fact_node_ids.get(
+                key, (str(facts[key]["analysis_exploration_node_id"]),)
+            )
+        )
+        for root_index, path in self._graph_reader._iter_selected_fact_paths(
+            exploration,
+            root_node_ids=root_node_ids,
+            target_node_ids=target_node_ids,
+        ):
+            node = path["node"]
+            path_fact_key = (
+                str(node.get("source_filing_id")),
+                str(node.get("source_fact_id")),
+            )
+            # T3 graph contains all as-filed facts.  Values enter this panel
+            # only if their exact direct observation was selected by T4-B for
+            # the requested view/as-of scope.
+            source = selected_by_fact[path_fact_key]
+            _require_graph_fact_match(source, node)
+            definition, binding, value = _reported_line(
+                source,
+                root_selections[root_index],
+                path,
+                nodes,
+                analysis_view_id,
+                analysis_view_version,
+            )
+            binding["primary_statement_evidence"] = deepcopy(
+                placement.get(
+                    (
+                        str(source.get("source_filing_id")),
+                        str(source.get("raw_concept_id")),
+                    ),
+                    [],
                 )
-                binding["primary_statement_evidence"] = deepcopy(placement.get(
-                    (str(source.get("source_filing_id")), str(source.get("raw_concept_id"))), []
-                ))
-                definitions.append(definition)
-                bindings.append(binding)
-                values.append(value)
+            )
+            definitions.append(definition)
+            bindings.append(binding)
+            values.append(value)
         _reject_duplicates(definitions, bindings, values)
         ordered_definitions = tuple(sorted(definitions, key=_definition_order))
         definition_order = {

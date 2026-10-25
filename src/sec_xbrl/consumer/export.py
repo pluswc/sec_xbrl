@@ -29,6 +29,7 @@ def prepare_overview_snapshot(
     view: str = "LATEST_REPORTED",
     as_of: str | None = None,
     review_cutoff: str | None = None,
+    reviewed_q4_cutoff: str | None = None,
     recent_quarters: int = 8,
     periods: Iterable[tuple[int, int]] | None = None,
     row_ids: Iterable[str] | None = None,
@@ -41,6 +42,7 @@ def prepare_overview_snapshot(
         view=view,
         as_of=as_of,
         review_cutoff=review_cutoff,
+        reviewed_q4_cutoff=reviewed_q4_cutoff,
         recent_quarters=recent_quarters,
     )
     rows = response["rows"]
@@ -80,10 +82,16 @@ def prepare_overview_snapshot(
     ]
     lineage_cells = _metric_input_cells(client, ticker, response, selected_metrics, view)
     excluded_cell_warnings = _excluded_cell_warnings(cells, selected_ids, period_keys)
+    publication = {"analysis_publication_id": response["context"]["publication_id"]}
+    if response["context"].get("reviewed_q4_publication_id"):
+        publication.update({
+            "reviewed_q4_publication_id": response["context"]["reviewed_q4_publication_id"],
+            "reviewed_q4_cutoff": response["context"]["reviewed_q4_cutoff"],
+        })
     return _finish(
         kind="OVERVIEW",
         context=response["context"],
-        publication={"analysis_publication_id": response["context"]["publication_id"]},
+        publication=publication,
         columns=selected_periods,
         rows=selected_rows,
         cells=snapshot_cells,
@@ -374,8 +382,11 @@ def _xlsx(snapshot: dict[str, Any], destination: Path) -> None:
     periods = list(dict.fromkeys(
         (column["fiscal_year"], column["fiscal_quarter"]) for column in snapshot["columns"]
     ))
+    annual = bool(snapshot["columns"]) and all(
+        column.get("period_class") == "FY" for column in snapshot["columns"]
+    )
     headers = ["label", "period_class", "unit", *[
-        f"FY{year} Q{quarter}" for year, quarter in periods
+        f"FY{year}" if annual else f"FY{year} Q{quarter}" for year, quarter in periods
     ], "row_warnings", "cell_statuses", "row_id", "depth"]
     table.append(headers)
     cell_index = {(cell["row_id"], cell["fiscal_year"], cell["fiscal_quarter"], cell["period_class"]): cell
