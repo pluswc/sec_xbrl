@@ -1,5 +1,11 @@
 # 계획 등록부 — 단일 진입점
 
+2026-10-25 운영 후속: [21사 screening main runtime 전환](../implementation/screening21-main-runtime-20261025.md)은
+기존 두 catalog entry, SQLite journal과 export를 보존한 채 accepted `main` source로
+전환하는 범위와 private-copy UAT·rollback 경계를 기록한다. 실제 전환 결과와 운영
+READY 판단은 해당 문서의 상태를 따른다. Private 저장·재열기와 live GET-only 대조는
+PASS했고 총괄이 21사 runtime 전환을 로컬 수락했으며, 독립 문서 검토는 대기 중이다.
+
 2026-10-25 누적 통합 후속: [투자자 워크플로 main 통합 인계](../implementation/investor-workflows-main-integration-20261025.md)는
 정확성·복구, 21사 스크리닝 저장·탐색기, 50사 확대·설명, History 증분·성능 계보를
 ordinary 3-way merge한 후보의 범위와 검사 경계를 기록한다. 기존 Raw·journal·운영
