@@ -507,6 +507,33 @@ def test_integrated_fifty_parent_status_recovery_receipt_mutation_rejected(
     assert len(states) == 50
     assert states["SIX"] == "READY"
     history._check_recovery_access(publication)
+
+    # The completed recovery consumer keeps its accepted private diagnostic
+    # artifacts, while its declared public payload remains fully verified.
+    validation = history.HistoryPublicationReader(publication).validate(
+        state_root=tmp_path / "recovery-validation-state"
+    )
+    assert validation.level == "DETAILED"
+    assert validation.reason == "COMPLETED_RECOVERY_COMPATIBILITY"
+    public_file = publication / recovered_payload["tables"][0]["files"]["cells"]["path"]
+    public_bytes = public_file.read_bytes()
+    public_file.write_bytes(public_bytes + b"tampered")
+    with pytest.raises(ValueError, match="integrity mismatch"):
+        history.HistoryPublicationReader(publication).validate(
+            state_root=tmp_path / "tampered-recovery-validation-state"
+        )
+    public_file.write_bytes(public_bytes)
+
+    # A sibling recovery publication is not the gate-bound consumer root and
+    # therefore receives the ordinary exact-inventory policy.
+    reported_publication = publication.parent / "reported-panels"
+    foreign = reported_publication / "foreign.bin"
+    foreign.write_bytes(b"foreign")
+    with pytest.raises(ValueError, match="structure anomaly"):
+        history.HistoryPublicationReader(reported_publication).validate(
+            state_root=tmp_path / "reported-validation-state"
+        )
+    foreign.unlink()
     config = metric_identity._validate_config(
         json.loads(prepared.identity_config.read_text(encoding="utf-8"))
     )

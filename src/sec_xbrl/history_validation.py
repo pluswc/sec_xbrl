@@ -57,6 +57,7 @@ def validate_publication(
     code_identity: str,
     mode: Literal["routine", "detailed"] = "routine",
     state_root: Path | None = None,
+    detailed_reason: str = "EXPLICIT_DETAILED",
 ) -> ValidationResult:
     """Validate one publication and atomically advance external routine state.
 
@@ -78,7 +79,7 @@ def validate_publication(
         if after != before:
             raise ValueError("history publication changed during detailed validation")
         result = ValidationResult(
-            "DETAILED", "EXPLICIT_DETAILED", tuple(sorted(inventory)), (), tuple(sorted(inventory)),
+            "DETAILED", detailed_reason, tuple(sorted(inventory)), (), tuple(sorted(inventory)),
             sum(int(entry["info"]["count"]) for entry in inventory.values()), -1, False,
             str(state_path.absolute()), dict(sorted(declared.items())),
         )

@@ -1470,13 +1470,26 @@ class HistoryPublicationReader:
                 "derivation_rule": self.manifest.get("derivation_rule"),
             },
         )
+        recovery_parent = _check_recovery_access(self.root)
+        completed_recovery_consumer = (
+            recovery_parent is not None
+            and self.root.absolute() == recovery_parent / "panels"
+        )
+        effective_mode = (
+            "detailed" if mode == "routine" and completed_recovery_consumer else mode
+        )
         return validate_publication(
             root=self.root,
             manifest=self.manifest,
             detailed=self.verify_all,
             code_identity=identity,
-            mode=mode,
+            mode=effective_mode,
             state_root=state_root,
+            detailed_reason=(
+                "COMPLETED_RECOVERY_COMPATIBILITY"
+                if effective_mode == "detailed" and mode == "routine"
+                else "EXPLICIT_DETAILED"
+            ),
         )
 
     def load(self, *, ticker: str, period_class: str = "QTD_3M", view: str = "LATEST_REPORTED"):
@@ -1958,10 +1971,11 @@ def _validate_recovery_gate(parent, control, receipt_path):
     pins.check()
 
 
-def _check_recovery_access(root: Path, capability: Any = None) -> None:
+def _check_recovery_access(root: Path, capability: Any = None) -> Path | None:
     """A staging flag never overrides a recovery transaction's readiness gate."""
     root = Path(root).absolute()
     _reject_symlink_components(root)
+    completed_parent: Path | None = None
     for parent in (root, *root.parents):
         if not parent.is_dir():
             continue
@@ -1971,13 +1985,16 @@ def _check_recovery_access(root: Path, capability: Any = None) -> None:
             continue
         if capability is not None and capability is _RECOVERY_OUTPUT.get() and parent == capability.root:
             _check_history_storage(root)
-            return
+            return None
         try:
             if len(controls) != 1 or controls[0].is_symlink() or not controls[0].is_dir():
                 raise ValueError("missing/ambiguous recovery transaction marker")
             _validate_recovery_gate(parent, controls[0], receipt_path)
+            if completed_parent is None:
+                completed_parent = parent
         except (OSError, ValueError, KeyError, TypeError) as exc:
             raise ValueError("recovery transaction is NOT_READY or its completion gate is invalid") from exc
+    return completed_parent
 
 
 

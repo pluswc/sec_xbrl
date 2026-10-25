@@ -75,7 +75,24 @@ journal·설정·Raw·publication을 다시 생성하거나 수정하지 않았�
 못해 collection에서 끝났다. `c5edb57…`은 pytest 설정에 `pythonpath = ["."]` 한
 줄만 추가해 외부 `PYTHONPATH` 없이 Ruff PASS와 최종 2,505개 collection을 확인했다.
 이 두 보정은 History·스크리닝 제품 source를 바꾸지 않는다. 보정 뒤 required CI
-전체 결과는 아직 대기한다.
+전체 실행은 pinned historical source를 checkout하는 recovery 검사가 shallow clone에서
+61건의 setup error를 내는 점도 확인했다. 이 검사는 임의 commit을 가져오는 것이 아니라
+통합 계보의 ancestor SHA를 검증하므로 CI checkout에 `fetch-depth: 0`을 지정한다. 테스트
+명령·trigger·required gate는 그대로다. 최종 required CI 결과는 아직 대기한다.
+
+Full-history CI에서 남은 제품 호환 문제는 완료 복구 publication이 의도적으로 보존한
+8개 private 진단 산출물과 routine exact-inventory 정책의 충돌이었다. 일반 publication의
+정책을 완화하지 않고, 유효한 `COMPLETE` gate에 정확히 결속된 consumer `panels` root만
+기존 상세 공개 데이터 검증으로 연결했다. 공개 manifest 파일의 hash/count/schema/JSON,
+receipt·control gate와 이후 physical source closure 검증은 유지된다. Receipt v1이 private
+진단 파일 bytes를 직접 결속한다는 새 보장은 추가하지 않았다. 이 보정은 새 저장 형식이나
+기존 자료 이관을 만들지 않는다.
+
+호환 보정의 focused 검사는 완료 복구 consumer의 READY·상세 공개 파일 검사와 receipt
+변조 거부, 선언 공개 파일 변조 거부, recovery sibling 및 일반 publication extra 거부를
+확인했다(`3 passed`). Full-history checkout 목적은 pinned ancestor fixture 1건으로 확인했다
+(`1 passed`). 최종 Ruff도 PASS였다. 전체 pytest는 required CI가 clean checkout에서
+실행하며, 이 로컬 보정을 위해 완료 기업 감사나 과거 성능 측정을 반복하지 않았다.
 
 ## 남은 전달 단계
 

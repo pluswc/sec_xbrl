@@ -93,6 +93,21 @@ unsafe path, SHA 불일치, count/schema/scalar 오류, null·중복 ID, danglin
 확인된 구조·참조 위반은 상세 검증을 진단 목적으로 실행해도 실패를 유지한다. 기존
 `verify_all()`이 extra file이나 FK를 검사하지 않는다는 이유로 이상을 통과시키지 않는다.
 
+### 완료 복구 publication 호환 경계 — 2026-10-25
+
+일반 publication의 exact inventory 규칙은 그대로다. 다만 기존 완료 복구 계약은
+gate에 결속된 `panels` 공개 파일과 함께 private 진단 산출물을 보존한다. 유효한
+`COMPLETE` transaction·receipt gate를 먼저 통과한 **정확한 consumer `panels` root**의
+routine 요청만 기존 상세 공개 데이터 검증으로 보낸다. 이 경로도 manifest에 선언된
+공개 파일의 SHA-256, count, schema와 JSON decode를 모두 수행한다. 잘못되거나 변조된
+gate, 다른 recovery sibling, 일반 publication과 일반 publication의 추가 파일에는 이
+호환 경계를 적용하지 않는다.
+
+Receipt v1이 보존 진단 파일의 bytes를 암호학적으로 결속한다고 주장하지 않는다. 해당
+파일을 포함한 physical source closure의 hash는 기존 consumer source-closure 단계에서
+계속 확인한다. 이번 호환 경계는 receipt 형식 변경, 진단 파일 무시 pattern 또는 독립
+109단계 의미 감사의 대체가 아니다.
+
 ## 기본 실행과 상세 opt-in
 
 일상 build의 기본값은 `routine`이다. State는 run마다 사라지는 임시 publication 안이
