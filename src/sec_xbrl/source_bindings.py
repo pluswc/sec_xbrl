@@ -1606,6 +1606,14 @@ def _extract_source_rows(
         format_prefix, transform = format_qname.split(":", 1)
         if namespaces.get(format_prefix) != SEC_TRANSFORM_NAMESPACE:
             continue
+        lexical = "".join(element.itertext()).strip()
+        # Optional IDs on unrelated SEC metadata transforms do not belong to
+        # this narrow financial conformance scope. In-scope sources retain every
+        # strict locator/Concept/context check below.
+        if transform not in _DURATION_TRANSFORMS and not _is_supported_correction_source(
+            {"transform": transform, "source_lexical": lexical}
+        ):
+            continue
         source_id = element.get("id")
         concept_qname = element.get("name")
         context_ref = element.get("contextref")
@@ -1640,7 +1648,7 @@ def _extract_source_rows(
             "primary_document": filing.primary_document,
             "source_id": source_id,
             "source_context_ref": context_ref,
-            "source_lexical": "".join(element.itertext()).strip(),
+            "source_lexical": lexical,
             "source_line": int(element.sourceline),
             "source_locator": f"line:{element.sourceline}",
             "source_element_type": element_type,
