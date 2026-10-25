@@ -1207,6 +1207,7 @@ def _company_status(
     request: dict[str, Any],
     run_root: Path,
     plan: dict[str, Any] | None,
+    validation_mode: str = "routine",
 ) -> CompanyStatus:
     ticker = company["ticker"]
     company_root = run_root / "companies" / ticker
@@ -1229,6 +1230,11 @@ def _company_status(
             if not build_path.is_file() or build_path.is_symlink():
                 raise ValueError("build attestation is unsafe")
             build = _read_json(build_path)
+            validation_state_root = company_root / "history-validation"
+            if validation_mode == "financial_sources":
+                from sec_xbrl.history_selection import completed_recovery_source
+                if completed_recovery_source(Path(build.get("publication", ""))):
+                    validation_state_root = None
             build_attestation_error = _validate_build_attestation(
                 build,
                 ticker=ticker,
@@ -1237,7 +1243,7 @@ def _company_status(
                 intake_path=intake_path,
                 intake=intake,
                 validation_mode="routine",
-                validation_state_root=company_root / "history-validation",
+                validation_state_root=validation_state_root,
             )
         except (OSError, TypeError, ValueError) as exc:
             build_attestation_error = str(exc)
@@ -1294,8 +1300,12 @@ def _company_status(
     )
 
 
-def read_universe_status(*, manifest_path: Path) -> UniverseStatus:
+def read_universe_status(
+    *, manifest_path: Path, validation_mode: str = "routine"
+) -> UniverseStatus:
     """Read deterministic status without discovery, SEC, parser, or selection work."""
+    if validation_mode not in {"routine", "financial_sources"}:
+        raise ValueError("unsupported collection status validation mode")
     attested = _attest_run(manifest_path)
     companies = tuple(
         _company_status(
@@ -1303,6 +1313,7 @@ def read_universe_status(*, manifest_path: Path) -> UniverseStatus:
             request=attested.request,
             run_root=manifest_path.parent,
             plan=attested.plans.get(company["ticker"]),
+            validation_mode=validation_mode,
         )
         for company in attested.manifest["companies"]
     )

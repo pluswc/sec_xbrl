@@ -19,7 +19,13 @@ from typing import Any
 
 from sec_xbrl.collection_operations import read_universe_status
 from sec_xbrl.filing.sec_inline_transforms import _decimal_duration, _week_duration
-from sec_xbrl.history import HISTORY_VERSION, HistoryPublicationReader
+from sec_xbrl.history import HISTORY_VERSION
+from sec_xbrl.history_selection import (
+    HistorySelections,
+    resolve_history_selection,
+    selection_declaration,
+    verify_financial_history_source,
+)
 from sec_xbrl.source_bindings import (
     BINDINGS_NAME,
     DOCUMENTS_NAME,
@@ -140,6 +146,7 @@ def _preflight_quality_inputs(
         provenance=provenance,
         financial_as_of=config["financial_as_of"],
         readiness=readiness,
+        selection=_configured_history_selection(config, collection_manifest),
     )
 
 
@@ -192,6 +199,7 @@ def publish_generic_metric_quality(
         provenance=provenance,
         financial_as_of=config["financial_as_of"],
         readiness=readiness,
+        selection=_configured_history_selection(config, collection_manifest),
     )
 
     bindings = SourceBindingsV2Reader(Path(source_binding_publication))
@@ -270,6 +278,9 @@ def publish_generic_metric_quality(
             for row in readiness
         },
     }
+    selection = _configured_history_selection(config, collection_manifest)
+    if selection is not None:
+        evidence_hashes["history_selection_controls"] = selection.controls
     parser_profiles = bindings.manifest["parser_profiles"]
     staging = destination.parent / f".{destination.name}.partial-{uuid.uuid4().hex}"
     try:
@@ -309,6 +320,9 @@ def publish_generic_metric_quality(
             "evidence_hashes": evidence_hashes,
             "files": {REPORT_NAME: _file_declaration(report_path)},
         }
+        if selection is not None:
+            manifest["history_selection"] = selection.declaration
+            manifest["selected_history_evidence"] = selection.companies
         manifest["publication_id"] = "generic-metric-quality-" + hashlib.sha256(
             _canonical_json(manifest).encode("utf-8")
         ).hexdigest()[:24]
@@ -509,6 +523,8 @@ class GenericMetricQualityReader:
             "history_manifests",
             "collection_build_manifests",
         }
+        if self.manifest.get("history_selection") is not None:
+            expected_evidence.add("history_selection_controls")
         if not isinstance(evidence, dict) or set(evidence) != expected_evidence:
             raise ValueError("generic metric quality evidence proof is invalid")
         _validate_evidence_declarations(evidence, expected_tickers=set(histories))
@@ -615,6 +631,11 @@ class GenericMetricQualityReader:
             or config["collection_scope_companies"] != list(companies)
         ):
             raise ValueError("generic metric quality config replay differs")
+        selection = _configured_history_selection(config, collection_manifest)
+        if (self.manifest.get("history_selection") != (selection.declaration if selection else None)
+            or self.manifest.get("selected_history_evidence") != (selection.companies if selection else None)
+            or evidence.get("history_selection_controls") != (selection.controls if selection else None)):
+            raise ValueError("generic quality History selection replay differs")
         provenance = {
             (row["ticker"], row["cik"]): row for row in config["source_provenance"]
         }
@@ -645,6 +666,7 @@ class GenericMetricQualityReader:
             provenance=provenance,
             financial_as_of=financial_as_of,
             readiness=readiness,
+            selection=_configured_history_selection(config, collection_manifest),
         )
         if histories != history_declarations:
             raise ValueError("generic metric quality history replay differs")
@@ -804,12 +826,22 @@ def _load_config(path: Path) -> dict[str, Any]:
         (row["ticker"], row["cik"]) for row in companies
     ]:
         raise ValueError("generic quality provenance scope differs from companies")
-    return {
+    normalized = {
         "schema_version": CONFIG_SCHEMA_VERSION,
         "financial_as_of": payload["financial_as_of"],
         "collection_scope_companies": list(companies),
         "source_provenance": provenance,
     }
+    if "history_selection" in payload:
+        normalized["history_selection"] = selection_declaration(payload["history_selection"])
+    return normalized
+
+
+def _configured_history_selection(config: dict[str, Any], collection_manifest: Path) -> HistorySelections | None:
+    declaration = config.get("history_selection")
+    return (resolve_history_selection(declaration, collection_manifest=collection_manifest,
+                                     scope_companies=config["collection_scope_companies"])
+            if declaration is not None else None)
 
 
 def _validate_status(
@@ -827,7 +859,7 @@ def _validate_status(
         for item in declared_companies
         if isinstance(item, dict)
     }
-    status = read_universe_status(manifest_path=collection_manifest)
+    status = read_universe_status(manifest_path=collection_manifest, validation_mode="financial_sources")
     status_parent = tuple(
         sorted(
             ({"ticker": row.ticker, "cik": str(row.cik)} for row in status.companies),
@@ -932,6 +964,7 @@ def _validate_histories(
     provenance: dict[tuple[str, str], dict[str, str]],
     financial_as_of: str,
     readiness: tuple[dict[str, Any], ...],
+    selection: HistorySelections | None = None,
 ) -> dict[str, dict[str, str]]:
     expected_tickers = {row["ticker"] for row in expected_companies}
     if set(history_manifests) != expected_tickers:
@@ -943,6 +976,10 @@ def _validate_histories(
         path = _regular_file(history_manifests[ticker], "accepted history manifest")
         digest = _sha256(path)
         ready = readiness_index.get(ticker)
+        selected = selection.companies.get(ticker) if selection else None
+        if selected is not None and ready is not None:
+            ready = {**ready, "history_manifest_path": selected["history_manifest"]["path"],
+                     "history_manifest_sha256": selected["history_manifest"]["sha256"]}
         if (
             ready is None
             or path != Path(str(ready["history_manifest_path"]))
@@ -950,7 +987,7 @@ def _validate_histories(
             or digest != ready["history_manifest_sha256"]
         ):
             raise ValueError("accepted history manifest differs from READY build")
-        HistoryPublicationReader(path.parent).verify_all()
+        verify_financial_history_source(path.parent)
         payload = _read_json(path)
         plan = payload.get("plan")
         plan_companies = plan.get("companies") if isinstance(plan, dict) else None
@@ -1000,7 +1037,7 @@ def _company_scope(value: Any, label: str) -> tuple[dict[str, str], ...]:
 
 def _verify_evidence_files(value: dict[str, Any]) -> None:
     for label, declaration in value.items():
-        if label in {"history_manifests", "collection_build_manifests"}:
+        if label in {"history_manifests", "collection_build_manifests", "history_selection_controls"}:
             if not isinstance(declaration, dict):
                 raise TypeError("history evidence declaration is invalid")
             for ticker, nested in declaration.items():
@@ -1024,8 +1061,12 @@ def _validate_evidence_declarations(
     declarations = [
         declaration
         for label, declaration in value.items()
-        if label not in {"history_manifests", "collection_build_manifests"}
+        if label not in {"history_manifests", "collection_build_manifests", "history_selection_controls"}
     ] + list(histories.values()) + list(builds.values())
+    controls = value.get("history_selection_controls", {})
+    if not isinstance(controls, dict):
+        raise TypeError("History selection controls are malformed")
+    declarations.extend(controls.values())
     for declaration in declarations:
         if (
             not isinstance(declaration, dict)

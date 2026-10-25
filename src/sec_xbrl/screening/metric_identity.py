@@ -21,6 +21,11 @@ from sec_xbrl.collection_operations import read_universe_status
 from sec_xbrl.company_metadata import MANIFEST_NAME as METADATA_MANIFEST
 from sec_xbrl.company_metadata import CompanyMetadataReader
 from sec_xbrl.history import HistoryPublicationReader
+from sec_xbrl.history_selection import (
+    resolve_history_selection,
+    selection_declaration,
+    verify_financial_history_source,
+)
 from sec_xbrl.screening.common import (
     contained_file,
     digest_value,
@@ -216,7 +221,7 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
     )
     if sha256_file(collection_path) != config["collection_manifest_sha256"]:
         raise ValueError("generic metric collection manifest changed")
-    status = read_universe_status(manifest_path=collection_path)
+    status = read_universe_status(manifest_path=collection_path, validation_mode="financial_sources")
     expected = tuple((row["ticker"], row["cik"]) for row in config["companies"])
     actual = tuple(
         sorted(((row.ticker, row.cik) for row in status.companies), key=lambda item: item[1])
@@ -273,10 +278,14 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
             {"ticker": ticker, "cik": cik, "observed_at": observed_at}
         )
 
+    selection = (resolve_history_selection(config["history_selection"], collection_manifest=collection_path,
+                                           scope_companies=config["companies"])
+                 if "history_selection" in config else None)
     company_sources: list[dict[str, Any]] = []
     history_hashes: dict[str, str] = {}
     for company in config["companies"]:
-        source = _verify_company_sources(company, config["financial_as_of"], collection_path)
+        source = _verify_company_sources(company, config["financial_as_of"], collection_path,
+                                         selected=selection.companies.get(company["ticker"]) if selection else None)
         company_sources.append(source)
         history_hashes[company["ticker"]] = source["history"]["manifest_sha256"]
 
@@ -292,6 +301,8 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
     quality = GenericMetricQualityReader(
         quality_root, manifest_sha256=config["quality_manifest_sha256"]
     )
+    if quality.manifest.get("history_selection") != config.get("history_selection"):
+        raise ValueError("quality and identity History selection companions differ")
     quality.verify_sources(
         collection_manifest=collection_path,
         history_manifest_sha256s=history_hashes,
@@ -373,11 +384,13 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def _verify_company_sources(
-    company: dict[str, Any], financial_as_of: str, collection_manifest: Path
+    company: dict[str, Any], financial_as_of: str, collection_manifest: Path,
+    *, selected: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ticker, cik = company["ticker"], company["cik"]
+    original_build_path = collection_manifest.parent / "companies" / ticker / "build_manifest.json"
     build_path = regular_file(
-        collection_manifest.parent / "companies" / ticker / "build_manifest.json",
+        Path(selected["build_manifest"]["path"]) if selected else original_build_path,
         f"{ticker} collection build attestation",
     )
     build = read_json(build_path, f"{ticker} collection build attestation")
@@ -398,7 +411,7 @@ def _verify_company_sources(
     ):
         raise ValueError(f"{ticker}: history identity differs from collection build")
     history = HistoryPublicationReader(history_root)
-    history.verify_all()
+    verify_financial_history_source(history_root)
 
     annual = _verify_analysis(
         company["annual_analysis_root"],
@@ -432,7 +445,9 @@ def _verify_company_sources(
             "manifest_sha256": history_sha,
             "version": require_string(history.manifest.get("version"), f"{ticker} history version"),
             "declared_files": _history_files(history.manifest),
-            "collection_build_manifest_sha256": sha256_file(build_path),
+            "collection_build_manifest_sha256": sha256_file(original_build_path),
+            **({"selected_build_manifest_sha256": sha256_file(build_path),
+                "selected_history_evidence": copy.deepcopy(selected)} if selected else {}),
             "collection_plan_sha256": _sha(
                 build.get("plan_sha256"), f"{ticker} collection plan SHA-256"
             ),
@@ -557,7 +572,7 @@ def _validate_config(value: Any) -> dict[str, Any]:
         {row["cik"] for row in companies}
     ) != len(companies):
         raise ValueError("generic metric identity companies must be unique")
-    return {
+    normalized = {
         "schema_version": CONFIG_VERSION,
         "source_kind": SOURCE_KIND,
         "universe_id": require_string(value.get("universe_id"), "universe_id"),
@@ -577,6 +592,9 @@ def _validate_config(value: Any) -> dict[str, Any]:
         "quality_manifest_sha256": _sha(value.get("quality_manifest_sha256"), "quality manifest SHA"),
         "companies": companies,
     }
+    if "history_selection" in value:
+        normalized["history_selection"] = selection_declaration(value["history_selection"])
+    return normalized
 
 
 def _analysis_files(manifest: dict[str, Any]) -> dict[str, str]:

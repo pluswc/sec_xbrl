@@ -113,3 +113,126 @@ catalog from base `669489b5c76b0ee4c419e82c48c6a61289f160cc` was compared direct
 canonical JSON SHA-256 is
 `e684c85ea4dea2b183584ef3e62e9663628290ae899246bcf643fab4e38e575d`.
 No actual company publication or runtime data was read or written by this writer.
+
+## Additive provenance routing and completed-proof reuse
+
+The first 41-metric source freeze `455b2bae80cf437655de187b9e26494bb39f5f3e`
+received independent Sol PASS and lead **SOURCE_SYNTHETIC_LOCALLY_ACCEPTED**.
+Its accounting/catalog implementation remains intact. The following additive
+source work has separate verification and operational acceptance gates.
+
+The first-five actual attempt exposed repeated detailed storage decoding:
+`read_universe_status` visits the full parent collection and completed recovery
+`History.validate(routine)` forces `COMPLETED_RECOVERY_COMPATIBILITY` detailed
+validation on each open. That attempt was stopped without a new publication or
+completed receipt. It is not acceptance evidence or a failed financial formula.
+
+The lead approved a financial-only reuse seam. `read_universe_status` accepts
+`validation_mode="financial_sources"`; its default remains `routine`. Only the
+exact completed recovery `parent/panels` with the existing public COMPLETE
+transaction/PASS full-report gate can use the existing build validator's current
+file-digest path. Plan, original intake, views, output root, manifest and declared
+payload hashes remain exact. Generic metric quality and identity, including
+reopening existing immutable v1 identities, use this path. New/non-recovery
+publications retain the existing detailed/routine validation. No arbitrary READY
+marker or caller-provided skip callback is accepted. `History.validate` itself
+and ordinary/default status behavior are unchanged.
+
+The shared source verifier checks current COMPLETE/PASS/report/rule bindings,
+safe physical inventory and every current declared payload byte. It does not
+decode already validated History JSON cells again. V1 retained diagnostics are
+restricted to known producer spill/chunk/manifest-partial patterns; aliases and
+unknown extras fail. The v1 receipt does **not** attest every retained diagnostic
+byte. Current invocation source closure binds their complete physical inventory
+and bytes at its established freshness points. This is storage/provenance reuse,
+not new financial semantic assurance, accounting equivalence or a performance
+claim. Existing prepared-source period, USD, basis, quality and metric gates
+continue independently.
+
+### Public companion/config contract
+
+For approved replacement History routing, both the generic quality config and
+generic identity config may include the same exact immutable declaration:
+
+```json
+{"history_selection":{"path":"/absolute/new-run/history-selection.json","sha256":"<64 lowercase hexadecimal characters>"}}
+```
+
+The companion is an explicit selection, with no ticker-specific engine behavior:
+
+```json
+{
+  "schema_version":"accepted-history-selection-v1",
+  "collection_manifest":{"path":"/absolute/original/collection_manifest.json","sha256":"<hash>"},
+  "companies":[{
+    "ticker":"EXAMPLE","cik":"0000001234",
+    "acceptance":{"path":"/absolute/existing-lead-acceptance.json","sha256":"<hash>"},
+    "recovery_receipt":{"path":"/absolute/existing-READY-recovery.json","sha256":"<hash>"},
+    "build_manifest":{"path":"/absolute/accepted-correction/build_manifest.json","sha256":"<hash>"},
+    "history_manifest":{"path":"/absolute/accepted-correction/panels/history_manifest.json","sha256":"<hash>"}
+  }]
+}
+```
+
+Entries must be unique and within the configured company scope. Unknown fields,
+unsafe/noncanonical aliases, missing historical approval, mismatched company,
+collection, recovery status, selected roots/hashes, plan, intake or views fail
+closed. Historical approval is the existing
+`lead-later45-company-history-acceptance-v1` receipt, status
+`LOCALLY_ACCEPTED_COMPANY_HISTORY_ONLY_NOT_FINANCIAL_READY`, `accepted_by=ROOT_LEAD`.
+Its exact selected build and recovery references must agree. The existing
+`universe50-history-recovery-receipt-v1` must be READY and bind the original
+collection, plan/intake, selected manifest and complete declared payload set.
+The ordinary build validator still checks the selected marker using the original
+plan/intake. No collection mirror, symlink, original marker rewrite, fake legacy
+approval or Raw/History rebuild is needed. A current financial operator must use
+new configs/publications; old receipts/publications remain unchanged.
+
+Quality preserves original `collection_status` and `collection_build_manifests`
+READY evidence and records `selected_history_evidence` separately. Identity keeps
+the original collection-build digest and adds selected-build/evidence fields.
+Quality and identity must declare the exact same companion; even a different
+path to byte-identical companion content is rejected. Readers replay the resolver,
+not just an opaque hash. Closure includes companion, original and selected build,
+current collection/request/plan/intake, selected History and active source files.
+
+Historical acceptance/recovery receipts and directly referenced approval, audit,
+GO, correction and configuration JSON controls are immutable hash-bound evidence
+blobs. They are not instructions to reopen old source checkouts, Raw/runtime
+inventories or journal state, nor to rerun completed company audits. No freshness
+claim is made for old engine/runner checkout code. Current producer source code
+remains part of the current invocation closure. The latest-as-of selection seam
+is explicitly outside this additive change.
+
+### Additive verification
+
+Run with `POLARS_MAX_THREADS=2 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:.`:
+
+```sh
+.venv/bin/python -m pytest -p no:cacheprovider \
+  tests/screening/test_history_selection.py \
+  tests/screening/test_generic_metric_identity_contract.py \
+  tests/screening/test_generic_metric_identity_integration.py \
+  tests/screening/test_verified_source_closure.py \
+  tests/unit/test_source_bindings.py -q --disable-warnings
+```
+
+The focused suite exercises default compatibility, original READY versus selected
+History state, public quality/identity replay, coherent provenance mismatch,
+missing/corrupt COMPLETE/PASS, changed payload bytes, unsafe inventory, declaration
+divergence and mid-publication control mutation. A real synthetic completed
+recovery records zero detailed callbacks on financial status/source verification;
+the default status still invokes its established detailed path. This source/test
+result does not accept actual first-five/50 metrics, main merge or live rollout.
+
+Additive writer result: **109 PASS in 28.73 s**, scoped Ruff PASS and
+`git diff --check` PASS. Independent verification and lead acceptance of the
+additive commit remain pending. No completed actual company audit was rerun.
+Actual first-five retry/50-company connection proceeds only after that separate
+source freeze is independently accepted.
+
+Later latest-as-of operational risk, not implemented here: a latest HON append
+must retain the previously approved effective fiscal-focus corrections in its
+accepted prefix. Existing Raw metadata must not silently restore the prior bad
+foci; the main append API's correction-overlay handoff needs a separate scoped
+assessment. Baseline 50-company connection takes precedence over that phase.
