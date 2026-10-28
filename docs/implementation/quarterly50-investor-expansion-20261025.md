@@ -841,3 +841,37 @@ No large screening suite, old company audit, actual AMD data revalidation, Raw
 parse or actual latest12/38 operator was run by the writer. This is IMPLEMENTED
 and SELF_VERIFIED source pending ROOT's separate independent review and actual
 operator acceptance.
+
+## Arithmetic TTM independent P2 return and exact input-binding repair
+
+Independent review of c17ef6adaaeadd939ed16bbde90e72bb1061800d returned Standards
+PASS with zero findings, but Spec FAIL with one P2: the new amount definitions'
+input_metric_id was trusted instead of checked against the approved fixed item.
+The original Spec FAIL report remains preserved (optional operator record
+`independent_arithmetic_ttm_spec_c17ef6.json`, SHA256
+`6c25d0ff98a64400faa7e4266b14de4f3104fbbfdfda616aac903af294340ba9`).
+The writer first reproduced its exact coherent, rehashed operating-income swap:
+ttm_operating_income incorrectly accepted revenue inputs and value1000 instead
+of55. Only temporary synthetic data was changed for reproduction.
+
+The repair adds a **new-catalog-only** fixed amount contract:
+
+| Amount metric | Required input metric |
+| --- | --- |
+| ttm_revenue | quarter_revenue |
+| ttm_operating_income | quarter_operating_income |
+| ttm_net_income | quarter_net_income |
+| ttm_cfo | quarter_cfo |
+| ttm_standardized_fcf | quarter_standardized_fcf |
+
+Producer arithmetic, all definition bytes, normal results and existing strict
+reader branches are unchanged. The repaired original probe rejects before
+consumption with “arithmetic TTM amount requires its exact governed input metric”.
+All five coherent rehashed amount swaps now have negative regression coverage.
+The exact probe plus 10 focused amount-contract/positive-reader/materialized-value/
+CLI/strict-golden cases PASS (10 tests in3.17s, 24 unrelated new-catalog cases
+deselected). Ruff/diff PASS. Previous29/26 suites were not blindly repeated and no
+actual company audit or latest12 build ran. A new independent repair review and
+ROOT acceptance are required; c17's failed report is not retroactively relabeled.
+Final whole-package migration/native identities must bind the new frozen source,
+while prepared c17 snapshots, controls and evidence remain preserved.

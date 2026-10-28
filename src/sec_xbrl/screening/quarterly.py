@@ -37,6 +37,13 @@ EXPANDED_CATALOG = "quarterly-investor-41-v1"
 ARITHMETIC_CATALOG = "quarterly-investor-41-arithmetic-ttm-v2"
 TTM_BASIS_POLICY = "DECLARED_EQUAL_OR_ALL_NULL_ARITHMETIC_V1"
 _EXPANDED_CATALOGS = {EXPANDED_CATALOG, ARITHMETIC_CATALOG}
+_ARITHMETIC_TTM_AMOUNT_INPUTS = {
+    "ttm_revenue": "quarter_revenue",
+    "ttm_operating_income": "quarter_operating_income",
+    "ttm_net_income": "quarter_net_income",
+    "ttm_cfo": "quarter_cfo",
+    "ttm_standardized_fcf": "quarter_standardized_fcf",
+}
 EXPANDED_METRIC_IDS = {
     *("quarter_" + metric for metric in (
         "revenue", "cost", "gross_profit", "research", "operating_income", "net_income",
@@ -160,6 +167,8 @@ class QuarterlyScreeningMetricReader:
                 continue
             if catalog == ARITHMETIC_CATALOG:
                 margin = metric.endswith("_margin")
+                if not margin and definition.get("input_metric_id") != _ARITHMETIC_TTM_AMOUNT_INPUTS[metric]:
+                    raise ValueError("arithmetic TTM amount requires its exact governed input metric")
                 version = ("quarter-" + metric.replace("_", "-") + "-arithmetic-v2"
                            if margin else "quarter-ttm-arithmetic-v2")
                 rule = version if margin else "quarter-ttm-contiguous-arithmetic-v2"

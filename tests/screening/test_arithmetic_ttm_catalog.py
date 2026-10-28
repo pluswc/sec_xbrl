@@ -213,3 +213,25 @@ def test_strict_catalog_and_null_basis_results_match_accepted_source_golden():
     # these digests are not generated from the new catalog at assertion time.
     assert digest_value(list(producer.METRIC_DEFINITIONS))=="1e1a64235d1b39eca4fe4a45b3362b94764a2d89836e637a234810d1b5aae25c"
     assert digest_value(_records(_null_inputs()))=="c5183a7e9ed2b5ca42ba70c47c11decfbcb97e7f8659050aec1b7069f3ce2903"
+
+
+@pytest.mark.parametrize("metric", ["ttm_revenue", "ttm_operating_income", "ttm_net_income", "ttm_cfo", "ttm_standardized_fcf"])
+def test_new_amount_input_binding_rejects_coherent_rehashed_metric_swap(tmp_path,metric):
+    root=_publication(tmp_path,inputs=_null_inputs(),catalog_version=NEW)
+    donor="ttm_operating_income" if metric=="ttm_revenue" else "ttm_revenue"
+    manifest_path=root/producer.MANIFEST;manifest=json.loads(manifest_path.read_text())
+    definitions_path=root/producer.DEFINITIONS_FILE;definitions=json.loads(definitions_path.read_text())
+    next(row for row in definitions["records"] if row["metric_id"]==metric)["input_metric_id"]=donor.replace("ttm_","quarter_",1)
+    observations_path=root/producer.OBSERVATIONS_FILE;observations=json.loads(observations_path.read_text())
+    for index,row in enumerate(observations["records"]):
+        if row["metric_id"]==metric:
+            replacement=copy.deepcopy(next(item for item in observations["records"] if item["metric_id"]==donor
+                and item["calendar_year"]==row["calendar_year"] and item["calendar_quarter"]==row["calendar_quarter"]))
+            replacement.update(metric_id=row["metric_id"],canonical_metric_id=row["canonical_metric_id"],observation_id=row["observation_id"])
+            observations["records"][index]=replacement
+    for path,value in ((definitions_path,definitions),(observations_path,observations)):
+        write_json(path,value)
+        manifest["files"][path.name].update(sha256=sha256_file(path),size=path.stat().st_size)
+    write_json(manifest_path,manifest)
+    with pytest.raises(ValueError,match="exact governed input metric"):
+        QuarterlyScreeningMetricReader(root)
