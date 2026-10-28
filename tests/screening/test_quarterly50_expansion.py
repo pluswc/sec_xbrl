@@ -68,11 +68,12 @@ def _inputs():
     return columns, cells, traces
 
 
-def _records(inputs=None):
+def _records(inputs=None, *, catalog_version=producer.CATALOG_VERSION):
     columns, cells, traces = inputs or _inputs()
     return producer.build_quarterly_company_records(
         ticker="TEST", cik=CIK, financial_as_of=AS_OF, columns=columns,
-        rows=_profile_rows(), cells=cells, traces=traces, spine=producer._quarter_spine(AS_OF))
+        rows=_profile_rows(), cells=cells, traces=traces, spine=producer._quarter_spine(AS_OF),
+        catalog_version=catalog_version)
 
 
 def _row(rows, metric, year=2026, quarter=3):
@@ -80,9 +81,9 @@ def _row(rows, metric, year=2026, quarter=3):
                 == (metric, year, quarter))
 
 
-def _publication(tmp_path, *, legacy=False, mutate=None):
-    rows, inventory = _records()
-    definitions = copy.deepcopy(list(producer.LEGACY_DEFINITIONS if legacy else producer.METRIC_DEFINITIONS))
+def _publication(tmp_path, *, legacy=False, mutate=None, inputs=None, catalog_version=producer.CATALOG_VERSION):
+    rows, inventory = _records(inputs, catalog_version=catalog_version)
+    definitions = copy.deepcopy(list(producer.LEGACY_DEFINITIONS if legacy else producer.quarterly_metric_definitions(catalog_version)))
     ids = {row["metric_id"] for row in definitions}
     rows = [row for row in rows if row["metric_id"] in ids]
     if mutate:
@@ -95,7 +96,7 @@ def _publication(tmp_path, *, legacy=False, mutate=None):
                 "annual_parent": {"company_membership_sha256": membership}, "config": {},
                 "governance_parents": [], "files": {}, "counts": {}}
     if not legacy:
-        manifest["catalog_version"] = producer.CATALOG_VERSION
+        manifest["catalog_version"] = catalog_version
     names = ("definitions", "support", "observations", "period_inventory")
     for filename, name, records in zip(producer.FILES, names, (definitions, support, rows, inventory)):
         path = tmp_path / filename

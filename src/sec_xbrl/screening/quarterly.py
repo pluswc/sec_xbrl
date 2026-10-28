@@ -34,6 +34,9 @@ SOURCE_KINDS = {"REPORTED", "DERIVED_QUARTER", "DERIVED_METRIC", "UNAVAILABLE"}
 AVAILABILITY = {"AVAILABLE", "UNAVAILABLE"}
 
 EXPANDED_CATALOG = "quarterly-investor-41-v1"
+ARITHMETIC_CATALOG = "quarterly-investor-41-arithmetic-ttm-v2"
+TTM_BASIS_POLICY = "DECLARED_EQUAL_OR_ALL_NULL_ARITHMETIC_V1"
+_EXPANDED_CATALOGS = {EXPANDED_CATALOG, ARITHMETIC_CATALOG}
 EXPANDED_METRIC_IDS = {
     *("quarter_" + metric for metric in (
         "revenue", "cost", "gross_profit", "research", "operating_income", "net_income",
@@ -146,12 +149,25 @@ class QuarterlyScreeningMetricReader:
         ):
             raise ValueError("quarterly metric definitions are not unique and prefixed")
         catalog = self.manifest.get("catalog_version")
-        if catalog not in {None, EXPANDED_CATALOG}:
+        if catalog not in {None, *_EXPANDED_CATALOGS}:
             raise ValueError("unsupported quarterly metric catalog")
-        if catalog == EXPANDED_CATALOG and set(definitions) != EXPANDED_METRIC_IDS:
+        if catalog in _EXPANDED_CATALOGS and set(definitions) != EXPANDED_METRIC_IDS:
             raise ValueError("expanded quarterly catalog requires the exact 41 metric identities")
         if catalog is None and _EXPANDED_ONLY_TTM.intersection(definitions):
             raise ValueError("expanded quarterly metrics require an explicit catalog version")
+        for metric, definition in definitions.items():
+            if not metric.startswith("ttm_"):
+                continue
+            if catalog == ARITHMETIC_CATALOG:
+                margin = metric.endswith("_margin")
+                version = ("quarter-" + metric.replace("_", "-") + "-arithmetic-v2"
+                           if margin else "quarter-ttm-arithmetic-v2")
+                rule = version if margin else "quarter-ttm-contiguous-arithmetic-v2"
+                if (definition.get("basis_policy") != TTM_BASIS_POLICY
+                    or definition.get("definition_version") != version or definition.get("rule_version") != rule):
+                    raise ValueError("arithmetic TTM requires its exact versioned basis contract")
+            elif "basis_policy" in definition or "arithmetic-v2" in str(definition.get("definition_version")):
+                raise ValueError("arithmetic TTM cannot be relabeled as a strict catalog")
         support_keys = [(row.get("cik"), row.get("metric_id")) for row in self.support]
         observation_keys = [
             (
@@ -280,7 +296,8 @@ class QuarterlyScreeningMetricReader:
                 raise ValueError("quarterly observation source kind is not allowed")
             if row.get("period_class") != definition.get("observation_basis"):
                 raise ValueError("quarterly observation period class differs from definition")
-            if definition.get("observation_basis") == "TTM" and not row.get("basis_version"):
+            if (definition.get("observation_basis") == "TTM" and not row.get("basis_version")
+                and self.manifest.get("catalog_version") != ARITHMETIC_CATALOG):
                 raise ValueError("available TTM observation requires a basis version")
         if row.get("period_end") is not None:
             if row.get("end_convention") != "EXCLUSIVE":
@@ -349,7 +366,7 @@ class QuarterlyScreeningMetricReader:
                 continue
             self._verify_source_scope(source, row, source_metric)
             if (definition["observation_basis"] == "TTM"
-                and self.manifest.get("catalog_version") == EXPANDED_CATALOG
+                and self.manifest.get("catalog_version") in _EXPANDED_CATALOGS
                 and source.get("source_kind") == "REPORTED" and "source_lineage" in source):
                 self._verify_observation(source, {item["metric_id"]: item for item in self.definitions})
                 self._remember_prepared_identity(source)
@@ -416,7 +433,7 @@ class QuarterlyScreeningMetricReader:
             ):
                 raise ValueError("derived quarter cumulative periods differ from output scope")
         else:
-            require_string(row.get("basis_version"), "available TTM basis version")
+            self._verify_ttm_basis(row, sources, definition)
             if (
                 definition.get("unit_kind") != "MONEY"
                 or any(source["period_class"] != "QTD_3M" for source in sources)
@@ -426,9 +443,7 @@ class QuarterlyScreeningMetricReader:
                 or row["period_end"] != sources[-1]["period_end"]
             ):
                 raise ValueError("TTM requires four contiguous QTD inputs matching output scope")
-            if any(not source.get("basis_version") for source in sources):
-                raise ValueError("available TTM inputs require compatible non-null basis versions")
-            if self.manifest.get("catalog_version") == EXPANDED_CATALOG:
+            if self.manifest.get("catalog_version") in _EXPANDED_CATALOGS:
                 if len({canonical_json(_ttm_binding(source)) for source in sources}) != 1:
                     raise ValueError("TTM semantic inputs differ")
                 for a, b in pairwise(sources):
@@ -690,13 +705,32 @@ class QuarterlyScreeningMetricReader:
                 )
         if row["metric_id"] in {"quarter_net_margin", "quarter_fcf_margin", "quarter_current_ratio",
                                  "quarter_liabilities_to_equity", "quarter_liabilities_to_assets", "quarter_net_debt"} or (
-                self.manifest.get("catalog_version") == EXPANDED_CATALOG
+                self.manifest.get("catalog_version") in _EXPANDED_CATALOGS
                 and contract_kind.startswith("SAME_PERIOD_")):
             _verify_same_filing_endpoints(inputs)
         if row["filed_date"] != max(item["filed_date"] for item in inputs):
             raise ValueError("quarterly derived filing date differs from source inputs")
         if row["report_date"] != current["report_date"]:
             raise ValueError("quarterly derived report date differs from current endpoint")
+
+    def _verify_ttm_basis(self, row: dict, inputs: list[dict], definition: dict) -> str:
+        bases = [item.get("basis_version") for item in inputs]
+        if self.manifest.get("catalog_version") == ARITHMETIC_CATALOG:
+            if definition.get("basis_policy") != TTM_BASIS_POLICY:
+                raise ValueError("arithmetic TTM basis policy is missing")
+            if all(value is None for value in bases):
+                policy = "ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"
+            elif all(isinstance(value, str) and value for value in bases) and len(set(bases)) == 1:
+                policy = "DECLARED_BASIS:" + bases[0]
+            else:
+                raise ValueError("arithmetic TTM rejects mixed or mismatched basis")
+            if row.get("basis_version") != bases[0] or row["source_lineage"].get("compatibility_policy") != policy:
+                raise ValueError("arithmetic TTM assurance or output basis differs")
+            return policy
+        require_string(row.get("basis_version"), "available TTM basis version")
+        if any(not item.get("basis_version") for item in inputs):
+            raise ValueError("available TTM inputs require compatible non-null basis versions")
+        return "ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"
 
     def _verify_ttm_margin(self, row: dict[str, Any], definition: dict[str, Any]) -> None:
         """Validate eight prepared QTD legs without calculating the producer ratio."""
@@ -712,10 +746,15 @@ class QuarterlyScreeningMetricReader:
                     for role, metric in (("NUMERATOR", numerator), ("DENOMINATOR", "quarter_revenue"))]
         lineage = row["source_lineage"]
         inputs = lineage.get("derivation_inputs")
+        arithmetic = self.manifest.get("catalog_version") == ARITHMETIC_CATALOG
+        basis_contract = TTM_BASIS_POLICY if arithmetic else "ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"
+        expected_assurance = (self._verify_ttm_basis(row, inputs, definition)
+                              if isinstance(inputs, list) and len(inputs) == 8 and arithmetic
+                              else "ARITHMETIC_ONLY_NOT_RECAST_VALIDATED")
         if (numerator is None or contract.get("version") != "quarter-derived-input-scope-v1"
             or contract.get("inputs") != expected or contract.get("denominator_policy") != "STRICTLY_POSITIVE"
-            or contract.get("basis_policy") != "ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"
-            or lineage.get("compatibility_policy") != contract["basis_policy"]
+            or contract.get("basis_policy") != basis_contract
+            or lineage.get("compatibility_policy") != expected_assurance
             or lineage.get("derivation_rule_version") != definition.get("rule_version")
             or definition.get("unit_kind") != "PERCENT" or row["unit"] != "PERCENT"
             or definition.get("canonical_value_scale") != "1"
@@ -917,7 +956,7 @@ class QuarterlyScreeningMetricReader:
             source["filed_date"]
         ):
             raise ValueError("quarterly source period is after filing")
-        if (self.manifest.get("catalog_version") == EXPANDED_CATALOG
+        if (self.manifest.get("catalog_version") in _EXPANDED_CATALOGS
             and source.get("source_kind") == "REPORTED"
             and not _typed_statement_source(source)
             and not (source_metric == "quarter_debt" and _direct_combined_debt(source))):

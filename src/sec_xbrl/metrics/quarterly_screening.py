@@ -251,6 +251,8 @@ TTM_DEFINITION = {
 
 LEGACY_DEFINITIONS = (*REPORTED_DEFINITIONS, *GENERIC_DEFINITIONS, TTM_DEFINITION)
 CATALOG_VERSION = "quarterly-investor-41-v1"
+ARITHMETIC_CATALOG_VERSION = "quarterly-investor-41-arithmetic-ttm-v2"
+TTM_BASIS_POLICY = "DECLARED_EQUAL_OR_ALL_NULL_ARITHMETIC_V1"
 
 # Existing definitions retain their exact identities. Added duration rows consume
 # the same already-approved reported/M8 prepared values, never SEC packages.
@@ -341,6 +343,29 @@ METRIC_DEFINITIONS = (*REPORTED_DEFINITIONS, *GENERIC_DEFINITIONS,
 DEFINITION_BY_ID = {row["metric_id"]: row for row in METRIC_DEFINITIONS}
 
 
+ARITHMETIC_METRIC_DEFINITIONS = tuple(
+    {**copy.deepcopy(row),
+     "definition_version": row["definition_version"].removesuffix("-v1") + "-arithmetic-v2",
+     "rule_version": row["rule_version"].removesuffix("-v1") + "-arithmetic-v2",
+     "basis_policy": TTM_BASIS_POLICY,
+     "description": ("최근4분기의 항목 합계를 매출 합계로 나눈 비율입니다. " if "input_contract" in row
+                     else "최근4분기 공시 금액의 산술 합계입니다. ") + "회계기준 변경을 조정한 비교 수치는 아닙니다.",
+     **({"input_contract": {**copy.deepcopy(row["input_contract"]), "basis_policy": TTM_BASIS_POLICY}}
+        if "input_contract" in row else {})}
+    if row["observation_basis"] == "TTM" else copy.deepcopy(row)
+    for row in METRIC_DEFINITIONS
+)
+
+
+def quarterly_metric_definitions(catalog_version: str = CATALOG_VERSION) -> tuple[dict[str, Any], ...]:
+    """Select an explicit immutable policy catalog; default stays strict."""
+    if catalog_version == CATALOG_VERSION:
+        return METRIC_DEFINITIONS
+    if catalog_version == ARITHMETIC_CATALOG_VERSION:
+        return ARITHMETIC_METRIC_DEFINITIONS
+    raise ValueError("unsupported quarterly metric catalog")
+
+
 @dataclass(frozen=True, slots=True)
 class QuarterlyMetricPublication:
     root: Path
@@ -369,7 +394,7 @@ def publish_quarterly_screening_metrics(
         raise ValueError("annual and quarterly company membership differ")
     generic_identity = _open_generic_identity_parent(annual)
 
-    definitions = copy.deepcopy(list(METRIC_DEFINITIONS))
+    definitions = copy.deepcopy(list(quarterly_metric_definitions(config.get("catalog_version", CATALOG_VERSION))))
     all_observations: list[dict[str, Any]] = []
     all_inventory: list[dict[str, Any]] = []
     sources: list[dict[str, Any]] = []
@@ -384,6 +409,7 @@ def publish_quarterly_screening_metrics(
             financial_as_of=config["financial_as_of"],
             client=client,
             spine=config["global_quarter_spine"],
+            catalog_version=config.get("catalog_version", CATALOG_VERSION),
         )
         all_observations.extend(observations)
         all_inventory.extend(inventory)
@@ -396,7 +422,7 @@ def publish_quarterly_screening_metrics(
     all_inventory.sort(
         key=lambda row: (row["cik"], row["calendar_year"], row["calendar_quarter"])
     )
-    support = _support_rows(config["companies"], all_observations)
+    support = _support_rows(config["companies"], all_observations, definitions=definitions)
     membership_hash = _membership_hash(configured_ciks)
     annual_parent = {
         "schema_version": "screening-metric-publication-v1",
@@ -451,7 +477,7 @@ def publish_quarterly_screening_metrics(
         }
         manifest = {
             "schema_version": VERSION,
-            "catalog_version": CATALOG_VERSION,
+            "catalog_version": config.get("catalog_version", CATALOG_VERSION),
             "publication_id": publication_id,
             "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             "fixture_kind": config["fixture_kind"],
@@ -539,10 +565,8 @@ class QuarterlyMetricReader:
             raise ValueError("quarterly payload file set changed")
         if any(path.is_symlink() for path in self.root.iterdir()):
             raise ValueError("quarterly publication cannot contain symlinks")
-        if self.manifest.get("catalog_version") not in {None, CATALOG_VERSION}:
-            raise ValueError("unsupported quarterly metric catalog")
-        expected_definitions = (METRIC_DEFINITIONS if self.manifest.get("catalog_version") == CATALOG_VERSION
-                                else LEGACY_DEFINITIONS)
+        catalog = self.manifest.get("catalog_version")
+        expected_definitions = (quarterly_metric_definitions(catalog) if catalog is not None else LEGACY_DEFINITIONS)
         if self.definitions != list(expected_definitions):
             raise ValueError("quarterly definitions differ from governed producer definitions")
         ciks = self.manifest.get("universe", {}).get("ciks")
@@ -616,6 +640,8 @@ class QuarterlyMetricReader:
 def _validate_config(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict) or value.get("schema_version") != CONFIG_VERSION:
         raise ValueError("unsupported quarterly metric config")
+    catalog = value.get("catalog_version", CATALOG_VERSION)
+    quarterly_metric_definitions(catalog)
     financial_as_of = require_string(value.get("financial_as_of"), "financial_as_of")
     date.fromisoformat(financial_as_of)
     companies = value.get("companies")
@@ -652,6 +678,7 @@ def _validate_config(value: Any) -> dict[str, Any]:
         "annual_metric_manifest_sha256": _require_sha(value.get("annual_metric_manifest_sha256"), "annual_metric_manifest_sha256"),
         "global_quarter_spine": copy.deepcopy(expected_spine),
         "companies": sorted(normalized, key=lambda row: row["cik"]),
+        **({"catalog_version": catalog} if catalog != CATALOG_VERSION else {}),
     }
 
 
@@ -770,6 +797,7 @@ def _company_records(
     financial_as_of: str,
     client: Any,
     spine: list[dict[str, Any]],
+    catalog_version: str = CATALOG_VERSION,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     columns = client._records(ticker, VIEW, "columns")
     rows = client._records(ticker, VIEW, "core_rows")
@@ -788,6 +816,7 @@ def _company_records(
         cells=cells,
         traces=traces,
         spine=spine,
+        catalog_version=catalog_version,
     )
 
 
@@ -801,8 +830,10 @@ def build_quarterly_company_records(
     cells: list[dict[str, Any]],
     traces: list[dict[str, Any]],
     spine: list[dict[str, Any]],
+    catalog_version: str = CATALOG_VERSION,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Build one company's fixed-spine records from already prepared data."""
+    definitions = quarterly_metric_definitions(catalog_version)
     ticker = require_ticker(ticker, "ticker")
     cik = require_cik(cik, "cik")
     date.fromisoformat(financial_as_of)
@@ -899,7 +930,7 @@ def build_quarterly_company_records(
                     fiscal_conflicts.add(coordinate)
                 else:
                     fiscal_index[coordinate] = row
-    for definition in (*TTM_DEFINITIONS, *TTM_MARGIN_DEFINITIONS):
+    for definition in (row for row in definitions if row["observation_basis"] == "TTM"):
         for bucket in spine:
             key = (bucket["calendar_year"], bucket["calendar_quarter"])
             row = (_ttm_margin_observation if definition.get("input_contract") else _ttm_observation)(
@@ -1995,8 +2026,14 @@ def _ttm_observation(
             reasons.append("INPUTS_NOT_COMPATIBLE")
         bases = [row.get("basis_version") for row in prepared]
         if (
-            any(not isinstance(value, str) or not value for value in bases)
-            or len(set(bases)) != 1
+            (any(not isinstance(value, str) or not value for value in bases)
+             or len(set(bases)) != 1)
+            and not (definition.get("basis_policy") == TTM_BASIS_POLICY and all(value is None for value in bases))
+        ):
+            reasons.append("INPUTS_NOT_COMPATIBLE")
+        if definition.get("basis_policy") == TTM_BASIS_POLICY and any(
+            row.get("period_class") != "QTD_3M" or not 75 <= (_duration_days(row.get("period_start"), row.get("period_end")) or 0) <= 105
+            for row in prepared
         ):
             reasons.append("INPUTS_NOT_COMPATIBLE")
         for field in (
@@ -2030,7 +2067,8 @@ def _ttm_observation(
         inputs=copy.deepcopy(prepared),
         value=value,
         basis_version=prepared[0]["basis_version"],
-        compatibility_policy="DECLARED_BASIS:" + prepared[0]["basis_version"],
+        compatibility_policy=(ARITHMETIC_POLICY if prepared[0]["basis_version"] is None
+                              else "DECLARED_BASIS:" + prepared[0]["basis_version"]),
     )
 
 
@@ -2040,11 +2078,14 @@ def _ttm_margin_observation(
     fiscal_index: dict[tuple[str, int, str], dict[str, Any]],
     inventory: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    template = (next(row for row in ARITHMETIC_METRIC_DEFINITIONS if row["metric_id"] == "ttm_revenue")
+                if definition.get("basis_policy") == TTM_BASIS_POLICY else TTM_DEFINITION)
     aggregates = [
         _ttm_observation(
             ticker=ticker, cik=cik, financial_as_of=financial_as_of, bucket=bucket,
-            definition={**TTM_DEFINITION, "metric_id": "ttm_" + item["metric_id"].removeprefix("quarter_"),
-                        "input_metric_id": item["metric_id"]},
+            definition={**template, "metric_id": "ttm_" + item["metric_id"].removeprefix("quarter_"),
+                        "input_metric_id": item["metric_id"],
+                        **({"basis_policy": TTM_BASIS_POLICY} if definition.get("basis_policy") == TTM_BASIS_POLICY else {})},
             current_by_bucket=current_by_bucket, fiscal_index=fiscal_index, inventory=inventory,
         ) for item in definition["input_contract"]["inputs"]
     ]
@@ -2070,7 +2111,10 @@ def _ttm_margin_observation(
         ticker=ticker, cik=cik, financial_as_of=financial_as_of, definition=definition,
         bucket=bucket, current=inputs[3], inputs=inputs,
         value=_decimal_string(_percentage(Decimal(numerator["value"]), Decimal(denominator["value"]), subtract_one=False)),
-        basis_version=inputs[0]["basis_version"], compatibility_policy=ARITHMETIC_POLICY,
+        basis_version=inputs[0]["basis_version"],
+        compatibility_policy=("DECLARED_BASIS:" + inputs[0]["basis_version"]
+            if definition.get("basis_policy") == TTM_BASIS_POLICY and inputs[0]["basis_version"] is not None
+            else ARITHMETIC_POLICY),
     )
     record["source_lineage"]["period_sums"] = {"NUMERATOR": numerator["value"], "DENOMINATOR": denominator["value"]}
     record["observation_id"] = _observation_id(record)
@@ -2280,10 +2324,16 @@ def main(argv: list[str] | None = None) -> int:
     publish = subparsers.add_parser("publish")
     publish.add_argument("--config", type=Path, required=True)
     publish.add_argument("--destination", type=Path, required=True)
+    publish.add_argument("--catalog-version", choices=(CATALOG_VERSION, ARITHMETIC_CATALOG_VERSION),
+                         help="Require the same explicit catalog selection in --config; omission preserves the config/default policy")
     status = subparsers.add_parser("status")
     status.add_argument("--publication", type=Path, required=True)
     args = parser.parse_args(argv)
     if args.command == "publish":
+        if args.catalog_version is not None:
+            configured = _validate_config(read_json(args.config, "quarterly metric config")).get("catalog_version", CATALOG_VERSION)
+            if configured != args.catalog_version:
+                parser.error("--catalog-version must match config.catalog_version (default is strict)")
         result = publish_quarterly_screening_metrics(args.config, args.destination)
         print(canonical_json({"publication_id": result.publication_id, "root": str(result.root)}))
     else:

@@ -686,3 +686,158 @@ Optional operator records are
 `work/quarterly50_expansion_20261025/lead_baseline_quarterly_connection_acceptance.json`.
 They supplement this tracked, self-contained status and are not prerequisites or
 sole authority for understanding scope, acceptance or outstanding decisions.
+
+## 2026-10-28 approved arithmetic TTM version — implementation contract
+
+The user explicitly selected “산술 TTM을 별도 버전으로 제공 (권장)” and authorized
+the recommended execution sequence. This resolves the required policy choice;
+implementation, independent verification, actual latest execution and release
+remain separate states. The sole writer implements a new
+`quarterly-investor-41-arithmetic-ttm-v2` catalog. Existing strict17/41 definitions,
+versions, saved results and their exact meaning remain unchanged. Rewriting the
+strict catalog would have a smaller immediate diff but would change historical
+contracts; it is rejected in favor of explicit version selection.
+
+Acceptance: all nine TTM definitions receive new definition/rule identities and
+an explicit declared-equal-or-all-null arithmetic basis policy. Four consecutive
+actual fiscal QTD observations must match CIK, selected view/cutoff, unit,
+dimensions, semantic item identity/mapping and compatible versions. Equal
+nonempty basis retains declared-basis assurance; four null bases may use only
+ARITHMETIC_ONLY_NOT_RECAST_VALIDATED, preserving null basis_version. Mixed,
+empty or mismatched basis and explicit recast, continuity, structural, review or
+quality problems remain unavailable. FCF requires compatible CFO and CAPEX
+components in all four quarters. TTM margins are ratios of four-quarter sums.
+Missing input, QTD/YTD confusion, balance summation, FY+YTD fallback and consumer
+or UI calculation remain prohibited.
+
+The producer owns arithmetic; consumer readers verify the new declared catalog,
+input contracts and complete source/derived lineage. New publication selection
+is explicit via config/catalog API; default remains strict. User-facing text is
+“최근4분기” and a brief arithmetic-basis explanation, retaining saved-context
+reopen behavior. Focused positive/negative, mixed-leg, consumer and legacy tests
+plus a small reused fixture strict/new comparison precede freeze. Completed
+company audits and full cached-history preparation are not repeated. Relevant
+code/source compatibility registries must be freshly approved against the final
+source before latest12/38 operations; original registries and receipts stay fixed.
+
+### Arithmetic catalog implementation and exact operator interface
+
+Source changes are limited to the quarterly producer/catalog and its read-only
+quarterly consumer. The existing service forwards definition.description, so no
+front-end or source API patch is needed. Definitions describe “최근4분기” with a
+brief arithmetic-only explanation; margins explicitly describe an item-sum over
+revenue-sum ratio. No fabricated basis_version is emitted.
+
+Select the new version in a NEW quarterly publisher config; preserve original
+configs, publications, dataset entries and saved journals:
+
+```json
+{
+  "schema_version": "quarterly-screening-metric-config-v1",
+  "catalog_version": "quarterly-investor-41-arithmetic-ttm-v2",
+  "financial_as_of": "2026-10-25",
+  "source_commit_sha": "<final frozen 40-character source SHA>",
+  "annual_metric_root": "<new exact-cutoff annual metric root>",
+  "annual_metric_manifest_sha256": "<that annual manifest SHA256>",
+  "companies": [
+    {
+      "ticker": "<ticker>",
+      "cik": "<10-digit CIK>",
+      "analysis_root": "<new current-cutoff prepared quarterly analysis root>",
+      "analysis_manifest_sha256": "<that analysis manifest SHA256>"
+    }
+  ]
+}
+```
+
+```sh
+python -m sec_xbrl.metrics.quarterly_screening publish \
+  --config NEW-quarterly-config.json --destination NEW-quarterly-publication \
+  --catalog-version quarterly-investor-41-arithmetic-ttm-v2
+python -m sec_xbrl.metrics.quarterly_screening status \
+  --publication NEW-quarterly-publication
+```
+
+The optional CLI flag asserts the same selection as config.catalog_version;
+a mismatch fails before publication. Omitting the config selector preserves
+strict `quarterly-investor-41-v1`. The Python publication API is unchanged:
+`publish_quarterly_screening_metrics(config_path, destination)`. The small pure
+prepared-input API accepts
+`build_quarterly_company_records(..., catalog_version=ARITHMETIC_CATALOG_VERSION)`;
+`quarterly_metric_definitions(ARITHMETIC_CATALOG_VERSION)` returns its exact
+41 declarations. Neither API selects SEC filings or rebuilds History.
+
+The nine TTM definitions declare
+`basis_policy=DECLARED_EQUAL_OR_ALL_NULL_ARITHMETIC_V1`. Amounts use
+`definition_version=quarter-ttm-arithmetic-v2` and
+`rule_version=quarter-ttm-contiguous-arithmetic-v2`. The four margins use
+`quarter-ttm-{gross|operating|net|fcf}-margin-arithmetic-v2` for both identities.
+Equal nonempty basis has `DECLARED_BASIS:<original basis>` assurance; all-null
+basis has `ARITHMETIC_ONLY_NOT_RECAST_VALIDATED` assurance and retains null.
+All other 32 definitions and their observation payloads are unchanged. The
+consumer requires the exact new catalog/version/basis contract, checks every
+raw/derived dependency and scope, and never recalculates the published sum or
+ratio. Rehashed policy downgrades, invented assurance, nested FCF basis/quality
+corruption and YTD legs reject. Existing saved dataset context remains pinned;
+new TTM execution uses its new definition version and a new publication.
+
+### Reuse boundaries and source freeze sequencing
+
+This change does not modify the relevant History/analysis policy modules hashed
+by financial_storage_policy_sources or prospective_policy_sources. ROOT can
+compare those exact helper outputs when assembling the final pinned
+compatibility artifacts; no compatibility meaning is inferred from a version
+label and no original registry or receipt is edited. Existing prepared analyses
+and approved storage evidence remain reusable under their existing exact byte,
+profile, review, completeness and policy proof contracts.
+
+The actual History.validate and T1–T4 producer code identities still hash the
+whole source package, so these two changed Python modules change those identities.
+Bind the final frozen source to the latest12 migration options and generate
+current routine validation reports/ROOT approvals after the final freeze, before
+quality consumers reuse them. Actual latest12/38 preparation was held before this
+change, so no just-completed build must be repeated. New actual artifacts,
+current/old-collection storage registries, prospective selection/configs and
+quarterly publications remain ROOT-owned and must bind the final source and exact
+2026-10-25 selection cutoff as appropriate.
+
+ROOT's 2026-10-28 fresh submissions discovery fetched all 50 companies and compared
+all 5,842 candidate filing records, including older filings, with the preserved
+2026-10-25 snapshots: inventories were identical. The ready 1109-filing canonical
+collection therefore retains selection cutoff 2026-10-25; freshness observation
+2026-10-28 is separate. No new Raw extraction or old company audit follows from
+that unchanged inventory.
+
+### Small reused-fixture evidence and remaining acceptance
+
+On the existing 15-quarter prepared fixture with all basis values null, strict
+TTM stays unavailable while all nine new TTM metrics are available. At 2026Q3 the
+new values are revenue1000, operating income55, net income40, CFO160, standardized
+FCF120; margins are gross30%, operating5.5%, net4%, FCF12%. Gross margin uses
+300/1000, rather than the 25% mean of quarterly percentages. Quarter-end cash
+remains40 and is never summed. Eligible M8-derived Q4 retains its two complete
+reported anchors and actual 1200 four-quarter revenue sum. This is small-fixture
+source evidence, not an AMD actual-data or 50-company readiness assertion.
+
+Direct comparison against accepted source e0b6/d359 confirmed identical strict17
+and strict41 definitions and identical null-basis strict observations/inventory.
+The frozen strict41 definition digest is
+`1e1a64235d1b39eca4fe4a45b3362b94764a2d89836e637a234810d1b5aae25c`;
+that strict fixture result digest is
+`c5183a7e9ed2b5ca42ba70c47c11decfbcb97e7f8659050aec1b7069f3ce2903`.
+New config/CLI selection, both readers, new TTM screening/trace/eight-quarter
+series and old saved-result context are covered by focused tests. Producer and
+consumer retain the existing decimal, money, sign, source-eligibility, bounded
+lineage and denominator policies. Actual latest12/38 execution, independent
+verification, local release acceptance and main merge are still separate and
+pending; the 2026-10-28 user decision authorizes this implementation, not an
+unmeasured actual performance/readiness claim.
+
+Writer validation: new arithmetic-catalog focused tests **29 PASS in 6.63 s**;
+existing quarterly41/legacy tests **26 PASS in 5.82 s**. Public config/CLI and
+saved-context checks are included in the new set. Accepted strict-source direct
+equality and golden checks PASS; Ruff/diff and changed-document links PASS.
+No large screening suite, old company audit, actual AMD data revalidation, Raw
+parse or actual latest12/38 operator was run by the writer. This is IMPLEMENTED
+and SELF_VERIFIED source pending ROOT's separate independent review and actual
+operator acceptance.
