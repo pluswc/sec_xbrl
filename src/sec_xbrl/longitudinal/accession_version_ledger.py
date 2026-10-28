@@ -48,7 +48,7 @@ class AccessionVersionLedgerPipeline:
 
     dataset = "accession_version_ledger"
 
-    def publish(self, release: CorpusRelease, *, output_root: Path) -> AccessionVersionLedgerResult:
+    def publish(self, release: CorpusRelease, *, output_root: Path, _effective_filings: dict | None = None) -> AccessionVersionLedgerResult:
         if not isinstance(release, CorpusRelease):
             raise AccessionVersionLedgerError("T4-A requires an explicit CorpusRelease")
         inputs_by_cik: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -64,6 +64,8 @@ class AccessionVersionLedgerPipeline:
                 for key in ("accession", "form", "filed_date", "report_date")
             ):
                 raise AccessionVersionLedgerError("snapshot filing provenance disagrees with declared input")
+            if _effective_filings is not None:
+                filing = _effective_filings[snapshot.input.snapshot_id]
             inputs_by_cik[snapshot.input.cik].append(
                 {
                     "filing": filing,

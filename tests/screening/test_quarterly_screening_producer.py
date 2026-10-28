@@ -1003,9 +1003,9 @@ def test_immutable_publication_roundtrip_and_payload_tamper(
     assert status == {
         "publication_id": published.publication_id,
         "companies": 1,
-        "definitions": 17,
-        "support": 17,
-        "observations": 136,
+        "definitions": 41,
+        "support": 41,
+        "observations": 328,
         "period_inventory": 8,
     }
 

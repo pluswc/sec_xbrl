@@ -52,7 +52,7 @@ class HistoryAppendReusePlan:
 
 def prepare_history_append(
     *, previous_history: Path, release: CorpusRelease, views: tuple[str, ...],
-    migration_evidence: Path | None = None,
+    migration_evidence: Path | None = None, effective_filings: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> HistoryAppendReusePlan:
     """Prove an immutable input prefix and prepare one shared canonical map."""
     previous_history = Path(previous_history).absolute()
@@ -113,14 +113,14 @@ def prepare_history_append(
     _verify_mapping_prefix(previous_t1, mappings, old_inputs)
     old_focus_keys = _focus_keys(previous_t1.records("reported_period_observation"))
     del previous_t1
-    filing_by_id, ledger_inputs_by_cik = _small_release_state(release)
+    filing_by_id, ledger_inputs_by_cik = _small_release_state(release, effective_filings=effective_filings)
     old_snapshot_ids = frozenset(item.snapshot_id for item in old_inputs)
     new_snapshots = tuple(
         snapshot for snapshot in release.snapshots if snapshot.input.snapshot_id not in old_snapshot_ids
     )
     if tuple(snapshot.input for snapshot in new_snapshots) != (new_input,):
         raise HistoryAppendReuseError("new snapshot does not match the declared suffix")
-    dirty, new_focus_keys = _dirty_period_classes_and_focus_keys(new_snapshots)
+    dirty, new_focus_keys = _dirty_period_classes_and_focus_keys(new_snapshots, effective_filings=effective_filings)
     new_filings = tuple(_one_filing(snapshot) for snapshot in new_snapshots)
     new_filing_ids = frozenset(str(row["filing_id"]) for row in new_filings)
     quarter_fast_input_proven = bool(
@@ -204,7 +204,7 @@ def publish_append_roots(
             t1[dataset].extend(dict(row) for row in rows)
     materializer = PeriodObservationMaterializer()
     for snapshot in plan.new_snapshots:
-        filing = _one_filing(snapshot)
+        filing = plan.filing_by_id[str(_one_filing(snapshot)["filing_id"])]
         result = materializer.materialize(
             filing=filing,
             concepts=snapshot.records("concept"),
@@ -409,7 +409,7 @@ def _canonical_mappings(release: CorpusRelease) -> dict[str, MappingTables]:
 
 
 def _small_release_state(
-    release: CorpusRelease,
+    release: CorpusRelease, *, effective_filings: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, tuple[dict[str, Any], ...]]]:
     """Retain only filing and amendment inputs after Raw prefix proof completes."""
     from sec_xbrl.longitudinal.accession_version_ledger import _amendment_evidence
@@ -417,7 +417,7 @@ def _small_release_state(
     filing_by_id: dict[str, dict[str, Any]] = {}
     ledger: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for snapshot in release.snapshots:
-        filing = _one_filing(snapshot)
+        filing = dict(effective_filings[snapshot.input.snapshot_id]) if effective_filings is not None else _one_filing(snapshot)
         filing_by_id[str(filing["filing_id"])] = filing
         ledger[snapshot.input.cik].append(
             {
@@ -598,14 +598,14 @@ def _focus_suffix_is_later(
 
 
 def _dirty_period_classes_and_focus_keys(
-    snapshots: Sequence[CorpusSnapshot],
+    snapshots: Sequence[CorpusSnapshot], *, effective_filings: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> tuple[set[str], frozenset[tuple[str, int, int | None, str]]]:
     from sec_xbrl.longitudinal.period_observation import PeriodObservationMaterializer
 
     dirty: set[str] = set()
     focus: list[dict[str, Any]] = []
     for snapshot in snapshots:
-        filing = _one_filing(snapshot)
+        filing = effective_filings[snapshot.input.snapshot_id] if effective_filings is not None else _one_filing(snapshot)
         result = PeriodObservationMaterializer().materialize(
             filing=filing,
             concepts=snapshot.records("concept"),

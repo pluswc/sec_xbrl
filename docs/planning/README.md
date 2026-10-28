@@ -1,5 +1,17 @@
 # 계획 등록부 — 단일 진입점
 
+2026-10-28 정책 결정: 사용자가 **산술 TTM을 별도 버전으로 제공**을 승인했다.
+[50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의
+`quarterly-investor-41-arithmetic-ttm-v2` 구현은 기존 strict17/41를 보존하고,
+명시적으로 선택한 새 버전에서만 all-null basis 네 분기의 산술 합계·합계비율을
+허용한다. 별도 assurance와 새 정의 버전, 생산자 계산·소비자 계보 검증을 적용한다.
+이로써 아래 2026-10-26의 필수 정책 선택 대기는 해결됐지만 독립 검증과 actual latest12/38
+실행·release 인수는 별도 대기다. 10-28 공시 freshness의 전체 5,842 후보 inventory가
+10-25와 같아 기존 1109 filings의 선택 cutoff 10-25를 유지한다.
+
+
+2026-10-26 갱신: [50사 분기·TTM·스크리닝 확대](../implementation/quarterly50-investor-expansion-20261025.md)의 source `d3591dccf1287c7231221372d6c80b8675209ad2`는 독립 repair/UI PASS 뒤 ROOT가 source/synthetic 로컬 수락했다. Baseline `1edec6d8ad682ae2dabb82b02b9986068d91e7e4`의 6단계 실제 연결과 private 50사 분기·YoY 생성/재시작 재열기·기존 21사 context 재열기는 PASS다. Front `d359`를 baseline backend `1edec6`에 overlay한 1464/768/390px 기간표·4종 basis caption 확인도 PASS지만 latest end-to-end 인수는 아니다. 실제 TTM은 basis 증거 부재로 가용 0이며 실행·release 미수락이다. **필수 사용자 TTM 정책 선택 대기**이며, 이후 source 변경으로 global code identity 검사를 반복하지 않도록 latest12 History와 prospective38 실행은 아직 시작하지 않았다. Latest12 Raw·latest50 metadata·1109 intakes·package view는 준비됐다. Live21/catalog/journal은 보존됐고 main 병합·push는 하지 않았다.
+
 2026-10-25 운영 후속: [21사 screening main runtime 전환](../implementation/screening21-main-runtime-20261025.md)은
 기존 두 catalog entry, SQLite journal과 export를 보존한 채 accepted `main` source로
 전환하는 범위와 private-copy UAT·rollback 경계를 기록한다. 실제 전환 결과와 운영

@@ -50,10 +50,10 @@ _RECORD_WRITE_BATCH_SIZE = 32
 _RECORD_WRITE_BATCH_BYTES = 8 * 1024 * 1024
 
 
-def _history_layer2_rule_versions() -> Layer2RuleVersions:
+def _history_layer2_rule_versions(correction_sha256: str | None = None) -> Layer2RuleVersions:
     """Declare the active policies in every newly built history run."""
     return Layer2RuleVersions(
-        "period-fiscal-boundaries-v2",
+        "period-fiscal-boundaries-v2" + (f"+fiscal-focus:{correction_sha256}" if correction_sha256 else ""),
         MAPPING_VERSION,
         "recast-v1",
         "selection-v1",
@@ -396,7 +396,10 @@ def build_history(*, intake_manifest: Path, output_root: Path,
                   views: tuple[str, ...] = ("AS_FILED", "LATEST_REPORTED"), roots_only: bool = False,
                   validation_mode: str = "routine", validation_state_root: Path | None = None,
                   previous_history: Path | None = None,
-                  previous_reuse_evidence: Path | None = None) -> Path:
+                  previous_reuse_evidence: Path | None = None,
+                  require_append_reuse: bool = False,
+                  fiscal_focus_corrections: Path | None = None,
+                  expected_fiscal_focus_corrections_sha256: str | None = None) -> Path:
     """Publish all history once; materialize fiscal pivots for offline reload."""
     from sec_xbrl.analytics import (
         CompanyAnalysisPanelBuilder,
@@ -416,6 +419,16 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     )
     if not views or len(set(views)) != len(views) or set(views) - {"AS_FILED", "LATEST_REPORTED"}:
         raise ValueError("views must be distinct AS_FILED/LATEST_REPORTED")
+    if type(require_append_reuse) is not bool or (require_append_reuse and previous_history is None):
+        raise ValueError("required append reuse needs an explicit previous history")
+    if (fiscal_focus_corrections is None) != (expected_fiscal_focus_corrections_sha256 is None):
+        raise ValueError("correction path and expected SHA-256 must be provided together")
+    correction_registry = None
+    if fiscal_focus_corrections is not None:
+        from sec_xbrl.longitudinal.fiscal_focus_correction import FiscalFocusCorrectionRegistry
+        correction_registry = FiscalFocusCorrectionRegistry.load(
+            fiscal_focus_corrections, expected_sha256=expected_fiscal_focus_corrections_sha256,
+        )
     intake = json.loads(intake_manifest.read_text())
     _validate_intake(intake)
     plan = intake["plan"]
@@ -426,10 +439,17 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     release = CohortReleaseAdapter().load(
         tuple(CohortSource(root, root.name, tuple(refs)) for root, refs in grouped.items()),
         cohort_id=run_id, ciks=tuple(company["cik"] for company in plan["companies"]), run_version=run_id,
-        rules=_history_layer2_rule_versions(),
+        rules=_history_layer2_rule_versions(expected_fiscal_focus_corrections_sha256),
     )
     planned = {(item["filing"]["cik"], item["filing"]["accession"]): item["filing"] for item in intake["filings"]}
     _validate_release_snapshot_plans(release, planned)
+    effective_filings = None
+    if correction_registry is not None:
+        effective_filings = {
+            snapshot.input.snapshot_id: correction_registry.apply(snapshot, snapshot.records("filing")[0])
+            for snapshot in release.snapshots
+        }
+        correction_registry.require_all_consumed()
     input_fingerprint = release.layer2_run.fingerprint
     snapshot_count = len(release.snapshots)
     reader = Layer2PublicationReader()
@@ -445,11 +465,15 @@ def build_history(*, intake_manifest: Path, output_root: Path,
         try:
             append_plan = prepare_history_append(
                 previous_history=previous_history, release=release, views=views,
-                migration_evidence=previous_reuse_evidence,
+                migration_evidence=previous_reuse_evidence, effective_filings=effective_filings,
             )
         except (HistoryAppendReuseError, OSError, ValueError) as exc:
+            if require_append_reuse:
+                raise HistoryAppendReuseError("required append reuse failed; full fallback prohibited") from exc
             append_fallback = f"{type(exc).__name__}: {exc}"
             print(json.dumps({"stage": "HISTORY_APPEND_FULL_FALLBACK", "reason": append_fallback}), flush=True)
+    if require_append_reuse and append_plan is None:
+        raise ValueError("required append reuse needs a new output root with no existing operational roots")
     destination = output_root / "reported-panels"
     if destination.exists() and not roots_only:
         history_reader = HistoryPublicationReader(destination)
@@ -523,7 +547,7 @@ def build_history(*, intake_manifest: Path, output_root: Path,
         gc.collect()
     elif not roots["t1"].exists():
         print(json.dumps({"stage": "BUILD_T1"}), flush=True)
-        VersionedObservationPanelPipeline().publish(release, output_root=output_root / "t1")
+        VersionedObservationPanelPipeline().publish(release, output_root=output_root / "t1", _effective_filings=effective_filings)
     if append_plan is None and not roots["t2"].exists():
         print(json.dumps({"stage": "BUILD_T2"}), flush=True)
         FilingRelationshipIndexPipeline().publish(release, output_root=output_root / "t2")
@@ -534,7 +558,7 @@ def build_history(*, intake_manifest: Path, output_root: Path,
         ExplorationGraphPipeline().publish(observations, relationships, output_root=output_root / "t3")
     if append_plan is None and not roots["t4"].exists():
         print(json.dumps({"stage": "BUILD_T4"}), flush=True)
-        AccessionVersionLedgerPipeline().publish(release, output_root=output_root / "t4")
+        AccessionVersionLedgerPipeline().publish(release, output_root=output_root / "t4", _effective_filings=effective_filings)
     graph = reader.load(roots["t3"])
     ledger_pub = reader.load(roots["t4"])
     _validate_active_publications(
@@ -549,7 +573,9 @@ def build_history(*, intake_manifest: Path, output_root: Path,
     filing_by_id = (
         append_filing_by_id
         if append_filing_by_id is not None
-        else {str(row["filing_id"]): row for row in release.records("filing")}
+        else {str(row["filing_id"]): row for row in (
+            effective_filings.values() if effective_filings is not None else release.records("filing")
+        )}
     )
     # T1-T4 have been validated against the active run fingerprint, and the
     # only remaining release data needed by reported panels is the small
@@ -2358,6 +2384,9 @@ def main() -> None:
     build.add_argument("--validation-state-root", type=Path)
     build.add_argument("--previous-history", type=Path)
     build.add_argument("--previous-reuse-evidence", type=Path)
+    build.add_argument("--require-append-reuse", action="store_true")
+    build.add_argument("--fiscal-focus-corrections", type=Path)
+    build.add_argument("--expected-fiscal-focus-corrections-sha256")
     query = commands.add_parser("query")
     query.add_argument("--publication", type=Path, required=True)
     query.add_argument("--ticker", required=True)
@@ -2401,6 +2430,9 @@ def main() -> None:
             validation_mode=args.validation_mode, validation_state_root=args.validation_state_root,
             previous_history=args.previous_history,
             previous_reuse_evidence=args.previous_reuse_evidence,
+            require_append_reuse=args.require_append_reuse,
+            fiscal_focus_corrections=args.fiscal_focus_corrections,
+            expected_fiscal_focus_corrections_sha256=args.expected_fiscal_focus_corrections_sha256,
         )
     elif args.command == "repair-coverage":
         result = repair_history_coverage(publication=args.publication, destination=args.destination)

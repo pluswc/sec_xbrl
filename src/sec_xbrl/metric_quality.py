@@ -19,7 +19,13 @@ from typing import Any
 
 from sec_xbrl.collection_operations import read_universe_status
 from sec_xbrl.filing.sec_inline_transforms import _decimal_duration, _week_duration
-from sec_xbrl.history import HISTORY_VERSION, HistoryPublicationReader
+from sec_xbrl.history import HISTORY_VERSION
+from sec_xbrl.history_selection import (
+    HistorySelections,
+    resolve_history_selection,
+    selection_declaration,
+    verify_financial_history_source,
+)
 from sec_xbrl.source_bindings import (
     BINDINGS_NAME,
     DOCUMENTS_NAME,
@@ -123,10 +129,14 @@ def _preflight_quality_inputs(
     provenance = {
         (row["ticker"], row["cik"]): row for row in config["source_provenance"]
     }
+    prospective = _configured_prospective(config, collection_manifest)
+    storage = _configured_storage_reuse(config, collection_manifest, prospective=prospective)
+    selection = _configured_history_selection(config, collection_manifest, storage_reuse=storage)
     readiness = _validate_status(
         collection_manifest=collection_manifest,
         parent_companies=parent,
-        expected_companies=companies,
+        expected_companies=companies, storage_reuse=config.get("storage_reuse"), verified_storage=storage,
+        prospective=prospective,
     )
     _validate_source_provenance(
         collection_manifest=collection_manifest,
@@ -140,6 +150,9 @@ def _preflight_quality_inputs(
         provenance=provenance,
         financial_as_of=config["financial_as_of"],
         readiness=readiness,
+        selection=selection,
+        storage_reuse=storage,
+        prospective=prospective,
     )
 
 
@@ -175,10 +188,14 @@ def publish_generic_metric_quality(
         raise ValueError("generic quality scope is outside parent collection")
     if config["financial_as_of"] != request.get("as_of_date"):
         raise ValueError("generic quality cutoff differs from collection")
+    prospective = _configured_prospective(config, collection_manifest)
+    storage = _configured_storage_reuse(config, collection_manifest, prospective=prospective)
+    selection = _configured_history_selection(config, collection_manifest, storage_reuse=storage)
     readiness = _validate_status(
         collection_manifest=collection_manifest,
         parent_companies=parent_companies,
-        expected_companies=companies,
+        expected_companies=companies, storage_reuse=config.get("storage_reuse"), verified_storage=storage,
+        prospective=prospective,
     )
     _validate_source_provenance(
         collection_manifest=collection_manifest,
@@ -192,6 +209,9 @@ def publish_generic_metric_quality(
         provenance=provenance,
         financial_as_of=config["financial_as_of"],
         readiness=readiness,
+        selection=selection,
+        storage_reuse=storage,
+        prospective=prospective,
     )
 
     bindings = SourceBindingsV2Reader(Path(source_binding_publication))
@@ -270,6 +290,12 @@ def publish_generic_metric_quality(
             for row in readiness
         },
     }
+    if selection is not None:
+        evidence_hashes["history_selection_controls"] = selection.controls
+    if storage is not None:
+        evidence_hashes["storage_reuse_controls"] = storage.controls
+    if prospective is not None:
+        evidence_hashes["prospective_selection_controls"] = prospective.controls
     parser_profiles = bindings.manifest["parser_profiles"]
     staging = destination.parent / f".{destination.name}.partial-{uuid.uuid4().hex}"
     try:
@@ -309,6 +335,14 @@ def publish_generic_metric_quality(
             "evidence_hashes": evidence_hashes,
             "files": {REPORT_NAME: _file_declaration(report_path)},
         }
+        if prospective is not None:
+            manifest["prospective_selection"] = prospective.declaration
+            manifest["prospective_history_evidence"] = prospective.companies
+        if storage is not None:
+            manifest["storage_reuse"] = storage.declaration
+        if selection is not None:
+            manifest["history_selection"] = selection.declaration
+            manifest["selected_history_evidence"] = selection.companies
         manifest["publication_id"] = "generic-metric-quality-" + hashlib.sha256(
             _canonical_json(manifest).encode("utf-8")
         ).hexdigest()[:24]
@@ -409,7 +443,11 @@ class GenericMetricQualityReader:
             != [row["ticker"] for row in companies]
             or any(
                 not isinstance(row, dict)
-                or row.get("state") != "READY"
+                or (row.get("state") != "READY" and not (
+                    self.manifest.get("prospective_selection") is not None
+                    and row.get("state") == "RAW_COMPLETE"
+                    and row.get("history_selection_status") == "SELECTION_EQUIVALENT"
+                    and row.get("build_evidence_kind") == "ORIGIN_ACCEPTED_HISTORY"))
                 or row.get("selected_filings") != row.get("held_filings")
                 or row.get("pending_filings") != 0
                 or row.get("failed_filings") != 0
@@ -509,6 +547,12 @@ class GenericMetricQualityReader:
             "history_manifests",
             "collection_build_manifests",
         }
+        if self.manifest.get("history_selection") is not None:
+            expected_evidence.add("history_selection_controls")
+        if self.manifest.get("storage_reuse") is not None:
+            expected_evidence.add("storage_reuse_controls")
+        if self.manifest.get("prospective_selection") is not None:
+            expected_evidence.add("prospective_selection_controls")
         if not isinstance(evidence, dict) or set(evidence) != expected_evidence:
             raise ValueError("generic metric quality evidence proof is invalid")
         _validate_evidence_declarations(evidence, expected_tickers=set(histories))
@@ -570,6 +614,8 @@ class GenericMetricQualityReader:
         history_manifest_sha256s: dict[str, str],
         financial_as_of: str,
         expected_companies: tuple[dict[str, str], ...],
+        _verified_storage_reuse: Any = None,
+        _verified_prospective_selection: Any = None,
     ) -> dict[str, Any]:
         """Reopen the exact parent collection, histories, source bytes, and Raw."""
         collection_manifest = _regular_file(collection_manifest, "collection manifest")
@@ -596,10 +642,23 @@ class GenericMetricQualityReader:
             or _sha256(request_path) != self.manifest.get("collection_request_sha256")
         ):
             raise ValueError("generic metric quality parent collection differs")
+        config_declaration = evidence.get("config")
+        if not isinstance(config_declaration, dict):
+            raise TypeError("generic quality config evidence is invalid")
+        config = _load_config(Path(str(config_declaration.get("path"))))
+        if _verified_prospective_selection is not None:
+            from sec_xbrl.prospective_selection import checked_prospective_selection
+            prospective = checked_prospective_selection(_verified_prospective_selection,
+                declaration=config.get("prospective_selection"), collection_manifest=collection_manifest)
+        else:
+            prospective = _configured_prospective(config, collection_manifest)
+        storage = _configured_storage_reuse(config,collection_manifest,prospective=prospective,
+                                             verified_storage=_verified_storage_reuse)
         readiness = _validate_status(
             collection_manifest=collection_manifest,
             parent_companies=parent,
-            expected_companies=companies,
+            expected_companies=companies, storage_reuse=self.manifest.get("storage_reuse"), verified_storage=storage,
+            prospective=prospective,
         )
         if list(readiness) != self.manifest.get("collection_status"):
             raise ValueError("generic metric quality collection status replay differs")
@@ -615,6 +674,18 @@ class GenericMetricQualityReader:
             or config["collection_scope_companies"] != list(companies)
         ):
             raise ValueError("generic metric quality config replay differs")
+        if (self.manifest.get("prospective_selection") != config.get("prospective_selection")
+            or self.manifest.get("prospective_history_evidence") != (prospective.companies if prospective else None)
+            or evidence.get("prospective_selection_controls") != (prospective.controls if prospective else None)):
+            raise ValueError("generic quality prospective selection replay differs")
+        if (self.manifest.get("storage_reuse") != config.get("storage_reuse")
+            or evidence.get("storage_reuse_controls") != (storage.controls if storage else None)):
+            raise ValueError("generic quality storage reuse replay differs")
+        selection = _configured_history_selection(config, collection_manifest, storage_reuse=storage)
+        if (self.manifest.get("history_selection") != (selection.declaration if selection else None)
+            or self.manifest.get("selected_history_evidence") != (selection.companies if selection else None)
+            or evidence.get("history_selection_controls") != (selection.controls if selection else None)):
+            raise ValueError("generic quality History selection replay differs")
         provenance = {
             (row["ticker"], row["cik"]): row for row in config["source_provenance"]
         }
@@ -645,6 +716,9 @@ class GenericMetricQualityReader:
             provenance=provenance,
             financial_as_of=financial_as_of,
             readiness=readiness,
+            selection=selection,
+            storage_reuse=storage,
+            prospective=prospective,
         )
         if histories != history_declarations:
             raise ValueError("generic metric quality history replay differs")
@@ -762,6 +836,10 @@ def _text_raw_matches(binding: dict[str, Any], expected: str) -> bool:
 
 def _raw_matches(binding: dict[str, Any], expected: str) -> bool:
     if binding.get("transform") == "numwordsen":
+        # The governed lexical nil is numeric zero, not xsi:nil. Preserve the
+        # declared Inline sign when comparing its immutable Raw representation.
+        if expected == "0" and binding.get("source_sign") == "-":
+            expected = "-0"
         return (
             binding.get("actual_raw_value") == expected
             and str(binding.get("actual_value_numeric")) == expected
@@ -804,12 +882,61 @@ def _load_config(path: Path) -> dict[str, Any]:
         (row["ticker"], row["cik"]) for row in companies
     ]:
         raise ValueError("generic quality provenance scope differs from companies")
-    return {
+    normalized = {
         "schema_version": CONFIG_SCHEMA_VERSION,
         "financial_as_of": payload["financial_as_of"],
         "collection_scope_companies": list(companies),
         "source_provenance": provenance,
     }
+    if "prospective_selection" in payload:
+        normalized["prospective_selection"] = selection_declaration(payload["prospective_selection"])
+    if "storage_reuse" in payload:
+        normalized["storage_reuse"] = selection_declaration(payload["storage_reuse"])
+    if "history_selection" in payload:
+        normalized["history_selection"] = selection_declaration(payload["history_selection"])
+    return normalized
+
+
+def _configured_prospective(config: dict[str, Any], collection_manifest: Path):
+    from sec_xbrl.prospective_selection import resolve_prospective_selection
+    return (resolve_prospective_selection(config["prospective_selection"], collection_manifest=collection_manifest,
+                    scope_companies=config.get("collection_scope_companies", config.get("companies", [])))
+            if "prospective_selection" in config else None)
+
+
+def _configured_storage_reuse(config: dict[str, Any], collection_manifest: Path,
+                              *, prospective: Any = None, verified_storage: Any = None):
+    from sec_xbrl.financial_storage_reuse import checked_storage_reuse, resolve_storage_reuse
+    if "storage_reuse" not in config:
+        if verified_storage is not None:
+            raise ValueError("storage proof needs an explicit config declaration")
+        return None
+    declared = _read_json(Path(config["storage_reuse"]["path"]))
+    parent = Path(declared["collection_manifest"]["path"])
+    if parent != collection_manifest:
+        prospective = prospective or _configured_prospective(config, collection_manifest)
+        if prospective is None or any(row["origin_collection"]["path"] != str(parent)
+                                      for row in prospective.companies.values()):
+            raise ValueError("storage reuse belongs to an unrelated collection")
+        verified_storage = verified_storage or prospective.storage_reuse
+    if verified_storage is not None:
+        return checked_storage_reuse(verified_storage,collection_manifest=parent,declaration=config["storage_reuse"])
+    return resolve_storage_reuse(config["storage_reuse"], collection_manifest=parent,
+                                scope_companies=_read_json(parent)["companies"])
+
+
+_UNRESOLVED_STORAGE = object()
+
+
+def _configured_history_selection(config: dict[str, Any], collection_manifest: Path,
+                                  *, storage_reuse: Any = _UNRESOLVED_STORAGE) -> HistorySelections | None:
+    declaration = config.get("history_selection")
+    if storage_reuse is _UNRESOLVED_STORAGE:
+        storage_reuse = _configured_storage_reuse(config, collection_manifest)
+    return (resolve_history_selection(declaration, collection_manifest=collection_manifest,
+                                     scope_companies=config["collection_scope_companies"],
+                                      storage_reuse=storage_reuse)
+            if declaration is not None else None)
 
 
 def _validate_status(
@@ -817,6 +944,7 @@ def _validate_status(
     collection_manifest: Path,
     parent_companies: tuple[dict[str, str], ...],
     expected_companies: tuple[dict[str, str], ...],
+    storage_reuse: dict | None = None, verified_storage: Any = None, prospective: Any = None,
 ) -> tuple[dict[str, Any], ...]:
     collection = _read_json(collection_manifest)
     declared_companies = collection.get("companies")
@@ -827,7 +955,12 @@ def _validate_status(
         for item in declared_companies
         if isinstance(item, dict)
     }
-    status = read_universe_status(manifest_path=collection_manifest)
+    status_storage = storage_reuse
+    if storage_reuse and Path(_read_json(Path(storage_reuse["path"]))["collection_manifest"]["path"]) != collection_manifest:
+        if prospective is None:
+            raise ValueError("financial status storage proof has an unrelated parent")
+        status_storage = None
+    status = read_universe_status(manifest_path=collection_manifest, validation_mode="financial_sources", storage_reuse=status_storage, _verified_storage_reuse=verified_storage if status_storage else None)
     status_parent = tuple(
         sorted(
             ({"ticker": row.ticker, "cik": str(row.cik)} for row in status.companies),
@@ -840,6 +973,23 @@ def _validate_status(
     evidence: list[dict[str, Any]] = []
     for company in expected_companies:
         row = status_index.get((company["ticker"], company["cik"]))
+        selected = prospective.companies.get(company["ticker"]) if prospective else None
+        if selected is not None:
+            if (row is None or row.state != "RAW_COMPLETE" or row.selected_filings != row.held_filings
+                or row.pending_filings != 0 or row.failed_filings != 0):
+                raise ValueError("prospective collection is not exactly RAW_COMPLETE")
+            evidence.append({"ticker":company["ticker"],"cik":company["cik"],"state":row.state,
+                "selected_filings":row.selected_filings,"held_filings":row.held_filings,
+                "pending_filings":row.pending_filings,"failed_filings":row.failed_filings,
+                "build_manifest_path":selected["origin_build_manifest"]["path"],
+                "build_manifest_sha256":selected["origin_build_manifest"]["sha256"],
+                "build_evidence_kind":"ORIGIN_ACCEPTED_HISTORY",
+                "history_selection_status":"SELECTION_EQUIVALENT",
+                "plan_path":selected["current_plan"]["path"],"plan_sha256":selected["current_plan"]["sha256"],
+                "intake_manifest_path":selected["current_intake"]["path"],"intake_sha256":selected["current_intake"]["sha256"],
+                "history_manifest_path":selected["origin_history_manifest"]["path"],
+                "history_manifest_sha256":selected["origin_history_manifest"]["sha256"]})
+            continue
         if (
             row is None
             or row.state != "READY"
@@ -932,6 +1082,8 @@ def _validate_histories(
     provenance: dict[tuple[str, str], dict[str, str]],
     financial_as_of: str,
     readiness: tuple[dict[str, Any], ...],
+    storage_reuse: Any = None, prospective: Any = None,
+    selection: HistorySelections | None = None,
 ) -> dict[str, dict[str, str]]:
     expected_tickers = {row["ticker"] for row in expected_companies}
     if set(history_manifests) != expected_tickers:
@@ -943,6 +1095,10 @@ def _validate_histories(
         path = _regular_file(history_manifests[ticker], "accepted history manifest")
         digest = _sha256(path)
         ready = readiness_index.get(ticker)
+        selected = selection.companies.get(ticker) if selection else None
+        if selected is not None and ready is not None:
+            ready = {**ready, "history_manifest_path": selected["history_manifest"]["path"],
+                     "history_manifest_sha256": selected["history_manifest"]["sha256"]}
         if (
             ready is None
             or path != Path(str(ready["history_manifest_path"]))
@@ -950,7 +1106,17 @@ def _validate_histories(
             or digest != ready["history_manifest_sha256"]
         ):
             raise ValueError("accepted history manifest differs from READY build")
-        HistoryPublicationReader(path.parent).verify_all()
+        from sec_xbrl.financial_storage_reuse import storage_history
+        verify_financial_history_source(path.parent, storage_entry=(storage_history(storage_reuse, ticker, path)
+            or storage_history(prospective.storage_reuse if prospective else None, ticker, path)))
+        equivalent = prospective.companies.get(ticker) if prospective else None
+        if equivalent is not None:
+            if (prospective.financial_as_of != financial_as_of
+                or equivalent["origin_history_manifest"] != {"path":str(path),"sha256":digest}
+                or any(provenance[(ticker,cik)][key] != ready[key] for key in ("plan_sha256","intake_sha256"))):
+                raise ValueError("prospective History current source proof differs")
+            result[ticker] = {"path":str(path),"sha256":digest}
+            continue
         payload = _read_json(path)
         plan = payload.get("plan")
         plan_companies = plan.get("companies") if isinstance(plan, dict) else None
@@ -1000,7 +1166,7 @@ def _company_scope(value: Any, label: str) -> tuple[dict[str, str], ...]:
 
 def _verify_evidence_files(value: dict[str, Any]) -> None:
     for label, declaration in value.items():
-        if label in {"history_manifests", "collection_build_manifests"}:
+        if label in {"history_manifests", "collection_build_manifests", "history_selection_controls", "storage_reuse_controls", "prospective_selection_controls"}:
             if not isinstance(declaration, dict):
                 raise TypeError("history evidence declaration is invalid")
             for ticker, nested in declaration.items():
@@ -1024,8 +1190,14 @@ def _validate_evidence_declarations(
     declarations = [
         declaration
         for label, declaration in value.items()
-        if label not in {"history_manifests", "collection_build_manifests"}
+        if label not in {"history_manifests", "collection_build_manifests", "history_selection_controls", "storage_reuse_controls", "prospective_selection_controls"}
     ] + list(histories.values()) + list(builds.values())
+    controls = value.get("history_selection_controls", {})
+    if not isinstance(controls, dict):
+        raise TypeError("History selection controls are malformed")
+    declarations.extend(controls.values())
+    declarations.extend(value.get("storage_reuse_controls", {}).values())
+    declarations.extend(value.get("prospective_selection_controls", {}).values())
     for declaration in declarations:
         if (
             not isinstance(declaration, dict)

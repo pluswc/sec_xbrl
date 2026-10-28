@@ -420,3 +420,17 @@ legacy 전체 연도, 오래된 predecessor의 계산 전용 사용, 비정상 �
 prepared 기간 축소 거부를 확인한다. 이는 local 구현 후보 상태이며 동결 SHA의
 독립 검증과 lead 인수는 대기다. actual first-five/50 재무 payload는 읽거나
 발행하지 않았고 두 범위 모두 `NOT_READY`다. 원격 push·PR·main 병합도 미수행이다.
+
+## 2026-10-28 별도 산술 TTM 버전 승인
+
+사용자는 기존 strict TTM 계약을 유지하면서 산술 TTM을 별도 버전으로 제공하는
+방안을 명시적으로 승인했다. `quarterly-investor-41-arithmetic-ttm-v2`만 네 QTD의
+basis가 모두 null인 경우 산술 비교임을 선언하고 허용한다. 동일 non-null basis는
+그대로 보존하며 mixed/mismatched/empty basis, 명시적 review·quality·recast·continuity
+문제는 차단한다. basis 문자열을 만들어 넣지 않는다. 기본 strict17/41와 저장
+결과의 정의·버전은 바꾸지 않는다. 생산자가 5개 합계와 4개 합계비율 TTM을 계산하고
+소비자는 새 catalog/version·정확한 입력 계보를 검증한다. FCF는 CFO/CAPEX 각 leg의
+호환성이 필요하며 잔액 합산이나 FY+YTD fallback은 허용하지 않는다.
+정확한 호출법·수락 조건과 상태는
+[50사 확대 계약의 산술 TTM 후속](quarterly50-investor-expansion-20261025.md)을 따른다.
+이는 위 strict null-basis hold의 별도 신규 버전 예외이며 기존 출판물의 의미 변경이 아니다.

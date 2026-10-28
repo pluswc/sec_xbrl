@@ -33,6 +33,30 @@ FILES = {
 SOURCE_KINDS = {"REPORTED", "DERIVED_QUARTER", "DERIVED_METRIC", "UNAVAILABLE"}
 AVAILABILITY = {"AVAILABLE", "UNAVAILABLE"}
 
+EXPANDED_CATALOG = "quarterly-investor-41-v1"
+ARITHMETIC_CATALOG = "quarterly-investor-41-arithmetic-ttm-v2"
+TTM_BASIS_POLICY = "DECLARED_EQUAL_OR_ALL_NULL_ARITHMETIC_V1"
+_EXPANDED_CATALOGS = {EXPANDED_CATALOG, ARITHMETIC_CATALOG}
+_ARITHMETIC_TTM_AMOUNT_INPUTS = {
+    "ttm_revenue": "quarter_revenue",
+    "ttm_operating_income": "quarter_operating_income",
+    "ttm_net_income": "quarter_net_income",
+    "ttm_cfo": "quarter_cfo",
+    "ttm_standardized_fcf": "quarter_standardized_fcf",
+}
+EXPANDED_METRIC_IDS = {
+    *("quarter_" + metric for metric in (
+        "revenue", "cost", "gross_profit", "research", "operating_income", "net_income",
+        "cfo", "capex", "cfi", "cff", "repurchases", "stock_compensation", "cash", "assets",
+        "current_assets", "receivables", "inventory", "liabilities", "current_liabilities", "debt", "equity",
+        "revenue_yoy", "revenue_qoq", "gross_margin", "operating_margin", "net_margin",
+        "standardized_fcf", "fcf_margin", "current_ratio", "liabilities_to_equity", "liabilities_to_assets", "net_debt")),
+    *("ttm_" + metric for metric in (
+        "revenue", "operating_income", "net_income", "cfo", "standardized_fcf",
+        "gross_margin", "operating_margin", "net_margin", "fcf_margin")),
+}
+_EXPANDED_ONLY_TTM = {metric for metric in EXPANDED_METRIC_IDS if metric.startswith("ttm_")} - {"ttm_revenue"}
+
 
 class QuarterlyScreeningMetricReader:
     """Read a frozen producer publication without selecting or calculating values."""
@@ -131,6 +155,28 @@ class QuarterlyScreeningMetricReader:
             )
         ):
             raise ValueError("quarterly metric definitions are not unique and prefixed")
+        catalog = self.manifest.get("catalog_version")
+        if catalog not in {None, *_EXPANDED_CATALOGS}:
+            raise ValueError("unsupported quarterly metric catalog")
+        if catalog in _EXPANDED_CATALOGS and set(definitions) != EXPANDED_METRIC_IDS:
+            raise ValueError("expanded quarterly catalog requires the exact 41 metric identities")
+        if catalog is None and _EXPANDED_ONLY_TTM.intersection(definitions):
+            raise ValueError("expanded quarterly metrics require an explicit catalog version")
+        for metric, definition in definitions.items():
+            if not metric.startswith("ttm_"):
+                continue
+            if catalog == ARITHMETIC_CATALOG:
+                margin = metric.endswith("_margin")
+                if not margin and definition.get("input_metric_id") != _ARITHMETIC_TTM_AMOUNT_INPUTS[metric]:
+                    raise ValueError("arithmetic TTM amount requires its exact governed input metric")
+                version = ("quarter-" + metric.replace("_", "-") + "-arithmetic-v2"
+                           if margin else "quarter-ttm-arithmetic-v2")
+                rule = version if margin else "quarter-ttm-contiguous-arithmetic-v2"
+                if (definition.get("basis_policy") != TTM_BASIS_POLICY
+                    or definition.get("definition_version") != version or definition.get("rule_version") != rule):
+                    raise ValueError("arithmetic TTM requires its exact versioned basis contract")
+            elif "basis_policy" in definition or "arithmetic-v2" in str(definition.get("definition_version")):
+                raise ValueError("arithmetic TTM cannot be relabeled as a strict catalog")
         support_keys = [(row.get("cik"), row.get("metric_id")) for row in self.support]
         observation_keys = [
             (
@@ -162,6 +208,7 @@ class QuarterlyScreeningMetricReader:
             for year, quarter in spine
         }:
             raise ValueError("quarterly observations do not cover metric/company/spine grain")
+        self._active_observation_ids: set[str] = set()
         self._prepared_identity_records: dict[str, str] = {}
         self._raw_identity_records: dict[tuple[str, ...], tuple[Decimal, str]] = {}
         for row in self.observations:
@@ -187,6 +234,18 @@ class QuarterlyScreeningMetricReader:
         }
 
     def _verify_observation(
+        self, row: dict[str, Any], definitions: dict[str, dict[str, Any]]
+    ) -> None:
+        identity = require_string(row.get("observation_id"), "quarterly observation identity")
+        if identity in self._active_observation_ids or len(self._active_observation_ids) >= 5:
+            raise ValueError("quarterly prepared dependency cycle or unsupported depth")
+        self._active_observation_ids.add(identity)
+        try:
+            self._verify_observation_body(row, definitions)
+        finally:
+            self._active_observation_ids.remove(identity)
+
+    def _verify_observation_body(
         self, row: dict[str, Any], definitions: dict[str, dict[str, Any]]
     ) -> None:
         definition = definitions.get(row.get("metric_id"))
@@ -246,7 +305,8 @@ class QuarterlyScreeningMetricReader:
                 raise ValueError("quarterly observation source kind is not allowed")
             if row.get("period_class") != definition.get("observation_basis"):
                 raise ValueError("quarterly observation period class differs from definition")
-            if definition.get("observation_basis") == "TTM" and not row.get("basis_version"):
+            if (definition.get("observation_basis") == "TTM" and not row.get("basis_version")
+                and self.manifest.get("catalog_version") != ARITHMETIC_CATALOG):
                 raise ValueError("available TTM observation requires a basis version")
         if row.get("period_end") is not None:
             if row.get("end_convention") != "EXCLUSIVE":
@@ -278,6 +338,9 @@ class QuarterlyScreeningMetricReader:
             if len(inputs) != 2:
                 raise ValueError("derived quarter requires exactly two cumulative source inputs")
             sources = inputs
+        elif definition.get("input_contract", {}).get("kind") == "TTM_PERIOD_SUM_RATIO":
+            self._verify_ttm_margin(row, definition)
+            return
         elif definition["observation_basis"] == "TTM":
             if len(inputs) != 4:
                 raise ValueError("available TTM requires exactly four eligible QTD inputs")
@@ -302,7 +365,20 @@ class QuarterlyScreeningMetricReader:
             ):
                 raise ValueError("TTM input metric definition is not an eligible monetary QTD")
         for source in sources:
+            if source.get("source_kind") == "DERIVED_METRIC":
+                if definition["metric_id"] != "ttm_standardized_fcf" or source_metric != "quarter_standardized_fcf":
+                    raise ValueError("unsupported nested TTM metric dependency")
+                self._verify_observation(source, {item["metric_id"]: item for item in self.definitions})
+                self._remember_prepared_identity(source)
+                if any(source.get(field) != row.get(field) for field in ("cik", "unit", "dimensions", "selection_view", "selection_as_of_date")):
+                    raise ValueError("nested TTM source scope differs")
+                continue
             self._verify_source_scope(source, row, source_metric)
+            if (definition["observation_basis"] == "TTM"
+                and self.manifest.get("catalog_version") in _EXPANDED_CATALOGS
+                and source.get("source_kind") == "REPORTED" and "source_lineage" in source):
+                self._verify_observation(source, {item["metric_id"]: item for item in self.definitions})
+                self._remember_prepared_identity(source)
             if source.get("source_kind") == "DERIVED_QUARTER":
                 if definition["observation_basis"] != "TTM":
                     raise ValueError("cumulative quarter inputs must be reported sources")
@@ -366,7 +442,7 @@ class QuarterlyScreeningMetricReader:
             ):
                 raise ValueError("derived quarter cumulative periods differ from output scope")
         else:
-            require_string(row.get("basis_version"), "available TTM basis version")
+            self._verify_ttm_basis(row, sources, definition)
             if (
                 definition.get("unit_kind") != "MONEY"
                 or any(source["period_class"] != "QTD_3M" for source in sources)
@@ -376,8 +452,16 @@ class QuarterlyScreeningMetricReader:
                 or row["period_end"] != sources[-1]["period_end"]
             ):
                 raise ValueError("TTM requires four contiguous QTD inputs matching output scope")
-            if any(not source.get("basis_version") for source in sources):
-                raise ValueError("available TTM inputs require compatible non-null basis versions")
+            if self.manifest.get("catalog_version") in _EXPANDED_CATALOGS:
+                if len({canonical_json(_ttm_binding(source)) for source in sources}) != 1:
+                    raise ValueError("TTM semantic inputs differ")
+                for a, b in pairwise(sources):
+                    year, quarter = _fiscal_coordinate(a)
+                    expected_coordinate = (year, quarter + 1) if quarter < 4 else (year + 1, 1)
+                    if _fiscal_coordinate(b) != expected_coordinate:
+                        raise ValueError("TTM fiscal inputs must be consecutive")
+                if _fiscal_coordinate(row) != _fiscal_coordinate(sources[-1]):
+                    raise ValueError("TTM output fiscal endpoint differs")
         if row["filed_date"] != max(source["filed_date"] for source in sources):
             raise ValueError("quarterly derived filing date differs from source inputs")
         if row["report_date"] != sources[0 if kind == "DERIVED_QUARTER" else -1]["report_date"]:
@@ -422,6 +506,7 @@ class QuarterlyScreeningMetricReader:
         contract = definition.get("input_contract")
         roles_by_kind = {
             "SAME_PERIOD_DIFFERENCE": ("CFO", "CAPEX"),
+            "SAME_PERIOD_NET_DEBT": ("DEBT", "CASH"),
             "SAME_PERIOD_RATIO": ("NUMERATOR", "DENOMINATOR"),
             "ADJACENT_FISCAL_QUARTER_GROWTH": ("CURRENT", "PRIOR"),
             "SAME_FISCAL_QUARTER_YOY_GROWTH": ("CURRENT", "PRIOR"),
@@ -466,7 +551,8 @@ class QuarterlyScreeningMetricReader:
             for item in declarations
         }
         expected_constraints = (
-            ("FINITE", "NONNEGATIVE")
+            ("NONNEGATIVE", "NONNEGATIVE")
+            if contract_kind == "SAME_PERIOD_NET_DEBT" else ("FINITE", "NONNEGATIVE")
             if contract_kind == "SAME_PERIOD_DIFFERENCE"
             else (
                 ("NONNEGATIVE", "POSITIVE")
@@ -506,7 +592,9 @@ class QuarterlyScreeningMetricReader:
                 or input_definition.get("observation_basis") not in {"QTD_3M", "INSTANT"}
                 or input_definition.get("unit_kind") != "MONEY"
                 or item.get("unit") != "USD"
-                or item.get("source_kind") not in {"REPORTED", "DERIVED_QUARTER"}
+                or (item.get("source_kind") not in {"REPORTED", "DERIVED_QUARTER"}
+                    and not (row["metric_id"] == "quarter_fcf_margin" and metric_id == "quarter_standardized_fcf"
+                             and item.get("source_kind") == "DERIVED_METRIC"))
                 or item.get("availability_status") != "AVAILABLE"
             ):
                 raise ValueError("quarterly derived metric input is not an eligible prepared value")
@@ -592,7 +680,22 @@ class QuarterlyScreeningMetricReader:
                 )
             if _company_binding(current) != _company_binding(prior):
                 raise ValueError("quarterly growth inputs have different company semantic bindings")
-        if contract_kind == "SAME_PERIOD_DIFFERENCE":
+        if contract_kind == "SAME_PERIOD_NET_DEBT":
+            debt = inputs[0]["source_lineage"]
+            if (row["metric_id"] != "quarter_net_debt" or definition["observation_basis"] != "INSTANT"
+                or tuple(item["metric_id"] for item in inputs) != ("quarter_debt", "quarter_cash")
+                or not _direct_combined_debt(debt)
+                or definition.get("unit_kind") != "MONEY"
+                or contract.get("denominator_policy") != "NOT_APPLICABLE"):
+                raise ValueError("net debt requires exact standard direct combined debt")
+            note_allowed = not debt.get("primary_statement_evidence")
+            policy = "EXACT_STANDARD_COMBINED_DEBT_NOTE_ALLOWANCE" if note_allowed else "TYPED_PRIMARY_BS"
+            locator = ({field: debt.get(field) for field in
+                        ("source_id", "source_fact_id", "source_snapshot_id", "source_filing_id", "context_id", "raw_concept_qname")}
+                       if note_allowed else None)
+            if lineage.get("debt_input_policy") != policy or lineage.get("debt_note_locator") != locator:
+                raise ValueError("net debt note policy or locator differs")
+        elif contract_kind == "SAME_PERIOD_DIFFERENCE":
             if (
                 definition["observation_basis"] != "QTD_3M"
                 or definition.get("unit_kind") != "MONEY"
@@ -609,10 +712,111 @@ class QuarterlyScreeningMetricReader:
                 raise ValueError(
                     "quarterly ratio or growth requires a strictly positive denominator"
                 )
+        if row["metric_id"] in {"quarter_net_margin", "quarter_fcf_margin", "quarter_current_ratio",
+                                 "quarter_liabilities_to_equity", "quarter_liabilities_to_assets", "quarter_net_debt"} or (
+                self.manifest.get("catalog_version") in _EXPANDED_CATALOGS
+                and contract_kind.startswith("SAME_PERIOD_")):
+            _verify_same_filing_endpoints(inputs)
         if row["filed_date"] != max(item["filed_date"] for item in inputs):
             raise ValueError("quarterly derived filing date differs from source inputs")
         if row["report_date"] != current["report_date"]:
             raise ValueError("quarterly derived report date differs from current endpoint")
+
+    def _verify_ttm_basis(self, row: dict, inputs: list[dict], definition: dict) -> str:
+        bases = [item.get("basis_version") for item in inputs]
+        if self.manifest.get("catalog_version") == ARITHMETIC_CATALOG:
+            if definition.get("basis_policy") != TTM_BASIS_POLICY:
+                raise ValueError("arithmetic TTM basis policy is missing")
+            if all(value is None for value in bases):
+                policy = "ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"
+            elif all(isinstance(value, str) and value for value in bases) and len(set(bases)) == 1:
+                policy = "DECLARED_BASIS:" + bases[0]
+            else:
+                raise ValueError("arithmetic TTM rejects mixed or mismatched basis")
+            if row.get("basis_version") != bases[0] or row["source_lineage"].get("compatibility_policy") != policy:
+                raise ValueError("arithmetic TTM assurance or output basis differs")
+            return policy
+        require_string(row.get("basis_version"), "available TTM basis version")
+        if any(not item.get("basis_version") for item in inputs):
+            raise ValueError("available TTM inputs require compatible non-null basis versions")
+        return "ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"
+
+    def _verify_ttm_margin(self, row: dict[str, Any], definition: dict[str, Any]) -> None:
+        """Validate eight prepared QTD legs without calculating the producer ratio."""
+        numerator_by_metric = {
+            "ttm_gross_margin": "quarter_gross_profit",
+            "ttm_operating_margin": "quarter_operating_income",
+            "ttm_net_margin": "quarter_net_income",
+            "ttm_fcf_margin": "quarter_standardized_fcf",
+        }
+        numerator = numerator_by_metric.get(row["metric_id"])
+        contract = definition["input_contract"]
+        expected = [{"input_role": role, "metric_id": metric, "value_constraint": "FINITE"}
+                    for role, metric in (("NUMERATOR", numerator), ("DENOMINATOR", "quarter_revenue"))]
+        lineage = row["source_lineage"]
+        inputs = lineage.get("derivation_inputs")
+        arithmetic = self.manifest.get("catalog_version") == ARITHMETIC_CATALOG
+        basis_contract = TTM_BASIS_POLICY if arithmetic else "ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"
+        expected_assurance = (self._verify_ttm_basis(row, inputs, definition)
+                              if isinstance(inputs, list) and len(inputs) == 8 and arithmetic
+                              else "ARITHMETIC_ONLY_NOT_RECAST_VALIDATED")
+        if (numerator is None or contract.get("version") != "quarter-derived-input-scope-v1"
+            or contract.get("inputs") != expected or contract.get("denominator_policy") != "STRICTLY_POSITIVE"
+            or contract.get("basis_policy") != basis_contract
+            or lineage.get("compatibility_policy") != expected_assurance
+            or lineage.get("derivation_rule_version") != definition.get("rule_version")
+            or definition.get("unit_kind") != "PERCENT" or row["unit"] != "PERCENT"
+            or definition.get("canonical_value_scale") != "1"
+            or not isinstance(inputs, list) or len(inputs) != 8):
+            raise ValueError("TTM margin requires declared four-quarter numerator and revenue sums")
+        sums = lineage.get("period_sums")
+        if not isinstance(sums, dict) or set(sums) != {"NUMERATOR", "DENOMINATOR"}:
+            raise ValueError("TTM margin requires explicit producer period sums")
+        try:
+            values = [Decimal(sums[role]) for role in ("NUMERATOR", "DENOMINATOR")]
+        except (InvalidOperation, TypeError) as exc:
+            raise ValueError("TTM margin period sums must be finite exact strings") from exc
+        if any(not isinstance(value, str) for value in sums.values()) or not all(value.is_finite() for value in values) or values[1] <= 0:
+            raise ValueError("TTM margin denominator sum must be strictly positive")
+        definitions = {item["metric_id"]: item for item in self.definitions}
+        for offset, item in enumerate(inputs):
+            metric = numerator if offset < 4 else "quarter_revenue"
+            role = ("NUMERATOR" if offset < 4 else "DENOMINATOR") + "_Q" + str(offset % 4 + 1)
+            if (item.get("metric_id") != metric or item.get("input_role") != role
+                or item.get("period_class") != "QTD_3M" or item.get("unit") != "USD"
+                or item.get("availability_status") != "AVAILABLE"
+                or item.get("source_kind") not in ({"REPORTED", "DERIVED_QUARTER", "DERIVED_METRIC"}
+                    if metric == "quarter_standardized_fcf" else {"REPORTED", "DERIVED_QUARTER"})):
+                raise ValueError("TTM margin input role, metric, period or source kind differs")
+            self._verify_observation(item, definitions)
+            self._remember_prepared_identity(item)
+            if not 75 <= _duration(item) <= 105:
+                raise ValueError("TTM margin input is not eligible QTD")
+            for field in ("cik", "dimensions", "selection_view", "selection_as_of_date",
+                          "basis_version", "structural_version", "recast_version", "canonical_mapping_version"):
+                if item.get(field) != row.get(field):
+                    raise ValueError("TTM margin input scope or basis differs")
+        for group in (inputs[:4], inputs[4:]):
+            for a, b in pairwise(group):
+                y, q = _fiscal_coordinate(a)
+                expected_coordinate = (y, q + 1) if q < 4 else (y + 1, 1)
+                if a["period_end"] != b["period_start"] or _fiscal_coordinate(b) != expected_coordinate:
+                    raise ValueError("TTM margin quarters must be contiguous")
+                if _ttm_binding(a) != _ttm_binding(b):
+                    raise ValueError("TTM margin quarter semantic bindings differ")
+        for first, second in zip(inputs[:4], inputs[4:]):
+            if any(first.get(field) != second.get(field) for field in
+                   ("period_start", "period_end", "fiscal_year", "fiscal_quarter")):
+                raise ValueError("TTM margin numerator and revenue quarters differ")
+            _verify_same_filing_endpoints([first, second])
+        if (row.get("period_start") != inputs[0]["period_start"]
+            or row.get("period_end") != inputs[3]["period_end"]
+            or _fiscal_coordinate(row) != _fiscal_coordinate(inputs[3])
+            or row.get("filed_date") != max(item["filed_date"] for item in inputs)
+            or row.get("report_date") != inputs[3]["report_date"]):
+            raise ValueError("TTM margin output period or dates differ")
+        scopes = [scope for item in inputs for scope in _prepared_input_scopes(item)]
+        self._verify_selected_eligibility(row, lineage, scopes)
 
     def _remember_prepared_identity(self, row: dict[str, Any]) -> None:
         observation_id = row.get("observation_id")
@@ -761,6 +965,11 @@ class QuarterlyScreeningMetricReader:
             source["filed_date"]
         ):
             raise ValueError("quarterly source period is after filing")
+        if (self.manifest.get("catalog_version") in _EXPANDED_CATALOGS
+            and source.get("source_kind") == "REPORTED"
+            and not _typed_statement_source(source)
+            and not (source_metric == "quarter_debt" and _direct_combined_debt(source))):
+            raise ValueError("expanded quarterly source requires typed primary statement evidence")
         self._remember_raw_identity(source)
 
     def _verify_support(self, spine: list[tuple[int, int]]) -> None:
@@ -856,11 +1065,60 @@ def _source_anchors(lineage: dict[str, Any]) -> list[dict[str, Any]]:
 def _prepared_input_scopes(row: dict[str, Any]) -> list[dict[str, Any]]:
     """Only the bounded, already-validated reported/M8 value path is selected evidence."""
     lineage = row["source_lineage"]
-    return [
-        row,
-        lineage,
-        *(lineage["derivation_inputs"] if row["source_kind"] == "DERIVED_QUARTER" else []),
-    ]
+    scopes = [row, lineage]
+    if row["source_kind"] == "DERIVED_QUARTER":
+        scopes.extend(lineage["derivation_inputs"])
+    elif row["source_kind"] == "DERIVED_METRIC":
+        for item in lineage["derivation_inputs"]:
+            scopes.extend(_prepared_input_scopes(item))
+    return scopes
+
+
+def _endpoint_sources(row: dict[str, Any]) -> list[dict[str, Any]]:
+    lineage = row["source_lineage"]
+    if row["source_kind"] == "REPORTED":
+        return [lineage]
+    if row["source_kind"] == "DERIVED_QUARTER":
+        return [item for item in lineage["derivation_inputs"] if item["period_end"] == row["period_end"]]
+    return [source for item in lineage["derivation_inputs"] for source in _endpoint_sources(item)]
+
+
+def _verify_same_filing_endpoints(inputs: list[dict[str, Any]]) -> None:
+    sources = [source for item in inputs for source in _endpoint_sources(item)]
+    if not sources or any(any(source.get(field) != sources[0].get(field) for field in
+                              ("cik", "source_filing_id", "accession", "period_end", "unit", "dimensions"))
+                          for source in sources):
+        raise ValueError("same-period inputs require the same source filing and endpoint")
+
+
+def _typed_statement_source(source: dict[str, Any]) -> bool:
+    source = source.get("source_lineage", source)
+    metric = source.get("canonical_metric_id")
+    if metric in {"quarter_revenue", "quarter_cost", "quarter_research", "quarter_gross_profit",
+                  "quarter_operating_income", "quarter_net_income"}:
+        types = {"IS"}
+    elif metric in {"quarter_cfo", "quarter_capex", "quarter_cfi", "quarter_cff",
+                    "quarter_repurchases", "quarter_stock_compensation"}:
+        types = {"CF"}
+    else:
+        types = {"BS", "EQ"} if metric == "quarter_equity" else {"BS"}
+    return any(isinstance(evidence, dict)
+               and evidence.get("source_network_type") == "PRE"
+               and evidence.get("source_filing_id") == source.get("source_filing_id")
+               and evidence.get("cik") == source.get("cik")
+               and evidence.get("accession") == source.get("accession")
+               and bool(types.intersection(evidence.get("statement_types") or []))
+               and bool(evidence.get("role_uri"))
+               for evidence in source.get("primary_statement_evidence") or [])
+
+
+def _direct_combined_debt(source: dict[str, Any]) -> bool:
+    return (source.get("source_kind") == "REPORTED"
+            and source.get("raw_concept_qname") == "us-gaap:DebtLongtermAndShorttermCombinedAmount"
+            and source.get("raw_concept_is_standard") is True
+            and source.get("raw_concept_data_type") == "xbrli:monetaryItemType"
+            and source.get("raw_concept_period_type") == "instant"
+            and source.get("period_class") == "INSTANT" and source.get("dimensions") == [])
 
 
 def _fiscal_coordinate(row: dict[str, Any]) -> tuple[int, int]:
@@ -868,6 +1126,13 @@ def _fiscal_coordinate(row: dict[str, Any]) -> tuple[int, int]:
     if type(year) is not int or quarter not in {"Q1", "Q2", "Q3", "Q4"}:
         raise ValueError("quarterly derived input requires exact issuer fiscal coordinates")
     return year, int(quarter[1])
+
+
+def _ttm_binding(row: dict[str, Any]) -> Any:
+    if row.get("metric_id") == "quarter_standardized_fcf":
+        return tuple((item["metric_id"], _ttm_binding(item))
+                     for item in row["source_lineage"]["derivation_inputs"])
+    return _company_binding(row)
 
 
 def _company_binding(row: dict[str, Any]) -> tuple[str, ...]:
