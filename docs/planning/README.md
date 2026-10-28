@@ -1,5 +1,20 @@
 # 계획 등록부 — 단일 진입점
 
+
+2026-10-28 실행 인계 snapshot(전체 완료 선언 아님):
+[50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의 source
+`451205b08fed2617d6e04f3c209e1a21b8aa9f29`는 Standards·Spec repair 독립 PASS 뒤
+ROOT가 로컬 수락했고, draft [PR67](https://github.com/pluswc/sec_xbrl/pull/67)의
+필수 test CI도 source451에서 PASS했다. 기존1010 baseline AMD 2026Q2 계산 표본은
+신규 TTM9 AVAILABLE이지만 final actual/UAT 인수가 아니다. Latest 안전9개 cohort는
+NFLX/META/PG/TXN/LRCX의 History append·annual/quarter analysis 완료 후 계속 실행 중이다.
+38사 prospective proof는 PASS했으나 batch는 staging 중이며 아직 공개되지 않았다.
+TSLA·IBM·UNP는 과거 accession-order와 현재 chronological-order 차이로 strict prefix가
+불일치하여 별도 HOLD다. 이3사만 기존Raw로 새 current-cutoff History를 기존 full API로
+생성할지, 순열 append 보완을 먼저 할지 **필수 사용자 선택 대기**이며 full fallback은
+아직 승인되지 않았다. 원본 자료·분석·catalog/journal과 live21은 그대로 보존됐고,
+main merge/live 변경 및 latest50 financial/UAT 인수는 아직 하지 않았다.
+
 2026-10-28 정책 결정: 사용자가 **산술 TTM을 별도 버전으로 제공**을 승인했다.
 [50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의
 `quarterly-investor-41-arithmetic-ttm-v2` 구현은 기존 strict17/41를 보존하고,

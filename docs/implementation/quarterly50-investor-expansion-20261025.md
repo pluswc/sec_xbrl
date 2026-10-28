@@ -875,3 +875,84 @@ actual company audit or latest12 build ran. A new independent repair review and
 ROOT acceptance are required; c17's failed report is not retroactively relabeled.
 Final whole-package migration/native identities must bind the new frozen source,
 while prepared c17 snapshots, controls and evidence remain preserved.
+
+
+## 2026-10-28 operational handoff snapshot — source accepted, latest incomplete
+
+This is the ROOT-reported handoff-time snapshot, not a full50/latest completion
+or release declaration. Source
+`451205b08fed2617d6e04f3c209e1a21b8aa9f29` received independent Standards and Spec
+repair PASS, then ROOT local acceptance
+`LOCALLY_ACCEPTED_SOURCE_NOT_ACTUAL_RELEASE`. The original c17 Spec FAIL remains
+preserved separately. The writer's following update is documentation only;
+Python/source/test bytes remain exactly the accepted451 snapshot.
+
+ROOT completed a bounded actual-prepared AMD calculation using the preserved
+2026-10-10 baseline scope, 2026Q2: all nine new arithmetic TTM observations were
+AVAILABLE, with TTM revenue41305000000. Calculation took0.5007s, peak189628KiB.
+Its status is `ACTUAL_PREPARED_CALCULATION_PASS_NOT_FINANCIAL_OR_UI_RELEASE`.
+This establishes an actual-input calculation sample, not latest financial
+publication, 50-company readiness, final UAT or live acceptance.
+
+Latest strict append progressed on source451: NFLX History append completed in
+163.35s, peak2198416KiB, annual analysis8.19s and quarterly analysis20.96s.
+NFLX, META, PG, TXN and LRCX completed their append/annual/quarter preparation.
+The remaining safe nine-company cohort was still running at handoff (GE was the
+current company). These per-company preparation results do not imply complete
+latest financial metrics or consumer readiness.
+
+The 38-company prospective proof passed in45.88s, peak329436KiB. Its first
+attempt correctly rejected a submissions snapshot-list order mismatch against
+the canonical plans. ROOT asserted identical file sets, then created a separate
+canonical-order summary and separate policy/config_r2; the original inputs and
+failed attempt were preserved. The corrected proof passed without changing
+producer source or accounting policy. The batch remained in staging at handoff:
+17 annual and16 quarterly targets staged, DUK quarterly processing in progress.
+No target batch had yet been publicly exposed, so this is not38 prepared
+publications READY or latest end-to-end acceptance.
+
+### Separate required decision: three historical input-order mismatches
+
+TSLA's strict prefix gate rejected reuse. Read-only diagnosis established that
+its historical25 input contents/identities match the corresponding prior inputs
+within the current26, but the historical T1 input list uses accession order while
+the current list uses chronological order. The same historical nonchronological
+order difference affects IBM and UNP; it does not affect the other nine latest
+companies. The original strict gate is retained and no hidden full fallback ran.
+
+Only TSLA, IBM and UNP are held for the user's required choice between:
+
+- Generate NEW current-cutoff History for these three from existing immutable Raw
+  through the existing full API, preserving original History, analyses and audits
+  (ROOT's recommendation, with no source change).
+- First implement and independently verify append support for permuted historical
+  input order under a separate explicit source contract.
+
+The answer had not arrived at this snapshot. Full generation/fallback for the
+three is **not yet authorized** and must not be inferred from source451 acceptance
+or from continuing the safe nine-company cohort. Existing Raw, original History,
+accepted analyses and old company audits remain preserved.
+
+### Remote CI, protected runtime and remaining acceptance
+
+ROOT pushed source451 and created/attached draft
+[PR67](https://github.com/pluswc/sec_xbrl/pull/67). Its required test CI passed in
+4m13s, [run40684132845, job122802058728](https://github.com/pluswc/sec_xbrl/actions/runs/40684132845/job/122802058728).
+CI acceptance applies to source451; it does not substitute for actual latest
+financial/UAT acceptance. The writer's docs-only handoff commit is local and
+unpublished, avoiding another CI run. Main merge and live runtime changes remain
+unperformed until actual50 refresh and UAT are accepted.
+
+ROOT rechecked protected catalog/journal hashes against the pre-work pins: they
+remain identical, and live21 is unchanged. Remaining work includes the required
+three-company decision and authorized disposition, completion/publication of the
+safe cohort and38 batch, final latest financial publication/TTM availability,
+end-to-end private UAT and separate release/main decisions. The completed baseline
+and original approvals are not rerun or overwritten by this status update.
+
+Optional operator evidence in `work/quarterly50_expansion_20261025/`:
+`lead_arithmetic_ttm_source_acceptance_451205b0.json`,
+`actual_amd_arithmetic_ttm_451205b0.json`, and
+`latest12_historical_order_inventory_20261028.json`.
+These supplement the tracked status/decision boundaries above and are not its
+sole authority or a prerequisite for understanding the checkout.
