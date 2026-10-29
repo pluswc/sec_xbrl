@@ -998,3 +998,53 @@ catalog/journal은 보존한다. 이번 문서 커밋은 로컬에만 남기며 
 `latest_execution_451205b0/items/{TSLA,IBM,UNP,NEE}-quarterly.json`이다.
 이 파일들은 위 추적 문서의 승인·미완료 경계를 보충하며 단독 권위나 필수 읽기
 자료가 아니다.
+
+## 2026-10-30 상태 후속 — 100개 분석·quality 완료, identity 보정 승인 대기
+
+이 부록은 앞선 49개사 준비·JNJ 진행 중 스냅샷 이후의 상태다. 이전 날짜별
+기록과 문서 커밋 `42fe27f859628afd00c670560db0a8b980bbda2f`의 당시 상태는
+보존한다. 제품 source freeze는 계속
+`451205b08fed2617d6e04f3c209e1a21b8aa9f29`이며 이 변경은 문서만이다.
+
+JNJ의 정상 공개 빌드는 현재 23개 filing의 완료 T1–T4를 재사용하여 PASS로
+완료됐다. History 처리 시간은 8938.42초, peak4546912KiB였고 연간 분석68.31초,
+분기 분석389.53초로 각각 PASS다. 이에 따라 current50의 연간·분기 분석 총
+100개가 모두 PASS로 준비됐다. 기존 partial과 완료 보고서는 보존하며 다시
+생성하거나 옛 회사 감사를 재실행하지 않는다.
+
+current50 발행의 quality 단계도 276.40초, peak11299012KiB로 PASS다. identity는
+첫 시도에서 RAM16GiB 운영 guard로 중단됐다. ROOT는 RAM24GiB 예산과 시스템
+가용 메모리 최소4GiB guard로 identity만 다시 실행했고, 161.06초,
+peak19078096KiB에서 실제 `ValueError`가 발생했다. 이 두 번째 결과는 단순 자원
+guard 중단과 구분한다. 완료된 quality와 100개 분석은 보존하며 재생성하지 않는다.
+
+제한된 읽기 전용 최초 차이 진단은 AAPL / ANNUAL / AS_FILED / `trace_0`의
+첫 행에서, 기대 dict에는 `availability_note` 키가 없고 실제 재독출 dict에는
+`availability_note=None`이 추가되어 있음을 확인했다. 이 관측만으로 실제 금융
+값의 차이라고 확정하지 않는다. 원본 trace shard를 새 ID로 재분할할 때 Parquet
+열 합집합이 누락 키를 null로 채우고, 소비자가 저장 전 dict와 정확 비교하는
+transport shape 차이가 확인된 원인이다. 다른 완료 회사의 검증을 반복하지 않았다.
+
+권장 보정 제안은 dataset의 최상위 열 합집합 안에서만 누락 키를 null로
+정규화하고 실제 열 집합을 정확히 검증하는 것이다. 중첩 lineage·값·행 개수와
+순서는 그대로 정확 비교한다. 소스 변경에 대해서는 원본451 보고서와 소스 증거를
+보존하고, 승인된 정확한 코드 변경 및 동일 정책·입력에 한정한 명시적 code/source
+compatibility 전이 증거를 결속하는 방안을 제안했다. 검증 생략, 보고서 rewrite,
+임의 추가 열 무시 또는 회계 의미 변경을 허용하는 제안이 아니다.
+
+ROOT는 위 형식 비교 보정과 명시적 호환성 증거에 대한 사용자 승인 질문을
+보냈으며, 이 스냅샷에서는 답변 대기 중이다. **이 보정 범위는 아직 구현 승인을
+받지 않았다.** 제품 코드·테스트·지침은 변경하지 않았으며 새 보정 구현이나
+데이터 재생성도 실행하지 않았다.
+
+identity를 포함한 quality 이후 나머지 5개 발행 단계, private current50 UAT,
+별도의 main merge와 live 적용은 모두 pending이다. ROOT가 준비한 live operator와
+새 UAT harness도 아직 실행하지 않았다. baseline 및 source451 수락은 이 미완료
+current50 발행·UAT·운영 적용을 대신하지 않는다.
+
+보조 증거는 `work/quarterly50_expansion_20261025/`의
+`latest50_identity_current_451205b0.log`,
+`latest50_identity_resume24_20261030.log`,
+`publish_latest50_pipeline_20261030.log` 및
+`reselection_first_difference_20261030.json`이다. 위 기록은 추적 문서의 상태와
+승인 경계를 보충하며 단독 권위나 필수 읽기 자료가 아니다.
