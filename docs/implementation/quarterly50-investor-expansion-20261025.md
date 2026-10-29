@@ -956,3 +956,45 @@ Optional operator evidence in `work/quarterly50_expansion_20261025/`:
 `latest12_historical_order_inventory_20261028.json`.
 These supplement the tracked status/decision boundaries above and are not its
 sole authority or a prerequisite for understanding the checkout.
+
+## 2026-10-30 상태 후속 — 사용자 결정 해소, 49개사 준비 및 JNJ 진행 중
+
+이 절은 앞선 날짜별 스냅샷 이후의 상태를 추가한다. 앞선 승인 대기와 진행 중
+기록은 당시 상태로 보존하며, 완료되지 않은 실제 발행이나 출시를 소급하여
+승인하지 않는다. 제품 source freeze는 계속
+`451205b08fed2617d6e04f3c209e1a21b8aa9f29`이고 이번 변경은 문서만이다.
+
+사용자는 2026-10-29 TSLA·IBM·UNP 세 회사에 한하여 기존 불변 Raw와 정상 공개
+full API를 이용한 새 current-cutoff History 생성을 승인했다. 기존 결과와 회사별
+감사 증거는 보존하며, 순서 순열을 허용하는 append 코드나 숨은 fallback은
+추가하지 않았다. 이로써 앞선 세 회사의 필수 사용자 결정 대기는 해소됐다.
+TSLA·IBM·UNP와 NEE는 모두 연간·분기 분석 준비를 완료했다.
+
+38개사 prospective batch도 실제 PASS로 완료됐다(1667.75초). 기존에 완료한
+7개 증분 회사와 위 4개사를 합쳐 현재 49개사의 연간·분기 분석이 준비됐다.
+이는 입력 분석 준비 상태이며, current50 금융·지표·데이터셋 발행 완료를 뜻하지
+않는다.
+
+JNJ만 미완료다. 첫 시도는 AS_FILED reported 6개 구간을 완료하고
+LATEST_REPORTED/FY 인코딩으로 진행한 뒤 3600초 시간 guard에 도달했다.
+완성된 reported-stage manifest가 없어 해당 6개 구간의 공개 resume는 불가능하다.
+ROOT는 현재 23개 filing의 fingerprint와 일치하는 완료 T1–T4를 재사용하는 정상
+공개 빌드를 단 1회 승인했다. 기존 약 11GiB partial은 보존하고 별도 새 partial에
+reported stage를 다시 생성하며, 제품 코드·회계 정책·옛 회사 감사는 변경하거나
+재실행하지 않는다. 재시도는 2026-10-30 00:08 KST에 시작했고 이 스냅샷에서는
+아직 진행 중이다. 운영 상한은 10800초, RAM 16GiB, 최소 여유 공간 8GiB이며,
+구간별 진행을 계측한다. 이 예산은 AS_FILED 약 54분과 다음 view·quarter 처리
+여유에 근거한 상한이지 완료시간 보장이 아니다.
+
+남은 수락 범위는 JNJ 준비 완료, current50의 6개 발행 단계 전체, 새 산술 TTM을
+포함한 private UAT, 별도의 main merge와 live 적용이다. 모두 여전히 pending이다.
+앞서 완료한 baseline 발행·private UAT와 source451의 독립 검토·CI PASS는 이
+latest/current50 수락과 구분한다. 기존 Raw·History·분석·감사 및 live21의 보호된
+catalog/journal은 보존한다. 이번 문서 커밋은 로컬에만 남기며 push하지 않는다.
+
+보조 운영 증거는 `work/quarterly50_expansion_20261025/`의
+`full_history_three_user_approval_20261029.json`,
+`jnj_completed_roots_resume_approval_20261030.json` 및
+`latest_execution_451205b0/items/{TSLA,IBM,UNP,NEE}-quarterly.json`이다.
+이 파일들은 위 추적 문서의 승인·미완료 경계를 보충하며 단독 권위나 필수 읽기
+자료가 아니다.
