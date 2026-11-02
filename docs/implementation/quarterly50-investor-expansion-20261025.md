@@ -1150,3 +1150,30 @@ main merge·live 적용 완료를 이 코드 구현만으로 선언하지 않는
 payload 변조·미래 추가 변경·알 수 없는 control·source alias·위조 객체도 거부했다.
 Ruff와 `git diff --check`는 PASS다. 큰 기존 suite나 완료 회사 감사는 반복하지
 않았다. 실제 AAPL 연간 한 건의 동결 후 회귀와 별도 독립 검토는 아직 다음 단계다.
+
+### 2026-11-02 동결 및 실제 한 건 회귀 결과
+
+제품 소스는 `9846357496e3deca84a66ee082dc7bd3d154606f`에 로컬 동결했다.
+그 뒤 실제 AAPL ANNUAL의 declared view 전체(AS_FILED 포함)에서 공개
+`verify_reselected_analysis` 비교가 PASS했다. 2026-10-25 기존 selection pin과
+AAPL 현재·원본 분석 manifest pin을 확인한 뒤 해당 한 건만 비교했으며,
+전체 cohort proof replay나 publication/data 쓰기는 하지 않았다. 처리1.7717초,
+peak538588KiB였다. 앞서 확인된 `trace_0` 최상위 null padding 차이는 허용하되
+동일 dataset의 나머지 값과 구조를 그대로 비교한 실제 회귀다. 이는 current50
+identity 발행이나 전체 UAT PASS 선언은 아니다.
+
+자체 synthetic 명령은 다음과 같다(`POLARS_MAX_THREADS=2`,
+`PYTHONDONTWRITEBYTECODE=1`, `PYTHONPATH=src:.`).
+
+```bash
+.venv/bin/python -m pytest -q -p no:cacheprovider \
+  tests/screening/test_financial_source_compatibility.py \
+  tests/screening/test_prospective_selection.py::test_prospective_selection_new_event_preserves_raw_and_old_bundle \
+  tests/screening/test_financial_storage_reuse.py::test_current_routine_v2_reuses_completed_light_checks_without_full_typed_claim
+```
+
+최종 소스의 독립 읽기 전용 검토와 ROOT 인수는 아직 별도 절차다. ROOT는 검토
+수락 후 최종 동결 소스에서 새 packet을 생성·명시적으로 승인하고, 새 identity
+config/destination으로 기존 quality를 참조하여 미완료 단계만 진행한다. 원본451
+소스·보고서·quality와 실패 로그는 보존한다. 이 문서 결과 후속 커밋은 제품
+소스를 바꾸지 않으며 push/main/live 적용도 수행하지 않는다.
