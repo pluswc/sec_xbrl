@@ -1048,3 +1048,105 @@ current50 발행·UAT·운영 적용을 대신하지 않는다.
 `publish_latest50_pipeline_20261030.log` 및
 `reselection_first_difference_20261030.json`이다. 위 기록은 추적 문서의 상태와
 승인 경계를 보충하며 단독 권위나 필수 읽기 자료가 아니다.
+
+## 2026-11-02 승인 및 구현 — nullable transport 비교와 명시적 소스 전이
+
+사용자는 2026-11-02 「형식 검사·호환성 근거 보정 후 계속」을 승인했다. 앞선
+2026-10-30 승인 대기 기록은 당시 상태로 보존한다. 이번 범위는 값이나 회계
+선택을 바꾸지 않는 재선택 transport 비교와, 완료된451 증거를 정확한 새 소비자
+소스로 연결하는 선택적 증거다. 기준일은 계속 2026-10-25이며 새 수집은 없다.
+기존50 History·100개 분석·quality·보고서·Raw·journal·live21은 불변이다.
+
+수락 조건은 다음과 같다.
+
+- 기대 dataset 전체의 최상위 키 합집합과 실제 Parquet 열 집합이 정확히 같아야
+  한다. 합집합 안의 누락 키만 행별 `None`으로 비교하며 원본 dict는 수정하지
+  않는다. 전체 정규화 복사본을 추가하지 않는다. 값·중첩 키·행 순서·행 개수,
+  알 수 없는 추가 열(모두 null인 열과 빈 테이블의 열 포함)은 그대로 거부한다.
+- 전이 증거가 없으면 기존 source/code identity 일치 검사를 유지한다. 증거가
+  있으면 원본451 전체 Python 소스 inventory와 bytes, 현재 전체 inventory,
+  정확한 허용 변경파일과 전후 SHA, 동일 rules, 각 기존 native report·build·
+  History·declared payload pin을 검증한다. ROOT 승인 없는 변경, 전이 역방향,
+  미래의 추가 변경, History/Raw/회계 선택/규칙 파일 변경은 허용하지 않는다.
+- 기존38 prospective manifest·정책·origin registry와 quality의 선언·controls·
+  결과 equality는 그대로 재검증한다. 새 전이 증거는 새 identity config와
+  현재 source closure에 별도로 결속한다. 기존 보고서/marker rewrite, 검증
+  생략, quality 재발행이나 분석 재생성으로 해결하지 않는다.
+
+`prospective_selection.py`의 비교만 nullable 최상위 열 형태를 보정한다.
+`financial_source_compatibility.py`는 directed 증거 검증과 proposal 생성을 맡는다.
+`financial_storage_reuse.py`는 선택적 검증 객체를 받아 기존 native report의
+정확한451 code identity를 현재 동일 rules 아래 연결한다. quality/identity와
+verified source closure는 이 증거를 전달하고 모든 source/evidence bytes의 현재
+신선도를 결속한다. 전이 검증 객체는 resolver가 발행한 issuer/seal이 필요하며
+호출자가 만든 임의 객체는 거부한다. 기존 routine 검증기 자체는 변경하지 않는다.
+
+### 새 증거 및 호출 계약
+
+새 identity config에만 아래 선언을 추가하고 기존 quality root와 SHA를 그대로
+참조한다. 기존 quality config나 publication을 수정하지 않는다.
+
+```json
+"source_compatibility": {
+  "path": "/absolute/governed/source-compatibility.json",
+  "sha256": "<exact packet SHA-256>"
+}
+```
+
+ROOT는 최종 동결 소스를 로드한 뒤 다음 공개 proposal 함수를 사용한다. 함수는
+metadata와 소스 bytes만 읽으며 쓰기·회사 검증 재실행·승인을 수행하지 않는다.
+
+```python
+from sec_xbrl.financial_source_compatibility import prepare_source_compatibility_packet
+
+packet = prepare_source_compatibility_packet(
+    origin_source_root=source451_root,  # .../src/sec_xbrl
+    preserved_controls=[quality_manifest_pin, prospective_manifest_pin,
+                        origin_storage_registry_pin, current12_storage_registry_pin],
+    routine_histories=[
+        {"report": report_pin, "build_manifest": build_pin,
+         "history_manifest": history_pin},
+        # Each of the 12 exact completed native reports is explicit.
+    ],
+)
+# ROOT reviews the exact source diff and packet, then explicitly approves a NEW
+# artifact by changing packet["status"] from PROPOSED to ROOT_APPROVED.
+```
+
+packet schema는 `financial-source-compatibility-v1`이다. 정확한 필드는
+`schema_version`, `status`, `origin_revision`(451 전체 SHA), `origin_source_root`,
+`origin_source_sha256s`, `current_source_sha256s`, `approved_changes`,
+`preserved_controls`, `routine_histories`다. inventory 키는 package 상대 Python
+파일명이며 값은 SHA-256이다. 각 변경은 `origin`/`current` SHA를 명시한다.
+각 routine 항목은 `report`, `build_manifest`, `history_manifest` pin과
+`declared_payload_sha256s`, `rules`, `origin_code_identity`,
+`current_code_identity`를 포함한다. 중복 pin/report와 unsafe source alias는
+거부한다. 기존 code identity는 digest 목록만으로 추정하지 않고 원본451의
+hash-bound 소스 bytes와 정확한 기존 identity 알고리즘으로 재계산한다.
+
+따라서 **원본451 코드 snapshot은 명시적인 필수 증거 입력**이다. ROOT는 선택적
+work snapshot과 분리한 `data/processed/source_evidence/<451 SHA>/src/sec_xbrl`
+같은 governed 위치에 동일 bytes를 복사·hash 대조해 보존할 수 있다. 특정 경로는
+엔진에 하드코딩하지 않는다. 이는 과거 runtime/checkout의 신선도나 새 semantic
+감사를 주장하지 않으며, 승인된 불변 소스 증거 bytes를 검사하는 계약이다.
+새 artifact와 새 config는 새 경로에 기록한다. 새 identity를 다음 기존 공개
+함수로 발행하면 기존 quality를 위 증거 아래 다시 읽는다.
+
+```python
+from sec_xbrl.screening.metric_identity import publish_generic_metric_identity
+
+publication = publish_generic_metric_identity(new_identity_config, new_identity_destination)
+```
+
+이 구현의 자체 검사는 새 synthetic 경계와 인접 기본 경로, 실제 AAPL 연간 한
+건으로 제한한다. 완료된 회사 감사·100개 분석·quality 생성은 반복하지 않는다.
+독립 검토와 ROOT 인수는 별도이며, current50 identity 이후 발행·private UAT·
+main merge·live 적용 완료를 이 코드 구현만으로 선언하지 않는다.
+
+자체 focused synthetic 결과: 신규20개와 인접 기존 기본 경로2개, 총22개 PASS
+(6.91초). 새 identity의 public publish/reopen이 기존 quality·native report bytes를
+보존하는 것, 기존 prospective+origin registry controls equality, commit 경계의
+전이 packet 변조 거부를 포함한다. 미승인 validator 변경·역방향·규칙/report/
+payload 변조·미래 추가 변경·알 수 없는 control·source alias·위조 객체도 거부했다.
+Ruff와 `git diff --check`는 PASS다. 큰 기존 suite나 완료 회사 감사는 반복하지
+않았다. 실제 AAPL 연간 한 건의 동결 후 회귀와 별도 독립 검토는 아직 다음 단계다.

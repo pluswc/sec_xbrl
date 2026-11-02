@@ -154,7 +154,7 @@ def _collection_controls(
     return read_json(plan_path), intake_path
 
 
-def _resolve_config(config_pin: dict[str, str]) -> tuple[str, dict, dict, Any]:
+def _resolve_config(config_pin: dict[str, str], *, source_compatibility=None) -> tuple[str, dict, dict, Any]:
     from sec_xbrl.collection_operations import _attest_intake, _validate_build_attestation
     from sec_xbrl.filing.company_discovery import (
         SUPPORTED_FORMS,
@@ -290,6 +290,7 @@ def _resolve_config(config_pin: dict[str, str]) -> tuple[str, dict, dict, Any]:
                     config["storage_reuse"],
                     collection_manifest=old_collection,
                     scope_companies=read_json(old_collection)["companies"],
+                    source_compatibility=source_compatibility,
                 )
                 controls.update(
                     {f"STORAGE:{name}": pin for name, pin in storage_proofs[key].controls.items()}
@@ -428,9 +429,12 @@ def publish_prospective_selection(*, config_path: Path, destination: Path) -> Pa
 
 
 def resolve_prospective_selection(
-    declaration: dict, *, collection_manifest: Path, scope_companies: list[dict]
+    declaration: dict, *, collection_manifest: Path, scope_companies: list[dict],
+    source_compatibility=None,
 ) -> ProspectiveSelections:
-    selection = _resolve_manifest(declaration)
+    from sec_xbrl.financial_source_compatibility import checked_source_compatibility
+    source_compatibility = checked_source_compatibility(source_compatibility)
+    selection = _resolve_manifest(declaration, source_compatibility=source_compatibility)
     allowed = {(row["ticker"], row["cik"]) for row in scope_companies}
     if any(
         (ticker, row["cik"]) not in allowed for ticker, row in selection.companies.items()
@@ -439,7 +443,7 @@ def resolve_prospective_selection(
     return selection
 
 
-def _resolve_manifest(declaration: dict) -> ProspectiveSelections:
+def _resolve_manifest(declaration: dict, *, source_compatibility=None) -> ProspectiveSelections:
     declaration = _pin(declaration)
     value = read_json(Path(declaration["path"]))
     if (
@@ -458,7 +462,9 @@ def _resolve_manifest(declaration: dict) -> ProspectiveSelections:
         or not value["publication_id"]
     ):
         raise ValueError("unsupported prospective selection manifest")
-    cutoff, companies, controls, storage = _resolve_config(value["config"])
+    if source_compatibility is not None:
+        source_compatibility.require_control(declaration)
+    cutoff, companies, controls, storage = _resolve_config(value["config"], source_compatibility=source_compatibility)
     if (
         value["financial_as_of"] != cutoff
         or value["companies"] != companies
@@ -795,6 +801,20 @@ def _reselected_records(client, *, ticker: str, view: str, cutoff: str, origin_l
     return transformed
 
 
+def _same_transport_records(expected: list[dict], actual: list[dict], *, actual_columns=None) -> bool:
+    """Allow only Parquet's dataset-wide top-level missing-key to null padding.
+
+    Never mutate either input, ignore unknown columns, or normalize nested data.
+    """
+    columns = {key for row in expected for key in row}
+    if (actual_columns is not None and set(actual_columns) != columns):
+        return False
+    if len(expected) != len(actual) or any(set(row) != columns for row in actual):
+        return False
+    return all({key: row.get(key) for key in columns} == stored
+               for row, stored in zip(expected, actual, strict=True))
+
+
 def verify_reselected_analysis(
     root: Path, *, selection: ProspectiveSelections, ticker: str, period_mode: str
 ) -> None:
@@ -838,7 +858,11 @@ def verify_reselected_analysis(
         if set(info["files"]) != set(actual_files):
             raise ValueError("reselected analysis dataset set differs")
         for name in info["files"]:
-            if current._records(ticker, view, name) != datasets[name]:
+            import polars as pl
+            actual = current._records(ticker, view, name)
+            columns = pl.read_parquet_schema(root / actual_files[name]["path"])
+            if not _same_transport_records(datasets[name], actual,
+                                           actual_columns=columns):
                 raise ValueError(
                     "reselected analysis differs from current event over approved unchanged observations"
                 )

@@ -616,8 +616,13 @@ class GenericMetricQualityReader:
         expected_companies: tuple[dict[str, str], ...],
         _verified_storage_reuse: Any = None,
         _verified_prospective_selection: Any = None,
+        _source_compatibility: Any = None,
     ) -> dict[str, Any]:
         """Reopen the exact parent collection, histories, source bytes, and Raw."""
+        from sec_xbrl.financial_source_compatibility import checked_source_compatibility
+        _source_compatibility = checked_source_compatibility(_source_compatibility)
+        if _source_compatibility is not None:
+            _source_compatibility.require_control({"path": str(self.manifest_path), "sha256": _sha256(self.manifest_path)})
         collection_manifest = _regular_file(collection_manifest, "collection manifest")
         companies = _company_scope(list(expected_companies), "expected quality")
         if (
@@ -651,9 +656,9 @@ class GenericMetricQualityReader:
             prospective = checked_prospective_selection(_verified_prospective_selection,
                 declaration=config.get("prospective_selection"), collection_manifest=collection_manifest)
         else:
-            prospective = _configured_prospective(config, collection_manifest)
+            prospective = _configured_prospective(config, collection_manifest, source_compatibility=_source_compatibility)
         storage = _configured_storage_reuse(config,collection_manifest,prospective=prospective,
-                                             verified_storage=_verified_storage_reuse)
+                                             verified_storage=_verified_storage_reuse, source_compatibility=_source_compatibility)
         readiness = _validate_status(
             collection_manifest=collection_manifest,
             parent_companies=parent,
@@ -897,15 +902,16 @@ def _load_config(path: Path) -> dict[str, Any]:
     return normalized
 
 
-def _configured_prospective(config: dict[str, Any], collection_manifest: Path):
+def _configured_prospective(config: dict[str, Any], collection_manifest: Path, *, source_compatibility=None):
     from sec_xbrl.prospective_selection import resolve_prospective_selection
     return (resolve_prospective_selection(config["prospective_selection"], collection_manifest=collection_manifest,
-                    scope_companies=config.get("collection_scope_companies", config.get("companies", [])))
+                    scope_companies=config.get("collection_scope_companies", config.get("companies", [])),
+                    source_compatibility=source_compatibility)
             if "prospective_selection" in config else None)
 
 
 def _configured_storage_reuse(config: dict[str, Any], collection_manifest: Path,
-                              *, prospective: Any = None, verified_storage: Any = None):
+                              *, prospective: Any = None, verified_storage: Any = None, source_compatibility=None):
     from sec_xbrl.financial_storage_reuse import checked_storage_reuse, resolve_storage_reuse
     if "storage_reuse" not in config:
         if verified_storage is not None:
@@ -922,7 +928,7 @@ def _configured_storage_reuse(config: dict[str, Any], collection_manifest: Path,
     if verified_storage is not None:
         return checked_storage_reuse(verified_storage,collection_manifest=parent,declaration=config["storage_reuse"])
     return resolve_storage_reuse(config["storage_reuse"], collection_manifest=parent,
-                                scope_companies=_read_json(parent)["companies"])
+                                scope_companies=_read_json(parent)["companies"], source_compatibility=source_compatibility)
 
 
 _UNRESOLVED_STORAGE = object()

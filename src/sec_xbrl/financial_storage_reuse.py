@@ -43,16 +43,19 @@ class FinancialStorageReuse:
 
 
 def resolve_storage_reuse(declaration: dict, *, collection_manifest: Path,
-                          scope_companies: list[dict]) -> FinancialStorageReuse:
+                          scope_companies: list[dict], source_compatibility=None) -> FinancialStorageReuse:
     from sec_xbrl.collection_operations import (
         _attest_intake,
         _declared_publication_files,
         _validate_build_attestation,
     )
+    from sec_xbrl.financial_source_compatibility import checked_source_compatibility
     from sec_xbrl.history import HistoryPublicationReader
-
+    source_compatibility = checked_source_compatibility(source_compatibility)
     declaration = _pin(declaration)
     payload = read_json(Path(declaration["path"]))
+    if source_compatibility is not None:
+        source_compatibility.require_control(declaration)
     fields = {"schema_version", "status", "collection_manifest", "current_policy_source_sha256s", "companies"}
     v2 = isinstance(payload, dict) and payload.get("schema_version") == VERSION_V2
     if v2:
@@ -61,7 +64,9 @@ def resolve_storage_reuse(declaration: dict, *, collection_manifest: Path,
         or payload.get("schema_version") not in {VERSION, VERSION_V2}
         or (v2 and payload.get("diagnostic_policy") != DIAGNOSTIC_POLICY)
         or payload.get("status") != "ROOT_APPROVED"
-        or payload.get("current_policy_source_sha256s") != financial_storage_policy_sources()):
+        or (payload.get("current_policy_source_sha256s") != financial_storage_policy_sources()
+            and not (source_compatibility is not None and source_compatibility.policy_matches(
+                payload.get("current_policy_source_sha256s"), financial_storage_policy_sources())))):
         raise ValueError("storage reuse requires exact ROOT-approved current policy compatibility")
     collection_pin = _pin(payload["collection_manifest"])
     if collection_pin["path"] != str(collection_manifest.resolve()):
@@ -109,7 +114,7 @@ def resolve_storage_reuse(declaration: dict, *, collection_manifest: Path,
             if prior.get("kind") == "ACCEPTED_CURRENT_ROUTINE_HISTORY":
                 if not v2:
                     raise ValueError("current routine evidence requires explicit v2 scope")
-                historical = _current_routine_evidence(prior, pins=pins, declared=declared)
+                historical = _current_routine_evidence(prior, pins=pins, declared=declared, source_compatibility=source_compatibility)
                 controls.update({f"{ticker}:{history_index}:CURRENT:{name}": pin
                                  for name,pin in historical.items()})
             elif prior.get("schema_version") == "accepted-financial-storage-evidence-v1":
@@ -271,17 +276,24 @@ def _normalized_evidence(value: dict, *, pins: dict, declared: dict,
 
 def current_history_validation_identity(manifest: dict) -> str:
     """Exact current public History.validate identity, without validating records."""
-    from dataclasses import asdict
-
     from sec_xbrl import history
     from sec_xbrl.history_validation import validation_code_identity
     return validation_code_identity(sources=tuple(sorted(Path(history.__file__).parent.rglob("*.py"))),
-        rules={"history_version":history.HISTORY_VERSION,
-               "layer2_rules":asdict(history._history_layer2_rule_versions()),
-               "period_rule":manifest.get("period_rule"),"derivation_rule":manifest.get("derivation_rule")})
+                                    rules=history_validation_rules(manifest))
 
 
-def _current_routine_evidence(value: dict, *, pins: dict, declared: dict) -> dict:
+def history_validation_rules(manifest: dict) -> dict:
+    """Exact rules used by the existing native validation identity."""
+    from dataclasses import asdict
+
+    from sec_xbrl import history
+    return {"history_version": history.HISTORY_VERSION,
+            "layer2_rules": asdict(history._history_layer2_rule_versions()),
+            "period_rule": manifest.get("period_rule"),
+            "derivation_rule": manifest.get("derivation_rule")}
+
+
+def _current_routine_evidence(value: dict, *, pins: dict, declared: dict, source_compatibility=None) -> dict:
     """Reuse completed routine checks; never assert a historical full typed audit."""
     from sec_xbrl.history_validation import (
         VALIDATION_POLICY_VERSION,
@@ -317,7 +329,11 @@ def _current_routine_evidence(value: dict, *, pins: dict, declared: dict) -> dic
     allowed={"ROUTINE_INITIAL","ROUTINE_CHANGED","ROUTINE_UNCHANGED"}
     marker=build.get("storage_validation",{})
     if (report.get("version") != 1 or report.get("policy_version") != VALIDATION_POLICY_VERSION
-        or report.get("code_identity") != current_history_validation_identity(manifest)
+        or (report.get("code_identity") != current_history_validation_identity(manifest)
+            and not (source_compatibility is not None and source_compatibility.accepts_routine(
+                report=controls["report"], pins=pins, declared=declared,
+                rules=history_validation_rules(manifest),
+                current_identity=current_history_validation_identity(manifest))))
         or report.get("scope_key") != _scope_key(manifest)
         or report.get("publication_root") != str(root)
         or report.get("manifest_sha256") != pins["history_manifest"]["sha256"]

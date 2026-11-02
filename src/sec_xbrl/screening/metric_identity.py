@@ -221,9 +221,11 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
     )
     if sha256_file(collection_path) != config["collection_manifest_sha256"]:
         raise ValueError("generic metric collection manifest changed")
+    from sec_xbrl.financial_source_compatibility import resolve_source_compatibility
     from sec_xbrl.metric_quality import _configured_prospective, _configured_storage_reuse
-    prospective = _configured_prospective(config, collection_path)
-    storage = _configured_storage_reuse(config, collection_path, prospective=prospective)
+    compatibility = resolve_source_compatibility(config.get("source_compatibility"))
+    prospective = _configured_prospective(config, collection_path, source_compatibility=compatibility)
+    storage = _configured_storage_reuse(config, collection_path, prospective=prospective, source_compatibility=compatibility)
     status_storage = config.get("storage_reuse")
     if status_storage and Path(read_json(Path(status_storage["path"]))["collection_manifest"]["path"]) != collection_path:
         if prospective is None:
@@ -323,6 +325,7 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
         financial_as_of=config["financial_as_of"],
         _verified_storage_reuse=storage,
         _verified_prospective_selection=prospective,
+        _source_compatibility=compatibility,
         expected_companies=tuple(
             {"ticker": row["ticker"], "cik": row["cik"]} for row in config["companies"]
         ),
@@ -622,6 +625,8 @@ def _validate_config(value: Any) -> dict[str, Any]:
         "quality_manifest_sha256": _sha(value.get("quality_manifest_sha256"), "quality manifest SHA"),
         "companies": companies,
     }
+    if "source_compatibility" in value:
+        normalized["source_compatibility"] = selection_declaration(value["source_compatibility"])
     if "prospective_selection" in value:
         normalized["prospective_selection"] = selection_declaration(value["prospective_selection"])
     if "storage_reuse" in value:

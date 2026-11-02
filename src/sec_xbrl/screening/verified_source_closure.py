@@ -725,7 +725,12 @@ def _discover_identity(
         (row.get("ticker"), row.get("cik")) for row in request_rows
     ]:
         raise ValueError("source closure collection membership differs")
+    from sec_xbrl.financial_source_compatibility import resolve_source_compatibility
     from sec_xbrl.metric_quality import _configured_storage_reuse
+    compatibility = resolve_source_compatibility(config.get("source_compatibility"))
+    if compatibility is not None:
+        for name, pin in compatibility.controls.items():
+            _add_declaration_file(collector, pin, f"{prefix}_SOURCE_COMPATIBILITY:{name}")
     prospective = _capture_prospective_inputs(collector, config, prefix=prefix)
     if prospective is not None:
         for name,declaration in prospective.controls.items():
@@ -794,7 +799,7 @@ def _discover_identity(
         if prospective is not None and declared_parent["collection_manifest"]["path"] != str(collection_path):
             storage = prospective.storage_reuse
         else:
-            storage = _configured_storage_reuse(config, collection_path)
+            storage = _configured_storage_reuse(config, collection_path, source_compatibility=compatibility)
         for name, declaration in storage.controls.items():
             _add_declaration_file(collector, declaration, f"{prefix}_STORAGE_REUSE:{name}")
         for ticker, company in storage.companies.items():
