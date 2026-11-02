@@ -1,5 +1,19 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-02 current50 최신 정정(아래 과거 스냅샷 보존):
+[50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의
+100개 연간·분기 분석과 기존 quality는 모두 PASS다. nullable transport·명시적
+소스 전이 보정 `9846357496e3deca84a66ee082dc7bd3d154606f`는 독립 PASS 및 ROOT
+소스 수락 후 기존 quality를 재사용하여 identity·annual metrics·annual dataset·
+quarterly metrics의 4개 발행을 완료했다. 마지막 combined dataset은 소비자가
+`DERIVED_QUARTER`의 누락된 `duration_days`를 거부하여 FAIL했다. 최초 사례는
+ABT `ttm_cfo` 2024Q4 내부 Q2이며 EXCLUSIVE 날짜의 91일 및 YTD 차감 산술은
+정상으로 관측됐다. 새 consumer scope/compatibility 보완은 **사용자 승인 대기**로,
+아직 구현하지 않는다. 완료 분석·quality·4개 발행과 원본 보고서는 보존한다.
+Combined dataset·private current50 UAT·main/live 적용은 pending이며 기존21은
+보존된다. 아래 과거의 세 회사 생성·형식 보정 승인 대기는 각각 사용자 결정으로
+해소됐지만 이번 새 보완 승인과 전체 출시 수락은 별개다.
+
 
 2026-10-28 실행 인계 snapshot(전체 완료 선언 아님):
 [50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의 source

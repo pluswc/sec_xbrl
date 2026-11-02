@@ -1177,3 +1177,51 @@ identity 발행이나 전체 UAT PASS 선언은 아니다.
 config/destination으로 기존 quality를 참조하여 미완료 단계만 진행한다. 원본451
 소스·보고서·quality와 실패 로그는 보존한다. 이 문서 결과 후속 커밋은 제품
 소스를 바꾸지 않으며 push/main/live 적용도 수행하지 않는다.
+
+## 2026-11-02 실제 발행 후속 — 4개 추가 발행 PASS, combined consumer 보완 승인 대기
+
+동결 소스 `9846357496e3deca84a66ee082dc7bd3d154606f`는 별도 독립 검토 PASS 뒤
+ROOT가 소스 범위로 수락했다. ROOT는 원본451의 governed 소스 증거와 12개
+routine 보고서, 5개 preserved control을 결속한 승인 전이 packet을 새 경로에
+생성했다. 기존 quality와38 prospective·registry 원본을 수정하지 않고 이어간
+실제 발행 결과는 다음과 같다.
+
+| 단계 | 실제 결과 | 처리 시간 | 알려진 peak RSS |
+| --- | --- | --- | --- |
+| 기존 quality | PASS, 원본 불변 재사용 | 앞선276.40초 | 앞선11299012KiB |
+| identity | PASS | 783.57초 | 22958372KiB |
+| annual metrics | PASS | 506.24초 | 이 상태 후속에 미기재 |
+| annual dataset | PASS | 468.65초 | 이 상태 후속에 미기재 |
+| quarterly metrics | PASS | 566.06초 | 이 상태 후속에 미기재 |
+| combined dataset | FAIL, quarterly consumer 검증에서 중단 | 680.25초 | 이 상태 후속에 미기재 |
+
+따라서 current50의 100개 분석·quality와 이후4개 완료 발행은 그대로 보존한다.
+이것은 6단계 전체 완료나 private current50 UAT·출시 수락이 아니다. 실패한
+combined 단계만 다음 판단 대상이며 완료 단계나 옛 회사 검증을 재생성하지 않는다.
+
+최종 읽기 전용 actual consumer 보고서의 최초 실패는 ABT / `ttm_cfo` / 2024Q4다.
+그 내부 Q2 `DERIVED_QUARTER` prepared observation에는 `duration_days` 키가 없지만
+`end_convention=EXCLUSIVE`, 2024-04-01부터2024-07-01까지의 날짜 차이는91일이다.
+해당 Q2의 원본 YTD2.985B에서 Q1 1.025B를 차감한1.96B 산술도 정상으로 관측됐다.
+현재 reader의 `_verify_source_scope`는 reported Raw와 동일하게 정수
+`duration_days`를 요구하여 `quarterly source period duration differs from its dates`
+오류로 거부했다. 이것은 확인된 최초 consumer 계약 실패이며, 전체 전파 범위나
+모든 파생 기간의 적합성을 이미 검증했다는 뜻은 아니다. 앞선 inclusive 가정
+진단은 무효이며 판단 근거로 사용하지 않는다.
+
+ROOT는 새 consumer scope와 호환성 근거 보완의 사용자 승인을 질문했고, 이
+스냅샷에서는 답변 대기 중이다. **새 보완 코드는 아직 승인·구현되지 않았다.**
+이번 상태 기록은 문서만 변경하며 제품 소스·테스트·지침과 기존 보고서·데이터는
+변경하지 않는다. 승인 후 별도 계약과 독립 검토 없이 duration 정책을 완화하거나
+누락 metadata를 위장하지 않는다.
+
+남은 범위는 이 새 판단, combined dataset 완료, private current50 UAT 및 별도의
+main merge/live 적용이다. 모두 pending이다. 기존21/live와 원본 journal은 보존하며
+ROOT가 준비한 새 live operator와 UAT harness는 아직 실행하지 않았다. main/live
+전환도 수행하지 않았다. 문서 후속은 로컬 커밋만 수행하고 push하지 않는다.
+
+소스 검토·수락의 보조 기록은
+`work/quarterly50_expansion_20261025/independent_transport_compatibility_98463574.json`
+및 `lead_transport_source_acceptance_98463574.json`이다. 최초 consumer 실패는 같은
+디렉터리의 최종 `first_quarter_consumer_failure_98463574.json`만 참조한다.
+이 보조 파일들은 위 추적 계약의 상태 경계를 보충하며 단독 권위가 아니다.
