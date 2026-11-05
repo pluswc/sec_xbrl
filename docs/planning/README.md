@@ -1,5 +1,17 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-06 current50 consumer 보완 후속:
+사용자가 계약 불일치와 보완 내용을 먼저 설명한 뒤 최소 읽기 계약 수정을
+승인했다. [50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의
+TTM 내 prepared `DERIVED_QUARTER`에 한해서 누락된 `duration_days`를 허용하며,
+명시된 일수와 Raw 원본 일수·기간·scope·quality 검증은 유지하는 소스 후보를 구현했다.
+Focused synthetic 43 PASS와 기존 quarterly publication 단일 consumer 재열기
+50사·16,400 observations PASS(6.258초)를 확인했다. 독립 검증·소스 로컬 인수는
+대기하며, combined 재개에 필요한 별도 source compatibility 판단도 미완료다.
+기존 100개 분석·quality·4개 완료 발행은 보존했다. Combined dataset·private current50
+UAT·main/live는 여전히 pending이다. 아래11-02 승인 대기 기록은 이 사용자 승인으로
+해소됐으며, 원본 과거 상태는 보존한다.
+
 2026-11-02 current50 최신 정정(아래 과거 스냅샷 보존):
 [50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의
 100개 연간·분기 분석과 기존 quality는 모두 PASS다. nullable transport·명시적

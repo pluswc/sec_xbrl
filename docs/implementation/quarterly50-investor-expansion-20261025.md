@@ -1225,3 +1225,46 @@ ROOT가 준비한 새 live operator와 UAT harness는 아직 실행하지 않았
 및 `lead_transport_source_acceptance_98463574.json`이다. 최초 consumer 실패는 같은
 디렉터리의 최종 `first_quarter_consumer_failure_98463574.json`만 참조한다.
 이 보조 파일들은 위 추적 계약의 상태 경계를 보충하며 단독 권위가 아니다.
+
+
+## 2026-11-06 prepared derived quarter consumer 최소 보완 후보
+
+사용자는 “계약 불일치 어떤건지 어떤보완인지 먼저표현하고진행”을 승인했고,
+ROOT가 위 최초 실패와 보완 범위를 설명한 뒤 단일 writer에 최소 구현을 위임했다.
+승인은 consumer 읽기 계약의 불일치를 해소하는 범위이며, 금액 산술·회계 정책이나
+기존 발행의 source identity 계약을 확대하는 승인이 아니다. 위11-02 승인 대기
+스냅샷은 이 결정으로 해소됐고 과거 기록은 보존한다.
+
+`screening/quarterly.py`는 TTM 입력인 prepared `DERIVED_QUARTER`를 구분하여
+`duration_days` 키가 없는 경우만 허용한다. 이 observation의 기간은 이미 생산자가
+명시한 EXCLUSIVE 시작/끝과 cumulative Raw 입력 계보로 검증한다. 필드가 존재하면
+정수이며 날짜 차이와 같아야 한다. `None`, bool, 문자열, 잘못된 정수는 거부한다.
+Raw reported anchor에는 누락 허용을 적용하지 않는다. 값·원본 날짜·중첩 근거·ID·
+입력 순서 변경, metadata 보충, consumer 금액 계산은 없다. 기존 CIK·metric·unit·
+dimension·view/as-of 연결, 기간 연속성, cumulative 입력 연결, quality·basis/recast·
+순환 검사와 Raw 원본 검증을 그대로 거친다. Compatibility helper는 수정하지 않았다.
+
+자체 검증은 다음 제한된 범위에서 수행했다.
+
+- 실제 producer 형태의 Q2 CFO(YTD_6M minus Q1)에서 파생 TTM CFO·분기 및 TTM FCF·
+  TTM FCF margin 읽기, 명시된 잘못된 일수·원본 누락/None/잘못된 일수·잘못된 기간·
+  부모 scope·quality 거부와 기존 ratio-of-sums 표본: **17 PASS**.
+- 기존 TTM 네 입력의 기간 연속성 및 reported source의 부모 scope 거부: **26 PASS**.
+- 기존 actual quarterly publication `quarterly-screening-metrics-bac105767b416b92a3a8898b`
+  consumer 단일 재열기: **50사 / 16,400 observations PASS, 6.258초**.
+  입력 root는 `data/processed/universe_runs/quarterly50_20261025/` 아래
+  `latest_financial50_compat_98463574/quarterly_metrics`다. 이는 해당 consumer 검증이며
+  combined producer의 parent identity·quality 재검증이나 source 전이 승인이 아니다.
+
+재현 명령(네트워크 불필요, 저장소 Python 3.12 환경):
+
+```bash
+python -m pytest -q tests/screening/test_quarterly50_expansion.py -k 'prepared_derived_quarter or all_41_and_ratio_of_sums'
+python -m pytest -q tests/screening/test_quarterly_source_validation.py::test_ttm_requires_four_contiguous_compatible_qtd_inputs tests/screening/test_quarterly_source_validation.py::test_reported_source_scope_must_match_observation
+```
+
+구현 후보와 자체 검증 상태이며, 별도 동결 SHA의 독립 검증 및 ROOT 소스 수락은 대기다.
+기존 50 histories·100 analyses·quality·4개 완료 발행과 모든 원본 보고서는 보존했다.
+Combined 재개 시 새 소스와 기존 immutable identity packet 간 호환성은 별도 판단과
+독립 검토가 필요하다. Broad compatibility·검증 skip·old packet 덮어쓰기는 허용하지
+않는다. Combined dataset, private current50 UAT, main merge/live 적용은 미완료다.

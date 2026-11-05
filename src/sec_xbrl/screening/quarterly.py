@@ -373,7 +373,11 @@ class QuarterlyScreeningMetricReader:
                 if any(source.get(field) != row.get(field) for field in ("cik", "unit", "dimensions", "selection_view", "selection_as_of_date")):
                     raise ValueError("nested TTM source scope differs")
                 continue
-            self._verify_source_scope(source, row, source_metric)
+            self._verify_source_scope(
+                source, row, source_metric,
+                prepared_derived=(definition["observation_basis"] == "TTM"
+                                  and source.get("source_kind") == "DERIVED_QUARTER"),
+            )
             if (definition["observation_basis"] == "TTM"
                 and self.manifest.get("catalog_version") in _EXPANDED_CATALOGS
                 and source.get("source_kind") == "REPORTED" and "source_lineage" in source):
@@ -887,7 +891,8 @@ class QuarterlyScreeningMetricReader:
                 raise ValueError("quarterly raw source identity has contradictory content")
 
     def _verify_source_scope(
-        self, source: dict[str, Any], row: dict[str, Any], source_metric: str
+        self, source: dict[str, Any], row: dict[str, Any], source_metric: str,
+        *, prepared_derived: bool = False,
     ) -> None:
         for field in (
             "cik",
@@ -945,8 +950,13 @@ class QuarterlyScreeningMetricReader:
                 raise ValueError("quarterly instant source scope must preserve its exact instant")
         else:
             require_string(source.get("period_start"), "quarterly source period_start")
-            if type(source.get("duration_days")) is not int or source["duration_days"] != _duration(
-                source
+            # Prepared derived quarters declare their interval through dates and
+            # cumulative input lineage, rather than a Raw duration_days field.
+            # Only omission is permitted; an explicit duration remains binding.
+            omitted_prepared_duration = prepared_derived and "duration_days" not in source
+            if not omitted_prepared_duration and (
+                type(source.get("duration_days")) is not int
+                or source["duration_days"] != _duration(source)
             ):
                 raise ValueError("quarterly source period duration differs from its dates")
         if source.get("availability_status", "AVAILABLE") != "AVAILABLE":

@@ -300,3 +300,87 @@ def test_sparse_lookback_outside_display_stays_unavailable(short_history):
         missing = _row(observations, "quarter_cost", 2024, 4)
         assert missing["availability_status"] == "UNAVAILABLE"
         assert missing["reason"] == "INPUT_NOT_REPORTED"
+
+
+def _inputs_with_derived_q2_cfo():
+    """Use producer materialization of YTD_6M minus Q1, including both Raw anchors."""
+    columns, cells, traces = _inputs()
+    by_id = {trace["cell_id"]: trace["value_lineage"] for trace in traces}
+    for cell in cells:
+        if cell["row_id"] != "cfo" or cell["fiscal_quarter"] != 2:
+            continue
+        year = cell["fiscal_year"]
+        lineage = by_id[cell["cell_id"]]
+        later = copy.deepcopy(lineage)
+        later.update(context_start_date=f"{year}-01-01", period_class="YTD_6M",
+                     value_numeric="80", selected_source_fact_id=f"fact-cfo-ytd-{year}",
+                     context_id=f"context-cfo-ytd-{year}")
+        earlier = copy.deepcopy(next(by_id[other["cell_id"]] for other in cells
+                                     if other["row_id"] == "cfo"
+                                     and other["fiscal_year"] == year
+                                     and other["fiscal_quarter"] == 1))
+        cell.update(status="DERIVED", source_fact_id=None,
+                    source_filing_ids=[later["source_filing_id"], earlier["source_filing_id"]])
+        cell["statement_evidence"][earlier["source_filing_id"]] = ["https://example.invalid/cfo"]
+        lineage.update(accession=None, source_filing_id=None, source_snapshot_id=None,
+                       selected_source_fact_id=None, context_id=None,
+                       derived_metric_id=f"derived-cfo-q2-{year}",
+                       derivation_rule_version="approved-core-cumulative-difference-v1",
+                       formula="YTD_6M - QTD_3M", source_inputs=[later, earlier])
+    return columns, cells, traces
+
+
+def test_prepared_derived_quarter_without_duration_opens_ttm_fcf_and_margin(tmp_path):
+    root = _publication(tmp_path, inputs=_inputs_with_derived_q2_cfo())
+    before = (root / "quarter_metric_observations.json").read_bytes()
+    reader = QuarterlyScreeningMetricReader(root)
+    for metric, expected in (("ttm_cfo", "160"), ("quarter_standardized_fcf", "30"),
+                             ("ttm_standardized_fcf", "120"), ("ttm_fcf_margin", "12")):
+        row = _row(reader.observations, metric)
+        assert row["availability_status"] == "AVAILABLE"
+        assert row["value"] == expected
+    q2 = _row(reader.observations, "ttm_cfo")["source_lineage"]["derivation_inputs"][2]
+    assert q2["source_kind"] == "DERIVED_QUARTER"
+    assert "duration_days" not in q2
+    assert q2["period_start"] == "2026-04-01"
+    assert q2["period_end"] == "2026-07-01"
+    assert [source["value"] for source in q2["source_lineage"]["derivation_inputs"]] == ["80", "40"]
+    assert (root / "quarter_metric_observations.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("duration", [None, True, "91", 90])
+def test_prepared_derived_quarter_explicit_wrong_duration_still_rejects(tmp_path, duration):
+    def mutate(rows):
+        q2 = _row(rows, "ttm_cfo")["source_lineage"]["derivation_inputs"][2]
+        q2["duration_days"] = duration
+
+    with pytest.raises(ValueError, match="source period duration"):
+        QuarterlyScreeningMetricReader(_publication(
+            tmp_path, inputs=_inputs_with_derived_q2_cfo(), mutate=mutate))
+
+
+@pytest.mark.parametrize("defect", ["period", "raw_duration_missing", "raw_duration_null", "raw_duration_wrong",
+                                          "cik", "metric", "unit", "dimensions", "view", "asof", "quality"])
+def test_prepared_derived_quarter_keeps_period_raw_and_parent_scope_gates(tmp_path, defect):
+    def mutate(rows):
+        q2 = _row(rows, "ttm_cfo")["source_lineage"]["derivation_inputs"][2]
+        if defect == "period":
+            q2["period_start"] = "2026-04-02"
+        elif defect.startswith("raw_duration"):
+            anchor = q2["source_lineage"]["derivation_inputs"][0]
+            if defect.endswith("missing"):
+                anchor.pop("duration_days")
+            else:
+                anchor["duration_days"] = None if defect.endswith("null") else 180
+        else:
+            field, value = {"metric": ("canonical_metric_id", "quarter_capex"),
+                            "cik": ("cik", "0000000002"), "unit": ("unit", "EUR"),
+                            "dimensions": ("dimensions", [{"axis": "a", "member": "b"}]),
+                            "view": ("selection_view", "AS_FILED"),
+                            "asof": ("selection_as_of_date", "2026-10-24"),
+                            "quality": ("quality_blocking", True)}[defect]
+            q2[field] = value
+
+    with pytest.raises(ValueError):
+        QuarterlyScreeningMetricReader(_publication(
+            tmp_path, inputs=_inputs_with_derived_q2_cfo(), mutate=mutate))
