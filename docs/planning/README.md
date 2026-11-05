@@ -1,5 +1,18 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-06 current50 consumer 소스 수락 / 호환 전이 승인 대기:
+[50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의
+`131df12ec8f5cfa37f4a084081d4ab512b261852`는 별도 읽기 전용 검토에서
+43 focused tests·4 inline probes PASS, findings 0을 받은 뒤 ROOT가
+`SOURCE_ACCEPTED_NOT_COMBINED_MAIN_OR_LIVE`로 소스 범위 수락했다.
+Actual50 consumer PASS는 writer의 단일 재열기 근거이며 독립 재실행하지 않았다.
+완료4발행을 보존·재사용하기 위한 v2 source compatibility는 자동 승인 검토가
+구체 확장의 명시 승인 부재와 immutable source/packet 검증 경계 영향을 이유로
+거부했다. ROOT가 구체 승인을 질문했으며 v2는 미승인·미구현이다. 기존 quality·
+4발행·원본·21사 journal/catalog는 보존했고 combined·private current50 UAT·main/live는
+미완료다. 아래 이전 소스 인수 대기 상태는 이 소스 수락으로 해소됐지만 호환 전이
+승인은 별개다.
+
 2026-11-06 current50 consumer 보완 후속:
 사용자가 계약 불일치와 보완 내용을 먼저 설명한 뒤 최소 읽기 계약 수정을
 승인했다. [50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의

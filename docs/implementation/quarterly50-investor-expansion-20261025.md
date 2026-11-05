@@ -1268,3 +1268,35 @@ python -m pytest -q tests/screening/test_quarterly_source_validation.py::test_tt
 Combined 재개 시 새 소스와 기존 immutable identity packet 간 호환성은 별도 판단과
 독립 검토가 필요하다. Broad compatibility·검증 skip·old packet 덮어쓰기는 허용하지
 않는다. Combined dataset, private current50 UAT, main merge/live 적용은 미완료다.
+
+
+## 2026-11-06 consumer 소스 독립 PASS·로컬 수락과 v2 자동 승인 거부
+
+동결 소스 `131df12ec8f5cfa37f4a084081d4ab512b261852`는 별도 읽기 전용 검토에서
+**43 focused tests + 4 inline probes PASS, findings 0**을 받았다. ROOT는 이를
+`SOURCE_ACCEPTED_NOT_COMBINED_MAIN_OR_LIVE`로 소스 범위 수락했다. 위 후보의
+독립 검증·소스 인수 대기는 해소됐다. Independent 검토는 actual50를 재실행하지
+않았으며 50사·16,400행·6.258초는 writer가 기록한 단일 consumer 재열기 근거다.
+
+검토 보조 기록은 `work/quarterly50_expansion_20261025/`의
+`independent_prepared_quarter_contract_131df12_20261106.json`
+(SHA-256 `c0243569d38fafb730ca98cbd8978bd24c7256344e7c7171e373f99144dfc240`),
+ROOT 수락 보조 기록은 같은 위치의
+`lead_prepared_quarter_contract_acceptance_131df12_20261106.json`이다.
+사용자에게 최초 ABT Q2의 실제 날짜·산술과 consumer 보완을 설명했다.
+
+완료4발행/config/old packet을 그대로 재사용하기 위한 새 v2 승인 packet과 정확한
+old pin 한정 scope가 제안됐다. 제품 범위는 기존 consumer 보완을 포함하여
+`screening/quarterly.py`, `financial_source_compatibility.py`,
+`screening/dataset_v3.py` 3개 파일이다. 추가 v2 경로 작성은 자동 승인 검토가
+“기존 immutable source/packet 검증 경계에 영향을 주며 구체적인 호환성 확장에
+대한 명시적 사용자 승인이 없다”는 이유로 거부했다. ROOT가 구체 승인 질문과
+거부 이유를 전달했고 현재 답변 대기다. 따라서 **v2는 미승인·미구현**이며 거부 후
+재시도·우회하지 않았다. Consumer 소스131의 수락을 v2 승인으로 해석하지 않는다.
+
+기존 quality·완료4발행·원본 보고서·21사 journal/catalog SHA는 보존했다.
+Combined dataset·private current50 UAT·main merge/live 적용은 미완료다.
+추가 읽기 전용 runtime GET에서18766·18765 모두 응답하지 않았지만 수정 전 상태로
+관측된 것이므로 이번 patch의 회귀로 단정하지 않는다. Runtime 실행 검증은 대기다.
+이번 후속은 두 추적 문서만 변경하며 제품 소스·테스트·지침은131 동결 상태를
+유지한다. 문서 diff 검사와 로컬 커밋만 수행하며 추가 테스트·push·main 변경은 없다.
