@@ -1,12 +1,19 @@
 # 계획 등록부 — 단일 진입점
 
-2026-11-06 기업 탐색 보기 기준 repair 후속:
+2026-11-07 선택 기업 추이 비교 구현 후속:
+[동일 지표 추이 계약](../implementation/explorer-company-trends-20261107.md)은
+기존 연간/분기/TTM과2~4개 기업 선택·비교 panel을 재사용한다. 공통5개 금액 지표를
+한 번에 하나씩 같은 축에 표시하며 FY/calendar key·선택 end·missing gap·기업별 실제
+기간을 유지한다. 신규 focused9건과 기존17건이 wrapper PASS, ROOT actual10+추가5
+preview scenarios도 PASS다. 독립 검증·소스 인수·18765 전환·PR/CI/main은 별도 대기다.
+Python119/bridge/backend/원본·저장 기록은 변경하지 않았다.
+
+2026-11-06 기존 보기 기준 기능 완료(이번 추이 추가와 별도):
 [연간·분기·TTM 탐색 계약](../implementation/explorer-period-basis-20261106.md)의
-source336은 같은 basis 내 기간 요청과 failed load 뒤 옛 switch continuation이 자료를
-다시 그리는 race로 독립 FAIL했다. Version/load token/정확한 context 및 READY를 모두
-확인하는 최소 repair와3 regression을 추가했고 관련 Node12 PASS다. 기존12 visual/
-4 guard 근거는 보존·재사용했다. 새 동결 SHA 독립 검증·실제 same-basis race·소스 인수·
-18765 전환·PR/CI/main은 별도 대기다. 기존 annual/저장 기록·Python119/bridge는 유지한다.
+source336 독립 FAIL은7a64 owned continuation repair로 해소했고 독립/실제 race 검증
+뒤 PR70으로 main `2cd9e2e989fbbc660a3665513c122a93798c1713`에 반영됐다.
+Live frontend3388, backend245090과 원본 journal 불변을 확인했다. 이전 pending과 실패
+이력은 역사로 보존하며 이번 추이 기능의 새 상태와 혼동하지 않는다.
 
 2026-11-06 기존 Display presentation 완료(이번 새 기능과 별도):
 [수치·표 표시 계약](../implementation/dashboard-data-presentation-20261106.md)의
