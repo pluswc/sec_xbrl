@@ -65,3 +65,13 @@ thead th{position:sticky;top:0;z-index:4;background:#e9e6dc}
 #comparison-trend-values{margin-top:12px;min-width:0}#comparison-trend-values summary{cursor:pointer;font-size:12px;color:var(--blue);padding:8px 0}
 @media(max-width:1100px){.company-trend{scroll-margin-top:16px}}
 @media(max-width:760px){.company-trend{padding-block:12px}.company-trend-heading{gap:8px}.company-trend-heading label{width:100%;min-width:0}.company-trend-legend{gap:8px 12px}}
+/* Selection remains visible when filtering; native inverses share the same transition. */
+.explorer-selection-tray{padding:12px 16px;border-bottom:1px solid var(--line);background:var(--sheet)}
+.selection-tray-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
+#explorer-selection-list{display:flex;flex-wrap:wrap;gap:8px;list-style:none;padding:0;margin:8px 0}
+#explorer-selection-list li{max-width:100%}#explorer-selection-list button{font-size:11px;overflow-wrap:anywhere;text-align:left}
+#explorer-selection-status{font-size:11px;color:var(--slate);margin:4px 0}
+.company-trend-actions{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.company-trend-actions button{font-size:11px}
+.company-trend-reference{stroke:var(--blue);stroke-width:1.2;stroke-dasharray:5 4}
+#comparison-trend-base{min-height:16px;line-height:1.5}
+@media(max-width:760px){.explorer-selection-tray{padding:12px}.selection-tray-heading{align-items:start;flex-wrap:wrap}.company-trend-actions button{white-space:normal}}

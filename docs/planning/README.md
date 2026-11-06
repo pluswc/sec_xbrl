@@ -1,12 +1,18 @@
 # 계획 등록부 — 단일 진입점
 
-2026-11-07 선택 기업 추이 비교 구현 후속:
-[동일 지표 추이 계약](../implementation/explorer-company-trends-20261107.md)은
-기존 연간/분기/TTM과2~4개 기업 선택·비교 panel을 재사용한다. 공통5개 금액 지표를
-한 번에 하나씩 같은 축에 표시하며 FY/calendar key·선택 end·missing gap·기업별 실제
-기간을 유지한다. 신규 focused9건과 기존17건이 wrapper PASS, ROOT actual10+추가5
-preview scenarios도 PASS다. 독립 검증·소스 인수·18765 전환·PR/CI/main은 별도 대기다.
-Python119/bridge/backend/원본·저장 기록은 변경하지 않았다.
+2026-11-07 기준100·선택 usability 구현 후속:
+[정규화·사용성 계약](../implementation/indexed-trends-usability-20261107.md)은
+ROOT가 먼저 설명한 공통 양수 BASE 정책의 비저장 Display exception과 선택/해제/clear,
+close/reset/retry 쌍을 구현한다. 신규10+기존26 focused cases wrapper PASS, ROOT actual7
+criteria groups·별도 policy fixtures4·최종 READY/focus3 checks도 PASS다. 각 해시는 구분했다.
+독립 검증·새 소스 인수·18765 전환·PR/CI/main은 별도 대기다. 원본/저장 기록은 보존한다.
+
+2026-11-07 기존 추이 비교 완료(이번 정규화·usability와 별도):
+[동일 지표 추이 계약](../implementation/explorer-company-trends-20261107.md)의
+기존 기능은 독립/실제 검증 후 PR71로 main
+`485fe940f8ecdc1aa9d2aeafe7be098a97dc6246`에 반영됐다. Live frontend41024이며
+backend245090·원본 journal은 변하지 않았다. 이전 pending은 그 시점의 기록으로 보존하고
+이번 기능의 새로운 검증·운영 상태와 구분한다.
 
 2026-11-06 기존 보기 기준 기능 완료(이번 추이 추가와 별도):
 [연간·분기·TTM 탐색 계약](../implementation/explorer-period-basis-20261106.md)의

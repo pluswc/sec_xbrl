@@ -81,8 +81,8 @@ function inclusiveEnd(value){if(!/^\d{4}-\d{2}-\d{2}$/.test(value||""))return va
 function explorerPeriod(row){const p=row.actual_period;if(!p)return"선택 연도 자료 없음";const end=inclusiveEnd(p.context_end_date||p.period_end);return p.period_start?`${p.period_start} ~ ${end}`:`기준일 ${end}`}
 function explorerValue(o,m){if(!o||o.value===null||o.value===undefined){const reason=(o?.reason_labels||[])[0]||"선택 연도 자료 없음";return`<span class="missing" title="${esc(reason)}" aria-label="자료 없음: ${esc(reason)}">—</span>`}return numberMarkup(o.value,m)}
 function annualUpdateExplorerSort(){const current=$("#explorer-sort").value,ids=EXPLORER_PRESETS[$("#explorer-preset").value]||EXPLORER_PRESETS.CORE;$("#explorer-sort").innerHTML='<option value="company">기업명</option>'+ids.map(id=>`<option value="${id}">${esc(explorerMetric(id).label)}</option>`).join("");if([...$("#explorer-sort").options].some(x=>x.value===current))$("#explorer-sort").value=current}
-function renderAnnualExplorer(){const r=S.explorer,ids=EXPLORER_PRESETS[$("#explorer-preset").value]||EXPLORER_PRESETS.CORE;if(!r)return;updateExplorerSort();$("#explorer-count").textContent=`${r.rows.length}개 기업 · FY${r.selected_fiscal_year}`;$("#explorer-year-note").textContent=`선택 연도 자료 ${r.selected_year_company_count}/${r.company_count} · 없는 기업도 목록에 유지합니다.`;$("#explorer-head").innerHTML=`<tr><th><span class="sr-only">비교 선택</span></th><th>기업</th><th>공시 재무기간</th>${ids.map(id=>{const m=explorerMetric(id);return`<th title="${esc(m.label)}">${esc(CORE_SHORT_LABELS[id]||m.label)}<small>${esc(unitLabel(m))}</small></th>`}).join("")}</tr>`;$("#explorer-body").innerHTML=r.rows.length?r.rows.map((row,index)=>{const c=row.company;return`<tr><td><input type="checkbox" data-explorer-select="${index}" aria-label="${esc(c.ticker)} 비교 선택" ${S.explorerSelected.has(c.cik)?"checked":""}></td><td><button class="company" data-explorer-open="${index}"><strong>${esc(c.name||c.ticker)}</strong><small>${esc(c.ticker)}</small><small class="industry">${esc(c.industry||"업종 정보 없음")}</small></button></td><td class="actual-period">${esc(explorerPeriod(row))}</td>${ids.map(id=>`<td>${explorerValue(row.metrics[id],explorerMetric(id))}</td>`).join("")}</tr>`}).join(""):`<tr><td colspan="${3+ids.length}" class="empty">검색 결과가 없습니다.</td></tr>`;$$('[data-explorer-select]').forEach(x=>x.onchange=()=>{const c=r.rows[Number(x.dataset.explorerSelect)].company;x.checked?S.explorerSelected.add(c.cik):S.explorerSelected.delete(c.cik);updateCompareButton()});$$('[data-explorer-open]').forEach(x=>x.onclick=()=>openProfile(r.rows[Number(x.dataset.explorerOpen)].company.cik,x).catch(fail));updateCompareButton()}
-function updateCompareButton(){const n=S.explorerSelected.size,b=$("#compare-selected");b.disabled=n<2||n>4;b.textContent=n?`선택 기업 비교 (${n})`:"선택 기업 비교"}
+function renderAnnualExplorer(){const r=S.explorer,ids=EXPLORER_PRESETS[$("#explorer-preset").value]||EXPLORER_PRESETS.CORE;if(!r)return;registerExplorerCompanies(r.rows.map(row=>row.company));updateExplorerSort();$("#explorer-count").textContent=`${r.rows.length}개 기업 · FY${r.selected_fiscal_year}`;$("#explorer-year-note").textContent=`선택 연도 자료 ${r.selected_year_company_count}/${r.company_count} · 없는 기업도 목록에 유지합니다.`;$("#explorer-head").innerHTML=`<tr><th><span class="sr-only">비교 선택</span></th><th>기업</th><th>공시 재무기간</th>${ids.map(id=>{const m=explorerMetric(id);return`<th title="${esc(m.label)}">${esc(CORE_SHORT_LABELS[id]||m.label)}<small>${esc(unitLabel(m))}</small></th>`}).join("")}</tr>`;$("#explorer-body").innerHTML=r.rows.length?r.rows.map((row,index)=>{const c=row.company;return`<tr><td><input type="checkbox" data-explorer-select="${index}" data-explorer-cik="${esc(c.cik)}" aria-label="${esc(c.ticker)} 비교 선택" ${S.explorerSelected.has(c.cik)?"checked":""}></td><td><button class="company" data-explorer-open="${index}"><strong>${esc(c.name||c.ticker)}</strong><small>${esc(c.ticker)}</small><small class="industry">${esc(c.industry||"업종 정보 없음")}</small></button></td><td class="actual-period">${esc(explorerPeriod(row))}</td>${ids.map(id=>`<td>${explorerValue(row.metrics[id],explorerMetric(id))}</td>`).join("")}</tr>`}).join(""):`<tr><td colspan="${3+ids.length}" class="empty">검색 결과가 없습니다.</td></tr>`;$$('[data-explorer-select]').forEach(x=>x.onchange=()=>{const c=r.rows[Number(x.dataset.explorerSelect)].company;transitionExplorerSelection("toggle",c.cik,x.checked,c,x)});$$('[data-explorer-open]').forEach(x=>x.onclick=()=>openProfile(r.rows[Number(x.dataset.explorerOpen)].company.cik,x).catch(fail));updateCompareButton()}
+function updateCompareButton(){const n=S.explorerSelected.size,b=$("#compare-selected");b.disabled=n<2||n>4||explorerBasis.readyKey!==explorerContextKey();b.textContent=n?`선택 기업 비교 (${n})`:"선택 기업 비교";syncExplorerSelectionUI()}
 
 async function loadExplorerCatalog(d){const key=`${d.dataset_id}:${S.explorerYear}`;if(S.explorerCatalogKey===key&&S.explorerCatalog)return S.explorerCatalog;const token=++S.explorerCatalogToken,r=await api(`/api/metric-library?dataset_id=${encodeURIComponent(d.dataset_id)}&fiscal_year=${S.explorerYear}`);if(token!==S.explorerCatalogToken)return null;const current=S.explorerDataset||S.defaultDataset;if(current?.dataset_id!==d.dataset_id||Number(r.selected_fiscal_year)!==Number(S.explorerYear))return null;if(d.definition_count&&r.metrics.length!==d.definition_count)throw new Error("전체 탐색 지표 정의를 불러오지 못했습니다.");S.explorerCatalog=r;S.explorerCatalogKey=key;return r}
 
@@ -234,13 +234,13 @@ function interimPrimaryObservation(row){const id=explorerBasis.basis==="TTM"?"tt
 function interimPeriodCaption(observation){return observation?.period_end?`${actualPeriod(observation)} · ${fiscalLabel(observation)}`:"자료 기간 없음"}
 function renderExplorer(){
   if(explorerBasis.basis==="ANNUAL")return renderAnnualExplorer();
-  const snapshot=explorerBasis.snapshot;if(!snapshot)return;updateExplorerSort();
+  const snapshot=explorerBasis.snapshot;if(!snapshot)return;registerExplorerCompanies(snapshot.rows.map(row=>row.company));updateExplorerSort();
   const ids=interimMetricIds(),rows=filterSortExplorerRows(snapshot.rows,$("#explorer-query").value,$("#explorer-sort").value,$("#explorer-direction").value);explorerBasis.visibleRows=rows;
   $("#explorer-count").textContent=`${rows.length}개 기업 · ${explorerBasis.periods[explorerBasis.basis]} ${explorerBasisLabel()}`;
   $("#explorer-year-note").textContent=`${explorerBasis.metrics.length}개 지표 · 실제 기간과 회사 회계표시는 기업·지표마다 다릅니다. 미제공은 —입니다.`;$("#explorer-asof").textContent=snapshot.financial_as_of;
   $("#explorer-head").innerHTML=`<tr><th><span class="sr-only">비교 선택</span></th><th>기업</th><th>실제 기간 · 회사 회계표시</th>${ids.map(id=>{const metric=explorerMetric(id);return`<th title="${esc(metric.label)}">${esc(explorerMetricCaption(metric))}<small>${esc(unitLabel(metric))}</small></th>`}).join("")}</tr>`;
-  $("#explorer-body").innerHTML=rows.length?rows.map((row,index)=>`<tr><td><input type="checkbox" data-explorer-select="${index}" aria-label="${esc(row.company.ticker)} 비교 선택" ${S.explorerSelected.has(row.company.cik)?"checked":""}></td><td><button class="company" data-explorer-open="${index}"><strong>${esc(row.company.name||row.company.ticker)}</strong><small>${esc(row.company.ticker)}</small><small class="industry">${esc(row.company.sic_description||row.company.industry||"업종 정보 없음")}</small></button></td><td class="actual-period">${esc(interimPeriodCaption(interimPrimaryObservation(row)))}</td>${ids.map(id=>`<td>${explorerValue(preparedExplorerObservation(row.metrics[id]),explorerMetric(id))}</td>`).join("")}</tr>`).join(""):`<tr><td colspan="${ids.length+3}" class="empty">검색 결과가 없습니다.</td></tr>`;
-  $$('[data-explorer-select]').forEach(node=>node.onchange=()=>{const cik=rows[Number(node.dataset.explorerSelect)].company.cik;node.checked?S.explorerSelected.add(cik):S.explorerSelected.delete(cik);updateCompareButton()});
+  $("#explorer-body").innerHTML=rows.length?rows.map((row,index)=>`<tr><td><input type="checkbox" data-explorer-select="${index}" data-explorer-cik="${esc(row.company.cik)}" aria-label="${esc(row.company.ticker)} 비교 선택" ${S.explorerSelected.has(row.company.cik)?"checked":""}></td><td><button class="company" data-explorer-open="${index}"><strong>${esc(row.company.name||row.company.ticker)}</strong><small>${esc(row.company.ticker)}</small><small class="industry">${esc(row.company.sic_description||row.company.industry||"업종 정보 없음")}</small></button></td><td class="actual-period">${esc(interimPeriodCaption(interimPrimaryObservation(row)))}</td>${ids.map(id=>`<td>${explorerValue(preparedExplorerObservation(row.metrics[id]),explorerMetric(id))}</td>`).join("")}</tr>`).join(""):`<tr><td colspan="${ids.length+3}" class="empty">검색 결과가 없습니다.</td></tr>`;
+  $$('[data-explorer-select]').forEach(node=>node.onchange=()=>{const cik=rows[Number(node.dataset.explorerSelect)].company.cik;transitionExplorerSelection("toggle",cik,node.checked,rows[Number(node.dataset.explorerSelect)].company,node)});
   $$('[data-explorer-open]').forEach(node=>node.onclick=()=>openProfile(rows[Number(node.dataset.explorerOpen)].company.cik,node).catch(error=>explorerNotice(error.message,true)));updateCompareButton();
 }
 function interimAxisCaption(row,x,missing){return`<text class="year-label ${missing?"missing-year":""}" x="${x}" y="126"><tspan x="${x}">${esc(row.calendar_year)}</tspan><tspan x="${x}" dy="12">Q${esc(row.calendar_quarter)}</tspan>${missing?`<tspan x="${x}" dy="12">없음</tspan>`:""}</text>`}
@@ -306,19 +306,18 @@ function bindExplorer(){
   $("#compare-selected").onclick=()=>{try{openComparison()}catch(error){explorerNotice(error.message,true)}};
   $("#run-comparison").onclick=()=>renderComparison().catch(error=>{$("#comparison-result").innerHTML=`<p class="message error">${esc(error.message)}</p>`});
   tools.addEventListener("change",event=>{if(event.target.id!=="explorer-basis")explorerBasis.views[explorerBasis.basis]=explorerViewState()});
-  document.addEventListener("change",event=>{if(event.target.matches("[data-explorer-select]")){invalidateCompanyTrend();explorerBasis.comparisonToken++;$("#comparison-panel").hidden=true;$("#comparison-result").replaceChildren()}});
-  $("#close-comparison").onclick=()=>{invalidateCompanyTrend();explorerBasis.comparisonToken++;$("#comparison-panel").hidden=true};
+  mountExplorerSelection();
   ensureExplorerInventory();
 }
 
 // Published same-metric company trends; no screening state or financial calculations.
-const companyTrend={token:0,cache:new Map(),model:null,baseMetric:"revenue",frame:0,resizeObserver:null};
+const companyTrend={token:0,cache:new Map(),model:null,displayModel:null,scale:"AMOUNT",baseMetric:"revenue",frame:0,resizeObserver:null};
 const COMPANY_TREND_METRICS={revenue:"매출",operating_income:"영업이익",net_income:"순이익",cfo:"영업활동 현금흐름",standardized_fcf:"표준화 FCF"};
 const COMPANY_TREND_STYLES=[{color:"#225e80",dash:""},{color:"#32634f",dash:"7 4"},{color:"#8b5a12",dash:"2 3"},{color:"#795787",dash:"10 3 2 3"}];
 function invalidateCompanyTrend(){
-  companyTrend.token++;companyTrend.model=null;
+  companyTrend.token++;companyTrend.model=null;companyTrend.displayModel=null;
   const section=$("#comparison-trend");if(!section)return;
-  section.setAttribute("aria-busy","false");$("#comparison-trend-chart").replaceChildren();$("#comparison-trend-values").replaceChildren();$("#comparison-trend-legend").replaceChildren();$("#comparison-trend-status").textContent="";
+  section.setAttribute("aria-busy","false");$("#comparison-trend-chart").replaceChildren();$("#comparison-trend-values").replaceChildren();$("#comparison-trend-legend").replaceChildren();$("#comparison-trend-status").textContent="";$("#comparison-trend-base").textContent="";$("#comparison-trend-retry").hidden=true;
 }
 function companyTrendMetricOptions(){
   const prefix=explorerBasis.basis==="ANNUAL"?"":explorerBasis.basis==="TTM"?"ttm_":"quarter_";
@@ -406,60 +405,110 @@ function alignCompanyTrend(context,results){
     return{...item,style:COMPANY_TREND_STYLES[index],points:slots.map(slot=>({slot,observation:byCoordinate.get(slot.key)||{value:null,reason_labels:[item.error?"기업 자료를 불러오지 못했습니다.":"해당 기간에 준비된 자료가 없습니다."]}}))};
   })};
 }
+// User-approved ephemeral display normalization; cached monetary observations stay immutable.
+function displayIndex100(value,base){
+  const parts=input=>{const normalized=shiftDecimal(input,0),negative=normalized.startsWith("-"),[whole,fraction=""]=(negative?normalized.slice(1):normalized).split(".");return{negative,digits:BigInt(whole+fraction),scale:fraction.length}};
+  const numerator=parts(value),denominator=parts(base);
+  if(denominator.negative||denominator.digits===0n)throw new Error("기준값은 0보다 커야 합니다.");
+  const dividend=numerator.digits*10n**BigInt(denominator.scale+4),divisor=denominator.digits*10n**BigInt(numerator.scale);
+  let rounded=dividend/divisor;if((dividend%divisor)*2n>=divisor)rounded+=1n;
+  const digits=rounded.toString().padStart(3,"0");return(numerator.negative&&rounded!==0n?"-":"")+digits.slice(0,-2)+"."+digits.slice(-2);
+}
+function buildCompanyTrendDisplay(model,requested="AMOUNT"){
+  const eligible=observation=>observation?.availability_status==="AVAILABLE"&&!observation.quality_blocking&&observation.quality_status!=="BLOCK"&&observation.value!==null&&observation.value!==undefined;
+  const baseIndex=requested==="INDEX100"?model.slots.findIndex((slot,index)=>model.series.length>=2&&model.series.every(series=>!series.error&&eligible(series.points[index].observation)&&compareExplorerDecimals(series.points[index].observation.value,"0")>0)):-1;
+  const indexed=requested==="INDEX100"&&baseIndex>=0,reason=requested==="INDEX100"&&!indexed?"모든 선택 기업에 공표된 양수 기준값이 있는 공통 기간이 없어 실제 금액으로 표시합니다. 0·음수·미제공·조회 실패는 기준으로 쓰지 않습니다.":"";
+  return{...model,effectiveScale:indexed?"INDEX100":"AMOUNT",baseSlot:indexed?model.slots[baseIndex]:null,reason,series:model.series.map(series=>({...series,points:series.points.map((point,index)=>({...point,beforeBase:indexed&&index<baseIndex,plotValue:indexed?(index<baseIndex||!eligible(point.observation)?null:displayIndex100(point.observation.value,series.points[baseIndex].observation.value)):eligible(point.observation)?point.observation.value:null}))}))};
+}
+function companyTrendPlotValue(point){return Object.hasOwn(point,"plotValue")?point.plotValue:point.observation.value}
+function companyTrendPlotNumber(point,model){const value=companyTrendPlotValue(point);return Number(model.effectiveScale==="INDEX100"?value:shiftDecimal(value,-6))}
+function companyTrendUnit(model){return model.effectiveScale==="INDEX100"?"지수 · 기준 100":"백만 달러"}
+function companyTrendPointText(point,model){return model.effectiveScale==="INDEX100"?formatDecimal(companyTrendPlotValue(point),2)+" 지수 · 원금액 "+displayValue(point.observation.value,model.context.definition)+" 백만 달러":displayValue(point.observation.value,model.context.definition)+" 백만 달러"}
+function companyTrendIndexCell(point,model){
+  const value=companyTrendPlotValue(point),text=point.beforeBase?"기준 이전":value===null||value===undefined?"—":formatDecimal(value,2);
+  return`<span class="display-number" title="${esc(text)} 지수 · 원값 ${esc(point.observation.value??"미제공")} USD" aria-label="${esc(text)} 지수"><span class="number-text">${esc(text)}</span><span class="number-clipped" aria-hidden="true">…</span></span><small>금액 ${explorerValue(point.observation,model.context.definition)} 백만 달러</small>`;
+}
+function applyCompanyTrendDisplay(){
+  if(!companyTrend.model||$("#comparison-panel").hidden)return;
+  const model=buildCompanyTrendDisplay(companyTrend.model,companyTrend.scale);companyTrend.displayModel=model;companyTrend.scale=model.effectiveScale;
+  $("#comparison-trend-scale").value=model.effectiveScale;
+  $("#comparison-trend-base").textContent=model.reason||(model.baseSlot?`공통 기준 ${model.baseSlot.label} = 100 · 각 기업의 해당 기간 양수 금액 대비`:"실제 금액 · 백만 달러");
+  renderCompanyTrendValues(model);renderCompanyTrendPlot();
+  $("#comparison-trend-retry").hidden=!companyTrend.model.series.some(series=>series.error);
+}
+function setCompanyTrendScale(scale){
+  companyTrend.scale=scale==="INDEX100"?"INDEX100":"AMOUNT";
+  if(companyTrend.model)applyCompanyTrendDisplay();
+  else $("#comparison-trend-base").textContent=companyTrend.scale==="INDEX100"?"자료를 불러온 뒤 공통 양수 기준 기간을 확인합니다.":"실제 금액 · 백만 달러";
+}
+function resetCompanyTrendView(){
+  companyTrend.baseMetric="revenue";companyTrend.scale="AMOUNT";$("#comparison-trend-scale").value="AMOUNT";
+  const option=companyTrendMetricOptions().find(item=>item.base==="revenue");
+  if(!option){$("#comparison-trend-base").textContent="현재 보기에 매출 지표가 없습니다.";return}
+  const same=$("#comparison-trend-metric").value===option.definition.metric_id;$("#comparison-trend-metric").value=option.definition.metric_id;
+  if($("#comparison-panel").hidden)return;
+  if(same&&companyTrend.model)applyCompanyTrendDisplay();else loadCompanyTrend();
+}
+
 function companyTrendGeometry(model,width){
   const left=84,right=18,top=26,bottom=58,height=280,plotWidth=width-left-right,plotHeight=height-top-bottom;
-  const values=model.series.flatMap(series=>series.points.filter(point=>point.observation.value!==null&&point.observation.value!==undefined).map(point=>Number(shiftDecimal(point.observation.value,-6))));
+  const values=model.series.flatMap(series=>series.points.filter(point=>companyTrendPlotValue(point)!==null&&companyTrendPlotValue(point)!==undefined).map(point=>companyTrendPlotNumber(point,model)));
   if(values.some(value=>!Number.isFinite(value)))throw new Error("그래프 범위를 표현할 수 없습니다. 정확한 값은 아래 표에서 확인해 주세요.");
   if(!values.length)return null;
   let min=Math.min(0,...values),max=Math.max(0,...values);if(min===max){min=-1;max=1}else{const pad=(max-min)*0.08;if(min<0)min-=pad;if(max>0)max+=pad}
   const first=model.slots[0].ordinal,last=model.slots.at(-1).ordinal,x=ordinal=>left+(ordinal-first)/Math.max(last-first,1)*plotWidth,y=value=>top+(max-value)/(max-min)*plotHeight;
   if(!Number.isFinite(max-min)||!Number.isFinite(max)||!Number.isFinite(min))throw new Error("그래프 범위를 표현할 수 없습니다. 정확한 값은 아래 표에서 확인해 주세요.");
-  const ticks=[...new Set([min,(min+max)/2,max].filter(value=>value===0||Math.abs(y(value)-y(0))>=18).concat(0))].sort((a,b)=>a-b);
-  return{width,height,left,right,top,bottom,min,max,x,y,ticks,zero:y(0)};
+  const references=model.effectiveScale==="INDEX100"?[0,100]:[0],ticks=[...new Set([min,(min+max)/2,max].filter(value=>references.includes(value)||references.every(reference=>Math.abs(y(value)-y(reference))>=18)).concat(references))].sort((a,b)=>a-b);
+  const ordered=ticks.slice().sort((a,b)=>y(a)-y(b)),labelPositions=new Map();let previous=top-10;
+  for(const tick of ordered){const position=Math.max(y(tick)+4,previous+14);labelPositions.set(tick,position);previous=position}
+  const overflow=Math.max(0,previous-(height-bottom+4));for(const tick of ordered)labelPositions.set(tick,labelPositions.get(tick)-overflow);
+  return{width,height,left,right,top,bottom,min,max,x,y,ticks,labelPositions,zero:y(0),reference:model.effectiveScale==="INDEX100"?y(100):null};
 }
 function renderCompanyTrendPlot(){
-  const model=companyTrend.model,chart=$("#comparison-trend-chart");if(!model||$("#comparison-panel").hidden)return;
+  const model=companyTrend.displayModel||companyTrend.model,chart=$("#comparison-trend-chart");if(!model||$("#comparison-panel").hidden)return;
   const width=Math.max(300,Math.floor(chart.getBoundingClientRect().width||600));
   try{
     const geometry=companyTrendGeometry(model,width);
     if(!geometry){chart.innerHTML='<p class="empty">선택한 기간에 표시할 수 있는 공표 값이 없습니다. 미제공은 0이 아닙니다.</p>';return}
     const {height,left,right,top,bottom,x,y}=geometry;
-    const grid=geometry.ticks.map(value=>`<g><line class="company-trend-grid" x1="${left}" y1="${y(value)}" x2="${width-right}" y2="${y(value)}"/><text class="company-trend-y" x="${left-8}" y="${y(value)+4}">${esc(formatDecimal(String(value),1))}</text></g>`).join("");
+    const grid=geometry.ticks.map(value=>`<g><line class="company-trend-grid" x1="${left}" y1="${y(value)}" x2="${width-right}" y2="${y(value)}"/><text class="company-trend-y" x="${left-8}" y="${geometry.labelPositions.get(value)}">${esc(formatDecimal(String(value),model.effectiveScale==="INDEX100"?2:1))}</text></g>`).join("");
     const axis=model.slots.map(slot=>`<text class="company-trend-x" x="${x(slot.ordinal)}" y="${height-bottom+21}">${model.context.basis==="ANNUAL"?esc(slot.label):`<tspan x="${x(slot.ordinal)}">${slot.year}</tspan><tspan x="${x(slot.ordinal)}" dy="13">Q${slot.quarter}</tspan>`}</text>`).join("");
     const lines=model.series.map(series=>{
-      const points=series.points.map(point=>point.observation.value===null||point.observation.value===undefined?null:{...point,x:x(point.slot.ordinal),y:y(Number(shiftDecimal(point.observation.value,-6)))});
+      const points=series.points.map(point=>companyTrendPlotValue(point)===null||companyTrendPlotValue(point)===undefined?null:{...point,x:x(point.slot.ordinal),y:y(companyTrendPlotNumber(point,model))});
       const segments=points.slice(1).map((point,index)=>point&&points[index]&&point.slot.ordinal===points[index].slot.ordinal+1?`<line x1="${points[index].x}" y1="${points[index].y}" x2="${point.x}" y2="${point.y}"/>`:"").join("");
-      const circles=points.filter(Boolean).map(point=>`<circle cx="${point.x}" cy="${point.y}" r="3.5"><title>${esc(series.company.ticker||series.company.name)} · ${esc(point.slot.label)} · ${esc(displayValue(point.observation.value,model.context.definition))} 백만 달러 · ${esc(actualPeriod(point.observation))}${model.context.basis!=="ANNUAL"?" · "+esc(fiscalLabel(point.observation)):""}</title></circle>`).join("");
+      const circles=points.filter(Boolean).map(point=>`<circle cx="${point.x}" cy="${point.y}" r="3.5"><title>${esc(series.company.ticker||series.company.name)} · ${esc(point.slot.label)} · ${esc(companyTrendPointText(point,model))} · 원값 ${esc(point.observation.value)} USD · ${esc(actualPeriod(point.observation))}${model.context.basis!=="ANNUAL"?" · "+esc(fiscalLabel(point.observation)):""}</title></circle>`).join("");
       return`<g class="company-trend-series" data-cik="${esc(series.company.cik)}" stroke="${series.style.color}" stroke-dasharray="${series.style.dash}" fill="${series.style.color}">${segments}${circles}</g>`;
     }).join("");
-    chart.innerHTML=`<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(explorerMetricCaption(model.context.definition))} · 선택 기업 ${model.series.length}개 · ${model.slots.length}개 기간 · 단위 백만 달러. 값과 실제 기간은 아래 표를 확인해 주세요."><text class="company-trend-unit" x="${left}" y="14">백만 달러</text>${grid}<line class="company-trend-zero" x1="${left}" x2="${width-right}" y1="${geometry.zero}" y2="${geometry.zero}"/>${axis}${lines}</svg>`;
+    chart.innerHTML=`<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(explorerMetricCaption(model.context.definition))} · 선택 기업 ${model.series.length}개 · ${model.slots.length}개 기간 · 단위 ${esc(companyTrendUnit(model))}. 값과 실제 기간은 아래 표를 확인해 주세요."><text class="company-trend-unit" x="${left}" y="14">${esc(companyTrendUnit(model))}</text>${grid}<line class="company-trend-zero" x1="${left}" x2="${width-right}" y1="${geometry.zero}" y2="${geometry.zero}"/>${geometry.reference!==null?`<line class="company-trend-reference" x1="${left}" x2="${width-right}" y1="${geometry.reference}" y2="${geometry.reference}"/>`:""}${axis}${lines}</svg>`;
   }catch(error){chart.innerHTML=`<p class="message error">${esc(error.message)}</p>`}
 }
 function renderCompanyTrendValues(model){
   $("#comparison-trend-legend").innerHTML=model.series.map(series=>`<li><svg width="30" height="12" aria-hidden="true"><line x1="0" x2="30" y1="6" y2="6" stroke="${series.style.color}" stroke-width="2" stroke-dasharray="${series.style.dash}"/></svg><span><strong>${esc(series.company.ticker||series.company.cik)}</strong> ${esc(series.company.name||"")}${series.error?`<small class="company-trend-error">조회 실패: ${esc(series.error)}</small>`:""}</span></li>`).join("");
-  $("#comparison-trend-values").innerHTML=`<details><summary>공표 값과 기업별 실제 기간 · ${model.slots.length}개 기간</summary><table><thead><tr><th>${model.context.basis==="ANNUAL"?"회계연도":"종료 분기"}</th>${model.series.map(series=>`<th>${esc(series.company.ticker||series.company.name)}<small>백만 달러</small></th>`).join("")}</tr></thead><tbody>${model.slots.map((slot,index)=>`<tr><th>${esc(slot.label)}</th>${model.series.map(series=>{const observation=series.points[index].observation;return`<td>${explorerValue(observation,model.context.definition)}<small>${esc(actualPeriod(observation))}${model.context.basis!=="ANNUAL"?" · "+esc(fiscalLabel(observation)):""}</small></td>`}).join("")}</tr>`).join("")}</tbody></table></details>`;
+  $("#comparison-trend-values").innerHTML=`<details><summary>공표 값과 기업별 실제 기간 · ${model.slots.length}개 기간</summary><table><thead><tr><th>${model.context.basis==="ANNUAL"?"회계연도":"종료 분기"}</th>${model.series.map(series=>`<th>${esc(series.company.ticker||series.company.name)}<small>${esc(companyTrendUnit(model))}</small></th>`).join("")}</tr></thead><tbody>${model.slots.map((slot,index)=>`<tr><th>${esc(slot.label)}</th>${model.series.map(series=>{const point=series.points[index],observation=point.observation;return`<td>${model.effectiveScale==="INDEX100"?companyTrendIndexCell(point,model):explorerValue(observation,model.context.definition)}<small>${esc(actualPeriod(observation))}${model.context.basis!=="ANNUAL"?" · "+esc(fiscalLabel(observation)):""}</small></td>`}).join("")}</tr>`).join("")}</tbody></table></details>`;
 }
 async function loadCompanyTrend(){
-  const token=++companyTrend.token;companyTrend.model=null;$("#comparison-trend-chart").replaceChildren();$("#comparison-trend-values").replaceChildren();$("#comparison-trend-legend").replaceChildren();
+  const token=++companyTrend.token;companyTrend.model=null;companyTrend.displayModel=null;$("#comparison-trend-retry").disabled=true;$("#comparison-trend-chart").replaceChildren();$("#comparison-trend-values").replaceChildren();$("#comparison-trend-legend").replaceChildren();
   const section=$("#comparison-trend");section.setAttribute("aria-busy","true");$("#comparison-trend-status").textContent="선택 기업의 같은 지표 흐름을 불러오는 중입니다…";
   let context;
   try{
     context=companyTrendContext($("#comparison-trend-metric").value);
     const results=await Promise.all(context.ciks.map(cik=>cachedCompanyTrendSeries(context,cik).catch(error=>({company:context.companies.find(item=>item.cik===cik)||{cik,ticker:cik},error:error.message}))));
     if(!companyTrendOwns(context,token))return;
-    const model=alignCompanyTrend(context,results);companyTrend.model=model;renderCompanyTrendValues(model);renderCompanyTrendPlot();
+    const model=alignCompanyTrend(context,results);companyTrend.model=model;applyCompanyTrendDisplay();
     const failed=results.filter(item=>item.error).length;
     $("#comparison-trend-status").textContent=`${explorerBasisLabel()} · 종료 ${context.basis==="ANNUAL"?"FY"+context.end:context.end} · 공표된 ${model.slots.length}개 기간${failed?` · ${failed}개 기업 조회 실패`:""}`;
-  }catch(error){if(token===companyTrend.token&&!$("#comparison-panel").hidden&&(!context||context.explorerKey===explorerContextKey()))$("#comparison-trend-status").textContent=error.message}
-  finally{if(token===companyTrend.token)section.setAttribute("aria-busy","false")}
+  }catch(error){if(token===companyTrend.token&&!$("#comparison-panel").hidden&&(!context||context.explorerKey===explorerContextKey())){$("#comparison-trend-status").textContent=error.message;$("#comparison-trend-retry").hidden=false}}
+  finally{if(token===companyTrend.token){section.setAttribute("aria-busy","false");$("#comparison-trend-retry").disabled=false}}
 }
-function mountCompanyTrend(){
+function mountCompanyTrend(userOpened=true){
   if(!$("#comparison-trend")){
     const section=document.createElement("section");section.id="comparison-trend";section.className="company-trend";
-    section.innerHTML='<div class="company-trend-heading"><h3>선택 기업 추이 비교</h3><label>추이 지표<select id="comparison-trend-metric"></select></label></div><p id="comparison-trend-status" role="status" aria-live="polite"></p><ul id="comparison-trend-legend" class="company-trend-legend"></ul><div id="comparison-trend-chart" class="company-trend-chart"></div><div id="comparison-trend-values"></div><p class="muted">기업마다 실제 재무기간이 다를 수 있습니다. 값이 없는 기간은 선을 연결하지 않습니다.</p>';
+    section.innerHTML='<div class="company-trend-heading"><h3>선택 기업 추이 비교</h3><label>추이 지표<select id="comparison-trend-metric"></select></label><label>표시 방식<select id="comparison-trend-scale"><option value="AMOUNT">실제 금액</option><option value="INDEX100">공통 기준 100</option></select></label></div><p id="comparison-trend-base" class="muted" aria-live="polite"></p><div class="company-trend-actions"><button type="button" id="comparison-trend-reset" class="quiet">차트 보기 초기화</button><button type="button" id="comparison-trend-retry" class="quiet" hidden>실패한 자료 다시 읽기</button></div><p id="comparison-trend-status" role="status" aria-live="polite"></p><ul id="comparison-trend-legend" class="company-trend-legend"></ul><div id="comparison-trend-chart" class="company-trend-chart"></div><div id="comparison-trend-values"></div><p class="muted">기업마다 실제 재무기간이 다를 수 있습니다. 값이 없는 기간은 선을 연결하지 않습니다.</p>';
     $("#comparison-panel .section-head").after(section);
     section.addEventListener("toggle",()=>scheduleTablePresentation(section),true);
     $("#comparison-trend-metric").onchange=()=>{companyTrend.baseMetric=$("#comparison-trend-metric").value.replace(/^(quarter_|ttm_)/,"");loadCompanyTrend()};
+    $("#comparison-trend-scale").onchange=()=>setCompanyTrendScale($("#comparison-trend-scale").value);
+    $("#comparison-trend-reset").onclick=resetCompanyTrendView;$("#comparison-trend-retry").onclick=()=>loadCompanyTrend();
     if(typeof ResizeObserver!=="undefined"){
       companyTrend.resizeObserver=new ResizeObserver(()=>{if(!companyTrend.frame)companyTrend.frame=requestAnimationFrame(()=>{companyTrend.frame=0;renderCompanyTrendPlot()})});
       companyTrend.resizeObserver.observe($("#comparison-trend-chart"));
@@ -467,10 +516,55 @@ function mountCompanyTrend(){
   }
   const options=companyTrendMetricOptions();$("#comparison-trend-metric").innerHTML=options.map(item=>`<option value="${item.definition.metric_id}">${esc(item.label)}</option>`).join("");
   const selected=options.find(item=>item.base===companyTrend.baseMetric)||options.find(item=>item.base==="revenue")||options[0];
-  $("#comparison-trend-metric").disabled=!selected;
+  $("#comparison-trend-scale").value=companyTrend.scale;$("#comparison-trend-metric").disabled=!selected;
   if(selected){$("#comparison-trend-metric").value=selected.definition.metric_id;loadCompanyTrend()}
   else{invalidateCompanyTrend();$("#comparison-trend-status").textContent="이 보기에는 공통 금액 흐름 지표가 준비되지 않았습니다."}
-  $("#comparison-trend").scrollIntoView({block:"start"});$("#comparison-trend-metric").focus({preventScroll:true});
+  if(userOpened){$("#comparison-trend").scrollIntoView({block:"start"});$("#comparison-trend-metric").focus({preventScroll:true})}
+}
+
+// One selection transition for checkboxes, filtered-independent chips, and both clear controls.
+const explorerSelection={registry:new Map(),mounted:false,message:""};
+function registerExplorerCompanies(companies){const dataset=explorerDataset()?.dataset_id;for(const company of companies)explorerSelection.registry.set(`${dataset}:${company.cik}`,{cik:company.cik,ticker:company.ticker,name:company.name})}
+function explorerSelectedCompany(cik){return explorerSelection.registry.get(`${explorerDataset()?.dataset_id}:${cik}`)||{cik,ticker:cik,name:""}}
+function comparisonFocusReturn(){const button=$("#compare-selected"),target=!button.disabled&&button.isConnected!==false?button:$("#explorer-query");target.focus({preventScroll:true})}
+function closeExplorerComparison(returnFocus=true){
+  invalidateCompanyTrend();explorerBasis.comparisonToken++;$("#comparison-panel").hidden=true;$("#comparison-result").replaceChildren();
+  if(returnFocus)comparisonFocusReturn();
+}
+function syncExplorerSelectionUI(){
+  $$('[data-explorer-select]').forEach(input=>input.checked=S.explorerSelected.has(input.dataset.explorerCik));
+  if(!explorerSelection.mounted)return;
+  const count=S.explorerSelected.size;$("#explorer-selection-count").textContent=`선택 기업 ${count}/4`;
+  $("#explorer-selection-status").textContent=explorerSelection.message||(count<2?"기업을 2~4개 선택하면 비교할 수 있습니다.":"필터로 보이지 않는 선택 기업도 비교에 포함됩니다.");
+  $("#explorer-selection-list").innerHTML=[...S.explorerSelected].map(cik=>{const company=explorerSelectedCompany(cik);return`<li><button type="button" class="quiet" data-remove-explorer-cik="${esc(cik)}" aria-label="${esc(company.ticker||company.name)} 선택 해제"><strong>${esc(company.ticker)}</strong> ${esc(company.name)} <span aria-hidden="true">×</span></button></li>`}).join("");
+  $$('[data-remove-explorer-cik]').forEach(button=>button.onclick=()=>transitionExplorerSelection("remove",button.dataset.removeExplorerCik,false,null,button));
+  $("#explorer-selection-clear").disabled=count===0;$("#comparison-selection-clear").disabled=count===0;
+}
+function transitionExplorerSelection(action,cik=null,checked=false,company=null,origin=null){
+  const selected=S.explorerSelected,adding=action==="toggle"&&checked&&!selected.has(cik),before=[...selected].sort().join(","),wasOpen=!$("#comparison-panel").hidden;
+  if(adding&&selected.size>=4){explorerSelection.message="최대 4개 기업까지 비교할 수 있습니다. 새 선택은 적용하지 않았습니다.";syncExplorerSelectionUI();return{accepted:false,changed:false}}
+  if(action==="clear")selected.clear();else if(action==="remove"||!checked)selected.delete(cik);else if(action==="toggle"&&cik){selected.add(cik);if(company)registerExplorerCompanies([company])}
+  explorerSelection.message="";const changed=before!==[...selected].sort().join(",");updateCompareButton();
+  if(!changed)return{accepted:true,changed:false};
+  explorerBasis.comparisonToken++;invalidateCompanyTrend();$("#comparison-result").textContent=selected.size>=2?"기업 선택이 변경되었습니다. 표를 보려면 ‘재무기간 비교’를 다시 눌러 주세요.":"";
+  if(selected.size<2){closeExplorerComparison(false);if(wasOpen&&origin?.closest?.("#comparison-panel"))comparisonFocusReturn()}
+  else if(wasOpen)mountCompanyTrend(false);
+  if(origin?.matches?.("[data-remove-explorer-cik]")){
+    const next=$("#explorer-selection-list button")||$("#explorer-selection-clear");(selected.size?next:$("#explorer-query")).focus({preventScroll:true});
+  }
+  if(selected.size===0&&origin)$("#explorer-query").focus({preventScroll:true});
+  return{accepted:true,changed:true};
+}
+function mountExplorerSelection(){
+  const tray=document.createElement("section");tray.id="explorer-selection-tray";tray.className="explorer-selection-tray";
+  tray.innerHTML='<div class="selection-tray-heading"><strong id="explorer-selection-count"></strong><button id="explorer-selection-clear" type="button" class="quiet">선택 모두 해제</button></div><ul id="explorer-selection-list"></ul><p id="explorer-selection-status" role="status" aria-live="polite"></p>';
+  $("#explorer-count").closest(".explorer-summary").after(tray);
+  const clear=document.createElement("button");clear.id="comparison-selection-clear";clear.type="button";clear.className="quiet";clear.textContent="선택 모두 해제";$("#close-comparison").before(clear);
+  $("#explorer-selection-clear").onclick=()=>transitionExplorerSelection("clear",null,false,null,$("#explorer-selection-clear"));
+  clear.onclick=()=>transitionExplorerSelection("clear",null,false,null,clear);
+  $("#close-comparison").textContent="비교 닫기";$("#close-comparison").onclick=()=>closeExplorerComparison();
+  $("#comparison-panel").addEventListener("keydown",event=>{if(event.key==="Escape"){event.preventDefault();event.stopPropagation();closeExplorerComparison()}});
+  explorerSelection.mounted=true;syncExplorerSelectionUI();
 }
 
 async function boot(){const s=await api("/api/status"),d=s.datasets.at(-1),explorer=d;S.defaultDataset=d;S.explorerDataset=explorer;$("#dataset").innerHTML=s.datasets.map(x=>`<option value="${x.dataset_id}">${x.dataset_id}</option>`).join("");$("#dataset").value=d.dataset_id;$("#asof").textContent=d.financial_as_of;await loadInputContext(d.dataset_id);await refreshScreens();await refreshRuns();S.decisions=await api("/api/decisions");$("#predicates").innerHTML="";predicateRow();renderTimeline();syncResultActions();mountAdmin();bindExplorer();await loadExplorer();await loadLibrary();const initial=({"#library-title":"library","#criteria-title":"screening","#results-title":"screening","#history-title":"history"})[location.hash]||"explorer";showView(initial);$("#criteria-form").addEventListener("input",e=>{if(isRevisionEdit(e.target))markDirty()});$("#criteria-form").addEventListener("change",e=>{if(isRevisionEdit(e.target))markDirty()})}
