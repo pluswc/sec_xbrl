@@ -135,9 +135,7 @@ def resolve_source_compatibility(declaration: dict | None) -> SourceCompatibilit
 def use_source_compatibility(declaration: dict | None) -> Iterator[SourceCompatibility | None]:
     """Apply an explicitly pinned transition only within this execution context."""
     witness = resolve_source_compatibility(declaration)
-    if witness is None:
-        yield None
-        return
+    # An explicit absent declaration isolates the caller from any ambient scope.
     token = _ACTIVE.set(witness)
     try:
         yield witness

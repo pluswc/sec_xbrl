@@ -4,13 +4,15 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from sec_xbrl import financial_source_compatibility as compat
 from sec_xbrl import history
-from sec_xbrl.screening.common import sha256_file, write_json
+from sec_xbrl.screening.common import digest_value, sha256_file, write_json
 from tests.screening.test_financial_source_compatibility import _transition
 from tests.screening.test_financial_storage_reuse import COHORT, _pin
 
@@ -247,3 +249,51 @@ def test_public_combined_publish_and_reopen_reuse_four_immutable_parents(tmp_pat
     with pytest.raises(ValueError, match="inventories"):
         publish_screening_dataset_v3(tmp_path / "missing-compatibility.json", tmp_path / "missing-combined")
     assert not (tmp_path / "missing-combined").exists()
+    # A pinless caller must fail even when its caller has an approved ambient scope.
+    with compat.use_source_compatibility(_pin(path)):
+        with pytest.raises(ValueError, match="inventories"):
+            publish_screening_dataset_v3(tmp_path / "missing-compatibility.json", tmp_path / "ambient-combined")
+        assert not (tmp_path / "ambient-combined").exists()
+        # Construct an otherwise consistent pinless manifest without publishing it.
+        pinless_root = tmp_path / "pinless-combined-fixture"
+        pinless_root.mkdir()
+        pinless = json.loads(original_manifest)
+        pinless.update(config=missing, config_path=str(tmp_path / "missing-compatibility.json"),
+                       config_sha256=sha256_file(tmp_path / "missing-compatibility.json"))
+        identity = {"config_path": pinless["config_path"], "config_sha256": pinless["config_sha256"],
+                    "config": missing, "annual_publication_id": pinless["versions"]["annual_publication_id"],
+                    "quarterly_publication_id": pinless["versions"]["quarterly_publication_id"]}
+        pinless["publication_id"] = "screening-dataset-" + digest_value(identity)[:24]
+        write_json(pinless_root / "screening_dataset_manifest.json", pinless)
+        with pytest.raises(ValueError, match="inventories"):
+            ScreeningDatasetV3Reader(pinless_root)
+        assert compat.resolve_source_compatibility(_pin(old)).declaration == _pin(path)
+    with pytest.raises(ValueError, match="inventories"):
+        ScreeningDatasetV3Reader(pinless_root)
+
+
+@pytest.mark.parametrize("first", ["compatibility", "dataset_v3"])
+def test_fresh_process_public_import_order(first):
+    imports = [
+        "from sec_xbrl.financial_source_compatibility import prepare_source_compatibility_packet",
+        "from sec_xbrl.screening.dataset_v3 import publish_screening_dataset_v3, ScreeningDatasetV3Reader",
+    ]
+    if first == "dataset_v3":
+        imports.reverse()
+    result = subprocess.run([sys.executable, "-c", "\n".join(imports)],
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+
+
+def test_explicit_none_scope_isolates_and_restores_outer_after_exception(tmp_path, monkeypatch):
+    path, _, old, _, _, _ = _supersession(tmp_path, monkeypatch)
+    with compat.use_source_compatibility(_pin(path)):
+        assert compat.resolve_source_compatibility(_pin(old)).declaration == _pin(path)
+        with pytest.raises(RuntimeError, match="isolated failure"), compat.use_source_compatibility(None) as witness:
+            assert witness is None
+            with pytest.raises(ValueError, match="inventories"):
+                compat.resolve_source_compatibility(_pin(old))
+            raise RuntimeError("isolated failure")
+        assert compat.resolve_source_compatibility(_pin(old)).declaration == _pin(path)
+    with pytest.raises(ValueError, match="inventories"):
+        compat.resolve_source_compatibility(_pin(old))

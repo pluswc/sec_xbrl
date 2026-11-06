@@ -11,10 +11,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from sec_xbrl.financial_source_compatibility import (
-    SUPERSEDING_VERSION,
-    use_source_compatibility,
-)
 from sec_xbrl.screening.common import (
     digest_value,
     read_json,
@@ -275,6 +271,11 @@ def _verify_parent_binding(
 @contextmanager
 def _configured_compatibility(config: dict) -> Iterator[None]:
     """Bind all four preserved publications to the explicitly configured scope."""
+    from sec_xbrl.financial_source_compatibility import (
+        SUPERSEDING_VERSION,
+        use_source_compatibility,
+    )
+
     with use_source_compatibility(config.get("source_compatibility")) as witness:
         if witness is not None:
             if witness.payload["schema_version"] != SUPERSEDING_VERSION:

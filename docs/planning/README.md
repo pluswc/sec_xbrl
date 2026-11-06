@@ -1,5 +1,13 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-06 v2 독립 FAIL 후 최소 repair 후보:
+`c49efa068ee246451f2f2134ffa766f6858c74d5`는 fresh-process 순환 import와
+pin 없는 v3의 외부 compatibility scope 상속 두 P1으로 독립 FAIL했다.
+[50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의
+repair는 helper lazy import와 명시 None scope의 token/reset 격리만 바꾼다.
+수정 seam focused 4 PASS이며 새 동결 소스 독립 검증·ROOT 인수는 대기다.
+기존131 consumer/actual50 근거와 완료4발행은 보존하고 실제 combined/UAT는 미실행이다.
+
 2026-11-06 v2 정확 호환 전이 후속:
 사용자가 구체 범위에 대해 **“이 범위의 검증기·호환 연결 변경을 승인”**하여 아래
 자동 승인 거부의 명시 승인 부재를 해소했고, 정상 재심을 통과해 최소 구현했다.

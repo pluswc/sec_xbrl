@@ -1386,3 +1386,35 @@ Private UAT의 예정 범위는 기존 baseline 재시작 근거를 재사용하
 명시 저장·새 브라우저 세션 재열기·비교·기존21 문맥을 원본 기록 복제본에서 확인하는
 것이다. 이는 실행 사실이 아니다. 원본 Raw/보고서/quality/4발행·21 journal/catalog와
 runtime은 그대로 보존하며 push·PR·main/live 변경은 수행하지 않는다.
+
+
+## 2026-11-06 c49 독립 FAIL 후 import/None scope 최소 repair 후보
+
+동결 후보 `c49efa068ee246451f2f2134ffa766f6858c74d5`는 독립 검토에서 두 P1으로
+FAIL했다. 실패 snapshot과 `work/quarterly50_expansion_20261025/`의
+`independent_source_compatibility_v2_c49efa06_20261106.json`은 실패 증거로 보존한다.
+첫째 direct factory import가 helper→history_selection→screening package→dataset_v3→
+초기화 중 helper 순환을 만들었다. 둘째 명시 pin이 없는 v3 config가 외부 승인 scope를
+상속하여 publish/reopen에 성공하고 scope 밖에서는 다시 열리지 않는 결함이 있었다.
+이는 c49의 자체 synthetic PASS와 별개이며 최종 소스 수락을 받지 않았다.
+
+동일 승인 범위의 repair는 dataset_v3의 helper import를 scope 함수 안으로 옮기고,
+`use_source_compatibility(None)`에도 `_ACTIVE.set(None)` token과 `finally/reset`을
+적용한다. 이제 명시 None은 ambient override를 격리하며 예외 뒤 외부 scope를
+복원한다. 새 pin scope 안의 정확한 old pin 전파는 유지한다. 제품 수정은 이 두
+seam뿐이며 수락된131 quarterly 소스와 실제 데이터·발행물·기존 보고서는 변경하지 않는다.
+
+자체 repair 검사 **4 PASS, 18 deselected (3.35초)**: fresh subprocess의 public
+factory/combined 양방향 import, 명시 None의 예외 후 외부 scope 복원, 공개 combined
+publish/reopen의 기존 positive와 외부 승인 scope 안의 pinless publish 거부/no output·
+pinless reader 거부를 확인했다. Pinless reader fixture는 config digest와 publication
+identity까지 일치시켜 다른 오류를 기대 거부로 오인하지 않도록 했다.
+
+```bash
+python -m pytest -q -p no:cacheprovider tests/screening/test_financial_source_compatibility_v2.py -k 'fresh_process or explicit_none or public_combined'
+```
+
+수정 파일 lint와 diff 검사를 수행한다. 이전 통과 범위와131 consumer의43 focused,
+독립4 probes 및 actual50의16,400행/6.258초 근거는 재사용하며 다시 실행하지 않는다.
+새 repair 동결 SHA의 독립 검증과 ROOT 인수, 실제 새 packet/combined 실행·private UAT·
+main/live는 별도 대기다. C49 source archive나 실패 보고서를 덮어쓰지 않는다.
