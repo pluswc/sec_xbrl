@@ -1,5 +1,25 @@
 # Quarterly 50 investor expansion — 2026-10-25
 
+## 2026-11-06 최신 인계 — current50 로컬 인수, main/live 별도
+
+ROOT는 `40826b754e2937c6b2543e7e5df1665763533d7c`의 독립 PASS, 새 exact v2 packet
+승인, 실제 combined-only 발행과 private browser UAT PASS를 근거로
+**LOCALLY_ACCEPTED_CURRENT50_NOT_MAIN_OR_LIVE**를 기록했다. Cutoff는
+**2026-10-25**이며11월 신규 수집은 없다.
+
+| 상태 | 최종 근거와 범위 |
+| --- | --- |
+| 소스 독립 검증 | 408 repair 4 focused PASS, 변경 없는18 prior cases 재사용; c49 두 P1 FAIL 이력 보존 |
+| 호환 전이 승인 | ROOT_APPROVED v2: 정확한9 preserved controls·12 routine 근거·완료4발행 pins |
+| 실제 발행 | 기존 quality·4발행 재사용 후 combined-only PASS,786.773초·peak23,721,980 KiB |
+| Private UAT | 50사·연간31/분기41 정의·8버킷, TTM·명시 저장·새 브라우저 재열기·비교·기존21 문맥 PASS |
+| 로컬 인수 | ROOT current50 source/actual publication/UAT 범위 인수 완료 |
+| Main/CI/new live | 별도 pending; 이번 인계에서 적용하지 않음 |
+
+아래 초기 source-only 설명과 중간 대기 상태는 당시 snapshot이다. 최신 actual 결과와
+검증 재사용·원본 보존·실행 한계는 문서 끝의11-06 최종 결과를 따른다. C49 실패와
+자동 승인 거부 이력은 삭제하지 않는다.
+
 ## Authority and milestone
 
 APPROVED: the user's 2026-10-25 direction authorizes the common 50-company
@@ -1418,3 +1438,58 @@ python -m pytest -q -p no:cacheprovider tests/screening/test_financial_source_co
 독립4 probes 및 actual50의16,400행/6.258초 근거는 재사용하며 다시 실행하지 않는다.
 새 repair 동결 SHA의 독립 검증과 ROOT 인수, 실제 새 packet/combined 실행·private UAT·
 main/live는 별도 대기다. C49 source archive나 실패 보고서를 덮어쓰지 않는다.
+
+
+## 2026-11-06 최종 actual combined·private UAT와 ROOT 로컬 인수
+
+최종 소스 `40826b754e2937c6b2543e7e5df1665763533d7c`는 별도 읽기 전용 검토에서
+**PASS, findings 0**을 받았다. Repair seam 4 focused를 독립 재실행했고 c49 검토의
+변경 없는18 focused PASS와 core 검토를 재사용했다. 기존131 consumer의43 focused·
+독립4 probes·actual50 consumer 단일 재열기16,400행/6.258초도 다시 실행하지 않았다.
+독립 근거는 `work/quarterly50_expansion_20261025/`의
+`independent_source_compatibility_v2_40826b75_20261106.json`, SHA-256
+`dd92851b2654aac5f200a5e22635bdd932370fe7e8794d9468480bf76f763fd9`다.
+C49 두 P1의 원본 FAIL 보고서와 source snapshot은 실패 증거로 보존했다.
+
+ROOT는 같은 보조 디렉터리의 `source_compatibility_v2_40826b75_approved_20261106.json`에
+exact9 preserved controls·12 routine 근거·4 completed-publication roles를 결속하여
+ROOT_APPROVED를 기록했다. 기존 quality, identity·annual metrics·annual dataset·
+quarterly metrics 4발행과 old config/packet은 변경·재생성하지 않았다. 기존50 History·
+100 analyses·company audits·원본 보고서도 그대로 보존했다.
+
+실제 실행은 새 combined 단계 하나다. **PASS,786.773191509초, peak RSS23,721,980 KiB**를
+기록했다. 새 manifest는 저장소 기준
+`data/processed/universe_runs/quarterly50_20261025/current50_v3_prepared_40826b75/combined_dataset_v3/screening_dataset_manifest.json`,
+SHA-256 `fdad1b85333897c1ddbcdced31a5ce0dda7a6aee934fa1ab2b294d44e4623fe0`다.
+보조 receipt는 `work/quarterly50_expansion_20261025/` 아래
+`latest50_receipts_prepared_v2_40826b75_20261106/combined-dataset.json`이다.
+이 결과는 기존 분석/발행을 다시 만드는 실행이나11월 최신 수집이 아니다.
+
+Private browser UAT는 source408 backend19066과 Windows bridge19065에서 원본 journal의
+일관된 복제본만 사용했다.50사 연간 탐색·연간31/분기41 정의·8버킷, preview 시 자동 저장
+없음, 명시적인 조건/결과 저장을 확인했다. AMD2026Q2의 `ttm_revenue`는
+**41,305,000,000 USD / AVAILABLE**이며8분기 추세와2사 비교가 열렸다. 기존21 저장 결과는
+원래 dataset 문맥으로 열렸고, 새 브라우저 세션에서 정확한 조건/결과를 추가 저장 없이
+재열었다. Private journal의 조건 revisions/runs는4/4→명시 저장 후5/5였으며 UI의
+screen definitions3→4와는 서로 다른 count다.
+
+Create/reopen 보고서는 모두 PASS이며 오류와 failed responses가 없다. 보고서 및 화면
+증거의 로컬 위치는
+`/mnt/c/Users/plusbdw/.codex/visualizations/2026/10/07/01a118cd-05d7-7842-b035-32b40d7c2817/quarterly50-20261025/current-compat-20261106/`
+아래 `create-report.json`, `reopen-report.json`이다. 이번 UAT는 **새 브라우저 세션**을
+검증했으며 backend를 새로 재시작하지 않았다. 이전 baseline의 재시작 검증을 재사용했으므로
+이번 실행의 backend restart PASS로 주장하지 않는다.
+
+ROOT 수락 보조 기록 `work/quarterly50_expansion_20261025/lead_current50_acceptance_40826b75.json`의
+상태는 **LOCALLY_ACCEPTED_CURRENT50_NOT_MAIN_OR_LIVE**다. 원본 보호 기준은 같은 위치의
+`protected_live21_baseline.json`에 있으며 다음 해시는 변하지 않았다.
+
+- 기존21 SQLite journal: `e486bb5e504d51272837ed9dc00de267529f74a20c40403b0abd85e480be0997`.
+- 기존 catalog: `92d8a801fdbee7176b59fa49a9c6f0c223243e915b90fed24b0b224da7918ee9`.
+
+기존21 runtime의 두 포트는 작업 전부터 응답하지 않는 상태로 읽기 전용 확인됐다.
+이를 이번 patch의 회귀나 새 live 반영 결과로 단정하지 않는다. Private backend와 bridge는
+ROOT가 소유권을 확인한 뒤 종료했다. Cutoff2026-10-25, 원본 기록 불변과 격리된 private
+UAT 범위를 유지했으며 **main merge·CI·새 live runtime 적용은 별도 pending**이다.
+이번 최종 인계는 문서만 변경하며408 제품/테스트 동결을 유지하고 추가 테스트·PR·push를
+실행하지 않는다.

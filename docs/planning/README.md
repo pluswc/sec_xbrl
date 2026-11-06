@@ -1,5 +1,18 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-06 current50 최신 인계 — **LOCALLY_ACCEPTED_CURRENT50_NOT_MAIN_OR_LIVE**:
+[50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의 최종 소스
+`40826b754e2937c6b2543e7e5df1665763533d7c`는 별도 v2 독립 PASS 뒤 ROOT가 정확한
+9 preserved controls·12 routine 근거의 v2 packet을 승인했다. 기존 quality·4발행을
+그대로 재사용한 **combined-only PASS (786.773초, peak 23,721,980 KiB)**와 private
+browser UAT PASS를 바탕으로 ROOT가 current50을 로컬 인수했다. 50사·연간31/분기41
+정의·8버킷, AMD 2026Q2 TTM revenue 41,305,000,000 USD, 명시 저장·새 브라우저 재열기·
+2사 비교·기존21 저장 문맥을 확인했다. 이번 backend 재시작은 하지 않았으며 이전
+baseline 재시작 근거를 재사용했다. Cutoff는2026-10-25로11월 신규 수집은 없다.
+원본 journal/catalog와 기존 분석·발행은 보존했고 private 서버는 종료했다.
+**Main/CI/new live 적용은 별도 pending**이다. 아래는 과거 상태와 실패·repair 이력이며,
+아래의 source/combined/UAT 대기는 이 최신 인계 범위에서 해소됐다.
+
 2026-11-06 v2 독립 FAIL 후 최소 repair 후보:
 `c49efa068ee246451f2f2134ffa766f6858c74d5`는 fresh-process 순환 import와
 pin 없는 v3의 외부 compatibility scope 상속 두 P1으로 독립 FAIL했다.
