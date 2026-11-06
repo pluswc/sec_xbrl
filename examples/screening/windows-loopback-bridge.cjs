@@ -7,9 +7,13 @@
  */
 
 const childProcess = require("node:child_process");
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
 const http = require("node:http");
 const readline = require("node:readline");
 
+const MAX_DISPLAY_ASSET = 2 * 1024 * 1024;
 const MAX_REQUEST_BODY = 1024 * 1024;
 const MAX_RESPONSE_BODY = 32 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 35000;
@@ -47,6 +51,7 @@ function parseArgs(argv) {
     "--backend-port",
     "--frontend-port",
     "--wsl",
+    "--assets-root",
   ]);
   for (const key of Object.keys(values)) {
     if (!allowed.has(key)) throw new Error(`unknown argument: ${key}`);
@@ -84,6 +89,7 @@ function parseArgs(argv) {
     backendPort,
     frontendPort,
     wsl: values["--wsl"] ? text("--wsl") : "wsl.exe",
+    assetsRoot: Object.hasOwn(values, "--assets-root") ? text("--assets-root") : null,
   };
 }
 
@@ -117,7 +123,47 @@ function writeJson(response, status, payload) {
   response.end(body);
 }
 
+function loadDisplayAssets(root) {
+  if (typeof root !== "string" || !path.isAbsolute(root)) {
+    throw new Error("display assets root must be an explicit absolute directory");
+  }
+  const directory = path.resolve(root);
+  for (let entry = directory; ; entry = path.dirname(entry)) {
+    if (fs.lstatSync(entry).isSymbolicLink()) throw new Error("display asset aliases are forbidden");
+    if (path.dirname(entry) === entry) break;
+  }
+  if (!fs.lstatSync(directory).isDirectory()) throw new Error("display assets root is not a directory");
+  const assets = new Map();
+  for (const [route, filename, type] of [
+    ["/app.css", "app.css", "text/css; charset=utf-8"],
+    ["/app.js", "app.js", "text/javascript; charset=utf-8"],
+  ]) {
+    const file = path.join(directory, filename);
+    if (fs.lstatSync(file).isSymbolicLink()) throw new Error("display asset aliases are forbidden");
+    const descriptor = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    try {
+      const before = fs.fstatSync(descriptor);
+      if (!before.isFile() || before.size < 1 || before.size > MAX_DISPLAY_ASSET) {
+        throw new Error("display asset must be a bounded nonempty regular file");
+      }
+      const buffer = Buffer.alloc(before.size + 1);
+      const count = fs.readSync(descriptor, buffer, 0, buffer.length, 0);
+      const after = fs.fstatSync(descriptor);
+      if (count !== before.size || after.size !== before.size || after.mtimeMs !== before.mtimeMs) {
+        throw new Error("display asset changed while loading");
+      }
+      const body = buffer.subarray(0, count);
+      assets.set(route, { body, type, sha256: crypto.createHash("sha256").update(body).digest("hex") });
+    } finally {
+      fs.closeSync(descriptor);
+    }
+  }
+  return { directory, assets };
+}
+
 function startBridge(options) {
+  // Both files must load before listening or starting the relay. HTTP never names a file.
+  const bundle = options.assetsRoot ? loadDisplayAssets(options.assetsRoot) : null;
   const relay = childProcess.spawn(
     options.wsl,
     [
@@ -219,6 +265,22 @@ function startBridge(options) {
       request.resume();
       return;
     }
+    const asset = bundle && bundle.assets.get((request.url || "").split("?", 1)[0]);
+    if (asset) {
+      if (method !== "GET") {
+        writeJson(response, 405, { error: "display assets require GET" });
+      } else {
+        response.writeHead(200, {
+          "content-type": asset.type,
+          "content-length": String(asset.body.length),
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+        });
+        response.end(asset.body);
+      }
+      request.resume();
+      return;
+    }
     const chunks = [];
     let size = 0;
     let rejected = false;
@@ -266,6 +328,12 @@ function startBridge(options) {
   server.on("clientError", (_error, socket) => socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"));
   server.listen(options.frontendPort, "127.0.0.1", () => {
     process.stdout.write(`screening dashboard: ${localOrigin(options.frontendPort)}/\n`);
+    if (bundle) {
+      process.stdout.write(`screening display assets: ${JSON.stringify({
+        root: bundle.directory,
+        sha256: Object.fromEntries([...bundle.assets].map(([route, asset]) => [route, asset.sha256])),
+      })}\n`);
+    }
   });
 
   const stop = () => {
@@ -288,4 +356,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { allowedPath, parseArgs, startBridge };
+module.exports = { allowedPath, parseArgs, startBridge, loadDisplayAssets };

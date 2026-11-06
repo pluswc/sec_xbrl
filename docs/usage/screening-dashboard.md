@@ -198,7 +198,28 @@ service의 CSRF 검사가 그대로 적용된다. XLSX/CSV bytes, status,
 `Content-Type`/`Content-Disposition`은 요청 ID와 함께 전달된다. 종료할 때는
 PowerShell에서 `Ctrl+C`를 눌러 Windows listener와 relay를 함께 닫는다.
 
-### 현재 21사 runtime의 표준 재시작 경로
+### 선택형 Display companion (2026-11-06)
+
+[수치·표 표시 전달 계약](../implementation/dashboard-data-presentation-20261106.md)의
+새 화면은 bridge와 `examples/screening/display-assets/app.css`, `app.js`를 같은
+frontend release로 복사한 뒤 명시적으로 사용한다. Windows local absolute directory의
+두 파일 SHA를 기록하고 기존 bridge 명령에 다음 옵션을 추가한다.
+
+```powershell
+  --assets-root "C:\screening-display\display-assets"
+```
+
+위 경로는 예시이며 실제 exact release directory로 바꾼다. Bridge가 시작할 때 두 자산을
+메모리에 읽고 SHA를 출력한다. 파일 교체만으로 실행 중 자산을 바꾸지 않으므로 frontend
+bridge만 명시적으로 전환한다. Backend18766·기존 catalog/journal은 변경하거나 재시작할
+필요가 없다. Host/Origin/body/경로 제한과 document CSP는 그대로 적용된다.
+
+정상 Windows18765가 companion을 쓰는 canonical 화면이다.18766 직결과 옵션 없는 bridge는
+기존 동결 UI fallback이며 같은 새 표시를 제공한다고 가정하지 않는다. 옵션 없이 시작하면
+두 asset URL도 기존 backend로 relay한다. 현재 구현의 독립 검증/운영 전환 상태는 전달
+계약을 따른다. 아래21-only 명령/경로는 당시 역사 자료다.
+
+### 2026-10-25 21사 runtime의 재시작 경로 (역사 자료)
 
 현재 동결된 21사 history는 아래 v1/v2 catalog 두 entry를 함께 사용한다. 과거
 v1 run을 열기 위해 v1 entry를 지우거나 v2 root로 바꾸지 않는다.
