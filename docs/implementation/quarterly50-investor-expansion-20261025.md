@@ -1,24 +1,26 @@
 # Quarterly 50 investor expansion — 2026-10-25
 
-## 2026-11-06 최신 인계 — current50 로컬 인수, main/live 별도
+## 2026-11-06 최신 인계 — current50 main 병합·운영 반영 인수
 
-ROOT는 `40826b754e2937c6b2543e7e5df1665763533d7c`의 독립 PASS, 새 exact v2 packet
-승인, 실제 combined-only 발행과 private browser UAT PASS를 근거로
-**LOCALLY_ACCEPTED_CURRENT50_NOT_MAIN_OR_LIVE**를 기록했다. Cutoff는
-**2026-10-25**이며11월 신규 수집은 없다.
+ROOT의 최종 상태는 **LOCALLY_ACCEPTED_MAIN_AND_LIVE_CURRENT50**다. 독립 수락 소스
+`40826b754e2937c6b2543e7e5df1665763533d7c`를 [PR67](https://github.com/pluswc/sec_xbrl/pull/67)로
+main `34f245458bfab45e3d51a6446738e1df87333b78`에 병합했고 main 전체 Python source
+inventory는408과 같다. Cutoff는 **2026-10-25**이며11월 신규 수집은 없다.
 
 | 상태 | 최종 근거와 범위 |
 | --- | --- |
-| 소스 독립 검증 | 408 repair 4 focused PASS, 변경 없는18 prior cases 재사용; c49 두 P1 FAIL 이력 보존 |
-| 호환 전이 승인 | ROOT_APPROVED v2: 정확한9 preserved controls·12 routine 근거·완료4발행 pins |
-| 실제 발행 | 기존 quality·4발행 재사용 후 combined-only PASS,786.773초·peak23,721,980 KiB |
-| Private UAT | 50사·연간31/분기41 정의·8버킷, TTM·명시 저장·새 브라우저 재열기·비교·기존21 문맥 PASS |
-| 로컬 인수 | ROOT current50 source/actual publication/UAT 범위 인수 완료 |
-| Main/CI/new live | 별도 pending; 이번 인계에서 적용하지 않음 |
+| 판단·승인 | 사용자 명시 v2 범위 승인, ROOT exact9 controls·12 routine·완료4발행 packet 승인 |
+| 구현 | source408; 기존 quality·4발행 재사용한 실제 combined-only PASS,786.773초·peak23,721,980 KiB |
+| 독립 검증 | 408 repair 4 focused PASS, 변경 없는18 prior cases 재사용; c49 두 P1 FAIL 이력 보존 |
+| 로컬 인수 | source/actual publication/private UAT를 ROOT가 먼저 별도 인수 |
+| PR·CI·main | PR67 MERGED main34; head011 CI42139166232 PASS(3분16초), main CI42139627160 PASS |
+| Live 인수 | main backend18766·Windows bridge18765; GET-only50행·기존21 두 dataset·저장 문맥 PASS, 원본 기록 불변 |
 
-아래 초기 source-only 설명과 중간 대기 상태는 당시 snapshot이다. 최신 actual 결과와
-검증 재사용·원본 보존·실행 한계는 문서 끝의11-06 최종 결과를 따른다. C49 실패와
-자동 승인 거부 이력은 삭제하지 않는다.
+[운영 화면](http://127.0.0.1:18765/)은 기존 주소를 유지한다. Backend 최초 초기화에
+수분이 걸렸고 초기화 후 RSS8,534,040 KiB·peak11,669,196 KiB를 관측했다. 성능 개선은
+남은 사항이며 추가 최적화는 이번 인계에 포함하지 않는다. 아래 source-only 설명과
+중간 대기 상태는 당시 snapshot이며 최신 실행 명령·보존 근거는 문서 끝의 최종 운영
+기록을 따른다. 과거21 runtime 경로와 c49 실패·자동 승인 거부 이력도 역사 자료로 보존한다.
 
 ## Authority and milestone
 
@@ -1493,3 +1495,60 @@ ROOT가 소유권을 확인한 뒤 종료했다. Cutoff2026-10-25, 원본 기록
 UAT 범위를 유지했으며 **main merge·CI·새 live runtime 적용은 별도 pending**이다.
 이번 최종 인계는 문서만 변경하며408 제품/테스트 동결을 유지하고 추가 테스트·PR·push를
 실행하지 않는다.
+
+
+## 2026-11-06 최종 main/CI/live 실행 기록
+
+앞선 **LOCALLY_ACCEPTED_CURRENT50_NOT_MAIN_OR_LIVE**는 source/combined/private UAT
+인수 시점의 상태다. 그 뒤 [PR67](https://github.com/pluswc/sec_xbrl/pull/67)은
+**main `34f245458bfab45e3d51a6446738e1df87333b78`에 MERGED**됐다.
+[PR head011 CI42139166232](https://github.com/pluswc/sec_xbrl/actions/runs/42139166232)는
+3분16초 PASS, [main CI42139627160](https://github.com/pluswc/sec_xbrl/actions/runs/42139627160)도
+PASS다. ROOT는 main34와 독립 수락408의 전체 Python source inventory 동일성을 확인했다.
+이번 문서 후속은 제품/테스트를 고치거나 기존 단위·회사 audit·실제 발행 검사를 반복하지 않는다.
+
+운영 backend는 저장소 ROOT의 main34 `src`로 실행했다. 기록 당시 PID245090,
+port18766이며 Windows bridge PID11388/port18765를 통해 기존 주소
+[http://127.0.0.1:18765/](http://127.0.0.1:18765/)를 유지한다. 최신 main backend 명령은
+다음과 같다(운영 기록용이며 이번 문서 수정에서 다시 실행하지 않는다).
+
+```bash
+cd /home/plusbdw/user_work/projects/sec_xbrl
+PYTHONPATH=src .venv/bin/python -u -m sec_xbrl.screening serve \
+  --catalog work/quarterly50_expansion_20261025/live50_rollout_40826b75_20261106/catalog.json \
+  --store data/processed/screening_runs/20261009_initial/user_journal.sqlite \
+  --exports data/processed/screening_runs/20261009_initial/exports \
+  --require-existing-store --host 127.0.0.1 --port 18766
+```
+
+과거21-only runtime/source 경로와 private19066/19065 명령은 해당 시점의 역사 자료다.
+현재 운영 명령 대신 사용하지 않는다. Private UAT의 새 브라우저 검증·이전 baseline
+backend 재시작 근거 재사용과 이번 main backend 신규 시작은 서로 다른 실행 사실이다.
+
+Live browser 검증은 **GET-only PASS**다.50행을 표시하고 기존21의
+`pilot-21-annual-20261008`, `pilot-21-expanded-20261008` 두 dataset을 유지하며 원래 저장
+결과가 원래 문맥으로 열렸다. POST나 추가 저장 없이 원본 counts는
+**definitions3 / revisions4 / runs4** 그대로였고 table digests도 전후 일치했다.
+Private UAT 복제본의5/5 저장 결과를 원본 운영 기록으로 옮기지 않았다.
+기존 SQLite/catalog bytes 해시는 앞서 기록한 `e486bb5e…` / `92d8a801…`와 같다.
+기존 quality·완료4발행·50 History·100 analyses·company audits를 다시 생성하거나 변경하지 않았다.
+
+최종 ROOT 수락 보조 기록은 `work/quarterly50_expansion_20261025/`의
+`lead_live50_acceptance_40826b75_20261106.json`, 상태
+**LOCALLY_ACCEPTED_MAIN_AND_LIVE_CURRENT50**다. Main merge receipt는 같은 위치의
+`main_merge_pr67_20261106.json`이며 rollout 디렉터리는
+`live50_rollout_40826b75_20261106/`다. 이 안의 `new-live-process.json`, `catalog.json`,
+`journal-before.json`, `journal-at-stop.json`, `journal-after.json`,
+`post_initialization_memory.json`이 process/catalog/원본 보존·메모리 근거다.
+Live browser 보고서는 앞서 기록한 Windows 시각화
+`quarterly50-20261025/current-compat-20261106/live-smoke-report.json`에 보존한다.
+
+초기화 완료 후 GET-only live 확인 시 RSS **8,534,040 KiB**, peak RSS **11,669,196 KiB**를
+관측했다. 최초 초기화에는 수분이 걸렸다. 이는 실제 운영 process 측정이며 earlier
+combined 발행의 peak와 다르다. 초기화 시간과 메모리는 남은 성능 사항으로 기록하고,
+새 최적화 구현이나 추가 benchmark를 이번 인계에 포함하지 않는다.
+
+Cutoff2026-10-25와 기존 기록은 유지한다. 판단·구현·독립408 검증·source/actual/private
+로컬 인수·PR67 main 병합·live 인수는 위 근거로 각각 구분하며 과거 c49 FAIL과 pending
+snapshot은 삭제하지 않는다. 이번 후속은 두 문서의 로컬 커밋만 수행한다. 문서 후속
+검토/PR/CI/병합은 ROOT의 별도 전달 절차이고 이 기록이 그 후속 완료를 뜻하지 않는다.
