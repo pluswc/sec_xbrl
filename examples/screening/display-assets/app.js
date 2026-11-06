@@ -1,5 +1,5 @@
 const S={screens:[],runs:[],decisions:[],catalog:[],companies:[],companySelection:new Set(),defaultDataset:null,contextToken:0,revision:null,run:null,resultContent:null,preview:null,busy:false,selected:new Set(),activeFilter:"ALL",dirty:false,lastFocus:null,evidenceRow:null,admin:new URLSearchParams(location.search).get("mode")==="admin",explorerDataset:null,explorerYear:null,explorer:null,library:null,explorerCatalog:null,explorerCatalogKey:null,explorerCatalogToken:0,explorerSelected:new Set(),profile:null,profileMetric:"revenue",view:"explorer",explorerToken:0,libraryToken:0,frequencyDrafts:{},quarterSpine:[],frequency:"ANNUAL"};const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
-async function api(path,options={}){const r=await fetch(path,{headers:{"Content-Type":"application/json"},...options}),b=await r.json().catch(()=>({error:`요청 오류 ${r.status}`}));if(!r.ok)throw new Error(b.error||"요청에 실패했습니다.");return b}
+async function api(path,options={}){const r=await fetch(path,{headers:{"Content-Type":"application/json"},...options}),b=await r.json().catch(()=>({error:`요청 오류 ${r.status}`}));if(!r.ok)throw Object.assign(new Error(b.error||"요청에 실패했습니다."),{status:r.status});if(options.method==="POST"&&/^\/api\/(?:screens|results|runs|decisions|history)(?:\/|$)/.test(path))invalidateHistoryRead();return b}
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function toast(m){const e=$("#toast");e.textContent=m;e.classList.add("visible");setTimeout(()=>e.classList.remove("visible"),1800)}
 function fail(e){const m=e.message||String(e);$("#criteria-error").hidden=false;$("#criteria-error").textContent=m.startsWith("metric is unavailable for execution:")?"현재 자료에서 실행할 수 없는 지표가 포함돼 있습니다. 사용 가능한 지표를 선택해 주세요.":m}
@@ -34,8 +34,138 @@ function markDirty(){S.dirty=true;S.preview=null;$("#save-result").disabled=true
 function isRevisionEdit(t){return t instanceof Element&&!t.closest("#saved-screen,#open-screen,#dataset,#metric-category,#metric-search,#company-query")}
 function setCriteriaCompact(c){$(".criteria").classList.toggle("compact",c);$("#toggle-criteria").setAttribute("aria-expanded",String(!c));$("#toggle-criteria").textContent=c?"조건 펼치기":"조건 접기"}
 
-async function refreshScreens(){S.screens=await api("/api/screen-revisions");$("#saved-screen").innerHTML='<option value="">새 조건</option>'+S.screens.map(x=>`<option value="${x.revision_id}">${esc(x.name)} · v${x.revision_number}</option>`).join("");renderTimeline()}
-async function refreshRuns(){S.runs=await api("/api/runs");const o='<option value="">실행 선택</option>'+S.runs.map(x=>`<option value="${x.run_id}">${esc(x.result_name||S.screens.find(s=>s.revision_id===x.revision_id)?.name||"저장 결과")} · ${esc(x.created_at?.slice(0,16)||"")} · 대상 ${x.counts.target}</option>`).join("");$("#old-run").innerHTML=o;$("#new-run").innerHTML=o;renderTimeline()}
+// Recoverable history is a journal projection, separate from financial evaluation.
+const journalHistory={configured:null,capability:null,snapshot:null,promise:null,version:0,epoch:0,request:0,error:"",pending:false,trash:false,confirm:null};
+async function historyCapability(){
+  if(journalHistory.capability)return journalHistory.capability;
+  journalHistory.capability=(async()=>{try{
+    const response=await fetch("/api/history/capabilities"),body=await response.json().catch(()=>({}));
+    if(response.status===404){journalHistory.configured=false;return false}
+    journalHistory.configured=body.configured!==false;
+    if(!response.ok)throw new Error(body.error||"이력 연결을 사용할 수 없습니다.");
+    return journalHistory.configured;
+  }catch(error){journalHistory.configured=true;throw error}})();
+  return journalHistory.capability;
+}
+function invalidateHistoryRead(){journalHistory.snapshot=null;journalHistory.request++;journalHistory.promise=null}
+function historyUnavailable(error){
+  journalHistory.epoch++;journalHistory.error=error.message||String(error);journalHistory.snapshot=null;
+  S.screens=[];S.runs=[];S.decisions=[];
+  clearResult();renderHistoryControls();
+}
+async function historySnapshot(){
+  if(journalHistory.snapshot)return journalHistory.snapshot;
+  if(journalHistory.promise)return journalHistory.promise;
+  const request=journalHistory.request;
+  const promise=api("/api/history").then(snapshot=>{
+    if(request!==journalHistory.request)return historySnapshot();
+    applyHistorySnapshot(snapshot);return snapshot;
+  }).finally(()=>{if(journalHistory.promise===promise)journalHistory.promise=null});
+  journalHistory.promise=promise;return promise;
+}
+async function historyRecords(key,legacyPath){
+  try{if(!await historyCapability())return await api(legacyPath);return(await historySnapshot())[key]}
+  catch(error){historyUnavailable(error);return[]}
+}
+function historyHidden(kind,id){return(journalHistory.snapshot?.trash||[]).some(x=>x.kind===kind&&x.record_id===id)}
+function applyHistorySnapshot(snapshot){
+  const changed=journalHistory.version!==snapshot.version;
+  journalHistory.version=snapshot.version;journalHistory.snapshot=snapshot;journalHistory.error="";
+  if(changed)journalHistory.epoch++;
+  S.screens=snapshot.revisions;S.runs=snapshot.runs;S.decisions=snapshot.decisions;
+  if(S.run?.run_id&&historyHidden("RUN",S.run.run_id)){clearResult();$("#run-diff").textContent="";toast("열었던 결과를 휴지통으로 이동했습니다. 복원 후 다시 열어 주세요.")}
+  if(S.revision&&historyHidden("REVISION",S.revision.revision_id)){
+    detachHistoryRevision();
+  }
+  renderHistoryControls();
+}
+function detachHistoryRevision(){
+    S.revision=null;S.preview=null;S.dirty=true;S.frequencyDrafts={};
+    $("#saved-screen").value="";$("#screen-name").readOnly=false;
+    $("#save-state").textContent="휴지통의 조건 · 현재 내용은 저장 전 복사본";
+    $("#screen-context").textContent="삭제된 저장 조건의 복사본 · 새 조건으로 저장 가능";
+}
+function historyRecordTitle(kind,record){
+  if(kind==="REVISION")return`${record.name} · v${record.revision_number}`;
+  if(kind==="RUN")return`${record.result_name||"저장 결과"} · 대상 ${record.counts?.target??"—"} · 충족 ${record.counts?.pass??"—"}`;
+  return`CIK ${record.cik} · ${Object.hasOwn(record,"display_before_state")?`${decisionLabel(record.display_before_state)} → `:""}${decisionLabel(record.state)} · ${record.rationale}`;
+}
+function historyEntries(){
+  if(journalHistory.trash)return(journalHistory.snapshot?.trash||[]).map(x=>({...x,deleted:true}));
+  return[...S.screens.map(record=>({kind:"REVISION",record_id:record.revision_id,record})),...S.runs.map(record=>({kind:"RUN",record_id:record.run_id,record})),...S.decisions.map(record=>({kind:"DECISION",record_id:record.event_id,record}))];
+}
+function renderHistoryControls(){
+  if(!$("#history-lifecycle"))return;
+  const configured=journalHistory.configured===true,blocked=configured&&Boolean(journalHistory.error),busy=journalHistory.pending;
+  $("#history-trash").hidden=!configured;$("#history-active").setAttribute("aria-pressed",String(!journalHistory.trash));$("#history-trash").setAttribute("aria-pressed",String(journalHistory.trash));
+  $("#history-active").disabled=busy;$("#history-trash").disabled=busy;
+  $("#history-retry").disabled=busy;$("#history-lifecycle").setAttribute("aria-busy",String(busy));
+  $("#history-status").textContent=journalHistory.error||(configured?`활성 조건 ${S.screens.length} · 결과 ${S.runs.length} · 메모 ${S.decisions.length} · 휴지통 ${journalHistory.snapshot?.trash.length||0}`:"삭제·복원 연결이 설정되지 않았습니다. 기존 이력 조회를 사용합니다.");
+  $("#history-status").classList.toggle("explorer-error",blocked);
+  $("#history-retry").textContent=blocked?"이력 다시 연결":"이력 새로고침";
+  $("#timeline").innerHTML=blocked?'<li class="empty">이력을 불러올 수 없습니다. 다시 연결해 주세요. 숨긴 기록을 원본 목록으로 대신 표시하지 않습니다.</li>':historyEntries().map(x=>`<li data-history-row="${esc(x.record_id)}" data-history-kind="${x.kind}" data-history-id="${esc(x.record_id)}"><div><b>${({REVISION:"조건",RUN:"결과",DECISION:"판단 메모"})[x.kind]}</b> · ${esc(historyRecordTitle(x.kind,x.record))}<time>${esc(x.record.created_at||"")}</time><small>${esc(x.record_id)}</small></div>${configured?`<button type="button" class="quiet" data-history-action="${x.deleted?"restore":"delete"}" ${x.deleted?"data-history-restore":"data-history-delete"} data-history-kind="${x.kind}" data-history-id="${esc(x.record_id)}" ${busy?'disabled':''}>${x.deleted?"복원":"삭제"}</button>`:""}</li>`).join("")||`<li class="empty">${journalHistory.trash?"휴지통이 비어 있습니다.":"아직 이력이 없습니다."}</li>`;
+}
+function renderTimeline(){renderHistoryControls()}
+function renderHistoryLists(){
+  const selected=$("#saved-screen").value,old=$("#old-run").value,newer=$("#new-run").value;
+  $("#saved-screen").innerHTML='<option value="">새 조건</option>'+S.screens.map(x=>`<option value="${esc(x.revision_id)}">${esc(x.name)} · v${x.revision_number}</option>`).join("");
+  if(S.screens.some(x=>x.revision_id===selected))$("#saved-screen").value=selected;
+  const options='<option value="">실행 선택</option>'+S.runs.map(x=>`<option value="${esc(x.run_id)}">${esc(x.result_name||S.screens.find(s=>s.revision_id===x.revision_id)?.name||"저장 결과")} · ${esc(x.created_at?.slice(0,16)||"")} · 대상 ${x.counts.target}</option>`).join("");
+  $("#old-run").innerHTML=options;$("#new-run").innerHTML=options;
+  if(S.runs.some(x=>x.run_id===old))$("#old-run").value=old;
+  if(S.runs.some(x=>x.run_id===newer))$("#new-run").value=newer;
+  renderTimeline();syncResultActions();if(S.run)renderRows();
+}
+async function refreshScreens(){S.screens=await historyRecords("revisions","/api/screen-revisions");renderHistoryLists()}
+async function refreshRuns(){S.runs=await historyRecords("runs","/api/runs");renderHistoryLists()}
+async function refreshDecisions(){S.decisions=await historyRecords("decisions","/api/decisions");renderHistoryLists()}
+async function retryHistory(){
+  if(journalHistory.pending)return;
+  journalHistory.capability=null;invalidateHistoryRead();
+  await refreshScreens();await refreshRuns();await refreshDecisions();
+}
+function confirmHistoryAction(action,kind,id,button){
+  if(journalHistory.pending||journalHistory.error)return;
+  const item=historyEntries().find(x=>x.kind===kind&&x.record_id===id);if(!item)return;
+  journalHistory.confirm={action,kind,id,version:journalHistory.version,focus:button};
+  $("#history-confirm-title").textContent=action==="delete"?"이 기록을 휴지통으로 이동할까요?":"이 기록을 복원할까요?";
+  $("#history-confirm-item").textContent=historyRecordTitle(kind,item.record);
+  $("#history-confirm-note").textContent=action==="delete"?"이 항목만 숨깁니다. 연결된 조건·결과·다른 메모와 다운로드 파일은 삭제하지 않습니다. 휴지통에서 복원할 수 있습니다.":"같은 ID와 원래 내용으로 되돌립니다. 판단 메모를 복원하면 현재 관심상태가 다시 계산됩니다.";
+  $("#history-confirm-submit").textContent=action==="delete"?"휴지통으로 이동":"복원";
+  $("#history-confirm-error").textContent="";$("#history-confirm-refresh").hidden=true;$("#history-confirm").showModal();$("#history-confirm-cancel").focus();
+}
+function closeHistoryConfirmation(){
+  if(journalHistory.pending)return;
+  const focus=journalHistory.confirm?.focus;journalHistory.confirm=null;$("#history-confirm").close();
+  (focus?.isConnected?focus:$("#history-retry")).focus();
+}
+async function submitHistoryAction(){
+  const item=journalHistory.confirm;if(!item||journalHistory.pending)return;
+  journalHistory.pending=true;syncResultActions();$("#history-confirm-submit").disabled=true;$("#history-confirm-cancel").disabled=true;renderHistoryControls();
+  try{
+    const snapshot=await api(`/api/history/${item.action}`,{method:"POST",body:JSON.stringify({kind:item.kind,record_id:item.id,expected_version:item.version})});
+    journalHistory.epoch++;applyHistorySnapshot(snapshot);renderHistoryLists();
+    journalHistory.pending=false;closeHistoryConfirmation();$(journalHistory.trash?"#history-trash":"#history-active").focus();
+    toast(item.action==="delete"?"휴지통으로 이동했습니다.":"기록을 복원했습니다.");
+  }catch(error){$("#history-confirm-error").textContent=error.message;$("#history-confirm-refresh").hidden=false;if(error.status>=500){historyUnavailable(error);renderHistoryLists()}}
+  finally{journalHistory.pending=false;$("#history-confirm-submit").disabled=false;$("#history-confirm-cancel").disabled=false;renderHistoryControls();syncResultActions()}
+}
+function mountJournalHistory(){
+  const controls=document.createElement("section");controls.id="history-lifecycle";
+  controls.innerHTML='<div class="history-toolbar"><button id="history-active" type="button" class="quiet" aria-pressed="true">활성 이력</button><button id="history-trash" type="button" class="quiet" aria-pressed="false" hidden>휴지통</button><button id="history-retry" type="button" class="quiet">이력 새로고침</button></div><p id="history-status" role="status" aria-live="polite"></p>';
+  $("#timeline").before(controls);
+  const dialog=document.createElement("dialog");dialog.id="history-confirm";dialog.setAttribute("aria-labelledby","history-confirm-title");
+  dialog.innerHTML='<h3 id="history-confirm-title"></h3><p id="history-confirm-item"></p><p id="history-confirm-note" class="muted"></p><p id="history-confirm-error" role="alert"></p><div class="button-row"><button id="history-confirm-refresh" type="button" class="quiet" hidden>이력 새로 확인</button><button id="history-confirm-cancel" type="button" class="quiet">취소</button><button id="history-confirm-submit" type="button">확인</button></div>';
+  document.body.append(dialog);
+  $("#history-active").onclick=()=>{journalHistory.trash=false;renderTimeline()};$("#history-trash").onclick=()=>{journalHistory.trash=true;renderTimeline()};
+  $("#history-retry").onclick=()=>retryHistory();
+  document.querySelectorAll('[data-view="history"]').forEach(link=>link.addEventListener("click",()=>retryHistory()));
+  $("#timeline").onclick=event=>{const b=event.target.closest("[data-history-action]");if(b)confirmHistoryAction(b.dataset.historyAction,b.dataset.historyKind,b.dataset.historyId,b)};
+  $("#history-confirm-submit").onclick=submitHistoryAction;$("#history-confirm-cancel").onclick=closeHistoryConfirmation;
+  $("#history-confirm-refresh").onclick=async()=>{closeHistoryConfirmation();await retryHistory();$("#history-retry").focus()};
+  dialog.addEventListener("cancel",event=>{event.preventDefault();closeHistoryConfirmation()});
+}
+
 async function saveScreen(){const c=revisionContent();if(!c.predicates.length)throw new Error("재무 조건을 하나 이상 추가해 주세요.");if(!c.columns.length)throw new Error("표시 항목을 하나 이상 선택해 주세요.");$("#save-state").textContent="저장 중…";const r=S.revision?await api(`/api/screens/${S.revision.screen_id}/revisions`,{method:"POST",body:JSON.stringify({content:c,dataset_id:$("#dataset").value})}):await api("/api/screens",{method:"POST",body:JSON.stringify({name:$("#screen-name").value,content:c,dataset_id:$("#dataset").value})});S.revision=r;S.dirty=false;$("#screen-name").readOnly=true;$("#save-state").textContent=`저장됨 · v${r.revision_number}`;$("#screen-context").textContent=`${$("#screen-name").value} · v${r.revision_number}`;await refreshScreens();$("#saved-screen").value=r.revision_id;toast("조건을 저장했습니다.")}
 function columnEnabled(c,g){const a={company:["company","ticker","name","cik"],aggregate:["aggregate"],predicates:["predicates"],decision:["decision"]};return(a[g]||[g]).some(x=>c.includes(x))}
 function loadScreenRecord(s){if(!s)return;S.revision=s;S.dirty=false;$("#screen-name").value=s.name;$("#screen-name").readOnly=true;const c=s.content;$("#universe-mode").value=c.universe.mode;toggleUniverse();S.companySelection=new Set(c.universe.mode==="CIKS"?(c.universe.ciks||[]):[]);renderCompanyOptions();if(c.universe.mode==="SIC")$("#industry-select").value=(c.universe.sic_codes||[])[0]||"";const quarterly=c.period_policy.mode==="FIXED_CALENDAR_QUARTER_END";$("#frequency").value=quarterly?"QUARTERLY":"ANNUAL";S.frequency=quarterly?"QUARTERLY":"ANNUAL";if(quarterly)$("#calendar-quarter").value=`${c.period_policy.calendar_year}Q${c.period_policy.calendar_quarter}`;else $("#period-mode").value=c.period_policy.mode;togglePeriod();if(c.period_policy.fiscal_year)$("#fiscal-year").value=c.period_policy.fiscal_year;$("#period-offset").value=c.period_policy.offset||0;$("#predicates").innerHTML="";c.predicates.forEach(predicateRow);const sort=$("#sort-column");if(![...sort.options].some(x=>x.value===c.sort.column)){const o=document.createElement("option");o.value=c.sort.column;o.textContent="저장된 정렬";sort.append(o)}sort.value=c.sort.column;$("#sort-direction").value=c.sort.direction;$$('[name="visible-column"]').forEach(x=>x.checked=columnEnabled(c.columns,x.value));$("#screen-context").textContent=`${s.name} · v${s.revision_number}`;$("#save-state").textContent="저장된 조건"}
@@ -46,7 +176,7 @@ async function switchFrequency(){clearResult();const target=$("#frequency").valu
 
 async function execute(){const content=revisionContent();clearResult();$("#result-body").innerHTML='<tr><td colspan="5" class="empty">기업을 찾는 중…</td></tr>';const r=await api("/api/preview",{method:"POST",body:JSON.stringify({content,dataset_id:$("#dataset").value})});S.preview=r;setRun(r,content);toast("시험 실행입니다. 필요한 결과만 저장하세요.")}
 async function saveResult(){const p=S.preview;if(!p)throw new Error("조건을 시험 실행한 뒤 결과를 저장해 주세요.");const name=$("#screen-name").value.trim()||"스크리닝 결과",sameRevision=S.revision?.content_hash===p.condition_hash&&(!S.revision.saved_context||S.revision.saved_context.dataset_id===p.dataset_id);const r=await api("/api/results",{method:"POST",body:JSON.stringify({name,content:p.content,dataset_id:p.dataset_id,preview_hash:p.preview_hash,revision_id:sameRevision?S.revision.revision_id:null})});S.preview=null;setRun(r,p.content);await refreshRuns();toast("결과를 저장했습니다. 이력에서 다시 열 수 있습니다.")}
-function syncResultActions(){const saved=Boolean(S.run?.run_id);$("#save-result").disabled=S.busy||!S.preview;["#export-selected-csv","#export-selected-xlsx","#export-full-csv","#export-full-xlsx","#save-decision"].forEach(id=>$(id).disabled=S.busy||!saved)}
+function syncResultActions(){const blocked=journalHistory.configured===true&&(Boolean(journalHistory.error)||journalHistory.pending),saved=Boolean(S.run?.run_id)&&!blocked;["#save-screen","#open-screen","#open-run","#compare-runs"].forEach(id=>{if(blocked)$(id).disabled=true;else if(!S.busy)$(id).disabled=false});$("#save-result").disabled=S.busy||blocked||!S.preview;["#export-selected-csv","#export-selected-xlsx","#export-full-csv","#export-full-xlsx","#save-decision"].forEach(id=>$(id).disabled=S.busy||!saved)}
 async function withBusy(action){if(S.busy)return;S.busy=true;$("#criteria-error").hidden=true;const controls=$$("#criteria-form input,#criteria-form select,#criteria-form button,.criteria .button-row button,#open-run,#compare-runs,#result-body button.company,[data-guide-add]");const before=controls.map(x=>[x,x.disabled]);controls.forEach(x=>x.disabled=true);syncResultActions();try{return await action()}finally{S.busy=false;before.forEach(([x,disabled])=>{if(x.isConnected)x.disabled=disabled});syncResultActions()}}
 function clearResult(){S.run=null;S.preview=null;S.resultContent=null;S.selected.clear();$("#result-body").innerHTML='<tr><td colspan="5" class="empty">조건을 시험 실행하면 결과가 표시됩니다.</td></tr>';$("#counts").textContent="실행 전";$("#evidence").hidden=true;syncResultActions()}
 function setRun(r,content){S.run=r;S.resultContent=content||S.revision?.content;S.selected.clear();$("#period-context").textContent=r.period_policy.mode==="FIXED_FISCAL_YEAR"?`FY${r.period_policy.fiscal_year}`:r.period_policy.mode==="FIXED_CALENDAR_QUARTER_END"?quarterLabel(r.period_policy):`최근 완료 연도${r.period_policy.offset?` -${r.period_policy.offset}`:""}`;$("#asof").textContent=r.financial_as_of;$("#counts").textContent=`${r.run_id?"저장된 결과":"시험 결과 · 저장 전"} · 대상 ${r.counts.target} · 충족 ${r.counts.pass} · 미충족 ${r.counts.fail} · 확인 필요 ${r.counts.undetermined}`;renderRows();syncResultActions();setCriteriaCompact(true)}
@@ -61,9 +191,8 @@ function actualPeriod(x){const end=x.period_end?inclusiveEnd(x.period_end):x.con
 function fiscalLabel(x){return x.fiscal_year&&x.fiscal_quarter?`FY${x.fiscal_year} ${x.fiscal_quarter}`:"—"}
 async function renderMetricEvidence(){const id=$("#evidence-metric").value,m=metricById(id),r=S.evidenceRow,e=r.predicates.find(x=>x.metric_id===id),o=e.observation||{},quarterly=S.run.period_policy?.mode==="FIXED_CALENDAR_QUARTER_END",seriesPath=quarterly?`/api/quarter-series?dataset_id=${encodeURIComponent(S.run.dataset_id)}&dataset_publication_id=${encodeURIComponent(S.run.dataset_publication_id)}&cik=${r.cik}&metric_id=${encodeURIComponent(id)}&limit=8`:`/api/series?dataset_id=${encodeURIComponent(S.run.dataset_id)}&dataset_publication_id=${encodeURIComponent(S.run.dataset_publication_id)}&cik=${r.cik}&metric_id=${encodeURIComponent(id)}`;const [series,trace]=await Promise.all([api(seriesPath),S.run.run_id?api(`/api/runs/${encodeURIComponent(S.run.run_id)}/trace?cik=${r.cik}&metric_id=${encodeURIComponent(id)}`):Promise.resolve({evaluation:e})]),source=trace.evaluation?.observation||o,filings=source.source_filings||[],inputs=(m.input_metric_ids||[]).map(x=>metricById(x).label),basis=quarterly?(m.observation_basis==="INSTANT"?"기말잔액":m.observation_basis==="TTM"?"최근 4개 분기":"3개월 분기 실적"):(m.period_class==="INSTANT"?"회계연도 말의 기말잔액":"해당 회계연도의 연간실적");$("#evidence-content").innerHTML=`<div class="financial-summary"><div><span>${esc(m.label)}</span><strong>${o.value===null||o.value===undefined?'—':numberMarkup(o.value,m)} ${unitLabel(m)}</strong></div><div><span>자료 기간</span><strong>${esc(actualPeriod(o))}</strong></div></div><p>${esc(metricHelp(m))}</p>${inputs.length?`<p class="muted">계산 입력: ${inputs.map(esc).join(", ")}</p>`:""}<p>${esc(basis)}${quarterly?` · ${esc(quarterSourceLabel(o.source_kind))} · ${esc(fiscalLabel(o))}`:""}</p>${filings.length?`<p class="muted">관련 공시 ${filings.map(esc).join(", ")}</p>`:""}${o.value===null||o.value===undefined?`<p class="message error">${esc(businessReason(e.reason))}</p>`:""}`;$("#series-content").innerHTML=`<table class="series-table"><thead><tr><th>${quarterly?"종료 분기 · 회사 회계표시":"연도"}</th><th>실제 기간</th><th>${esc(m.label)} (${unitLabel(m)})</th>${quarterly?"<th>자료 성격</th>":""}</tr></thead><tbody>${series.observations.map(x=>`<tr><td>${quarterly?`${esc(quarterLabel(x))}<small>${esc(fiscalLabel(x))}</small>`:x.fiscal_year}</td><td>${esc(actualPeriod(x))}</td><td>${x.value===null||x.value===undefined?`<span title="${esc(businessReason(x.reason))}">—</span>`:numberMarkup(x.value,m)}</td>${quarterly?`<td>${esc(quarterSourceLabel(x.source_kind))}</td>`:""}</tr>`).join("")}</tbody></table>`}
 async function comparePeer(){const peer=$("#peer-company").value;if(!peer)throw new Error("비교 기업을 선택해 주세요.");const id=$("#evidence-metric").value,m=metricById(id),quarterly=S.run.period_policy?.mode==="FIXED_CALENDAR_QUARTER_END";let path;if(quarterly){const p=S.run.period_policy;path=`/api/quarter-comparison?dataset_id=${encodeURIComponent(S.run.dataset_id)}&dataset_publication_id=${encodeURIComponent(S.run.dataset_publication_id)}&ciks=${S.evidenceRow.cik},${peer}&metric_id=${encodeURIComponent(id)}&calendar_year=${p.calendar_year}&calendar_quarter=${p.calendar_quarter}`}else{const e=S.evidenceRow.predicates.find(x=>x.metric_id===id),year=e.observation?.fiscal_year;if(!year)throw new Error("비교할 기간 자료가 없습니다.");path=`/api/peer-comparison?dataset_id=${encodeURIComponent(S.run.dataset_id)}&dataset_publication_id=${encodeURIComponent(S.run.dataset_publication_id)}&ciks=${S.evidenceRow.cik},${peer}&metric_id=${encodeURIComponent(id)}&fiscal_year=${year}`}const r=await api(path);$("#peer-comparison").innerHTML=`${r.warning?`<p>${esc(r.warning)}</p>`:""}<table class="series-table"><thead><tr><th>기업</th><th>${quarterly?"회사 회계표시":"기간"}</th><th>실제 기간</th><th>${esc(m.label)} (${unitLabel(m)})</th></tr></thead><tbody>${r.rows.map(x=>`<tr><td>${esc(x.company.ticker)}</td><td>${quarterly?esc(fiscalLabel(x.observation||{})):esc(x.observation?.fiscal_year||"—")}</td><td>${esc(actualPeriod(x.observation||{}))}</td><td>${x.observation?.value===null||x.observation?.value===undefined?'—':numberMarkup(x.observation.value,m)}</td></tr>`).join("")}</tbody></table>`}
-async function saveDecision(){if(!S.run?.run_id)throw new Error("결과를 저장한 뒤 관심상태를 기록해 주세요.");const cik=$("#evidence").dataset.cik,r=$("#decision-rationale").value.trim();if(!r)throw new Error("판단 메모를 입력해 주세요.");await api("/api/decisions",{method:"POST",body:JSON.stringify({cik,state:$("#decision-state").value,rationale:r,run_id:S.run.run_id,actor:"local-user",evidence_ids:[S.run.run_id]})});S.decisions=await api("/api/decisions");renderRows();renderTimeline();toast("관심상태를 기록했습니다.")}
-function renderTimeline(){const a=[...S.screens.map(x=>({k:"조건 저장",t:`${x.name} v${x.revision_number}`,d:x.created_at})),...S.runs.map(x=>({k:"결과 저장",t:`${x.result_name||"저장 결과"} · 대상 ${x.counts.target} · 충족 ${x.counts.pass} · 확인 필요 ${x.counts.undetermined}`,d:x.created_at})),...S.decisions.map(x=>({k:"관심상태",t:`${decisionLabel(x.before_state)} → ${decisionLabel(x.state)} · ${x.rationale}`,d:x.created_at,c:"decision"}))];$("#timeline").innerHTML=a.map(x=>`<li class="${x.c||''}"><b>${x.k}</b> · ${esc(x.t)} <time>${esc(x.d||"")}</time></li>`).join("")||'<li>아직 이력이 없습니다.</li>'}
-async function openRun(id){if(!id)throw new Error("결과를 선택해 주세요.");const r=await api(`/api/runs/${id}`),v=await api(`/api/revisions/${r.revision_id}`);await openSavedScreenRecord(v,r.dataset_id);S.revision=S.screens.find(x=>x.revision_id===v.revision_id)||null;$("#screen-name").readOnly=Boolean(S.revision);$("#saved-screen").value=S.revision?.revision_id||"";S.preview=null;setRun(r,v.content);showView("screening",true)}
+async function saveDecision(){if(!S.run?.run_id)throw new Error("결과를 저장한 뒤 관심상태를 기록해 주세요.");const cik=$("#evidence").dataset.cik,r=$("#decision-rationale").value.trim();if(!r)throw new Error("판단 메모를 입력해 주세요.");await api("/api/decisions",{method:"POST",body:JSON.stringify({cik,state:$("#decision-state").value,rationale:r,run_id:S.run.run_id,actor:"local-user",evidence_ids:[S.run.run_id]})});await refreshDecisions();renderRows();renderTimeline();toast("관심상태를 기록했습니다.")}
+async function openRun(id){const epoch=journalHistory.epoch;if(!id)throw new Error("결과를 선택해 주세요.");const r=await api(`/api/runs/${id}`),v=await api(`/api/revisions/${r.revision_id}`);if(epoch!==journalHistory.epoch||historyHidden("RUN",id))return;await openSavedScreenRecord(v,r.dataset_id);if(epoch!==journalHistory.epoch||historyHidden("RUN",id))return;S.revision=S.screens.find(x=>x.revision_id===v.revision_id)||null;$("#screen-name").readOnly=Boolean(S.revision);$("#saved-screen").value=S.revision?.revision_id||"";if(historyHidden("REVISION",v.revision_id))detachHistoryRevision();S.preview=null;setRun(r,v.content);showView("screening",true)}
 async function compareRuns(){const a=$("#old-run").value,b=$("#new-run").value;if(!a||!b)throw new Error("두 실행을 선택해 주세요.");const d=await api(`/api/run-comparison?old_run_id=${encodeURIComponent(a)}&new_run_id=${encodeURIComponent(b)}`);$("#run-diff").textContent=d.differences.length?`${d.differences.length}개 기업의 결과 또는 값이 달라졌습니다.`:"기업 결과는 동일합니다."}
 async function exportRun(scope,format){if(!S.run?.run_id)throw new Error("결과를 저장한 뒤 다운로드해 주세요.");const c=scope==="SELECTED"?[...S.selected]:null;if(scope==="SELECTED"&&!c.length)throw new Error("기업을 하나 이상 선택해 주세요.");const r=await api(`/api/runs/${S.run.run_id}/exports`,{method:"POST",body:JSON.stringify({scope,format,selected_ciks:c})}),a=document.createElement("a");a.href=r.download_url;a.download="";document.body.append(a);a.click();a.remove();toast("결과 다운로드를 시작했습니다.")}
 function normalizeMetric(x){if(x.category!=="LEGACY_REPORTED")return x;const category=({revenue:"GROWTH",operating_income:"PROFITABILITY",net_income:"PROFITABILITY",cfo:"CASH_FLOW"})[x.metric_id]||"OTHER_REPORTED";return{...x,category}}
@@ -567,9 +696,9 @@ function mountExplorerSelection(){
   explorerSelection.mounted=true;syncExplorerSelectionUI();
 }
 
-async function boot(){const s=await api("/api/status"),d=s.datasets.at(-1),explorer=d;S.defaultDataset=d;S.explorerDataset=explorer;$("#dataset").innerHTML=s.datasets.map(x=>`<option value="${x.dataset_id}">${x.dataset_id}</option>`).join("");$("#dataset").value=d.dataset_id;$("#asof").textContent=d.financial_as_of;await loadInputContext(d.dataset_id);await refreshScreens();await refreshRuns();S.decisions=await api("/api/decisions");$("#predicates").innerHTML="";predicateRow();renderTimeline();syncResultActions();mountAdmin();bindExplorer();await loadExplorer();await loadLibrary();const initial=({"#library-title":"library","#criteria-title":"screening","#results-title":"screening","#history-title":"history"})[location.hash]||"explorer";showView(initial);$("#criteria-form").addEventListener("input",e=>{if(isRevisionEdit(e.target))markDirty()});$("#criteria-form").addEventListener("change",e=>{if(isRevisionEdit(e.target))markDirty()})}
+async function boot(){mountJournalHistory();const s=await api("/api/status"),d=s.datasets.at(-1),explorer=d;S.defaultDataset=d;S.explorerDataset=explorer;$("#dataset").innerHTML=s.datasets.map(x=>`<option value="${x.dataset_id}">${x.dataset_id}</option>`).join("");$("#dataset").value=d.dataset_id;$("#asof").textContent=d.financial_as_of;await loadInputContext(d.dataset_id);await refreshScreens();await refreshRuns();await refreshDecisions();$("#predicates").innerHTML="";predicateRow();renderTimeline();syncResultActions();mountAdmin();bindExplorer();await loadExplorer();await loadLibrary();const initial=({"#library-title":"library","#criteria-title":"screening","#results-title":"screening","#history-title":"history"})[location.hash]||"explorer";showView(initial);$("#criteria-form").addEventListener("input",e=>{if(isRevisionEdit(e.target))markDirty()});$("#criteria-form").addEventListener("change",e=>{if(isRevisionEdit(e.target))markDirty()})}
 $("#add-predicate").onclick=()=>{predicateRow();markDirty()};$("#metric-category").onchange=refreshMetricOptions;$("#metric-search").oninput=refreshMetricOptions;$("#company-query").oninput=renderCompanyOptions;$("#company-select").onchange=syncCompanySelection;$("#universe-mode").onchange=toggleUniverse;$("#period-mode").onchange=togglePeriod;$("#frequency").onfocus=()=>{S.frequencyDrafts[S.frequency]={content:revisionContent(),name:$("#screen-name").value,revision:S.revision,dirty:S.dirty,dataset:{dataset_id:$("#dataset").value,financial_as_of:$("#asof").textContent}}};$("#frequency").onchange=()=>withBusy(switchFrequency).catch(fail);
-async function openSavedScreenRecord(record,datasetId=null){if(!record)return;if(!datasetId){record=await api(`/api/saved-conditions/${record.revision_id}`);datasetId=record.open_dataset_id||$("#dataset").value||S.defaultDataset.dataset_id;}clearResult();$("#dataset").value=datasetId;await loadInputContext(datasetId);const quarterly=record.content.period_policy.mode==="FIXED_CALENDAR_QUARTER_END";$("#frequency").value=quarterly?"QUARTERLY":"ANNUAL";if(quarterly){const [catalog,periods]=await Promise.all([api(`/api/quarter-metric-catalog?dataset_id=${encodeURIComponent(datasetId)}`),api(`/api/quarter-periods?dataset_id=${encodeURIComponent(datasetId)}`)]);S.catalog=catalog;S.quarterSpine=periods.spine;$("#calendar-quarter").innerHTML=periods.spine.map(x=>`<option value="${x.calendar_year}Q${x.calendar_quarter}">${quarterLabel(x)}</option>`).join("")}loadScreenRecord(record);$("#saved-screen").value=record.revision_id;setCriteriaCompact(false);if(record.context_origin==="UNKNOWN")toast("과거 저장 자료를 확인할 수 없어 현재 선택 자료로 조건을 열었습니다.");else if(record.context_origin==="HISTORICAL_RUN")toast("이 조건의 과거 실행 자료로 열었습니다.");showView("screening",true)}
+async function openSavedScreenRecord(record,datasetId=null){const epoch=journalHistory.epoch,dependency=Boolean(datasetId);if(!record)return;if(!dependency&&historyHidden("REVISION",record.revision_id))throw new Error("휴지통에서 조건을 복원한 뒤 다시 열어 주세요.");if(!datasetId){record=await api(`/api/saved-conditions/${record.revision_id}`);datasetId=record.open_dataset_id||$("#dataset").value||S.defaultDataset.dataset_id;}if(epoch!==journalHistory.epoch)return;clearResult();$("#dataset").value=datasetId;await loadInputContext(datasetId);if(epoch!==journalHistory.epoch)return;const quarterly=record.content.period_policy.mode==="FIXED_CALENDAR_QUARTER_END";$("#frequency").value=quarterly?"QUARTERLY":"ANNUAL";if(quarterly){const [catalog,periods]=await Promise.all([api(`/api/quarter-metric-catalog?dataset_id=${encodeURIComponent(datasetId)}`),api(`/api/quarter-periods?dataset_id=${encodeURIComponent(datasetId)}`)]);S.catalog=catalog;S.quarterSpine=periods.spine;$("#calendar-quarter").innerHTML=periods.spine.map(x=>`<option value="${x.calendar_year}Q${x.calendar_quarter}">${quarterLabel(x)}</option>`).join("")}if(epoch!==journalHistory.epoch)return;loadScreenRecord(record);$("#saved-screen").value=record.revision_id;setCriteriaCompact(false);if(record.context_origin==="UNKNOWN")toast("과거 저장 자료를 확인할 수 없어 현재 선택 자료로 조건을 열었습니다.");else if(record.context_origin==="HISTORICAL_RUN")toast("이 조건의 과거 실행 자료로 열었습니다.");showView("screening",true)}
 $("#open-screen").onclick=()=>withBusy(async()=>{const record=S.screens.find(x=>x.revision_id===$("#saved-screen").value);if(!record)throw new Error("저장 조건 버전을 선택해 주세요.");await openSavedScreenRecord(record)}).catch(fail);
 $("#save-result").onclick=()=>withBusy(saveResult).catch(fail);
 async function newScreen(){clearResult();S.frequencyDrafts={};const d=S.defaultDataset;$("#new-screen").disabled=true;try{$("#frequency").value="ANNUAL";S.frequency="ANNUAL";$("#dataset").value=d.dataset_id;$("#asof").textContent=d.financial_as_of;await loadInputContext(d.dataset_id);togglePeriod();S.revision=null;S.companySelection.clear();renderCompanyOptions();S.dirty=false;$("#saved-screen").value="";$("#screen-name").readOnly=false;$("#screen-name").value="";$("#screen-context").textContent="새 조건";$("#save-state").textContent="새 조건";$("#predicates").innerHTML="";predicateRow();setCriteriaCompact(false);$("#screen-name").focus()}finally{$("#new-screen").disabled=false}}$("#new-screen").onclick=()=>withBusy(()=>newScreen()).catch(fail);$("#save-screen").onclick=()=>withBusy(()=>saveScreen()).catch(fail);$("#execute").onclick=()=>withBusy(()=>execute()).catch(fail);$("#toggle-criteria").onclick=()=>setCriteriaCompact(!$(".criteria").classList.contains("compact"));$("#show-all").onchange=renderRows;$$('[data-filter]').forEach(x=>x.onclick=()=>{$$('[data-filter]').forEach(y=>y.classList.remove("active"));x.classList.add("active");S.activeFilter=x.dataset.filter;renderRows()});$("#toggle-history").onclick=()=>{const c=$("#history-content"),o=c.hidden;c.hidden=!o;$("#toggle-history").setAttribute("aria-expanded",String(o));$("#toggle-history").textContent=o?"이력 닫기":"이력 보기"};$("#open-run").onclick=()=>withBusy(()=>openRun($("#old-run").value)).catch(fail);$("#compare-runs").onclick=()=>compareRuns().catch(fail);$("#export-selected-csv").onclick=()=>withBusy(()=>exportRun("SELECTED","csv")).catch(fail);$("#export-full-xlsx").onclick=()=>withBusy(()=>exportRun("FULL","xlsx")).catch(fail);$("#export-full-csv").onclick=()=>withBusy(()=>exportRun("FULL","csv")).catch(fail);$("#export-selected-xlsx").onclick=()=>withBusy(()=>exportRun("SELECTED","xlsx")).catch(fail);$("#evidence-metric").onchange=()=>renderMetricEvidence().catch(fail);$("#compare-peer").onclick=()=>comparePeer().catch(fail);$("#save-decision").onclick=()=>withBusy(saveDecision).catch(fail);$("#close-evidence").onclick=()=>{const c=$("#evidence").dataset.cik;$("#evidence").hidden=true;($(`[data-open="${c}"]`)||S.lastFocus)?.focus()};$("#evidence").addEventListener("keydown",e=>{if(e.key==="Escape"){$("#close-evidence").click();return}if(e.key!=="Tab")return;const f=$$("#evidence button:not([disabled]),#evidence select:not([disabled]),#evidence textarea:not([disabled])"),a=f[0],b=f.at(-1);if(e.shiftKey&&document.activeElement===a){e.preventDefault();b.focus()}else if(!e.shiftKey&&document.activeElement===b){e.preventDefault();a.focus()}});boot().catch(fail);

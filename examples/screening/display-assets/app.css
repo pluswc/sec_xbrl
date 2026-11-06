@@ -75,3 +75,16 @@ thead th{position:sticky;top:0;z-index:4;background:#e9e6dc}
 .company-trend-reference{stroke:var(--blue);stroke-width:1.2;stroke-dasharray:5 4}
 #comparison-trend-base{min-height:16px;line-height:1.5}
 @media(max-width:760px){.explorer-selection-tray{padding:12px}.selection-tray-heading{align-items:start;flex-wrap:wrap}.company-trend-actions button{white-space:normal}}
+
+/* History lifecycle uses the existing ledger hierarchy and native modal controls. */
+.history-toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0}
+.history-toolbar [aria-pressed="true"]{color:var(--blue);border-color:var(--blue);background:var(--paper)}
+#history-status{font-size:11px;color:var(--slate);margin:8px 0}
+#history-status.explorer-error,#history-confirm-error{color:var(--danger,#963b32)}
+#timeline li{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+#timeline li>div{min-width:0;overflow-wrap:anywhere}#timeline li>button{flex-shrink:0}
+#timeline time,#timeline small{display:block;font-size:11px;color:var(--slate);margin-top:4px}
+#history-confirm{max-width:480px;width:calc(100% - 40px);box-sizing:border-box;border:1px solid var(--line);border-radius:4px;padding:24px;color:var(--ink);background:var(--paper,#faf9f6)}
+#history-confirm::backdrop{background:rgba(24,34,43,.35)}
+#history-confirm h3{margin-top:0}#history-confirm p{overflow-wrap:anywhere;line-height:1.6}
+#history-confirm .button-row{justify-content:flex-end;gap:8px;margin-top:20px}

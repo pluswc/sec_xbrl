@@ -52,6 +52,8 @@ function parseArgs(argv) {
     "--frontend-port",
     "--wsl",
     "--assets-root",
+    "--history-worker",
+    "--journal-store",
   ]);
   for (const key of Object.keys(values)) {
     if (!allowed.has(key)) throw new Error(`unknown argument: ${key}`);
@@ -82,7 +84,17 @@ function parseArgs(argv) {
   const backendPort = port("--backend-port");
   const frontendPort = port("--frontend-port");
   if (backendPort === frontendPort) throw new Error("frontend and backend ports must differ");
+  if (Object.hasOwn(values, "--history-worker") !== Object.hasOwn(values, "--journal-store")) {
+    throw new Error("--history-worker and --journal-store must be configured together");
+  }
+  for (const key of ["--history-worker", "--journal-store"]) {
+    if (Object.hasOwn(values, key) && (!text(key).startsWith("/") || text(key).split("/").some(part => part === "." || part === ".."))) {
+      throw new Error(`${key} must be an explicit absolute Linux path without aliases`);
+    }
+  }
   return {
+    historyWorker: values["--history-worker"] || null,
+    journalStore: values["--journal-store"] || null,
     distribution: text("--distribution"),
     linuxPython: text("--linux-python"),
     sourceRoot: text("--source-root"),
@@ -161,6 +173,63 @@ function loadDisplayAssets(root) {
   return { directory, assets };
 }
 
+// A separate child owns lifecycle state. Its failures never terminate the financial relay.
+function startHistoryWorker(options) {
+  const child = childProcess.spawn(options.wsl, [
+    "-d", options.distribution, "--exec", "/usr/bin/env", `PYTHONPATH=${options.sourceRoot}`,
+    options.linuxPython, options.historyWorker, "--journal-store", options.journalStore,
+  ], { stdio: ["pipe", "pipe", "inherit"], windowsHide: true });
+  const pending = new Map();
+  let sequence = 0, dead = false;
+  const failAll = () => {
+    dead = true;
+    for (const item of pending.values()) { clearTimeout(item.timer); item.reject(new Error("history worker is unavailable")); }
+    pending.clear();
+  };
+  child.on("error", failAll);
+  child.on("exit", failAll);
+  child.stdin.on("error", failAll);
+  readline.createInterface({ input: child.stdout, crlfDelay: Infinity }).on("line", line => {
+    if (line.length > MAX_RESPONSE_BODY * 2) { failAll(); child.kill(); return; }
+    let result;
+    try { result = JSON.parse(line); } catch { failAll(); child.kill(); return; }
+    const item = pending.get(result?.id);
+    if (!item) return;
+    pending.delete(result.id); clearTimeout(item.timer);
+    try {
+      if (!Number.isInteger(result.status) || result.status < 200 || result.status > 599 ||
+          typeof result.body_base64 !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(result.body_base64)) {
+        throw new Error("invalid history worker response");
+      }
+      const bytes = Buffer.from(result.body_base64, "base64");
+      if (bytes.length > MAX_RESPONSE_BODY) throw new Error("history worker response exceeds limit");
+      item.resolve({ status: result.status, body: JSON.parse(bytes.toString("utf8")) });
+    } catch (error) { item.reject(error); }
+  });
+  return {
+    child,
+    request(message) {
+      if (dead) return Promise.reject(new Error("history worker is unavailable"));
+      return new Promise((resolve, reject) => {
+        const id = `history-${++sequence}`;
+        const timer = setTimeout(() => {
+          pending.delete(id);
+          const error = new Error("history worker timed out"); error.status = 504; reject(error);
+        }, REQUEST_TIMEOUT_MS);
+        pending.set(id, { resolve, reject, timer });
+        child.stdin.write(`${JSON.stringify({ ...message, id })}\n`, error => { if (error) failAll(); });
+      });
+    },
+    stop() { failAll(); child.kill(); },
+  };
+}
+function historyGuardRequired(method, route) {
+  const pathname = route.split("?", 1)[0];
+  return (method === "POST" && ["/api/results", "/api/runs"].includes(pathname)) ||
+    /^\/api\/runs\/[^/]+(?:\/trace|\/exports)?$/u.test(pathname) ||
+    /^\/api\/saved-conditions\/[^/]+$/u.test(pathname) || pathname === "/api/run-comparison";
+}
+
 function startBridge(options) {
   // Both files must load before listening or starting the relay. HTTP never names a file.
   const bundle = options.assetsRoot ? loadDisplayAssets(options.assetsRoot) : null;
@@ -173,6 +242,7 @@ function startBridge(options) {
     ],
     { stdio: ["pipe", "pipe", "inherit"], windowsHide: true },
   );
+  const history = options.historyWorker ? startHistoryWorker(options) : null;
   const pending = new Map();
   let nextId = 1;
   let stopping = false;
@@ -294,7 +364,7 @@ function startBridge(options) {
       }
       chunks.push(chunk);
     });
-    request.on("end", () => {
+    request.on("end", async () => {
       if (rejected) return;
       const id = String(nextId++);
       const message = {
@@ -307,6 +377,27 @@ function startBridge(options) {
         },
         body_base64: Buffer.concat(chunks).toString("base64"),
       };
+      const route = (request.url || "").split("?", 1)[0];
+      const historyNamespace = route === "/api/history" || route.startsWith("/api/history/");
+      const listKey = method === "GET" ? ({ "/api/screen-revisions": "revisions", "/api/runs": "runs", "/api/decisions": "decisions" })[route] : null;
+      if (historyNamespace && !history) {
+        writeJson(response, route === "/api/history/capabilities" && method === "GET" ? 200 : 503,
+          { configured: false, available: false, error: "history lifecycle is not configured" });
+        return;
+      }
+      if (history && (historyNamespace || listKey || (method === "POST" && route === "/api/decisions") || historyGuardRequired(method, request.url))) {
+        try {
+          const result = await history.request(listKey ? { ...message, method: "GET", path: "/api/history", body_base64: "" } :
+            { ...message, check_only: !historyNamespace && route !== "/api/decisions" });
+          if (listKey || historyNamespace || route === "/api/decisions" || result.status >= 400) {
+            writeJson(response, result.status, listKey && result.status < 400 ? result.body[listKey] : result.body);
+            return;
+          }
+        } catch (error) {
+          writeJson(response, error.status || 503, { configured: true, available: false, error: "이력 연결을 사용할 수 없습니다. 잠시 후 다시 시도해 주세요." });
+          return;
+        }
+      }
       const timer = setTimeout(() => {
         const current = pending.get(id);
         if (!current) return;
@@ -342,10 +433,11 @@ function startBridge(options) {
     completePending(503, "local bridge is stopping");
     server.close();
     relay.kill();
+    history?.stop();
   };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
-  return { relay, server };
+  return { relay, server, history };
 }
 
 if (require.main === module) {
@@ -356,4 +448,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { allowedPath, parseArgs, startBridge, loadDisplayAssets };
+module.exports = { allowedPath, parseArgs, startBridge, loadDisplayAssets, startHistoryWorker, historyGuardRequired };

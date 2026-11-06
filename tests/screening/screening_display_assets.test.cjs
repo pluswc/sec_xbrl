@@ -31,13 +31,14 @@ test("display rounds decimal strings half-up without precision loss or unit poli
 });
 
 test("all existing non-presentation functions and financial workflow handlers stay byte-identical", () => {
-  const allowed = new Set(["formatDecimal", "displayValue", "renderRows", "renderMetricEvidence", "comparePeer", "explorerValue", "renderExplorer", "profileObservationCell", "renderProfileTrend", "explorerMetric", "updateExplorerSort", "loadExplorer", "openProfile", "closeProfile", "renderComparison", "openComparison", "bindExplorer", "updateCompareButton"]);
+  // History lifecycle changes only projection reads, owned opens and action availability.
+  const allowed = new Set(["api", "refreshScreens", "refreshRuns", "renderTimeline", "saveDecision", "syncResultActions", "openRun", "openSavedScreenRecord", "boot", "formatDecimal", "displayValue", "renderRows", "renderMetricEvidence", "comparePeer", "explorerValue", "renderExplorer", "profileObservationCell", "renderProfileTrend", "explorerMetric", "updateExplorerSort", "loadExplorer", "openProfile", "closeProfile", "renderComparison", "openComparison", "bindExplorer", "updateCompareButton"]);
   for (const line of frozen.split("\n")) {
     const name = line.match(/^(?:async )?function (\w+)\(/)?.[1];
     if (name && !allowed.has(name)) assert(source.split("\n").includes(line), `changed protected function ${name}`);
     if (!name && line.startsWith("$(")) assert(source.includes(line), "changed button/event workflow binding");
   }
-  for (const name of ["shiftDecimal", "thresholdToApi", "thresholdFromApi", "execute", "saveScreen", "saveResult", "exportRun", "openRun"]) {
+  for (const name of ["shiftDecimal", "thresholdToApi", "thresholdFromApi", "execute", "saveScreen", "saveResult", "exportRun"]) {
     const original = frozen.split("\n").find(line => new RegExp(`^(?:async )?function ${name}\\(`).test(line));
     if (original) assert(source.includes(original), name);
   }

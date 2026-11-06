@@ -1,11 +1,16 @@
 # 계획 등록부 — 단일 진입점
 
-2026-11-07 기준100·선택 usability 구현 후속:
-[정규화·사용성 계약](../implementation/indexed-trends-usability-20261107.md)은
-ROOT가 먼저 설명한 공통 양수 BASE 정책의 비저장 Display exception과 선택/해제/clear,
-close/reset/retry 쌍을 구현한다. 신규10+기존26 focused cases wrapper PASS, ROOT actual7
-criteria groups·별도 policy fixtures4·최종 READY/focus3 checks도 PASS다. 각 해시는 구분했다.
-독립 검증·새 소스 인수·18765 전환·PR/CI/main은 별도 대기다. 원본/저장 기록은 보존한다.
+2026-11-07 이력 휴지통·복원 구현 후속:
+[저장 이력 계약](../implementation/history-trash-restore-20261107.md)은 조건 버전·저장 결과·
+판단 메모를 같은 journal의 추가 lifecycle event로 개별 숨김/복원한다. 원본 행·재무
+publication은 보존한다. 자체 focused 검사와 private-copy browser 확인을 완료했고,
+독립 검증·원본 migration·새 PR/CI/main/live는 별도 대기다. 개인 SQLite/data는 Git에 넣지 않는다.
+
+2026-11-07 기존 기준100·선택 usability 완료(이번 휴지통과 별도):
+[정규화·사용성 계약](../implementation/indexed-trends-usability-20261107.md)은 독립/실제
+검증 뒤 PR72로 main `7a54b64ed51120f22bd94dfdec2a32efae4005e9`에 반영됐다.
+Live frontend33220, backend245090을 유지했고 기존 journal 기록을 보존했다.
+이전 pending은 당시 기록이며 이번 journal lifecycle의 새 상태와 구분한다.
 
 2026-11-07 기존 추이 비교 완료(이번 정규화·usability와 별도):
 [동일 지표 추이 계약](../implementation/explorer-company-trends-20261107.md)의
