@@ -147,6 +147,7 @@ async function ensureExplorerInventory(){
   })();return explorerBasis.inventoryPromise;
 }
 function invalidateExplorerDetails(){
+  invalidateCompanyTrend();
   explorerBasis.version++;explorerBasis.profileToken++;explorerBasis.seriesToken++;explorerBasis.comparisonToken++;S.explorerToken++;
   $("#company-profile").hidden=true;$("#comparison-panel").hidden=true;$("#comparison-result").replaceChildren();
   $("#explorer-body").innerHTML='<tr><td colspan="12" class="empty">선택한 자료를 불러오는 중입니다…</td></tr>';
@@ -273,9 +274,9 @@ async function renderProfileTrend(){
 }
 function openComparison(){
   if(explorerBasis.readyKey!==explorerContextKey())throw new Error("선택한 탐색 자료를 먼저 불러와 주세요.");
-  if(explorerBasis.basis==="ANNUAL")return openAnnualComparison();
+  if(explorerBasis.basis==="ANNUAL"){openAnnualComparison();mountCompanyTrend();return}
   const ids=interimMetricIds();$("#comparison-metrics").innerHTML=explorerBasis.metrics.map(metric=>`<option value="${metric.metric_id}" ${ids.includes(metric.metric_id)?"selected":""}>${esc(metric.label)}</option>`).join("");
-  $("#comparison-result").replaceChildren();$("#comparison-panel").hidden=false;$("#comparison-panel").scrollIntoView({block:"nearest"});
+  $("#comparison-result").replaceChildren();$("#comparison-panel").hidden=false;$("#comparison-panel").scrollIntoView({block:"nearest"});mountCompanyTrend();
 }
 async function renderComparison(){
   if(explorerBasis.basis==="ANNUAL"){
@@ -305,8 +306,171 @@ function bindExplorer(){
   $("#compare-selected").onclick=()=>{try{openComparison()}catch(error){explorerNotice(error.message,true)}};
   $("#run-comparison").onclick=()=>renderComparison().catch(error=>{$("#comparison-result").innerHTML=`<p class="message error">${esc(error.message)}</p>`});
   tools.addEventListener("change",event=>{if(event.target.id!=="explorer-basis")explorerBasis.views[explorerBasis.basis]=explorerViewState()});
-  document.addEventListener("change",event=>{if(event.target.matches("[data-explorer-select]")){explorerBasis.comparisonToken++;$("#comparison-panel").hidden=true;$("#comparison-result").replaceChildren()}});
+  document.addEventListener("change",event=>{if(event.target.matches("[data-explorer-select]")){invalidateCompanyTrend();explorerBasis.comparisonToken++;$("#comparison-panel").hidden=true;$("#comparison-result").replaceChildren()}});
+  $("#close-comparison").onclick=()=>{invalidateCompanyTrend();explorerBasis.comparisonToken++;$("#comparison-panel").hidden=true};
   ensureExplorerInventory();
+}
+
+// Published same-metric company trends; no screening state or financial calculations.
+const companyTrend={token:0,cache:new Map(),model:null,baseMetric:"revenue",frame:0,resizeObserver:null};
+const COMPANY_TREND_METRICS={revenue:"매출",operating_income:"영업이익",net_income:"순이익",cfo:"영업활동 현금흐름",standardized_fcf:"표준화 FCF"};
+const COMPANY_TREND_STYLES=[{color:"#225e80",dash:""},{color:"#32634f",dash:"7 4"},{color:"#8b5a12",dash:"2 3"},{color:"#795787",dash:"10 3 2 3"}];
+function invalidateCompanyTrend(){
+  companyTrend.token++;companyTrend.model=null;
+  const section=$("#comparison-trend");if(!section)return;
+  section.setAttribute("aria-busy","false");$("#comparison-trend-chart").replaceChildren();$("#comparison-trend-values").replaceChildren();$("#comparison-trend-legend").replaceChildren();$("#comparison-trend-status").textContent="";
+}
+function companyTrendMetricOptions(){
+  const prefix=explorerBasis.basis==="ANNUAL"?"":explorerBasis.basis==="TTM"?"ttm_":"quarter_";
+  return Object.entries(COMPANY_TREND_METRICS).map(([base,label])=>({base,label,definition:activeExplorerMetrics().find(metric=>metric.metric_id===prefix+base)})).filter(item=>item.definition?.unit_kind==="MONEY"&&item.definition.unit==="USD");
+}
+function companyTrendContext(metric){
+  const basis=explorerBasis.basis,dataset=explorerDataset(),annual=basis==="ANNUAL",ciks=[...S.explorerSelected].sort();
+  if(ciks.length<2||ciks.length>4)throw new Error("같은 지표를 비교할 기업을 2~4개 선택해 주세요.");
+  if(explorerBasis.readyKey!==explorerContextKey())throw new Error("현재 탐색 자료를 먼저 불러와 주세요.");
+  const definition=activeExplorerMetrics().find(item=>item.metric_id===metric);
+  if(!definition||definition.unit_kind!=="MONEY"||definition.unit!=="USD")throw new Error("이 보기에서 준비된 동일 통화 금액 지표가 아닙니다.");
+  const rows=annual?S.explorer.rows:explorerBasis.snapshot.rows;
+  return{annualDefinitions:annual?companyTrendMetricOptions().map(item=>item.definition):[],dataset:dataset.dataset_id,publication:S.explorer?.dataset_publication_id,financialAsOf:annual?S.explorer.financial_as_of:explorerBasis.snapshot.financial_as_of,basis,end:annual?S.explorerYear:explorerBasis.periods[basis],ciks,definition,companies:rows.map(row=>row.company),annualYears:annual?S.explorer.fiscal_years.map(row=>row.fiscal_year):[],spine:annual?[]:explorerBasis.inventory.spine.map(row=>({...row})),explorerKey:explorerContextKey(),key:JSON.stringify([dataset.dataset_id,basis,annual?S.explorerYear:explorerBasis.periods[basis],ciks,metric])};
+}
+function companyTrendOwns(context,token){
+  if(token!==companyTrend.token||$("#comparison-panel").hidden||context.explorerKey!==explorerContextKey())return false;
+  return JSON.stringify([...S.explorerSelected].sort())===JSON.stringify(context.ciks)&&$("#comparison-trend-metric").value===context.definition.metric_id;
+}
+function projectTrendObservation(row){
+  const keys=["metric_id","fiscal_year","fiscal_quarter","calendar_year","calendar_quarter","availability_status","value","period_start","period_end","end_convention","definition_version","unit","cik","quality_status","quality_blocking","reason","reason_labels"];
+  const result=Object.fromEntries(keys.filter(key=>Object.hasOwn(row,key)).map(key=>[key,row[key]]));
+  const guarded=preparedExplorerObservation(result);
+  if(guarded.value===null&&result.reason_labels?.length)guarded.reason_labels=[...result.reason_labels];
+  return guarded;
+}
+function validateCompanyTrendSeries(context,cik,payload){
+  const annual=context.basis==="ANNUAL",expected=context.definition;
+  let definition,rows,years=[],company=context.companies.find(item=>item.cik===cik)||{cik,ticker:cik,name:cik};
+  if(annual){
+    if(payload.dataset_id!==context.dataset||!context.publication||payload.dataset_publication_id!==context.publication||payload.financial_as_of!==context.financialAsOf||payload.selected_fiscal_year!==context.end||payload.company?.cik!==cik)throw new Error("연간 기업 자료의 선택 범위가 다릅니다.");
+    const definitions=(payload.groups||[]).flatMap(group=>group.metrics||[]).map(item=>item.definition).filter(item=>item?.metric_id===expected.metric_id);
+    if(definitions.length!==1)throw new Error("연간 지표 정의가 없거나 중복됩니다.");
+    definition=definitions[0];rows=payload.series?.[expected.metric_id];years=payload.prepared_years;
+    if(!Array.isArray(years)||new Set(years).size!==years.length||years.some(year=>!Number.isInteger(year)||!context.annualYears.includes(year)))throw new Error("연간 준비 기간의 범위가 다릅니다.");
+    company={cik:payload.company.cik,ticker:payload.company.ticker,name:payload.company.name};
+  }else{definition=payload.metric;rows=payload.observations}
+  if(!definition||["metric_id","definition_version","unit_kind","unit"].some(field=>definition[field]!==expected[field])||(annual?definition.period_class!=="FY":definition.observation_basis!==expected.observation_basis))throw new Error("기업별 지표 정의 또는 단위가 다릅니다.");
+  if(!Array.isArray(rows))throw new Error("공표된 시계열이 없습니다.");
+  const coordinates=new Set();
+  for(const row of rows){
+    if(row.metric_id!==expected.metric_id||row.definition_version!==expected.definition_version)throw new Error("시계열의 지표 정의가 다릅니다.");
+    if(annual){if(!Number.isInteger(row.fiscal_year)||!years.includes(row.fiscal_year))throw new Error("시계열의 회계연도 범위가 다릅니다.")}
+    else if(row.cik!==cik||row.unit!==expected.unit||row.selection_as_of_date!==context.financialAsOf||row.period_class!==expected.observation_basis||!Number.isInteger(row.calendar_year)||![1,2,3,4].includes(row.calendar_quarter)||(row.period_end&&row.end_convention!=="EXCLUSIVE"))throw new Error("분기 시계열의 기업·기간·단위 범위가 다릅니다.");
+    const coordinate=annual?row.fiscal_year:periodCoordinate(row);if(!annual&&!context.spine.some(slot=>periodCoordinate(slot)===coordinate))throw new Error("시계열의 분기가 준비된 기간 범위를 벗어납니다.");if(coordinates.has(coordinate))throw new Error("시계열의 기간 좌표가 중복됩니다.");coordinates.add(coordinate);
+    if(row.value!==null&&row.value!==undefined){if(typeof row.value!=="string")throw new Error("정확한 공표 숫자 문자열이 아닙니다.");shiftDecimal(row.value,0)}
+  }
+  return{company,preparedYears:years.slice(),rows:rows.map(projectTrendObservation)};
+}
+function cachedCompanyTrendSeries(context,cik){
+  const annual=context.basis==="ANNUAL",definitions=context.annualDefinitions||[context.definition];
+  const cacheKey=JSON.stringify([context.dataset,context.publication,context.financialAsOf,cik,annual?"annual-profile":context.definition.metric_id,annual?definitions.map(item=>[item.metric_id,item.definition_version,item.unit]):context.definition.definition_version,annual?context.end:null]);
+  const use=pending=>pending.then(entry=>{
+    const selected=annual?entry[context.definition.metric_id]:entry;
+    if(!selected||selected.error)throw new Error(selected?.error||"선택한 지표가 준비되지 않았습니다.");return selected;
+  }).catch(error=>{if(companyTrend.cache.get(cacheKey)===pending)companyTrend.cache.delete(cacheKey);throw error});
+  if(companyTrend.cache.has(cacheKey)){const pending=companyTrend.cache.get(cacheKey);companyTrend.cache.delete(cacheKey);companyTrend.cache.set(cacheKey,pending);return use(pending)}
+  const path=annual?`/api/company-profile?${new URLSearchParams({dataset_id:context.dataset,cik,fiscal_year:String(context.end)})}`:`/api/quarter-series?${new URLSearchParams({dataset_id:context.dataset,cik,metric_id:context.definition.metric_id,limit:"8"})}`;
+  const pending=api(path).then(payload=>{
+    if(!annual)return validateCompanyTrendSeries(context,cik,payload);
+    // One governed annual profile supplies the small five-metric display projection.
+    return Object.fromEntries(definitions.map(definition=>{
+      try{return[definition.metric_id,validateCompanyTrendSeries({...context,definition},cik,payload)]}
+      catch(error){return[definition.metric_id,{error:error.message}]}
+    }));
+  });
+  companyTrend.cache.set(cacheKey,pending);while(companyTrend.cache.size>16)companyTrend.cache.delete(companyTrend.cache.keys().next().value);return use(pending);
+}
+function companyTrendSlots(context,series){
+  if(context.basis==="ANNUAL"){
+    const years=series.flatMap(item=>item.preparedYears||[]).filter(year=>year<=context.end),fallback=context.annualYears.filter(year=>year<=context.end),earliest=Math.min(...(years.length?years:fallback));
+    if(!Number.isFinite(earliest))return[];
+    const start=Math.max(context.end-3,earliest);return Array.from({length:Math.max(0,context.end-start+1)},(_,index)=>({key:start+index,ordinal:start+index,label:`FY${start+index}`}));
+  }
+  const ending=context.end.match(/^(\d{4})Q([1-4])$/);if(!ending)throw new Error("종료 분기를 확인해 주세요.");
+  const end=Number(ending[1])*4+Number(ending[2])-1,seen=new Set();
+  return context.spine.map(row=>{
+    if(!Number.isInteger(row.calendar_year)||![1,2,3,4].includes(row.calendar_quarter))throw new Error("준비된 분기 좌표가 올바르지 않습니다.");
+    const key=periodCoordinate(row);if(seen.has(key))throw new Error("준비된 분기 좌표가 중복됩니다.");seen.add(key);return{key,ordinal:row.calendar_year*4+row.calendar_quarter-1,label:key,year:row.calendar_year,quarter:row.calendar_quarter};
+  }).filter(row=>row.ordinal<=end).sort((a,b)=>a.ordinal-b.ordinal).slice(-8);
+}
+function alignCompanyTrend(context,results){
+  const successful=results.filter(item=>!item.error),slots=companyTrendSlots(context,successful);
+  return{context,slots,series:results.map((item,index)=>{
+    const byCoordinate=new Map((item.rows||[]).map(row=>[context.basis==="ANNUAL"?row.fiscal_year:periodCoordinate(row),row]));
+    return{...item,style:COMPANY_TREND_STYLES[index],points:slots.map(slot=>({slot,observation:byCoordinate.get(slot.key)||{value:null,reason_labels:[item.error?"기업 자료를 불러오지 못했습니다.":"해당 기간에 준비된 자료가 없습니다."]}}))};
+  })};
+}
+function companyTrendGeometry(model,width){
+  const left=84,right=18,top=26,bottom=58,height=280,plotWidth=width-left-right,plotHeight=height-top-bottom;
+  const values=model.series.flatMap(series=>series.points.filter(point=>point.observation.value!==null&&point.observation.value!==undefined).map(point=>Number(shiftDecimal(point.observation.value,-6))));
+  if(values.some(value=>!Number.isFinite(value)))throw new Error("그래프 범위를 표현할 수 없습니다. 정확한 값은 아래 표에서 확인해 주세요.");
+  if(!values.length)return null;
+  let min=Math.min(0,...values),max=Math.max(0,...values);if(min===max){min=-1;max=1}else{const pad=(max-min)*0.08;if(min<0)min-=pad;if(max>0)max+=pad}
+  const first=model.slots[0].ordinal,last=model.slots.at(-1).ordinal,x=ordinal=>left+(ordinal-first)/Math.max(last-first,1)*plotWidth,y=value=>top+(max-value)/(max-min)*plotHeight;
+  if(!Number.isFinite(max-min)||!Number.isFinite(max)||!Number.isFinite(min))throw new Error("그래프 범위를 표현할 수 없습니다. 정확한 값은 아래 표에서 확인해 주세요.");
+  const ticks=[...new Set([min,(min+max)/2,max].filter(value=>value===0||Math.abs(y(value)-y(0))>=18).concat(0))].sort((a,b)=>a-b);
+  return{width,height,left,right,top,bottom,min,max,x,y,ticks,zero:y(0)};
+}
+function renderCompanyTrendPlot(){
+  const model=companyTrend.model,chart=$("#comparison-trend-chart");if(!model||$("#comparison-panel").hidden)return;
+  const width=Math.max(300,Math.floor(chart.getBoundingClientRect().width||600));
+  try{
+    const geometry=companyTrendGeometry(model,width);
+    if(!geometry){chart.innerHTML='<p class="empty">선택한 기간에 표시할 수 있는 공표 값이 없습니다. 미제공은 0이 아닙니다.</p>';return}
+    const {height,left,right,top,bottom,x,y}=geometry;
+    const grid=geometry.ticks.map(value=>`<g><line class="company-trend-grid" x1="${left}" y1="${y(value)}" x2="${width-right}" y2="${y(value)}"/><text class="company-trend-y" x="${left-8}" y="${y(value)+4}">${esc(formatDecimal(String(value),1))}</text></g>`).join("");
+    const axis=model.slots.map(slot=>`<text class="company-trend-x" x="${x(slot.ordinal)}" y="${height-bottom+21}">${model.context.basis==="ANNUAL"?esc(slot.label):`<tspan x="${x(slot.ordinal)}">${slot.year}</tspan><tspan x="${x(slot.ordinal)}" dy="13">Q${slot.quarter}</tspan>`}</text>`).join("");
+    const lines=model.series.map(series=>{
+      const points=series.points.map(point=>point.observation.value===null||point.observation.value===undefined?null:{...point,x:x(point.slot.ordinal),y:y(Number(shiftDecimal(point.observation.value,-6)))});
+      const segments=points.slice(1).map((point,index)=>point&&points[index]&&point.slot.ordinal===points[index].slot.ordinal+1?`<line x1="${points[index].x}" y1="${points[index].y}" x2="${point.x}" y2="${point.y}"/>`:"").join("");
+      const circles=points.filter(Boolean).map(point=>`<circle cx="${point.x}" cy="${point.y}" r="3.5"><title>${esc(series.company.ticker||series.company.name)} · ${esc(point.slot.label)} · ${esc(displayValue(point.observation.value,model.context.definition))} 백만 달러 · ${esc(actualPeriod(point.observation))}${model.context.basis!=="ANNUAL"?" · "+esc(fiscalLabel(point.observation)):""}</title></circle>`).join("");
+      return`<g class="company-trend-series" data-cik="${esc(series.company.cik)}" stroke="${series.style.color}" stroke-dasharray="${series.style.dash}" fill="${series.style.color}">${segments}${circles}</g>`;
+    }).join("");
+    chart.innerHTML=`<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(explorerMetricCaption(model.context.definition))} · 선택 기업 ${model.series.length}개 · ${model.slots.length}개 기간 · 단위 백만 달러. 값과 실제 기간은 아래 표를 확인해 주세요."><text class="company-trend-unit" x="${left}" y="14">백만 달러</text>${grid}<line class="company-trend-zero" x1="${left}" x2="${width-right}" y1="${geometry.zero}" y2="${geometry.zero}"/>${axis}${lines}</svg>`;
+  }catch(error){chart.innerHTML=`<p class="message error">${esc(error.message)}</p>`}
+}
+function renderCompanyTrendValues(model){
+  $("#comparison-trend-legend").innerHTML=model.series.map(series=>`<li><svg width="30" height="12" aria-hidden="true"><line x1="0" x2="30" y1="6" y2="6" stroke="${series.style.color}" stroke-width="2" stroke-dasharray="${series.style.dash}"/></svg><span><strong>${esc(series.company.ticker||series.company.cik)}</strong> ${esc(series.company.name||"")}${series.error?`<small class="company-trend-error">조회 실패: ${esc(series.error)}</small>`:""}</span></li>`).join("");
+  $("#comparison-trend-values").innerHTML=`<details><summary>공표 값과 기업별 실제 기간 · ${model.slots.length}개 기간</summary><table><thead><tr><th>${model.context.basis==="ANNUAL"?"회계연도":"종료 분기"}</th>${model.series.map(series=>`<th>${esc(series.company.ticker||series.company.name)}<small>백만 달러</small></th>`).join("")}</tr></thead><tbody>${model.slots.map((slot,index)=>`<tr><th>${esc(slot.label)}</th>${model.series.map(series=>{const observation=series.points[index].observation;return`<td>${explorerValue(observation,model.context.definition)}<small>${esc(actualPeriod(observation))}${model.context.basis!=="ANNUAL"?" · "+esc(fiscalLabel(observation)):""}</small></td>`}).join("")}</tr>`).join("")}</tbody></table></details>`;
+}
+async function loadCompanyTrend(){
+  const token=++companyTrend.token;companyTrend.model=null;$("#comparison-trend-chart").replaceChildren();$("#comparison-trend-values").replaceChildren();$("#comparison-trend-legend").replaceChildren();
+  const section=$("#comparison-trend");section.setAttribute("aria-busy","true");$("#comparison-trend-status").textContent="선택 기업의 같은 지표 흐름을 불러오는 중입니다…";
+  let context;
+  try{
+    context=companyTrendContext($("#comparison-trend-metric").value);
+    const results=await Promise.all(context.ciks.map(cik=>cachedCompanyTrendSeries(context,cik).catch(error=>({company:context.companies.find(item=>item.cik===cik)||{cik,ticker:cik},error:error.message}))));
+    if(!companyTrendOwns(context,token))return;
+    const model=alignCompanyTrend(context,results);companyTrend.model=model;renderCompanyTrendValues(model);renderCompanyTrendPlot();
+    const failed=results.filter(item=>item.error).length;
+    $("#comparison-trend-status").textContent=`${explorerBasisLabel()} · 종료 ${context.basis==="ANNUAL"?"FY"+context.end:context.end} · 공표된 ${model.slots.length}개 기간${failed?` · ${failed}개 기업 조회 실패`:""}`;
+  }catch(error){if(token===companyTrend.token&&!$("#comparison-panel").hidden&&(!context||context.explorerKey===explorerContextKey()))$("#comparison-trend-status").textContent=error.message}
+  finally{if(token===companyTrend.token)section.setAttribute("aria-busy","false")}
+}
+function mountCompanyTrend(){
+  if(!$("#comparison-trend")){
+    const section=document.createElement("section");section.id="comparison-trend";section.className="company-trend";
+    section.innerHTML='<div class="company-trend-heading"><h3>선택 기업 추이 비교</h3><label>추이 지표<select id="comparison-trend-metric"></select></label></div><p id="comparison-trend-status" role="status" aria-live="polite"></p><ul id="comparison-trend-legend" class="company-trend-legend"></ul><div id="comparison-trend-chart" class="company-trend-chart"></div><div id="comparison-trend-values"></div><p class="muted">기업마다 실제 재무기간이 다를 수 있습니다. 값이 없는 기간은 선을 연결하지 않습니다.</p>';
+    $("#comparison-panel .section-head").after(section);
+    section.addEventListener("toggle",()=>scheduleTablePresentation(section),true);
+    $("#comparison-trend-metric").onchange=()=>{companyTrend.baseMetric=$("#comparison-trend-metric").value.replace(/^(quarter_|ttm_)/,"");loadCompanyTrend()};
+    if(typeof ResizeObserver!=="undefined"){
+      companyTrend.resizeObserver=new ResizeObserver(()=>{if(!companyTrend.frame)companyTrend.frame=requestAnimationFrame(()=>{companyTrend.frame=0;renderCompanyTrendPlot()})});
+      companyTrend.resizeObserver.observe($("#comparison-trend-chart"));
+    }
+  }
+  const options=companyTrendMetricOptions();$("#comparison-trend-metric").innerHTML=options.map(item=>`<option value="${item.definition.metric_id}">${esc(item.label)}</option>`).join("");
+  const selected=options.find(item=>item.base===companyTrend.baseMetric)||options.find(item=>item.base==="revenue")||options[0];
+  $("#comparison-trend-metric").disabled=!selected;
+  if(selected){$("#comparison-trend-metric").value=selected.definition.metric_id;loadCompanyTrend()}
+  else{invalidateCompanyTrend();$("#comparison-trend-status").textContent="이 보기에는 공통 금액 흐름 지표가 준비되지 않았습니다."}
+  $("#comparison-trend").scrollIntoView({block:"start"});$("#comparison-trend-metric").focus({preventScroll:true});
 }
 
 async function boot(){const s=await api("/api/status"),d=s.datasets.at(-1),explorer=d;S.defaultDataset=d;S.explorerDataset=explorer;$("#dataset").innerHTML=s.datasets.map(x=>`<option value="${x.dataset_id}">${x.dataset_id}</option>`).join("");$("#dataset").value=d.dataset_id;$("#asof").textContent=d.financial_as_of;await loadInputContext(d.dataset_id);await refreshScreens();await refreshRuns();S.decisions=await api("/api/decisions");$("#predicates").innerHTML="";predicateRow();renderTimeline();syncResultActions();mountAdmin();bindExplorer();await loadExplorer();await loadLibrary();const initial=({"#library-title":"library","#criteria-title":"screening","#results-title":"screening","#history-title":"history"})[location.hash]||"explorer";showView(initial);$("#criteria-form").addEventListener("input",e=>{if(isRevisionEdit(e.target))markDirty()});$("#criteria-form").addEventListener("change",e=>{if(isRevisionEdit(e.target))markDirty()})}
@@ -320,7 +484,7 @@ async function newScreen(){clearResult();S.frequencyDrafts={};const d=S.defaultD
 function tablePresentationRole(table){
   if(table.closest(".explorer-matrix"))return"explorer";
   if(table.closest(".workspace"))return"results";
-  if(table.closest("#comparison-result"))return"comparison";
+  if(table.closest("#comparison-result,#comparison-trend-values"))return"comparison";
   if(table.closest("#peer-comparison"))return"peer";
   if(table.closest("#series-content,#profile-series"))return"series";
   return null;
