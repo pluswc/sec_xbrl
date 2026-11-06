@@ -1,5 +1,16 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-06 v2 정확 호환 전이 후속:
+사용자가 구체 범위에 대해 **“이 범위의 검증기·호환 연결 변경을 승인”**하여 아래
+자동 승인 거부의 명시 승인 부재를 해소했고, 정상 재심을 통과해 최소 구현했다.
+[50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의
+새 v2 packet은 old packet·archive984·origin451/current 전체 Python inventory·기존
+routine 근거와 완료4발행을 정확히 고정한다. 새 combined config에 명시한 scope에서만
+old pin을 새 검증 근거로 연결하며 기존 발행/config/보고서는 보존한다. V2 focused
+synthetic 19 PASS, 기존 v1 strict focused 10 PASS와 변경 파일 lint PASS다.
+독립 v2 검증·최종 소스 인수·actual combined·private current50 UAT·main/live는 대기다.
+기존131 consumer 소스 수락과 actual50 단일 reader PASS는 재실행 없이 재사용했다.
+
 2026-11-06 current50 consumer 소스 수락 / 호환 전이 승인 대기:
 [50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의
 `131df12ec8f5cfa37f4a084081d4ab512b261852`는 별도 읽기 전용 검토에서

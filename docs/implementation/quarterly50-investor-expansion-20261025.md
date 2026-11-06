@@ -1300,3 +1300,89 @@ Combined dataset·private current50 UAT·main merge/live 적용은 미완료다.
 관측된 것이므로 이번 patch의 회귀로 단정하지 않는다. Runtime 실행 검증은 대기다.
 이번 후속은 두 추적 문서만 변경하며 제품 소스·테스트·지침은131 동결 상태를
 유지한다. 문서 diff 검사와 로컬 커밋만 수행하며 추가 테스트·push·main 변경은 없다.
+
+
+## 2026-11-06 명시 승인 후 v2 정확 호환 전이 구현 후보
+
+위 자동 승인 검토 거부 후 사용자는 검증기와 combined 연결의 구체 범위에 대해
+**“이 범위의 검증기·호환 연결 변경을 승인”**이라고 답했다. 질문은 기존 승인파일을
+정확한 새 코드 버전에서도 인정하는 `financial_source_compatibility.py`의 제한된
+전이 경로와 `screening/dataset_v3.py` 연결, 기존4발행/보고서 불변, 변경 전후 코드/
+발행물 해시 고정, 현재 데이터의 기간·출처·품질 검사 유지를 명시했다. 이 새 명시
+승인을 있는 그대로 제시한 정상 재심이 통과하여 구현했다. 앞선 거부 기록은 보존하며
+이를 우회하지 않았다. 보조 승인 기록은 `work/quarterly50_expansion_20261025/`의
+`explicit_compatibility_extension_approval_20261106.json`이다.
+
+제품 변경은 helper와 dataset_v3 두 파일이며 `screening/quarterly.py`는 수락된131과
+동일하다. V1의 기존6파일 허용 범위는 유지한다. 새
+`financial-source-compatibility-v2`는 기존 v1 필드를 모두 유지하고 다음 정확한
+`supersedes` 필드를 추가한다.
+
+```json
+{
+  "packet": {"path": "<immutable old v1 packet>", "sha256": "<exact old digest>"},
+  "source_root": "<archived984 source package root>",
+  "completed_publications": {
+    "identity": {"path": "<identity manifest>", "sha256": "<exact digest>"},
+    "annual_metrics": {"path": "<annual metric manifest>", "sha256": "<exact digest>"},
+    "annual_dataset": {"path": "<annual dataset manifest>", "sha256": "<exact digest>"},
+    "quarterly_metrics": {"path": "<quarterly manifest>", "sha256": "<exact digest>"}
+  }
+}
+```
+
+Old v1 packet은 지정 archive984의 전체 Python inventory와 기존 v1 계약으로
+451→984 방향을 검증한다. 새 v2는451→현재 전체 inventory와 정확한 source delta를
+검증하고, archive984→현재 차이는 helper·quarterly·dataset_v3만 허용한다.
+기존 routine report/build/History pins, declared payload inventory, rules와 origin
+identity는 old packet과 동일해야 하며 current identity만 새 전체 소스로 검증한다.
+Preserved controls는 old controls와 완료4발행 pins의 정확한 합집합이다. 원본12 routine
+근거를 새 검증 보고서로 위장하거나 typed/full audit를 재실행하지 않는다.
+
+기존 `prepare_source_compatibility_packet(..., supersedes=...)`는 이 구조를
+`PROPOSED`로만 반환한다. ROOT가 최종 소스와 정확한 packet을 검토하여 승인해야 하며
+후속 새 combined config에만 다음 pin을 기록한다.
+
+```json
+{"source_compatibility": {"path": "<new ROOT_APPROVED v2 packet>", "sha256": "<exact new digest>"}}
+```
+
+`use_source_compatibility`는 sealed witness를 ContextVar에 제한하고 `finally`에서
+이전 scope를 복원한다. 그 안에서 정확히 지정한 old pin만 현재 v2 근거로 해석한다.
+각 해석은 현재 bytes/inventory와 packet을 다시 검증하여 acceptance cache로 사용하지
+않는다. Scope 밖의 old packet은 새 코드에 대해 기존처럼 fail closed다. 무승인,
+다른 old pin, 변경된 소스/packet/report/rules/발행물, unknown Python, archive 이후
+기존6파일의 추가 변경, 누락된 controls/4pins와 선언 범위 변조를 거부한다.
+
+Public combined publish는 새 config의 scope를 열고 기존 본체를 실행한다. V3 reader는
+불변 manifest/config를 검증한 뒤 동일 pin의 scope로 기존 parent readers를 연다.
+완료4발행의 pin과 실제 사용 경로를 모두 맞추며 v3 manifest 부모도 config와 같아야
+한다. 기존 공개 reader의 기간·출처·quality·identity 검사와 closure freshness 검사는
+그대로 실행한다. 기존 closure는 witness.controls를 통해 새/옛 packet, current/
+archive984/origin451 소스, routine/control 및4발행 pins를 결속하므로 수정하지 않았다.
+환경변수·자동 경로 탐색·global monkeypatch·검증 skip·old packet 덮어쓰기는 없다.
+
+자체 검증 범위와 실행 사실:
+
+- 신규 v2 focused synthetic **19 PASS**: 정확한 scope 및 예외 후 reset, 비동기 context
+  격리, 매 해석의 current bytes·seal 검사, strict negative, 공개 combined publish와
+  재열기,4발행/config/old packet 불변 및 closure 포함 확인.
+- 기존 v1 strict focused **10 PASS**: 기존 directed transition과 forged witness,
+  무승인/역방향/rules/report/payload/control/current inventory 거부, source alias 거부.
+- 변경 제품2파일과 신규 focused test의 `ruff check --no-cache`, `git diff --check` PASS.
+- 기존131의43 focused·4 independent probes와 actual50 consumer 단일 재열기
+  16,400행 PASS/6.258초는 기존 근거를 재사용했다. Actual50·회사 audit·100 analyses·
+  quality·완료4발행을 다시 실행하지 않았다. 실제 v2 packet 승인·combined 발행,
+  private current50 UAT, main/live는 아직 실행·인수하지 않았다.
+
+```bash
+python -m pytest -q -p no:cacheprovider tests/screening/test_financial_source_compatibility_v2.py
+python -m pytest -q -p no:cacheprovider tests/screening/test_financial_source_compatibility.py -k 'rejects_caller_forged or directed_transition or transition_rejects or source_inventory'
+```
+
+이는 구현 후보와 자체 synthetic 검증이다. 최종 동결 소스의 v2 독립 검증 및 ROOT 소스
+수락은 별도 대기이며, 기존131 consumer 수락을 v2 수락으로 확대하지 않는다.
+Private UAT의 예정 범위는 기존 baseline 재시작 근거를 재사용하여 새 TTM 조건의
+명시 저장·새 브라우저 세션 재열기·비교·기존21 문맥을 원본 기록 복제본에서 확인하는
+것이다. 이는 실행 사실이 아니다. 원본 Raw/보고서/quality/4발행·21 journal/catalog와
+runtime은 그대로 보존하며 push·PR·main/live 변경은 수행하지 않는다.

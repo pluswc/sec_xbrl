@@ -6,9 +6,15 @@ import copy
 import hashlib
 import shutil
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from sec_xbrl.financial_source_compatibility import (
+    SUPERSEDING_VERSION,
+    use_source_compatibility,
+)
 from sec_xbrl.screening.common import (
     digest_value,
     read_json,
@@ -38,6 +44,11 @@ def publish_screening_dataset_v3(config_path: Path | str, destination: Path | st
     config = read_json(config_file, "v3 config")
     if not isinstance(config, dict) or config.get("schema_version") != CONFIG_VERSION:
         raise ValueError("unsupported screening v3 config")
+    with _configured_compatibility(config):
+        return _publish_screening_dataset_v3(config_file, config, destination)
+
+
+def _publish_screening_dataset_v3(config_file: Path, config: dict, destination: Path | str) -> Path:
     destination_path = Path(destination).absolute()
     if destination_path.exists():
         raise ValueError("screening v3 destination must be new")
@@ -160,21 +171,29 @@ class ScreeningDatasetV3Reader:
             or sha256_file(quarter_root / QUARTER_MANIFEST) != quarter_parent["manifest_sha256"]
         ):
             raise ValueError("screening v3 parent changed")
-        self.annual = ScreeningDatasetV2Reader(annual_root)
-        self.quarterly = QuarterlyScreeningMetricReader(
-            quarter_root, manifest_sha256=quarter_parent["manifest_sha256"]
-        )
-        if self.annual.publication_id != annual_parent["publication_id"]:
-            raise ValueError("annual parent publication identity changed")
-        if self.quarterly.publication_id != quarter_parent["publication_id"]:
-            raise ValueError("quarterly parent publication identity changed")
-        _verify_parent_binding(self.annual, self.quarterly)
         config_path = regular_file(Path(self.manifest["config_path"]), "v3 config")
         config = read_json(config_path, "v3 config")
         if sha256_file(config_path) != self.manifest.get(
             "config_sha256"
         ) or config != self.manifest.get("config"):
             raise ValueError("screening v3 config changed")
+        if config.get("source_compatibility") is not None and (
+            annual_root != real_directory(Path(config["annual_dataset_root"]), "configured annual parent")
+            or quarter_root != real_directory(Path(config["quarterly_metric_root"]), "configured quarter parent")
+            or annual_parent["manifest_sha256"] != config["annual_manifest_sha256"]
+            or quarter_parent["manifest_sha256"] != config["quarterly_manifest_sha256"]
+        ):
+            raise ValueError("v3 preserved parents differ from configured compatibility scope")
+        with _configured_compatibility(config):
+            self.annual = ScreeningDatasetV2Reader(annual_root)
+            self.quarterly = QuarterlyScreeningMetricReader(
+                quarter_root, manifest_sha256=quarter_parent["manifest_sha256"]
+            )
+        if self.annual.publication_id != annual_parent["publication_id"]:
+            raise ValueError("annual parent publication identity changed")
+        if self.quarterly.publication_id != quarter_parent["publication_id"]:
+            raise ValueError("quarterly parent publication identity changed")
+        _verify_parent_binding(self.annual, self.quarterly)
         identity = {
             "config_path": str(config_path),
             "config_sha256": sha256_file(config_path),
@@ -251,3 +270,27 @@ def _verify_parent_binding(
         or quarter.manifest.get("financial_as_of") != annual.manifest.get("financial_as_of")
     ):
         raise ValueError("quarterly publication is not bound to the annual metric parent")
+
+
+@contextmanager
+def _configured_compatibility(config: dict) -> Iterator[None]:
+    """Bind all four preserved publications to the explicitly configured scope."""
+    with use_source_compatibility(config.get("source_compatibility")) as witness:
+        if witness is not None:
+            if witness.payload["schema_version"] != SUPERSEDING_VERSION:
+                raise ValueError("v3 preserved parents require superseding source compatibility")
+            completed = witness.payload["supersedes"]["completed_publications"]
+            annual_path = Path(config["annual_dataset_root"]) / MANIFEST
+            quarter_path = Path(config["quarterly_metric_root"]) / QUARTER_MANIFEST
+            annual = read_json(regular_file(annual_path, "preserved annual manifest"))
+            identity = annual["config"]["identity_source"]
+            paths = {
+                "annual_dataset": annual_path,
+                "quarterly_metrics": quarter_path,
+                "annual_metrics": Path(annual["sources"]["metrics"]["root"]) / "screening_metric_manifest.json",
+                "identity": Path(identity["root"]) / "generic_metric_identity_manifest.json",
+            }
+            for name, path in paths.items():
+                if completed[name] != {"path": str(path.absolute()), "sha256": sha256_file(path)}:
+                    raise ValueError("v3 parent differs from preserved compatibility publication")
+        yield
