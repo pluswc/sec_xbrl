@@ -15,7 +15,7 @@ function harness(respond){
   get("#comparison-metrics").selectedOptions=[{value:"quarter_revenue"}];
   const context=vm.createContext({URLSearchParams,location:{search:""},Node:{TEXT_NODE:3},document:{querySelector:get,querySelectorAll:()=>[]},fetch:async(url)=>{calls.push(url);const value=await respond(url);return{ok:true,json:async()=>value}}});
   vm.runInContext(source.slice(0,source.indexOf("async function boot()")),context);
-  const app=vm.runInContext("({state:explorerBasis,S,chooseExplorerPeriod,preparedExplorerObservation,compareExplorerDecimals,filterSortExplorerRows,cachedExplorerSnapshot,loadExplorer,invalidateExplorerDetails,openAnnualProfile,openProfile,renderComparison,renderProfileTrend,interimMetricIds,ensureExplorerInventory})",context);
+  const app=vm.runInContext("({state:explorerBasis,S,switchExplorerBasis,chooseExplorerPeriod,preparedExplorerObservation,compareExplorerDecimals,filterSortExplorerRows,cachedExplorerSnapshot,loadExplorer,invalidateExplorerDetails,openAnnualProfile,openProfile,renderComparison,renderProfileTrend,interimMetricIds,ensureExplorerInventory})",context);
   app.S.defaultDataset={dataset_id:"current50"};app.S.explorerYear=2024;
   return{...app,get,calls,context};
 }
@@ -123,4 +123,42 @@ test("late annual detail failures stay out of the new explorer context",async()=
   const comparison=c.renderComparison();c.state.basis="QUARTERLY";c.invalidateExplorerDetails();
   b.reject(new Error("old annual comparison failure"));await comparison;
   assert.equal(c.get("#comparison-result").innerHTML,"");
+});
+
+
+for(const order of ["old-first","new-first"])test(`basis switch continuation cannot override a newer same-basis period (${order})`,async()=>{
+  const q2=deferred(),q3=deferred(),h=harness(url=>url.includes("calendar_quarter=2")?q2.promise:q3.promise);prepared(h);
+  h.state.basis="TTM";h.state.snapshot=snapshot(2);h.state.metrics=definitions.slice(32);
+  h.state.views.QUARTERLY.sort="quarter_revenue";
+  h.get("#explorer-sort").options=[{value:"company"},{value:"quarter_revenue"}];
+  h.get("#explorer-basis").value="QUARTERLY";
+  const switching=h.switchExplorerBasis();
+  for(let turn=0;turn<20&&!h.calls.some(url=>url.includes("calendar_quarter=2"));turn++)await Promise.resolve();
+  assert(h.calls.some(url=>url.includes("calendar_quarter=2")),"Q2 must already be in flight before selecting Q3");
+  h.state.periods.QUARTERLY="2026Q3";h.invalidateExplorerDetails();
+  h.get("#explorer-sort").value="company";const latest=h.loadExplorer();await Promise.resolve();
+  if(order==="old-first"){
+    q2.resolve(snapshot(2));await switching;
+    assert.match(h.get("#explorer-body").innerHTML,/불러오는 중/);
+    assert.equal(h.get("#explorer-sort").value,"company");
+    q3.resolve(snapshot(3));await latest;
+  }else{
+    q3.resolve(snapshot(3));await latest;
+    q2.resolve(snapshot(2));await switching;
+  }
+  assert.equal(h.get("#explorer-sort").value,"company");
+  assert.equal(h.state.readyKey,"current50:QUARTERLY:2026Q3");
+  assert.match(h.get("#explorer-count").textContent,/2026Q3 분기/);
+});
+
+test("failed basis load leaves the error and never rerenders retained quarterly data as TTM",async()=>{
+  const h=harness(()=>{throw new Error("synthetic network failure")});prepared(h);
+  h.state.snapshot=snapshot(2);h.state.metrics=definitions.slice(0,32);h.state.readyKey="current50:QUARTERLY:2026Q2";
+  h.get("#explorer-basis").value="TTM";
+  await h.switchExplorerBasis();
+  assert.equal(h.state.readyKey,null);
+  assert.match(h.get("#explorer-message").textContent,/synthetic network failure/);
+  assert.match(h.get("#explorer-body").innerHTML,/표시할 수 없습니다/);
+  assert.doesNotMatch(h.get("#explorer-body").innerHTML,/Alpha/);
+  assert.doesNotMatch(h.get("#explorer-head").innerHTML,/quarter_revenue/);
 });

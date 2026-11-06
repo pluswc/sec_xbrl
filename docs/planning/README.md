@@ -1,11 +1,12 @@
 # 계획 등록부 — 단일 진입점
 
-2026-11-06 기업 탐색 보기 기준 후속:
-[연간·분기·TTM 탐색 계약](../implementation/explorer-period-basis-20261106.md)은
-기존 연간/저장 기록을 유지하며 companion만32개 분기/9개TTM·기간 선택·비교/profile8에
-연결하는 승인 범위다. 신규 focused9건과 기존 Display5건이 wrapper PASS이며 ROOT의
-실제 preview12 checks도 PASS했다. 마지막 async guard의 별도 해시 차이는 계약에
-구분했다. 독립 검증·새 소스 인수·18765 전환·PR/CI/main은 별도 대기다.
+2026-11-06 기업 탐색 보기 기준 repair 후속:
+[연간·분기·TTM 탐색 계약](../implementation/explorer-period-basis-20261106.md)의
+source336은 같은 basis 내 기간 요청과 failed load 뒤 옛 switch continuation이 자료를
+다시 그리는 race로 독립 FAIL했다. Version/load token/정확한 context 및 READY를 모두
+확인하는 최소 repair와3 regression을 추가했고 관련 Node12 PASS다. 기존12 visual/
+4 guard 근거는 보존·재사용했다. 새 동결 SHA 독립 검증·실제 same-basis race·소스 인수·
+18765 전환·PR/CI/main은 별도 대기다. 기존 annual/저장 기록·Python119/bridge는 유지한다.
 
 2026-11-06 기존 Display presentation 완료(이번 새 기능과 별도):
 [수치·표 표시 계약](../implementation/dashboard-data-presentation-20261106.md)의

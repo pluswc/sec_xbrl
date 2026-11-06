@@ -161,7 +161,9 @@ async function switchExplorerBasis(){
   const view=explorerBasis.views[requested];$("#explorer-preset").value=view.preset;$("#explorer-direction").value=view.direction;
   if(requested!=="ANNUAL")$("#explorer-quarter").value=explorerBasis.periods[requested];
   if(requested==="ANNUAL"){annualUpdateExplorerSort();$("#explorer-sort").value=view.sort}
-  await loadExplorer();if(explorerBasis.basis!==requested)return;
+  const version=explorerBasis.version,key=explorerContextKey(),pending=loadExplorer(),token=explorerBasis.loadToken;
+  await pending;
+  if(explorerBasis.basis!==requested||version!==explorerBasis.version||token!==explorerBasis.loadToken||key!==explorerContextKey()||explorerBasis.loading||explorerBasis.readyKey!==key)return;
   $("#explorer-sort").value=[...$("#explorer-sort").options].some(option=>option.value===view.sort)?view.sort:"company";
   if(requested!=="ANNUAL")renderExplorer();
 }

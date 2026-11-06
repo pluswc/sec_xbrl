@@ -2,6 +2,11 @@
 
 ## 승인과 현재 상태
 
+최신 repair 상태: source336은 basis switch continuation의 stale-render race로 독립
+FAIL했다. 아래11-06 repair는 해당 post-await ownership만 보완한 후보이며 관련
+Node12 PASS다. 새 동결 SHA의 독립 검증·ROOT 인수는 대기다. 기존 실제12 visual/
+4 guard 근거는 보존하고 다시 실행하지 않았다.
+
 사용자는 기업 둘러보기의 연간·분기·TTM 전환과 기업 비교를 요청했고 기존 연간 기능·
 저장 기록 보존 및 기존 기능 재사용을 승인했다. ROOT가 확정한 최소 범위는 companion
 `examples/screening/display-assets/app.js`, `app.css`와 관련 focused tests/문서다.
@@ -111,3 +116,32 @@ AAPL missing 유지, 기존21 저장 결과 재열기 후 탐색TTM50 유지,390
 backend PID245090을 유지한 채 frontend만 전환한다. Writer는 push/PR/main/runtime이나
 원본 data/catalog/journal을 바꾸지 않는다. 이번 기능의 승인·구현·자체/독립 검증·로컬
 인수·운영·병합을 구분하여 후속 결과를 기록한다.
+
+
+## 2026-11-06 source336 독립 FAIL 후 switch continuation repair
+
+`33625fdeea911b5d1aeb835a5d1acfd566caa6c9` 독립 검토는 `switchExplorerBasis`의
+post-await continuation이 basis만 확인하는 결함을 발견해 FAIL했다. TTM→분기의 Q2
+요청 중 같은 분기 보기에서 Q3를 고르면 loader가 오래된 Q2를 폐기해도 옛 switch가
+정렬을 복원하고 retained Q2 snapshot을 현재Q3 caption 아래 다시 그릴 수 있었다.
+Quarterly32가 준비된 뒤 TTM load가 실패해도 그 continuation이 기존32개를 TTM으로
+다시 그리는 재현도 있었다. 실패 후보/보고서와 이전 visual 근거는 보존한다.
+
+Repair는 switch가 자기 version, 정확한 dataset+basis+period key와 호출 직후의 load
+token을 보유하도록 한다. Await 뒤 이 값이 모두 같고 loading이 끝났으며 자신의 key가
+READY인 경우에만 sort 복원/renderer를 실행한다. 기존 `loadExplorer` guard를 줄이거나
+다른 rendering/formatter/기능을 바꾸지 않았다.
+
+새3 regression은 Q2가 먼저 끝나는 경우, Q3가 먼저 끝나는 경우와 failed TTM load를
+검사한다. Frozen336에서3건 모두 실제 FAIL을 확인한 뒤 repair에서 기존 관련9건을
+포함해 **Node12 PASS (52.47ms)**를 확인했다.
+
+```bash
+node --test tests/screening/screening_explorer_period_basis.test.cjs
+```
+
+JS syntax/diff와 main 대비 Python119/bridge 변경 없음도 확인했다. 이전 wrapper/Display
+검사와 실제12 visual/4 guard는 재사용하며 금융/backend/browser 전체를 다시 실행하지
+않았다. Repair JS SHA는
+`75b311ee02b93f387cffb3943a1747e7d395ff900218e476cc8a34bb8f6637a0`이고 CSS는 그대로다.
+새 독립 판단·ROOT의 실제 same-basis race 확인·소스 인수·운영·PR/CI/main은 별도 대기다.
