@@ -10,8 +10,14 @@ Journal SQLite, 개인 기록, publication 및 벌크 자료는 Git에 추가하
 
 기준 main은 `7a54b64ed51120f22bd94dfdec2a32efae4005e9`, 구현 branch는
 `codex/history-trash-restore`다. 구현·자체 focused 검사와 ROOT의 private-copy browser
-검사는 완료했다. 독립 검증·소스 인수·원본 journal migration·새 PR/CI/main/live 적용은
-별도 단계이며 이 문서만으로 완료를 주장하지 않는다.
+검사는 완료했고, ROOT는 동결648f1c22의 독립 PASS와 private 인수를 확인했다. PR73의
+첫 CI는 pytest 전에 Ruff3건으로 실패했다. 후속 수정은 SQLite.Row를 dict로 옮겨 hash
+입력을 보존하고 잘못된 body/request type을 TypeError로 분류한다. Worker는 기존대로
+ValueError/TypeError 모두 HTTP400으로 처리한다. 새 worker의 `uv run ruff check .`와 관련 Python6검사는 PASS했고 기존 Node35초/browser 검사는 반복하지 않는다. 원본 journal migration과
+새 main/live 반영은 아직 별도 대기다. 통합·운영 receipt의 지속 위치는
+[PR73](https://github.com/pluswc/sec_xbrl/pull/73)이다. 기존648f1c22 독립 보고서
+(hash prefix383ac) PASS·ROOT private 인수와 이번 CI 수정의 재검토/CI·live 대기를
+구분한다. 이 기록은 병합을 주장하지 않는다.
 
 ## 저장·검증 경계
 

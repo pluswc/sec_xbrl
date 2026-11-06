@@ -148,7 +148,7 @@ def test_fixed_routes_reject_http_sql_fields_and_incompatible_lifecycle_schema(j
     history = JournalHistory(journal[0])
     for body in [{"kind": "RUN", "record_id": journal[3]["run_id"], "expected_version": 0, "sql": "DELETE FROM screen_runs"}, []]:
         request = {"method": "POST", "path": "/api/history/delete", "body_base64": base64.b64encode(json.dumps(body).encode()).decode()}
-        with pytest.raises(ValueError):
+        with pytest.raises(TypeError if isinstance(body, list) else ValueError):
             history.dispatch(request)
     assert history.dispatch({"method": "GET", "path": "/api/history/../../private"})[0] == 404
     with pytest.raises(ValueError):

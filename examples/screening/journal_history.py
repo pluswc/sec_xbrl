@@ -95,7 +95,8 @@ class JournalHistory:
         states: dict[tuple[str, str], str] = {}
         sequence, previous_hash = 0, None
         for row in connection.execute(f"SELECT * FROM {TABLE} ORDER BY sequence"):
-            material = {key: row[key] for key in row.keys() if key != "event_hash"}
+            values = dict(row)
+            material = {key: value for key, value in values.items() if key != "event_hash"}
             key = record_key(row["record_kind"], row["record_id"])
             if (row["sequence"] != sequence + 1 or row["schema_version"] != 1
                     or row["previous_hash"] != previous_hash or not row["created_at"]
@@ -212,7 +213,7 @@ class JournalHistory:
             raise ValueError("history request exceeds limit")
         body = json.loads(raw) if raw else {}
         if not isinstance(body, dict):
-            raise ValueError("history body must be an object")
+            raise TypeError("history body must be an object")
         if message.get("check_only") is True:
             self.guard(method, path, body)
             return 200, {"allowed": True}
@@ -247,7 +248,7 @@ def run_worker(history: JournalHistory) -> None:
         try:
             request = json.loads(line)
             if not isinstance(request, dict) or not isinstance(request.get("id"), str):
-                raise ValueError("history request needs an ID")
+                raise TypeError("history request needs an ID")
             identity = request["id"]
             status, result = history.dispatch(request)
         except Conflict as error:
