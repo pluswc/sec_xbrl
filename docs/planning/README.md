@@ -1,5 +1,13 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-06 Display presentation 후속:
+[대시보드 수치·표 표시 계약](../implementation/dashboard-data-presentation-20261106.md)은
+기존119 Python·금융 발행/검증·저장 기록을 유지하고 Windows bridge의 명시적인
+CSS/JS companion만 적용하는 승인 범위다. Exact display 반올림·숫자 정렬·header/
+행 label 고정 분리·좁은 화면 고정 열·부분 숫자 `…` 처리를 구현했다. Focused Node5건,
+pytest wrapper PASS와 ROOT19065 실제 preview를 확인했으며 독립 검증·소스 인수·
+18765 운영 전환·PR/CI/main 반영은 별도 대기다. 아래 current50 운영 인수는 유지한다.
+
 2026-11-06 current50 최신 운영 인계 — **LOCALLY_ACCEPTED_MAIN_AND_LIVE_CURRENT50**:
 [50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의
 독립 수락 소스408은 [PR67](https://github.com/pluswc/sec_xbrl/pull/67)로 main
