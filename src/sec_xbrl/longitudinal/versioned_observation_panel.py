@@ -44,7 +44,7 @@ class VersionedObservationPanelPipeline:
     unit, dimensions, filing and amendment identity remain on every row.
     """
 
-    def publish(self, release: CorpusRelease, *, output_root: Path) -> VersionedObservationPanelResult:
+    def publish(self, release: CorpusRelease, *, output_root: Path, _effective_filings: dict | None = None) -> VersionedObservationPanelResult:
         if not isinstance(release, CorpusRelease):
             raise VersionedObservationPanelError("T1 requires an explicit CorpusRelease")
         filings: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -64,6 +64,8 @@ class VersionedObservationPanelPipeline:
             cik = snapshot.input.cik
             if str(filing.get("cik") or "") != cik:
                 raise VersionedObservationPanelError("snapshot filing CIK disagrees with CorpusRelease")
+            if _effective_filings is not None:
+                filing = _effective_filings[snapshot.input.snapshot_id]
             result = materializer.materialize(
                 filing=filing,
                 concepts=snapshot.records("concept"),

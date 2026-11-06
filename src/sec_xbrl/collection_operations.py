@@ -1015,6 +1015,7 @@ def _validate_build_attestation(
     validation_state_root: Path | None = None,
 ) -> str | None:
     try:
+        history_build_controls(marker)
         if not intake.complete or intake.error or intake.sha256 is None:
             raise ValueError("READY requires a complete validated intake")
         if marker.get("version") != COLLECTION_VERSION or marker.get("status") != "READY":
@@ -1067,6 +1068,47 @@ def _validate_build_attestation(
     return None
 
 
+def _history_build_options(value: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Validate explicit public append controls, with no implicit full fallback."""
+    from sec_xbrl.history_selection import _pin
+    required = {"previous_history_manifest", "previous_reuse_evidence", "require_append_reuse"}
+    if not isinstance(value, dict) or not required <= set(value) or set(value)-required-{"fiscal_focus_corrections"}:
+        raise ValueError("history build options require exact pinned strict append controls")
+    if value["require_append_reuse"] is not True:
+        raise ValueError("declared history build options must require append reuse")
+    pins = {name:_pin(value[name]) for name in required-{"require_append_reuse"}}
+    if Path(pins["previous_history_manifest"]["path"]).name != "history_manifest.json":
+        raise ValueError("previous History must pin its public history manifest")
+    normalized = {**pins,"require_append_reuse":True}
+    kwargs = {"previous_history":Path(pins["previous_history_manifest"]["path"]).parent,
+              "previous_reuse_evidence":Path(pins["previous_reuse_evidence"]["path"]),
+              "require_append_reuse":True}
+    if "fiscal_focus_corrections" in value:
+        pin = _pin(value["fiscal_focus_corrections"])
+        normalized["fiscal_focus_corrections"] = pin
+        kwargs.update(fiscal_focus_corrections=Path(pin["path"]),
+                      expected_fiscal_focus_corrections_sha256=pin["sha256"])
+    return normalized, kwargs
+
+
+def history_build_controls(marker: dict[str, Any]) -> dict[str, dict[str,str]]:
+    """Replay active append/correction control pins without old audit recursion."""
+    from sec_xbrl.history_selection import _historical_controls, _pin
+    if "history_build_options" not in marker:
+        return {}
+    normalized,_ = _history_build_options(marker["history_build_options"])
+    controls = {name:pin for name,pin in normalized.items() if isinstance(pin,dict)}
+    correction = controls.get("fiscal_focus_corrections")
+    if correction is not None:
+        artifact = _read_json(Path(correction["path"]))
+        for index,entry in enumerate(artifact.get("corrections", [])):
+            for name in ("approval","evidence_supplement"):
+                pin=_pin(entry[name]);controls[f"correction:{index}:{name}"]=pin
+                for role,witness in _historical_controls(_read_json(Path(pin["path"])),name):
+                    controls[f"correction:{index}:{role}"]=_pin(witness)
+    return controls
+
+
 def build_universe(
     *,
     manifest_path: Path,
@@ -1074,6 +1116,7 @@ def build_universe(
     views: Sequence[str] = ("AS_FILED", "LATEST_REPORTED"),
     selected_tickers: Sequence[str] | None = None,
     validation_mode: str = "routine",
+    history_build_options: Mapping[str, dict[str, Any]] | None = None,
 ) -> Path:
     """Publish governed history for all or selected raw-complete companies."""
     attested = _attest_run(manifest_path)
@@ -1081,6 +1124,13 @@ def build_universe(
     tickers = tuple(company.ticker for company in attested.config.companies)
     operation_tickers = _operation_tickers(selected_tickers, tickers)
     operation_scope = _operation_scope(operation_tickers, tickers)
+    normalized_options = {}
+    forwarded_options = {}
+    if history_build_options is not None:
+        if set(history_build_options) != set(operation_tickers):
+            raise ValueError("history build options must match the exact selected ticker scope")
+        for ticker,value in history_build_options.items():
+            normalized_options[ticker],forwarded_options[ticker] = _history_build_options(value)
     _preflight_run_mutations(manifest_path.parent, tickers)
     _preflight_publication_paths(output_root, tickers)
     intake_by_ticker: dict[str, _IntakeAttestation] = {}
@@ -1104,6 +1154,8 @@ def build_universe(
                 raise ValueError(f"build destination changed for run identity: {ticker}")
             if marker.get("views") != list(views):
                 raise ValueError(f"build views changed for run identity: {ticker}")
+            if ticker in normalized_options and marker.get("history_build_options") != normalized_options[ticker]:
+                raise ValueError(f"strict append options changed for run identity: {ticker}")
             error = _validate_build_attestation(
                 marker,
                 ticker=ticker,
@@ -1151,6 +1203,7 @@ def build_universe(
                 views=tuple(views),
                 validation_mode=validation_mode,
                 validation_state_root=company_root / "history-validation",
+                **forwarded_options.get(ticker, {}),
             )
             result = _create_build_attestation(
                 ticker=ticker,
@@ -1164,6 +1217,16 @@ def build_universe(
                 validation_mode=validation_mode,
                 validation_state_root=company_root / "history-validation",
             )
+            if ticker in normalized_options:
+                # Bind both inputs again after the producer before READY publication.
+                checked,_ = _history_build_options(history_build_options[ticker])
+                if checked != normalized_options[ticker]:
+                    raise ValueError("history build option pins changed during publication")
+                result["history_build_options"] = checked
+                payload = _read_json(publication / "history_manifest.json").get("history_append_reuse", {})
+                if (payload.get("mode") != "STRICTLY_LATER_SINGLE_CIK_APPEND_V1"
+                    or payload.get("previous_history") != str(Path(checked["previous_history_manifest"]["path"]).parent)):
+                    raise ValueError("required append producer did not publish the exact reuse proof")
             _write_once_json(marker, result, label=f"{ticker} build")
         except Exception as exc:  # noqa: BLE001 - company-level isolation is the contract.
             result = {
@@ -1207,6 +1270,8 @@ def _company_status(
     request: dict[str, Any],
     run_root: Path,
     plan: dict[str, Any] | None,
+    validation_mode: str = "routine",
+    storage_reuse: Any = None,
 ) -> CompanyStatus:
     ticker = company["ticker"]
     company_root = run_root / "companies" / ticker
@@ -1229,6 +1294,16 @@ def _company_status(
             if not build_path.is_file() or build_path.is_symlink():
                 raise ValueError("build attestation is unsafe")
             build = _read_json(build_path)
+            validation_state_root = company_root / "history-validation"
+            if validation_mode == "financial_sources":
+                from sec_xbrl.financial_storage_reuse import storage_history, verify_storage_entry
+                from sec_xbrl.history_selection import completed_recovery_source
+                approved = storage_history(storage_reuse, ticker, Path(str(build.get("history_manifest", ""))))
+                if approved is not None:
+                    verify_storage_entry(Path(build["publication"]), approved)
+                    validation_state_root = None
+                elif completed_recovery_source(Path(build.get("publication", ""))):
+                    validation_state_root = None
             build_attestation_error = _validate_build_attestation(
                 build,
                 ticker=ticker,
@@ -1237,7 +1312,7 @@ def _company_status(
                 intake_path=intake_path,
                 intake=intake,
                 validation_mode="routine",
-                validation_state_root=company_root / "history-validation",
+                validation_state_root=validation_state_root,
             )
         except (OSError, TypeError, ValueError) as exc:
             build_attestation_error = str(exc)
@@ -1294,15 +1369,33 @@ def _company_status(
     )
 
 
-def read_universe_status(*, manifest_path: Path) -> UniverseStatus:
+def read_universe_status(
+    *, manifest_path: Path, validation_mode: str = "routine", storage_reuse: dict | None = None,
+    _verified_storage_reuse: Any = None,
+) -> UniverseStatus:
     """Read deterministic status without discovery, SEC, parser, or selection work."""
+    if validation_mode not in {"routine", "financial_sources"}:
+        raise ValueError("unsupported collection status validation mode")
+    if _verified_storage_reuse is not None and storage_reuse is None:
+        raise ValueError("verified storage proof requires an explicit financial declaration")
     attested = _attest_run(manifest_path)
+    proof = None
+    if storage_reuse is not None:
+        if validation_mode != "financial_sources":
+            raise ValueError("storage reuse is limited to explicit financial source status")
+        from sec_xbrl.financial_storage_reuse import checked_storage_reuse, resolve_storage_reuse
+        proof = (checked_storage_reuse(_verified_storage_reuse, collection_manifest=manifest_path,
+                                      declaration=storage_reuse)
+                 if _verified_storage_reuse is not None else
+                 resolve_storage_reuse(storage_reuse, collection_manifest=manifest_path,
+                                       scope_companies=attested.manifest["companies"]))
     companies = tuple(
         _company_status(
             company,
             request=attested.request,
             run_root=manifest_path.parent,
             plan=attested.plans.get(company["ticker"]),
+            validation_mode=validation_mode, storage_reuse=proof,
         )
         for company in attested.manifest["companies"]
     )

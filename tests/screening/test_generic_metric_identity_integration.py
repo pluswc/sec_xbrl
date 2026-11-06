@@ -465,8 +465,8 @@ def test_quality_identity_annual31_dataset_v2_chain_and_subset_stability(
         quarterly_config, tmp_path / "quarterly-metrics"
     )
     quarterly_status = QuarterlyMetricReader(quarterly.root).verify_all()
-    assert quarterly_status["definitions"] == 17
-    assert quarterly_status["observations"] == 136
+    assert quarterly_status["definitions"] == 41
+    assert quarterly_status["observations"] == 328
     assert QuarterlyMetricReader(quarterly.root).manifest["annual_parent"][
         "generic_identity"
     ]["publication_id"] == identity.publication_id
@@ -566,8 +566,8 @@ def test_quality_identity_annual31_dataset_v2_chain_and_subset_stability(
     assert reopened_v3.quarter_observations == quarterly_parent.observations
     assert reopened_v3.quarter_period_inventory == quarterly_parent.period_inventory
     assert dataset_v3_status["company_count"] == 1
-    assert dataset_v3_status["quarter_definition_count"] == 17
-    assert dataset_v3_status["quarter_observation_count"] == 136
+    assert dataset_v3_status["quarter_definition_count"] == 41
+    assert dataset_v3_status["quarter_observation_count"] == 328
     reopened_ttm = next(
         row
         for row in ScreeningDatasetV3Reader(dataset_v3).quarter_observations

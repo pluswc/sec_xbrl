@@ -1,5 +1,103 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-06 current50 최신 인계 — **LOCALLY_ACCEPTED_CURRENT50_NOT_MAIN_OR_LIVE**:
+[50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의 최종 소스
+`40826b754e2937c6b2543e7e5df1665763533d7c`는 별도 v2 독립 PASS 뒤 ROOT가 정확한
+9 preserved controls·12 routine 근거의 v2 packet을 승인했다. 기존 quality·4발행을
+그대로 재사용한 **combined-only PASS (786.773초, peak 23,721,980 KiB)**와 private
+browser UAT PASS를 바탕으로 ROOT가 current50을 로컬 인수했다. 50사·연간31/분기41
+정의·8버킷, AMD 2026Q2 TTM revenue 41,305,000,000 USD, 명시 저장·새 브라우저 재열기·
+2사 비교·기존21 저장 문맥을 확인했다. 이번 backend 재시작은 하지 않았으며 이전
+baseline 재시작 근거를 재사용했다. Cutoff는2026-10-25로11월 신규 수집은 없다.
+원본 journal/catalog와 기존 분석·발행은 보존했고 private 서버는 종료했다.
+**Main/CI/new live 적용은 별도 pending**이다. 아래는 과거 상태와 실패·repair 이력이며,
+아래의 source/combined/UAT 대기는 이 최신 인계 범위에서 해소됐다.
+
+2026-11-06 v2 독립 FAIL 후 최소 repair 후보:
+`c49efa068ee246451f2f2134ffa766f6858c74d5`는 fresh-process 순환 import와
+pin 없는 v3의 외부 compatibility scope 상속 두 P1으로 독립 FAIL했다.
+[50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의
+repair는 helper lazy import와 명시 None scope의 token/reset 격리만 바꾼다.
+수정 seam focused 4 PASS이며 새 동결 소스 독립 검증·ROOT 인수는 대기다.
+기존131 consumer/actual50 근거와 완료4발행은 보존하고 실제 combined/UAT는 미실행이다.
+
+2026-11-06 v2 정확 호환 전이 후속:
+사용자가 구체 범위에 대해 **“이 범위의 검증기·호환 연결 변경을 승인”**하여 아래
+자동 승인 거부의 명시 승인 부재를 해소했고, 정상 재심을 통과해 최소 구현했다.
+[50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의
+새 v2 packet은 old packet·archive984·origin451/current 전체 Python inventory·기존
+routine 근거와 완료4발행을 정확히 고정한다. 새 combined config에 명시한 scope에서만
+old pin을 새 검증 근거로 연결하며 기존 발행/config/보고서는 보존한다. V2 focused
+synthetic 19 PASS, 기존 v1 strict focused 10 PASS와 변경 파일 lint PASS다.
+독립 v2 검증·최종 소스 인수·actual combined·private current50 UAT·main/live는 대기다.
+기존131 consumer 소스 수락과 actual50 단일 reader PASS는 재실행 없이 재사용했다.
+
+2026-11-06 current50 consumer 소스 수락 / 호환 전이 승인 대기:
+[50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의
+`131df12ec8f5cfa37f4a084081d4ab512b261852`는 별도 읽기 전용 검토에서
+43 focused tests·4 inline probes PASS, findings 0을 받은 뒤 ROOT가
+`SOURCE_ACCEPTED_NOT_COMBINED_MAIN_OR_LIVE`로 소스 범위 수락했다.
+Actual50 consumer PASS는 writer의 단일 재열기 근거이며 독립 재실행하지 않았다.
+완료4발행을 보존·재사용하기 위한 v2 source compatibility는 자동 승인 검토가
+구체 확장의 명시 승인 부재와 immutable source/packet 검증 경계 영향을 이유로
+거부했다. ROOT가 구체 승인을 질문했으며 v2는 미승인·미구현이다. 기존 quality·
+4발행·원본·21사 journal/catalog는 보존했고 combined·private current50 UAT·main/live는
+미완료다. 아래 이전 소스 인수 대기 상태는 이 소스 수락으로 해소됐지만 호환 전이
+승인은 별개다.
+
+2026-11-06 current50 consumer 보완 후속:
+사용자가 계약 불일치와 보완 내용을 먼저 설명한 뒤 최소 읽기 계약 수정을
+승인했다. [50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의
+TTM 내 prepared `DERIVED_QUARTER`에 한해서 누락된 `duration_days`를 허용하며,
+명시된 일수와 Raw 원본 일수·기간·scope·quality 검증은 유지하는 소스 후보를 구현했다.
+Focused synthetic 43 PASS와 기존 quarterly publication 단일 consumer 재열기
+50사·16,400 observations PASS(6.258초)를 확인했다. 독립 검증·소스 로컬 인수는
+대기하며, combined 재개에 필요한 별도 source compatibility 판단도 미완료다.
+기존 100개 분석·quality·4개 완료 발행은 보존했다. Combined dataset·private current50
+UAT·main/live는 여전히 pending이다. 아래11-02 승인 대기 기록은 이 사용자 승인으로
+해소됐으며, 원본 과거 상태는 보존한다.
+
+2026-11-02 current50 최신 정정(아래 과거 스냅샷 보존):
+[50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의
+100개 연간·분기 분석과 기존 quality는 모두 PASS다. nullable transport·명시적
+소스 전이 보정 `9846357496e3deca84a66ee082dc7bd3d154606f`는 독립 PASS 및 ROOT
+소스 수락 후 기존 quality를 재사용하여 identity·annual metrics·annual dataset·
+quarterly metrics의 4개 발행을 완료했다. 마지막 combined dataset은 소비자가
+`DERIVED_QUARTER`의 누락된 `duration_days`를 거부하여 FAIL했다. 최초 사례는
+ABT `ttm_cfo` 2024Q4 내부 Q2이며 EXCLUSIVE 날짜의 91일 및 YTD 차감 산술은
+정상으로 관측됐다. 새 consumer scope/compatibility 보완은 **사용자 승인 대기**로,
+아직 구현하지 않는다. 완료 분석·quality·4개 발행과 원본 보고서는 보존한다.
+Combined dataset·private current50 UAT·main/live 적용은 pending이며 기존21은
+보존된다. 아래 과거의 세 회사 생성·형식 보정 승인 대기는 각각 사용자 결정으로
+해소됐지만 이번 새 보완 승인과 전체 출시 수락은 별개다.
+
+
+2026-10-28 실행 인계 snapshot(전체 완료 선언 아님):
+[50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의 source
+`451205b08fed2617d6e04f3c209e1a21b8aa9f29`는 Standards·Spec repair 독립 PASS 뒤
+ROOT가 로컬 수락했고, draft [PR67](https://github.com/pluswc/sec_xbrl/pull/67)의
+필수 test CI도 source451에서 PASS했다. 기존1010 baseline AMD 2026Q2 계산 표본은
+신규 TTM9 AVAILABLE이지만 final actual/UAT 인수가 아니다. Latest 안전9개 cohort는
+NFLX/META/PG/TXN/LRCX의 History append·annual/quarter analysis 완료 후 계속 실행 중이다.
+38사 prospective proof는 PASS했으나 batch는 staging 중이며 아직 공개되지 않았다.
+TSLA·IBM·UNP는 과거 accession-order와 현재 chronological-order 차이로 strict prefix가
+불일치하여 별도 HOLD다. 이3사만 기존Raw로 새 current-cutoff History를 기존 full API로
+생성할지, 순열 append 보완을 먼저 할지 **필수 사용자 선택 대기**이며 full fallback은
+아직 승인되지 않았다. 원본 자료·분석·catalog/journal과 live21은 그대로 보존됐고,
+main merge/live 변경 및 latest50 financial/UAT 인수는 아직 하지 않았다.
+
+2026-10-28 정책 결정: 사용자가 **산술 TTM을 별도 버전으로 제공**을 승인했다.
+[50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의
+`quarterly-investor-41-arithmetic-ttm-v2` 구현은 기존 strict17/41를 보존하고,
+명시적으로 선택한 새 버전에서만 all-null basis 네 분기의 산술 합계·합계비율을
+허용한다. 별도 assurance와 새 정의 버전, 생산자 계산·소비자 계보 검증을 적용한다.
+이로써 아래 2026-10-26의 필수 정책 선택 대기는 해결됐지만 독립 검증과 actual latest12/38
+실행·release 인수는 별도 대기다. 10-28 공시 freshness의 전체 5,842 후보 inventory가
+10-25와 같아 기존 1109 filings의 선택 cutoff 10-25를 유지한다.
+
+
+2026-10-26 갱신: [50사 분기·TTM·스크리닝 확대](../implementation/quarterly50-investor-expansion-20261025.md)의 source `d3591dccf1287c7231221372d6c80b8675209ad2`는 독립 repair/UI PASS 뒤 ROOT가 source/synthetic 로컬 수락했다. Baseline `1edec6d8ad682ae2dabb82b02b9986068d91e7e4`의 6단계 실제 연결과 private 50사 분기·YoY 생성/재시작 재열기·기존 21사 context 재열기는 PASS다. Front `d359`를 baseline backend `1edec6`에 overlay한 1464/768/390px 기간표·4종 basis caption 확인도 PASS지만 latest end-to-end 인수는 아니다. 실제 TTM은 basis 증거 부재로 가용 0이며 실행·release 미수락이다. **필수 사용자 TTM 정책 선택 대기**이며, 이후 source 변경으로 global code identity 검사를 반복하지 않도록 latest12 History와 prospective38 실행은 아직 시작하지 않았다. Latest12 Raw·latest50 metadata·1109 intakes·package view는 준비됐다. Live21/catalog/journal은 보존됐고 main 병합·push는 하지 않았다.
+
 2026-10-25 운영 후속: [21사 screening main runtime 전환](../implementation/screening21-main-runtime-20261025.md)은
 기존 두 catalog entry, SQLite journal과 export를 보존한 채 accepted `main` source로
 전환하는 범위와 private-copy UAT·rollback 경계를 기록한다. 실제 전환 결과와 운영

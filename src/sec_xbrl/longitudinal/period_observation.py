@@ -213,7 +213,7 @@ def _observation(
         )
         for row in dimension_signature
     )
-    fiscal_year = _fiscal_year(filing, context)
+    fiscal_year = _fiscal_year(filing, context, comparative_type=fact.get("comparative_type"))
     fiscal_quarter = _fiscal_quarter(filing)
     source_fact_id = str(fact["fact_id"])
     result = {
@@ -272,6 +272,36 @@ def _observation(
     }
     if policy is not None:
         result.update(_validated_q4_policy(policy, concept, unit))
+    correction_id = filing.get("fiscal_focus_correction_id")
+    if correction_id is not None:
+        result.update(
+            {
+                "reported_document_fiscal_year_focus": filing.get(
+                    "reported_document_fiscal_year_focus"
+                ),
+                "effective_document_fiscal_year_focus": filing.get(
+                    "effective_document_fiscal_year_focus"
+                ),
+                "fiscal_focus_correction_id": correction_id,
+                "fiscal_focus_correction_artifact_sha256": filing.get(
+                    "fiscal_focus_correction_artifact_sha256"
+                ),
+                "fiscal_focus_correction_provenance": filing.get(
+                    "fiscal_focus_correction_provenance"
+                ),
+            }
+        )
+        if "reported_document_fiscal_period_focus" in filing:
+            result.update(
+                {
+                    "reported_document_fiscal_period_focus": filing[
+                        "reported_document_fiscal_period_focus"
+                    ],
+                    "effective_document_fiscal_period_focus": filing[
+                        "effective_document_fiscal_period_focus"
+                    ],
+                }
+            )
     return result
 
 
@@ -442,10 +472,21 @@ def _as_date(value: object) -> date | None:
         return None
 
 
-def _fiscal_year(filing: Mapping[str, Any], context: Mapping[str, Any]) -> int | None:
+def _fiscal_year(
+    filing: Mapping[str, Any],
+    context: Mapping[str, Any],
+    *,
+    comparative_type: object = None,
+) -> int | None:
     value = filing.get("document_fiscal_year_focus")
     try:
-        return int(str(value))
+        fiscal_year = int(str(value))
+        if (
+            filing.get("fiscal_focus_correction_id") is not None
+            and comparative_type in {"PRIOR_YEAR_COMPARABLE", "PRIOR_FY_BALANCE"}
+        ):
+            return fiscal_year - 1
+        return fiscal_year
     except (TypeError, ValueError):
         endpoint = context.get("instant_date") or context.get("end_date")
         try:
