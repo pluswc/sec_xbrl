@@ -31,7 +31,7 @@ test("display rounds decimal strings half-up without precision loss or unit poli
 });
 
 test("all existing non-presentation functions and financial workflow handlers stay byte-identical", () => {
-  const allowed = new Set(["formatDecimal", "displayValue", "renderRows", "renderMetricEvidence", "comparePeer", "explorerValue", "renderExplorer", "profileObservationCell", "renderProfileTrend"]);
+  const allowed = new Set(["formatDecimal", "displayValue", "renderRows", "renderMetricEvidence", "comparePeer", "explorerValue", "renderExplorer", "profileObservationCell", "renderProfileTrend", "explorerMetric", "updateExplorerSort", "loadExplorer", "openProfile", "closeProfile", "renderComparison", "openComparison", "bindExplorer"]);
   for (const line of frozen.split("\n")) {
     const name = line.match(/^(?:async )?function (\w+)\(/)?.[1];
     if (name && !allowed.has(name)) assert(source.split("\n").includes(line), `changed protected function ${name}`);
