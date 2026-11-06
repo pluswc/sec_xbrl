@@ -14,7 +14,8 @@ import pytest
 def test_display_companion_node_contract() -> None:
     root = Path(__file__).resolve().parents[1]
     result = subprocess.run(
-        ["node", "--test", "tests/screening/screening_display_assets.test.cjs"],
+        ["node", "--test", "tests/screening/screening_display_assets.test.cjs",
+         "tests/screening/screening_explorer_period_basis.test.cjs"],
         cwd=root,
         capture_output=True,
         text=True,

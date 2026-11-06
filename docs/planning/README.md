@@ -1,12 +1,19 @@
 # 계획 등록부 — 단일 진입점
 
-2026-11-06 Display presentation 후속:
-[대시보드 수치·표 표시 계약](../implementation/dashboard-data-presentation-20261106.md)은
-기존119 Python·금융 발행/검증·저장 기록을 유지하고 Windows bridge의 명시적인
-CSS/JS companion만 적용하는 승인 범위다. Exact display 반올림·숫자 정렬·header/
-행 label 고정 분리·좁은 화면 고정 열·부분 숫자 `…` 처리를 구현했다. Focused Node5건,
-pytest wrapper PASS와 ROOT19065 실제 preview를 확인했으며 독립 검증·소스 인수·
-18765 운영 전환·PR/CI/main 반영은 별도 대기다. 아래 current50 운영 인수는 유지한다.
+2026-11-06 기업 탐색 보기 기준 repair 후속:
+[연간·분기·TTM 탐색 계약](../implementation/explorer-period-basis-20261106.md)의
+source336은 같은 basis 내 기간 요청과 failed load 뒤 옛 switch continuation이 자료를
+다시 그리는 race로 독립 FAIL했다. Version/load token/정확한 context 및 READY를 모두
+확인하는 최소 repair와3 regression을 추가했고 관련 Node12 PASS다. 기존12 visual/
+4 guard 근거는 보존·재사용했다. 새 동결 SHA 독립 검증·실제 same-basis race·소스 인수·
+18765 전환·PR/CI/main은 별도 대기다. 기존 annual/저장 기록·Python119/bridge는 유지한다.
+
+2026-11-06 기존 Display presentation 완료(이번 새 기능과 별도):
+[수치·표 표시 계약](../implementation/dashboard-data-presentation-20261106.md)의
+기존 Display는 독립 PASS·PR69 CI PASS 뒤 main
+`588198b8c4f1a5e369f578c6b38b64de389ab277`에 반영됐다. Frontend37636으로 운영 적용했고
+backend245090·Python119·원본 journal hash는 유지했다. 아래 current50 운영 인수도
+유지하며 기존 Display의 과거 pending을 새 탐색 기능의 상태와 혼동하지 않는다.
 
 2026-11-06 current50 최신 운영 인계 — **LOCALLY_ACCEPTED_MAIN_AND_LIVE_CURRENT50**:
 [50사 확대 계약](../implementation/quarterly50-investor-expansion-20261025.md)의
