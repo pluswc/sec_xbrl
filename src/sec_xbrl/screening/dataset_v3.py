@@ -272,13 +272,14 @@ def _verify_parent_binding(
 def _configured_compatibility(config: dict) -> Iterator[None]:
     """Bind all four preserved publications to the explicitly configured scope."""
     from sec_xbrl.financial_source_compatibility import (
+        LATEST_VERSION,
         SUPERSEDING_VERSION,
         use_source_compatibility,
     )
 
     with use_source_compatibility(config.get("source_compatibility")) as witness:
         if witness is not None:
-            if witness.payload["schema_version"] != SUPERSEDING_VERSION:
+            if witness.payload["schema_version"] not in {SUPERSEDING_VERSION, LATEST_VERSION}:
                 raise ValueError("v3 preserved parents require superseding source compatibility")
             completed = witness.payload["supersedes"]["completed_publications"]
             annual_path = Path(config["annual_dataset_root"]) / MANIFEST

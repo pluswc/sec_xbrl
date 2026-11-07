@@ -15,7 +15,7 @@ function harness(respond){
   get("#comparison-metrics").selectedOptions=[{value:"quarter_revenue"}];
   const context=vm.createContext({URLSearchParams,location:{search:""},Node:{TEXT_NODE:3},document:{querySelector:get,querySelectorAll:()=>[]},fetch:async(url)=>{calls.push(url);const value=await respond(url);return{ok:true,json:async()=>value}}});
   vm.runInContext(source.slice(0,source.indexOf("async function boot()")),context);
-  const app=vm.runInContext("({state:explorerBasis,S,switchExplorerBasis,chooseExplorerPeriod,preparedExplorerObservation,compareExplorerDecimals,filterSortExplorerRows,cachedExplorerSnapshot,loadExplorer,invalidateExplorerDetails,openAnnualProfile,openProfile,renderComparison,renderProfileTrend,interimMetricIds,ensureExplorerInventory})",context);
+  const app=vm.runInContext("({state:explorerBasis,S,switchExplorerBasis,chooseExplorerPeriod,preparedExplorerObservation,compareExplorerDecimals,filterSortExplorerRows,cachedExplorerSnapshot,loadExplorer,invalidateExplorerDetails,openAnnualProfile,openProfile,renderComparison,renderProfileTrend,interimMetricIds,ensureExplorerInventory,batchView,applyBatchChoice,screeningPeriodPolicy,availabilityCaption})",context);
   app.S.defaultDataset={dataset_id:"current50"};app.S.explorerYear=2024;
   return{...app,get,calls,context};
 }
@@ -161,4 +161,31 @@ test("failed basis load leaves the error and never rerenders retained quarterly 
   assert.match(h.get("#explorer-body").innerHTML,/표시할 수 없습니다/);
   assert.doesNotMatch(h.get("#explorer-body").innerHTML,/Alpha/);
   assert.doesNotMatch(h.get("#explorer-head").innerHTML,/quarter_revenue/);
+});
+
+
+test("unverified actual batch does not issue a prepared simulation request or enable a new condition",async()=>{
+  const h=harness(()=>{throw new Error("no verified batch was eligible on the selected date")});
+  h.batchView.enabled=true;h.get("#batch-mode").value="ACTUAL";
+  await h.applyBatchChoice();
+  assert.equal(h.calls.length,1);assert.match(h.calls[0],/mode=ACTUAL&lag=0/);
+  assert.equal(h.batchView.snapshot,null);assert.equal(h.get("#batch-use-screen").disabled,true);
+  assert.match(h.get("#batch-status").textContent,/확인된 실제 배치가 없습니다/);
+});
+
+test("latest query and saved policy use anchored data, while fixed quarter remains selectable",async()=>{
+  const h=harness(()=>({...snapshot(),period_scope:"LATEST_COMPANY"}));
+  const value=await h.cachedExplorerSnapshot("current50","LATEST");
+  assert.equal(value.period_scope,"LATEST_COMPANY");assert.match(h.calls[0],/latest=true/);
+  const pinned={mode:"ACTUAL",dataset_id:"current50",publication_id:"p",financial_as_of:"2026-10-25",ready_at:"2026-11-06T19:00:00Z",decision_date:"2026-11-06",lag:0};
+  h.S.screenAvailability=pinned;h.get("#dataset").value="current50";
+  h.get("#frequency").value="QUARTERLY";h.get("#period-mode").value="LATEST_COMPANY_QUARTER_V1";
+  const policy=h.screeningPeriodPolicy();assert.equal(policy.mode,"LATEST_COMPANY_QUARTER_V1");
+  assert.deepEqual(JSON.parse(JSON.stringify(policy.availability)),pinned);assert.match(h.availabilityCaption(pinned),/실제 배치/);
+  h.get("#period-mode").value="FIXED_CALENDAR_QUARTER_END";h.get("#calendar-quarter").value="2026Q2";
+  const fixed=h.screeningPeriodPolicy();assert.equal(fixed.calendar_quarter,2);assert.equal(fixed.availability.publication_id,"p");
+  h.S.screenAvailability=null;assert.equal(h.screeningPeriodPolicy().availability,undefined);
+  h.S.screenAvailability=pinned;
+  h.get("#period-mode").value="LATEST_COMPANY_QUARTER_V1";h.get("#dataset").value="different";
+  assert.throws(()=>h.screeningPeriodPolicy(),/조회 배치/);
 });

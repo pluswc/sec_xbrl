@@ -69,6 +69,7 @@ _GUIDANCE: dict[str, tuple[str, str]] = {
 }
 
 _REASON_LABELS = {
+    "PERIOD_CONFLICT": "재무기간이 서로 달라 확인이 필요합니다.",
     "SELECTED_YEAR_NOT_PREPARED": "선택 연도 자료 없음",
     "MISSING_INPUT": "필요한 보고 항목 없음",
     "MULTIPLE_CANDIDATES": "여러 후보가 있어 값 확정 필요",
@@ -85,6 +86,67 @@ _REASON_LABELS = {
     "SEMANTIC_IDENTITY_MISMATCH": "보고 항목 의미 불일치",
 }
 
+
+
+LATEST_ANNUAL = "LATEST_COMPANY_ANNUAL_V1"
+LATEST_QUARTER = "LATEST_COMPANY_QUARTER_V1"
+LATEST_PERIOD_MODES = frozenset({LATEST_ANNUAL, LATEST_QUARTER})
+
+
+def latest_company_period(reader: Any, cik: str, *, quarterly: bool) -> dict[str, Any] | None:
+    """Resolve a prepared company period before reading any metric value."""
+    if quarterly:
+        periods = [
+            row for row in getattr(reader, "quarter_period_inventory", [])
+            if row["cik"] == cik and row["bucket_status"] != "NO_FILING_AS_OF_CUTOFF"
+        ]
+        if not periods:
+            return None
+        return max(periods, key=lambda row: (row["calendar_year"], row["calendar_quarter"]))
+
+    by_year: dict[int, list[dict[str, Any]]] = {}
+    for row in reader.observations:
+        if row["cik"] == cik:
+            by_year.setdefault(row["fiscal_year"], []).append(row)
+    if not by_year:
+        return None
+    fiscal_ends = {
+        year: {row["period_end"] for row in rows if row.get("period_end") and row.get("period_class") == "FY"}
+        for year, rows in by_year.items()
+    }
+    ends = {
+        year: max(fiscal_ends[year] or {row["period_end"] for row in rows if row.get("period_end")}, default="")
+        for year, rows in by_year.items()
+    }
+    year = max(ends, key=lambda key: (ends[key], key))
+    # A prepared newest FY without a date remains a hold, not an older-metric fallback.
+    if not ends[max(by_year)]:
+        year = max(by_year)
+    rows = by_year[year]
+    starts = {
+        row["period_start"] for row in rows
+        if row.get("period_class") == "FY" and row.get("period_end") == ends[year]
+        and row.get("period_start")
+    }
+    if len(fiscal_ends[year]) > 1 or len(starts) > 1:
+        return {
+            "fiscal_year": year, "period_start": None, "period_end": None,
+            "bucket_status": "PERIOD_CONFLICT",
+        }
+    filed_dates = {
+        lineage["filed_date"]
+        for row in rows
+        if isinstance(trace := row.get("trace"), dict)
+        and isinstance(lineage := trace.get("value_lineage"), dict)
+        and lineage.get("filed_date")
+    }
+    return {
+        "fiscal_year": year,
+        "period_start": next(iter(starts)) if len(starts) == 1 else None,
+        "period_end": ends[year] or None,
+        "end_convention": "EXCLUSIVE",
+        "source_filed_dates": sorted(filed_dates),
+    }
 
 class ScreeningExplorer:
     """Indexed, display-only projections from one verified v2 publication."""
@@ -141,9 +203,12 @@ class ScreeningExplorer:
         *,
         fiscal_year: int | None = None,
         query: str | None = None,
+        latest: bool = False,
         sort: str = "company",
         direction: str = "asc",
     ) -> dict[str, Any]:
+        if latest and fiscal_year is not None:
+            raise ValueError("latest company periods cannot be combined with a fixed year")
         year = self._year(fiscal_year)
         sort = require_string(sort, "explorer sort")
         direction = require_string(direction, "explorer sort direction").lower()
@@ -152,6 +217,10 @@ class ScreeningExplorer:
         if sort != "company" and sort not in CORE_METRIC_IDS:
             raise ValueError("explorer sort must be company or a visible core metric")
         needle = (query or "").strip().casefold()
+        periods = {
+            cik: latest_company_period(self.reader, cik, quarterly=False)
+            for cik in self.companies
+        } if latest else {}
         rows = []
         for company in self.companies.values():
             if needle and not any(
@@ -163,15 +232,18 @@ class ScreeningExplorer:
                 )
             ):
                 continue
+            period = periods.get(company["cik"])
+            row_year = period["fiscal_year"] if period is not None else year
             metrics = {
-                metric_id: self._observation(company["cik"], metric_id, year)
+                metric_id: self._observation(company["cik"], metric_id, row_year, anchor=period)
                 for metric_id in CORE_METRIC_IDS
             }
             rows.append(
                 {
                     "company": self._company(company),
-                    "year_prepared": year in self.company_years[company["cik"]],
-                    "actual_period": self._actual_period(company["cik"], year),
+                    "year_prepared": row_year in self.company_years[company["cik"]],
+                    "actual_period": period if latest else self._actual_period(company["cik"], year),
+                    **({"resolved_period": period} if latest else {}),
                     "metrics": metrics,
                 }
             )
@@ -183,6 +255,7 @@ class ScreeningExplorer:
             "sort": sort,
             "direction": direction,
             "rows": rows,
+            **({"period_scope": "LATEST_COMPANY", "selected_fiscal_year": None, "resolved_periods": periods} if latest else {}),
         }
 
     def metric_library(
@@ -261,6 +334,7 @@ class ScreeningExplorer:
         ciks: list[str],
         metric_ids: list[str],
         fiscal_year: int | None = None,
+        latest: bool = False,
     ) -> dict[str, Any]:
         if not isinstance(ciks, list) or not 2 <= len(ciks) <= 4:
             raise ValueError("company comparison requires two to four CIKs")
@@ -276,23 +350,35 @@ class ScreeningExplorer:
             raise ValueError("company comparison contains duplicate metrics")
         if any(metric_id not in self.definitions for metric_id in checked_metrics):
             raise ValueError("company comparison contains an unknown metric")
+        if latest and fiscal_year is not None:
+            raise ValueError("latest company periods cannot be combined with a fixed year")
         year = self._year(fiscal_year)
+        periods = {
+            cik: latest_company_period(self.reader, cik, quarterly=False) if latest
+            else self._actual_period(cik, year)
+            for cik in checked_ciks
+        }
         return self._context(year) | {
             "companies": [self._company(self.companies[cik]) for cik in checked_ciks],
-            "actual_periods": {
-                cik: self._actual_period(cik, year) for cik in checked_ciks
-            },
+            "actual_periods": periods,
+            **({"period_scope": "LATEST_COMPANY", "selected_fiscal_year": None} if latest else {}),
             "rows": [
                 {
                     "metric": self._definition(metric_id, year),
                     "values": {
-                        cik: self._observation(cik, metric_id, year)
+                        cik: self._observation(
+                            cik, metric_id, periods[cik]["fiscal_year"] if latest and periods[cik] else year,
+                            anchor=periods[cik] if latest else None,
+                        )
                         for cik in checked_ciks
                     },
                 }
                 for metric_id in checked_metrics
             ],
-            "date_limitation": "같은 회계연도 표시는 실제 시작·종료일이 같다는 뜻이 아닙니다.",
+            "date_limitation": (
+                "기업별로 준비된 최신 실제 재무기간을 비교합니다."
+                if latest else "같은 회계연도 표시는 실제 시작·종료일이 같다는 뜻이 아닙니다."
+            ),
         }
 
     def _context(self, fiscal_year: int) -> dict[str, Any]:
@@ -383,16 +469,22 @@ class ScreeningExplorer:
             "observation": self._observation(cik, metric_id, fiscal_year),
         }
 
-    def _observation(self, cik: str, metric_id: str, fiscal_year: int) -> dict[str, Any]:
+    def _observation(
+        self, cik: str, metric_id: str, fiscal_year: int, *, anchor: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         row = self.observations.get((cik, metric_id, fiscal_year))
+        conflict = anchor is not None and anchor.get("bucket_status") == "PERIOD_CONFLICT"
+        if conflict:
+            row = None
+        reason = "PERIOD_CONFLICT" if conflict else "SELECTED_YEAR_NOT_PREPARED"
         if row is None:
             return {
                 "metric_id": metric_id,
                 "fiscal_year": fiscal_year,
                 "availability_status": "UNAVAILABLE",
                 "value": None,
-                "reason_codes": ["SELECTED_YEAR_NOT_PREPARED"],
-                "reason_labels": [_reason_label("SELECTED_YEAR_NOT_PREPARED")],
+                "reason_codes": [reason],
+                "reason_labels": [_reason_label(reason)],
                 "period_start": None,
                 "period_end": None,
                 "period_class": self.definitions[metric_id]["period_class"],

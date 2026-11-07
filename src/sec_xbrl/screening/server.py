@@ -105,6 +105,13 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
                 self._json(service.store.list_runs(query.get("revision_id")))
             elif parsed.path == "/api/decisions":
                 self._json(service.decisions(query.get("cik")))
+            elif parsed.path == "/api/batch-availability":
+                self._json(service.batch_availability(
+                    mode=query.get("mode", "ACTUAL"),
+                    dataset_id=query.get("dataset_id"),
+                    decision_date=query.get("decision_date"),
+                    lag=int(query.get("lag", 0)),
+                ))
             elif parsed.path == "/api/availability":
                 self._json(service.metric_availability(query["dataset_id"], cik=query.get("cik")))
             elif parsed.path == "/api/metric-catalog":
@@ -126,24 +133,27 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
                 self._json(
                     service.quarter_explorer(
                         query["dataset_id"],
-                        calendar_year=int(query["calendar_year"]),
-                        calendar_quarter=int(query["calendar_quarter"]),
+                        **({"latest": _bool(query["latest"])} if "latest" in query else {}),
+                        calendar_year=_optional_int(query.get("calendar_year")),
+                        calendar_quarter=_optional_int(query.get("calendar_quarter")),
                     )
                 )
             elif parsed.path == "/api/quarter-comparison":
                 self._json(
                     service.quarter_comparison(
                         query["dataset_id"],
+                        **({"latest": _bool(query["latest"])} if "latest" in query else {}),
                         ciks=query["ciks"].split(","),
                         metric_id=query["metric_id"],
-                        calendar_year=int(query["calendar_year"]),
-                        calendar_quarter=int(query["calendar_quarter"]),
+                        calendar_year=_optional_int(query.get("calendar_year")),
+                        calendar_quarter=_optional_int(query.get("calendar_quarter")),
                     )
                 )
             elif parsed.path == "/api/explorer":
                 self._json(
                     service.company_explorer(
                         query["dataset_id"],
+                        **({"latest": _bool(query["latest"])} if "latest" in query else {}),
                         fiscal_year=_optional_int(query.get("fiscal_year")),
                         query=query.get("query"),
                         sort=query.get("sort", "company"),
@@ -163,6 +173,7 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
                 self._json(
                     service.company_profile(
                         query["dataset_id"],
+                        **({"latest": _bool(query["latest"])} if "latest" in query else {}),
                         cik=query["cik"],
                         fiscal_year=_optional_int(query.get("fiscal_year")),
                     )
@@ -171,6 +182,7 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
                 self._json(
                     service.company_comparison(
                         query["dataset_id"],
+                        **({"latest": _bool(query["latest"])} if "latest" in query else {}),
                         ciks=query["ciks"].split(","),
                         metric_ids=query["metric_ids"].split(","),
                         fiscal_year=_optional_int(query.get("fiscal_year")),
