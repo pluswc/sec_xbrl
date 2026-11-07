@@ -37,7 +37,7 @@ function availabilityCaption(snapshot){
   if(!snapshot)return "배치를 선택해 주세요.";
   if(snapshot.mode==="PREPARED_SIMULATION")return `준비 자료 기준 가정 조회 · 재무 기준일 ${snapshot.financial_as_of} · 실제 가용 이력 미적용`;
   const ready=new Date(snapshot.ready_at).toLocaleString("ko-KR",{timeZone:"America/New_York"});
-  return `실제 배치 · 뉴욕 ${ready} 준비 완료 · 판단일 ${snapshot.decision_date} · 사용지연 ${snapshot.lag}거래일 · 재무 기준일 ${snapshot.financial_as_of}`;
+  return `실제 배치 · 뉴욕 ${ready} 조회 가능 확인 · 판단일 ${snapshot.decision_date} · 사용지연 ${snapshot.lag}거래일 · 재무 기준일 ${snapshot.financial_as_of}`;
 }
 function syncScreenPeriodModes(){
   if(!batchView.enabled)return;
@@ -853,16 +853,21 @@ async function applyBatchChoice(){
     }
   }finally{if(token===batchView.token){$("#batch-apply").disabled=false;$("#batch-use-screen").disabled=!batchView.snapshot}}
 }
+function batchDatasetCaption(dataset){
+  const count=dataset.company_count??dataset.counts?.companies;
+  const scope=dataset.quarter_definition_count>0?"연간·분기·TTM":"연간";
+  return [dataset.financial_as_of,Number.isInteger(count)?`${count}개 기업`:null,scope].filter(Boolean).join(" · ");
+}
 function mountBatchAvailability(status){
   if(!status.batch_availability)return;
   batchView.enabled=true;batchView.datasets=status.datasets.filter(item=>item.definition_count||item.quarter_definition_count);
   if(!batchView.datasets.length){batchView.enabled=false;return}
   const panel=document.createElement("div");panel.className="batch-availability";
   panel.innerHTML=`<label>조회 기준<select id="batch-mode"><option value="ACTUAL">실제 배치 이력</option><option value="PREPARED_SIMULATION">준비 자료 기준 가정 조회</option></select></label>
-    <label>준비 자료<select id="batch-dataset">${batchView.datasets.map(item=>`<option value="${esc(item.dataset_id)}">${esc(item.dataset_id)} · ${esc(item.financial_as_of)}</option>`).join("")}</select></label>
+    <label>준비 자료<select id="batch-dataset">${batchView.datasets.map(item=>`<option value="${esc(item.dataset_id)}">${esc(batchDatasetCaption(item))}</option>`).join("")}</select></label>
     <label>판단일 (뉴욕, 비우면 오늘)<input id="batch-date" type="date"></label>
     <label>사용지연 (미국 거래일)<input id="batch-lag" type="number" min="0" step="1" value="0"></label>
-    <button id="batch-apply" type="button" class="quiet">배치 조회</button>
+    <button id="batch-apply" type="button">배치 조회</button>
     <button id="batch-fixed" type="button" class="quiet">기존 고정 기간 보기</button>
     <button id="batch-use-screen" type="button" class="quiet" disabled>이 배치로 새 조건</button>
     <p id="batch-status" role="status"></p>`;

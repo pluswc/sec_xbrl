@@ -96,8 +96,8 @@ thead th{position:sticky;top:0;z-index:4;background:#e9e6dc}
 #history-selection-tools{gap:8px}#history-confirm-item{white-space:pre-line}
 
 .batch-availability{display:flex;flex-wrap:wrap;align-items:end;gap:8px 12px;padding:12px 16px;border-bottom:1px solid var(--line)}
-.batch-availability label{display:grid;gap:4px;min-width:0;font-size:11px;color:var(--slate)}
-.batch-availability input,.batch-availability select{max-width:100%;min-height:36px}
+.batch-availability label{display:grid;gap:4px;min-width:0;max-width:100%;font-size:11px;color:var(--slate)}
+.batch-availability input,.batch-availability select,.batch-availability button{max-width:100%;min-height:40px}
 .batch-availability [hidden]{display:none}
 #batch-status{flex-basis:100%;margin:0;color:var(--slate);font-size:11px}
 #screen-batch-status{margin:0;font-size:11px;overflow-wrap:anywhere}
