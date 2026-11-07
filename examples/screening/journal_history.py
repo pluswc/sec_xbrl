@@ -157,24 +157,44 @@ class JournalHistory:
                 "decisions": visible_decisions, "trash": trash}
 
     def change(self, kind: Any, identity: Any, action: str, expected_version: Any) -> dict[str, Any]:
-        key = record_key(kind, identity)
+        return self.change_batch([{"kind": kind, "record_id": identity}], action, expected_version)
+
+    def change_batch(self, items: Any, action: str, expected_version: Any) -> dict[str, Any]:
+        """Validate the full captured scope, then append its transitions atomically."""
+        if not isinstance(items, list):
+            raise TypeError("history items must be a list")
+        if not items:
+            raise ValueError("history items must not be empty")
+        keys = []
+        for item in items:
+            if not isinstance(item, dict):
+                raise TypeError("history item must be an object")
+            if set(item) != {"kind", "record_id"}:
+                raise ValueError("unexpected history item fields")
+            keys.append(record_key(item["kind"], item["record_id"]))
+        if len(keys) != len(set(keys)):
+            raise ValueError("duplicate history items")
         if type(expected_version) is not int or expected_version < 0:
             raise ValueError("expected_version must be a nonnegative integer")
         if action not in {"DELETE", "RESTORE"}:
             raise ValueError("unsupported lifecycle action")
-        self._require_record(*key)
+        for key in keys:
+            self._require_record(*key)
         with self.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             version, states, previous_hash = self._state(connection)
-            # Retried identical actions are harmless even after the first response was lost.
-            if states.get(key, "RESTORE") != action:
-                if version != expected_version:
-                    raise Conflict("이력이 변경됐습니다. 새로고침 후 항목을 다시 확인해 주세요.")
+            transitions = [key for key in keys if states.get(key, "RESTORE") != action]
+            # A lost-response retry is harmless only when every requested state already holds.
+            if transitions and version != expected_version:
+                raise Conflict("이력이 변경됐습니다. 새로고침 후 항목을 다시 확인해 주세요.")
+            for kind, identity in transitions:
                 material = {"sequence": version + 1, "schema_version": 1,
                             "record_kind": kind, "record_id": identity, "action": action,
                             "created_at": datetime.now(UTC).isoformat(), "previous_hash": previous_hash}
+                previous_hash = digest(material)
                 connection.execute(f"INSERT INTO {TABLE} VALUES(?,?,?,?,?,?,?,?)",
-                                   (*material.values(), digest(material)))
+                                   (*material.values(), previous_hash))
+                version += 1
         return self.snapshot()
 
     def require_visible(self, kind: str, identity: Any) -> None:
@@ -228,6 +248,11 @@ class JournalHistory:
                 raise ValueError("unexpected history fields")
             return 200, self.change(body["kind"], body["record_id"],
                                     "DELETE" if path.endswith("/delete") else "RESTORE", body["expected_version"])
+        if method == "POST" and path in {"/api/history/batch-delete", "/api/history/batch-restore"}:
+            if set(body) != {"items", "expected_version"}:
+                raise ValueError("unexpected batch history fields")
+            return 200, self.change_batch(body["items"],
+                                          "DELETE" if path.endswith("delete") else "RESTORE", body["expected_version"])
         if method == "POST" and path in {"/api/history/decisions", "/api/decisions"}:
             if not set(body) <= {"cik", "state", "rationale", "run_id", "actor", "evidence_ids"}:
                 raise ValueError("unexpected decision fields")

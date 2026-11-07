@@ -11,7 +11,7 @@ function harness(respond){
   const context=vm.createContext({URLSearchParams,location:{search:""},document:{querySelector:get,querySelectorAll:()=>[],createElement:()=>get("new"),body:get("body")},setTimeout:()=>0,fetch:async(url,options={})=>{calls.push({url,options});const value=await respond(url,options);return{ok:value?.status===undefined||value.status<400,status:value?.status||200,json:async()=>value?.body??value}}});
   vm.runInContext(source.slice(0,source.indexOf("async function boot()")),context);
   vm.runInContext('renderRows=()=>{}',context);
-  return{...vm.runInContext('({S,history:journalHistory,historyRecords,applyHistorySnapshot,renderHistoryLists,historyEntries,confirmHistoryAction,closeHistoryConfirmation,submitHistoryAction,retryHistory,openRun})',context),get,calls,focus,context};
+  return{...vm.runInContext('({S,history:journalHistory,historyRecords,applyHistorySnapshot,renderHistoryLists,historyEntries,confirmHistoryAction,closeHistoryConfirmation,submitHistoryAction,retryHistory,openRun,selectHistoryItems,switchHistoryView,confirmSelectedHistory,historySelectionKey})',context),get,calls,focus,context};
 }
 function deferred(){let resolve;return{promise:new Promise(done=>resolve=done),resolve:value=>resolve(value)}}
 
@@ -86,4 +86,64 @@ test("an unresponsive history child times out without coupling to financial rela
   const history=bridge.startHistoryWorker({wsl:executable,distribution:"fixture",sourceRoot:"/unused/src",linuxPython:"/unused/python",historyWorker:"/worker.py",journalStore:"/private.sqlite"});
   try{await assert.rejects(history.request({method:"GET",path:"/api/history/capabilities",body_base64:""}),error=>error.status===504)}
   finally{history.stop();fs.rmSync(directory,{recursive:true,force:true})}
+});
+
+
+test("batch selection handles none/partial/all/clear without requests and stays scoped to the visible tab",()=>{
+  const h=harness(()=>{throw Error("unexpected fetch")});h.history.configured=true;h.applyHistorySnapshot(snapshot());h.renderHistoryLists();
+  assert.equal(h.get("#history-bulk-action").disabled,true);h.confirmSelectedHistory(h.get("bulk"));assert.equal(h.history.confirm,null);
+  h.selectHistoryItems("toggle","REVISION",revision,true);assert.equal(h.history.selected.size,1);assert.equal(h.get("#history-bulk-action").textContent,"선택 1개 삭제");
+  h.selectHistoryItems("all");h.selectHistoryItems("all");assert.equal(h.history.selected.size,2);assert.equal(h.get("#history-select-all").disabled,true);
+  h.selectHistoryItems("clear");h.selectHistoryItems("clear");assert.equal(h.history.selected.size,0);assert.equal(h.get("#history-clear-selection").disabled,true);
+  h.selectHistoryItems("all");h.applyHistorySnapshot(snapshot(1,[{kind:"RUN",record_id:run,record:snapshot().runs[0]}]));assert.equal(h.history.selected.size,1);
+  h.switchHistoryView(true);assert.equal(h.history.selected.size,0);h.selectHistoryItems("all");assert.equal(h.history.selected.size,1);assert.equal(h.get("#history-bulk-action").textContent,"선택 1개 복원");
+  h.switchHistoryView(false);assert.equal(h.history.selected.size,0);assert.equal(h.calls.length,0);
+});
+
+test("batch refresh prunes stale IDs but never expands selection to newly visible records",()=>{
+  const h=harness(()=>{throw Error("unexpected fetch")});h.history.configured=true;h.applyHistorySnapshot(snapshot());h.selectHistoryItems("all");
+  const refreshed=snapshot();refreshed.revisions.push({...refreshed.revisions[0],revision_id:"revision-"+"3".repeat(24),name:"Newly saved"});
+  h.applyHistorySnapshot(refreshed);assert.equal(h.history.selected.size,2);assert(!h.history.selected.has("REVISION:revision-"+"3".repeat(24)));
+  const hidden=snapshot(1,[{kind:"RUN",record_id:run,record:snapshot().runs[0]}]);h.applyHistorySnapshot(hidden);assert.deepEqual([...h.history.selected],["REVISION:"+revision]);
+  h.history.configured=false;h.selectHistoryItems("all");assert.equal(h.history.selected.size,1);assert.equal(h.calls.length,0);
+});
+
+test("batch confirmation captures exact items/version with bounded names and cancel preserves selection",()=>{
+  const h=harness(()=>{throw Error("unexpected fetch")});h.history.configured=true;const initial=snapshot();initial.revisions[0].name="Long "+"x".repeat(1000);h.applyHistorySnapshot(initial);h.selectHistoryItems("all");
+  h.confirmSelectedHistory(h.get("bulk"));assert.equal(h.history.confirm.batch,true);assert.equal(h.history.confirm.items.length,2);assert.match(h.get("#history-confirm-item").textContent,/조건 1개 · 결과 1개/);assert(h.get("#history-confirm-item").textContent.length<300);
+  h.selectHistoryItems("clear");h.switchHistoryView(true);assert.equal(h.history.selected.size,2);assert.equal(h.history.trash,false);
+  const next=snapshot(1);next.revisions.push({...next.revisions[0],revision_id:"revision-"+"3".repeat(24)});h.applyHistorySnapshot(next);
+  assert.equal(h.history.confirm.items.length,2);assert.equal(h.history.confirm.version,0);
+  h.closeHistoryConfirmation();assert.equal(h.history.selected.size,2);assert.equal(h.calls.length,0);assert.equal(h.focus.at(-1),"bulk");
+});
+
+test("batch pending disables selection and double submission; success clears selection through the shared projection",async()=>{
+  const pending=deferred(),h=harness(()=>pending.promise);h.history.configured=true;h.applyHistorySnapshot(snapshot());h.S.run={run_id:run};h.selectHistoryItems("all");h.confirmSelectedHistory(h.get("bulk"));
+  const submitting=h.submitHistoryAction();h.selectHistoryItems("clear");await h.submitHistoryAction();assert.equal(h.calls.length,1);assert.equal(h.history.selected.size,2);assert.equal(h.get("#history-bulk-action").disabled,true);assert.equal(h.get("#history-clear-selection").disabled,true);
+  assert.equal(h.calls[0].url,"/api/history/batch-delete");assert.deepEqual(JSON.parse(h.calls[0].options.body),{items:[{kind:"REVISION",record_id:revision},{kind:"RUN",record_id:run}],expected_version:0});
+  pending.resolve({configured:true,version:2,revisions:[],runs:[],decisions:[],trash:[{kind:"REVISION",record_id:revision,record:snapshot().revisions[0]},{kind:"RUN",record_id:run,record:snapshot().runs[0]}]});await submitting;
+  assert.equal(h.history.selected.size,0);assert.equal(h.S.run,null);assert.equal(h.get("#history-confirm").open,false);assert.equal(h.get("#history-bulk-action").disabled,true);
+});
+
+test("batch conflict refresh retains only valid selected IDs, requires reconfirmation and cannot auto-expand scope",async()=>{
+  const refreshed=snapshot(1,[{kind:"RUN",record_id:run,record:snapshot().runs[0]}]);refreshed.revisions.push({...refreshed.revisions[0],revision_id:"revision-"+"3".repeat(24)});
+  const h=harness(url=>url==="/api/history/batch-delete"?{status:409,body:{error:"changed"}}:refreshed);h.history.configured=true;h.applyHistorySnapshot(snapshot());h.selectHistoryItems("all");h.confirmSelectedHistory(h.get("bulk"));
+  await h.submitHistoryAction();assert.equal(h.calls.length,2);assert.equal(h.history.confirm.stale,true);assert.equal(h.get("#history-confirm-submit").disabled,true);assert.deepEqual([...h.history.selected],["REVISION:"+revision]);
+  await h.submitHistoryAction();assert.equal(h.calls.length,2);h.closeHistoryConfirmation();h.confirmSelectedHistory(h.get("bulk"));assert.equal(h.history.confirm.version,1);assert.equal(h.history.confirm.items.length,1);assert.equal(h.history.confirm.items[0].record_id,revision);
+});
+
+test("batch empty/unsupported/error states have no executable action and restore uses only captured trash",async()=>{
+  const h=harness(()=>{throw Error("unexpected fetch")});h.applyHistorySnapshot(snapshot());h.selectHistoryItems("all");h.confirmSelectedHistory(h.get("bulk"));assert.equal(h.history.confirm,null);
+  h.history.configured=true;h.history.error="unavailable";h.selectHistoryItems("all");assert.equal(h.history.selected.size,0);h.history.error="";
+  h.applyHistorySnapshot({configured:true,version:0,revisions:[],runs:[],decisions:[],trash:[]});h.selectHistoryItems("all");assert.equal(h.get("#history-bulk-action").disabled,true);await h.submitHistoryAction();assert.equal(h.calls.length,0);
+  const trash={kind:"RUN",record_id:run,record:snapshot().runs[0]};h.applyHistorySnapshot(snapshot(1,[trash]));h.switchHistoryView(true);h.selectHistoryItems("all");h.confirmSelectedHistory(h.get("bulk"));assert.equal(h.history.confirm.action,"restore");assert.deepEqual(JSON.parse(JSON.stringify(h.history.confirm.items)),[{kind:"RUN",record_id:run}]);
+});
+
+
+test("batch checkboxes keep native labels and a40px hit area while retaining row action hooks",()=>{
+  const h=harness(()=>{throw Error("unexpected fetch")});h.history.configured=true;h.applyHistorySnapshot(snapshot());
+  assert.match(h.get("#timeline").innerHTML,/<label class="history-checkbox"><input type="checkbox" data-history-select[^>]+><\/label>/);
+  const css=fs.readFileSync(path.join(root,"examples/screening/display-assets/app.css"),"utf8");
+  assert.match(css,/#timeline \.history-checkbox\{[^}]*min-width:40px;min-height:40px/);
+  assert.match(css,/#timeline li\.history-selected\{background:var\(--blue-soft\)/);
 });

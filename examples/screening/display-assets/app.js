@@ -35,7 +35,7 @@ function isRevisionEdit(t){return t instanceof Element&&!t.closest("#saved-scree
 function setCriteriaCompact(c){$(".criteria").classList.toggle("compact",c);$("#toggle-criteria").setAttribute("aria-expanded",String(!c));$("#toggle-criteria").textContent=c?"조건 펼치기":"조건 접기"}
 
 // Recoverable history is a journal projection, separate from financial evaluation.
-const journalHistory={configured:null,capability:null,snapshot:null,promise:null,version:0,epoch:0,request:0,error:"",pending:false,trash:false,confirm:null};
+const journalHistory={configured:null,capability:null,snapshot:null,promise:null,version:0,epoch:0,request:0,error:"",pending:false,trash:false,confirm:null,selected:new Set()};
 async function historyCapability(){
   if(journalHistory.capability)return journalHistory.capability;
   journalHistory.capability=(async()=>{try{
@@ -94,8 +94,51 @@ function historyEntries(){
   if(journalHistory.trash)return(journalHistory.snapshot?.trash||[]).map(x=>({...x,deleted:true}));
   return[...S.screens.map(record=>({kind:"REVISION",record_id:record.revision_id,record})),...S.runs.map(record=>({kind:"RUN",record_id:record.run_id,record})),...S.decisions.map(record=>({kind:"DECISION",record_id:record.event_id,record}))];
 }
+function historySelectionKey(item){return`${item.kind}:${item.record_id}`}
+function pruneHistorySelection(){
+  if(!journalHistory.snapshot||journalHistory.error)return;
+  const valid=new Set(historyEntries().map(historySelectionKey));
+  for(const key of journalHistory.selected)if(!valid.has(key))journalHistory.selected.delete(key);
+}
+function syncHistorySelectionControls(){
+  const entries=historyEntries(),count=journalHistory.selected.size;
+  const blocked=journalHistory.configured!==true||Boolean(journalHistory.error)||journalHistory.pending;
+  $("#history-selected-count").textContent=`선택 ${count}개`;
+  $("#history-select-all").disabled=blocked||!entries.length||count===entries.length;
+  $("#history-clear-selection").disabled=blocked||!count;
+  $("#history-bulk-action").textContent=`선택 ${count}개 ${journalHistory.trash?"복원":"삭제"}`;
+  $("#history-bulk-action").disabled=blocked||!count;
+  $("#history-selection-tools").hidden=journalHistory.configured!==true;
+  $$('[data-history-select]').forEach(input=>{
+    input.checked=journalHistory.selected.has(historySelectionKey({kind:input.dataset.historyKind,record_id:input.dataset.historyId}));
+    input.disabled=blocked;input.closest('[data-history-row]')?.classList.toggle("history-selected",input.checked);
+  });
+}
+function selectHistoryItems(action,kind=null,id=null,checked=false){
+  if(journalHistory.pending||journalHistory.confirm||journalHistory.error||journalHistory.configured!==true)return;
+  pruneHistorySelection();const entries=historyEntries();
+  if(action==="all")entries.forEach(item=>journalHistory.selected.add(historySelectionKey(item)));
+  else if(action==="clear")journalHistory.selected.clear();
+  else if(action==="toggle"){
+    const key=historySelectionKey({kind,record_id:id});
+    if(!entries.some(item=>historySelectionKey(item)===key))return;
+    checked?journalHistory.selected.add(key):journalHistory.selected.delete(key);
+  }
+  syncHistorySelectionControls();
+}
+function switchHistoryView(trash){
+  if(journalHistory.pending||journalHistory.confirm)return;
+  if(journalHistory.trash!==trash)journalHistory.selected.clear();
+  journalHistory.trash=trash;renderTimeline();
+}
+function confirmSelectedHistory(button){
+  pruneHistorySelection();
+  const items=historyEntries().filter(item=>journalHistory.selected.has(historySelectionKey(item)));
+  if(items.length)openHistoryConfirmation(journalHistory.trash?"restore":"delete",items,button,true);
+}
 function renderHistoryControls(){
   if(!$("#history-lifecycle"))return;
+  pruneHistorySelection();
   const configured=journalHistory.configured===true,blocked=configured&&Boolean(journalHistory.error),busy=journalHistory.pending;
   $("#history-trash").hidden=!configured;$("#history-active").setAttribute("aria-pressed",String(!journalHistory.trash));$("#history-trash").setAttribute("aria-pressed",String(journalHistory.trash));
   $("#history-active").disabled=busy;$("#history-trash").disabled=busy;
@@ -103,7 +146,8 @@ function renderHistoryControls(){
   $("#history-status").textContent=journalHistory.error||(configured?`활성 조건 ${S.screens.length} · 결과 ${S.runs.length} · 메모 ${S.decisions.length} · 휴지통 ${journalHistory.snapshot?.trash.length||0}`:"삭제·복원 연결이 설정되지 않았습니다. 기존 이력 조회를 사용합니다.");
   $("#history-status").classList.toggle("explorer-error",blocked);
   $("#history-retry").textContent=blocked?"이력 다시 연결":"이력 새로고침";
-  $("#timeline").innerHTML=blocked?'<li class="empty">이력을 불러올 수 없습니다. 다시 연결해 주세요. 숨긴 기록을 원본 목록으로 대신 표시하지 않습니다.</li>':historyEntries().map(x=>`<li data-history-row="${esc(x.record_id)}" data-history-kind="${x.kind}" data-history-id="${esc(x.record_id)}"><div><b>${({REVISION:"조건",RUN:"결과",DECISION:"판단 메모"})[x.kind]}</b> · ${esc(historyRecordTitle(x.kind,x.record))}<time>${esc(x.record.created_at||"")}</time><small>${esc(x.record_id)}</small></div>${configured?`<button type="button" class="quiet" data-history-action="${x.deleted?"restore":"delete"}" ${x.deleted?"data-history-restore":"data-history-delete"} data-history-kind="${x.kind}" data-history-id="${esc(x.record_id)}" ${busy?'disabled':''}>${x.deleted?"복원":"삭제"}</button>`:""}</li>`).join("")||`<li class="empty">${journalHistory.trash?"휴지통이 비어 있습니다.":"아직 이력이 없습니다."}</li>`;
+  $("#timeline").innerHTML=blocked?'<li class="empty">이력을 불러올 수 없습니다. 다시 연결해 주세요. 숨긴 기록을 원본 목록으로 대신 표시하지 않습니다.</li>':historyEntries().map(x=>`<li data-history-row="${esc(x.record_id)}" data-history-kind="${x.kind}" data-history-id="${esc(x.record_id)}">${configured?`<label class="history-checkbox"><input type="checkbox" data-history-select data-history-kind="${x.kind}" data-history-id="${esc(x.record_id)}" aria-label="${esc(historyRecordTitle(x.kind,x.record).slice(0,120))} 선택"></label>`:""}<div><b>${({REVISION:"조건",RUN:"결과",DECISION:"판단 메모"})[x.kind]}</b> · ${esc(historyRecordTitle(x.kind,x.record))}<time>${esc(x.record.created_at||"")}</time><small>${esc(x.record_id)}</small></div>${configured?`<button type="button" class="quiet" data-history-action="${x.deleted?"restore":"delete"}" ${x.deleted?"data-history-restore":"data-history-delete"} data-history-kind="${x.kind}" data-history-id="${esc(x.record_id)}" ${busy?'disabled':''}>${x.deleted?"복원":"삭제"}</button>`:""}</li>`).join("")||`<li class="empty">${journalHistory.trash?"휴지통이 비어 있습니다.":"아직 이력이 없습니다."}</li>`;
+  syncHistorySelectionControls();
 }
 function renderTimeline(){renderHistoryControls()}
 function renderHistoryLists(){
@@ -125,14 +169,18 @@ async function retryHistory(){
   await refreshScreens();await refreshRuns();await refreshDecisions();
 }
 function confirmHistoryAction(action,kind,id,button){
-  if(journalHistory.pending||journalHistory.error)return;
-  const item=historyEntries().find(x=>x.kind===kind&&x.record_id===id);if(!item)return;
-  journalHistory.confirm={action,kind,id,version:journalHistory.version,focus:button};
-  $("#history-confirm-title").textContent=action==="delete"?"이 기록을 휴지통으로 이동할까요?":"이 기록을 복원할까요?";
-  $("#history-confirm-item").textContent=historyRecordTitle(kind,item.record);
-  $("#history-confirm-note").textContent=action==="delete"?"이 항목만 숨깁니다. 연결된 조건·결과·다른 메모와 다운로드 파일은 삭제하지 않습니다. 휴지통에서 복원할 수 있습니다.":"같은 ID와 원래 내용으로 되돌립니다. 판단 메모를 복원하면 현재 관심상태가 다시 계산됩니다.";
-  $("#history-confirm-submit").textContent=action==="delete"?"휴지통으로 이동":"복원";
-  $("#history-confirm-error").textContent="";$("#history-confirm-refresh").hidden=true;$("#history-confirm").showModal();$("#history-confirm-cancel").focus();
+  const item=historyEntries().find(x=>x.kind===kind&&x.record_id===id);
+  if(item)openHistoryConfirmation(action,[item],button,false);
+}
+function openHistoryConfirmation(action,items,button,batch){
+  if(journalHistory.pending||journalHistory.confirm||journalHistory.error||journalHistory.configured!==true||!items.length)return;
+  journalHistory.confirm={action,kind:items[0].kind,id:items[0].record_id,items:items.map(x=>({kind:x.kind,record_id:x.record_id})),batch,version:journalHistory.version,focus:button};
+  const count=items.length,summary=["REVISION","RUN","DECISION"].map(kind=>{const n=items.filter(x=>x.kind===kind).length;return n?`${({REVISION:"조건",RUN:"결과",DECISION:"메모"})[kind]} ${n}개`:""}).filter(Boolean).join(" · ");
+  $("#history-confirm-title").textContent=batch?`선택 ${count}개를 ${action==="delete"?"휴지통으로 이동":"복원"}할까요?`:action==="delete"?"이 기록을 휴지통으로 이동할까요?":"이 기록을 복원할까요?";
+  $("#history-confirm-item").textContent=(batch?`${summary}\n`:"")+items.slice(0,5).map(x=>historyRecordTitle(x.kind,x.record).slice(0,120)).join("\n")+(count>5?`\n외 ${count-5}개`:"");
+  $("#history-confirm-note").textContent=action==="delete"?"확인한 항목만 함께 숨깁니다. 연결된 조건·결과·다른 메모와 다운로드 파일은 삭제하지 않습니다. 휴지통에서 복원할 수 있습니다.":"확인한 항목을 같은 ID와 원래 내용으로 함께 되돌립니다. 판단 메모를 복원하면 현재 관심상태가 다시 계산됩니다.";
+  $("#history-confirm-submit").textContent=batch?`선택 ${count}개 ${action==="delete"?"삭제":"복원"}`:action==="delete"?"휴지통으로 이동":"복원";
+  $("#history-confirm-submit").disabled=false;$("#history-confirm-error").textContent="";$("#history-confirm-refresh").hidden=true;$("#history-confirm").showModal();$("#history-confirm-cancel").focus();
 }
 function closeHistoryConfirmation(){
   if(journalHistory.pending)return;
@@ -140,24 +188,34 @@ function closeHistoryConfirmation(){
   (focus?.isConnected?focus:$("#history-retry")).focus();
 }
 async function submitHistoryAction(){
-  const item=journalHistory.confirm;if(!item||journalHistory.pending)return;
+  const item=journalHistory.confirm;if(!item||item.stale||journalHistory.pending)return;
   journalHistory.pending=true;syncResultActions();$("#history-confirm-submit").disabled=true;$("#history-confirm-cancel").disabled=true;renderHistoryControls();
   try{
-    const snapshot=await api(`/api/history/${item.action}`,{method:"POST",body:JSON.stringify({kind:item.kind,record_id:item.id,expected_version:item.version})});
+    const snapshot=await api(`/api/history/${item.batch?"batch-":""}${item.action}`,{method:"POST",body:JSON.stringify(item.batch?{items:item.items,expected_version:item.version}:{kind:item.kind,record_id:item.id,expected_version:item.version})});
+    if(item.batch)journalHistory.selected.clear();
     journalHistory.epoch++;applyHistorySnapshot(snapshot);renderHistoryLists();
     journalHistory.pending=false;closeHistoryConfirmation();$(journalHistory.trash?"#history-trash":"#history-active").focus();
     toast(item.action==="delete"?"휴지통으로 이동했습니다.":"기록을 복원했습니다.");
-  }catch(error){$("#history-confirm-error").textContent=error.message;$("#history-confirm-refresh").hidden=false;if(error.status>=500){historyUnavailable(error);renderHistoryLists()}}
-  finally{journalHistory.pending=false;$("#history-confirm-submit").disabled=false;$("#history-confirm-cancel").disabled=false;renderHistoryControls();syncResultActions()}
+  }catch(error){
+    $("#history-confirm-error").textContent=error.message;$("#history-confirm-refresh").hidden=false;
+    if(error.status===409){
+      item.stale=true;invalidateHistoryRead();
+      try{await historySnapshot();renderHistoryLists()}catch(refreshError){historyUnavailable(refreshError);renderHistoryLists()}
+    }else if(error.status>=500){historyUnavailable(error);renderHistoryLists()}
+  }
+  finally{journalHistory.pending=false;$("#history-confirm-submit").disabled=Boolean(journalHistory.confirm?.stale);$("#history-confirm-cancel").disabled=false;renderHistoryControls();syncResultActions()}
 }
 function mountJournalHistory(){
   const controls=document.createElement("section");controls.id="history-lifecycle";
-  controls.innerHTML='<div class="history-toolbar"><button id="history-active" type="button" class="quiet" aria-pressed="true">활성 이력</button><button id="history-trash" type="button" class="quiet" aria-pressed="false" hidden>휴지통</button><button id="history-retry" type="button" class="quiet">이력 새로고침</button></div><p id="history-status" role="status" aria-live="polite"></p>';
+  controls.innerHTML='<div class="history-toolbar"><button id="history-active" type="button" class="quiet" aria-pressed="true">활성 이력</button><button id="history-trash" type="button" class="quiet" aria-pressed="false" hidden>휴지통</button><button id="history-retry" type="button" class="quiet">이력 새로고침</button></div><div id="history-selection-tools" class="history-toolbar" hidden><button id="history-select-all" type="button" class="quiet">전체 선택</button><button id="history-clear-selection" type="button" class="quiet">선택 해제</button><span id="history-selected-count" role="status" aria-live="polite">선택 0개</span><button id="history-bulk-action" type="button" disabled>선택 0개 삭제</button></div><p id="history-status" role="status" aria-live="polite"></p>';
   $("#timeline").before(controls);
   const dialog=document.createElement("dialog");dialog.id="history-confirm";dialog.setAttribute("aria-labelledby","history-confirm-title");
   dialog.innerHTML='<h3 id="history-confirm-title"></h3><p id="history-confirm-item"></p><p id="history-confirm-note" class="muted"></p><p id="history-confirm-error" role="alert"></p><div class="button-row"><button id="history-confirm-refresh" type="button" class="quiet" hidden>이력 새로 확인</button><button id="history-confirm-cancel" type="button" class="quiet">취소</button><button id="history-confirm-submit" type="button">확인</button></div>';
   document.body.append(dialog);
-  $("#history-active").onclick=()=>{journalHistory.trash=false;renderTimeline()};$("#history-trash").onclick=()=>{journalHistory.trash=true;renderTimeline()};
+  $("#history-active").onclick=()=>switchHistoryView(false);$("#history-trash").onclick=()=>switchHistoryView(true);
+  $("#history-select-all").onclick=()=>selectHistoryItems("all");$("#history-clear-selection").onclick=()=>selectHistoryItems("clear");
+  $("#history-bulk-action").onclick=()=>confirmSelectedHistory($("#history-bulk-action"));
+  $("#timeline").onchange=event=>{const input=event.target.closest("[data-history-select]");if(input)selectHistoryItems("toggle",input.dataset.historyKind,input.dataset.historyId,input.checked)};
   $("#history-retry").onclick=()=>retryHistory();
   document.querySelectorAll('[data-view="history"]').forEach(link=>link.addEventListener("click",()=>retryHistory()));
   $("#timeline").onclick=event=>{const b=event.target.closest("[data-history-action]");if(b)confirmHistoryAction(b.dataset.historyAction,b.dataset.historyKind,b.dataset.historyId,b)};
