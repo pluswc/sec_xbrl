@@ -85,6 +85,71 @@ test("comparison validates each metric through existing endpoint and prints actu
 });
 
 
+test("fixed comparison shows quarter dates once with explicit exceptions, instant basis and zero",async()=>{
+  const ids=["quarter_revenue","quarter_cfo","quarter_net_income","quarter_debt","quarter_capex"];
+  const h=harness(url=>{
+    const id=new URLSearchParams(url.split("?")[1]).get("metric_id");
+    const companies=[{cik:"1",name:"Alpha",ticker:"A"},{cik:"2",name:"Beta",ticker:"B"}];
+    return {calendar_year:2026,calendar_quarter:2,metric_id:id,rows:companies.map((company,index)=>{
+      let item=observation("1000000");
+      if(id==="quarter_net_income"&&index===0)item=observation("0",{period_start:"2026-04-01"});
+      if(id==="quarter_debt")item=observation("1000000",{period_class:"INSTANT",period_start:null,period_end:index===0?"2026-06-28":"2026-06-27"});
+      if(id==="quarter_capex")item=observation(null,{availability_status:"UNAVAILABLE",reason:"REQUIRED_ITEM_NOT_IN_PREPARED_DATA"});
+      return {company,observation:item};
+    })};
+  });
+  prepared(h);h.S.explorerSelected=new Set(["1","2"]);
+  h.state.metrics=ids.map(metric_id=>({metric_id,label:metric_id,unit_kind:"MONEY",unit:"USD",observation_basis:metric_id==="quarter_debt"?"INSTANT":"QTD_3M"}));
+  h.get("#comparison-metrics").selectedOptions=ids.map(value=>({value}));
+  await h.renderComparison();
+  const [heading,body]=h.get("#comparison-result").innerHTML.split("<tbody>");
+  assert.match(heading,/Alpha · A/);
+  assert.equal((heading.match(/분기 2026-03-29 ~ 2026-06-27/g)||[]).length,2);
+  assert.doesNotMatch(body,/2026-03-29/);
+  assert.equal((body.match(/class="comparison-period-exception"/g)||[]).length,2);
+  assert.match(body,/0\.0[\s\S]*분기 2026-04-01 ~ 2026-06-27/);
+  assert.match(body,/기말 기준[\s\S]*기준일 2026-06-26/);
+  assert.match(body,/aria-label="자료 없음: 준비 자료에서 항목을 확인할 수 없음"/);
+});
+
+test("latest TTM comparison uses TTM spans, anchor-only dates and no conflicted date",async()=>{
+  const id="ttm_revenue",anchor={...observation(null,{period_end:"2026-07-01"}),bucket_status:"PERIOD_AVAILABLE"};
+  const h=harness(()=>({period_scope:"LATEST_COMPANY",metric_id:id,rows:[
+    {company:{cik:"1",name:"Alpha"},period:anchor,observation:observation("1200000",{period_class:"TTM",period_start:"2025-07-01",period_end:"2026-07-01"})},
+    {company:{cik:"2",name:"Beta"},period:anchor,observation:observation(null,{availability_status:"UNAVAILABLE",reason:"INPUTS_NOT_COMPATIBLE"})},
+    {company:{cik:"3",name:"Gamma"},period:{...anchor,bucket_status:"PERIOD_CONFLICT",period_end:"2026-06-20"},observation:null},
+  ]}));
+  prepared(h);h.state.basis="TTM";h.state.periods.TTM="LATEST";
+  h.state.metrics=definitions.filter(metric=>metric.metric_id===id);h.S.explorerSelected=new Set(["1","2","3"]);
+  h.get("#comparison-metrics").selectedOptions=[{value:id}];
+  await h.renderComparison();
+  const [heading,body]=h.get("#comparison-result").innerHTML.split("<tbody>");
+  assert.match(h.calls[0],/latest=true/);
+  assert.match(heading,/TTM 2025-07-01 ~ 2026-06-30/);
+  assert.match(heading,/기준 종료일 2026-06-30/);
+  assert.match(heading,/Gamma<small[^>]+>실제 기간 확인 불가/);
+  assert.doesNotMatch(heading,/2026-03-29|2026-06-19/);
+  assert.doesNotMatch(body,/comparison-period-exception/);
+  assert.match(body,/aria-label="자료 없음: 분기 합계 조건을 충족하지 않음"/);
+});
+
+test("annual comparison honors legacy context-end conventions and displays a differing instant",async()=>{
+  const id="debt",metric={metric_id:id,label:"부채",period_class:"INSTANT",unit_kind:"MONEY",unit:"USD"};
+  const h=harness(()=>({selected_fiscal_year:2024,date_limitation:"기간 주의",companies:[{cik:"1",name:"Alpha"},{cik:"2",name:"Beta"},{cik:"3",name:"Gamma"}],
+    actual_periods:{
+      "1":{period_start:"2024-01-01",context_end_date:"2024-12-31"},
+      "2":{period_start:"2024-01-01",period_end:"2025-01-01"},
+      "3":{period_start:"2024-01-01",context_end_date:"2025-01-01",context_end_convention:"SOURCE_CONTEXT_END_EXCLUSIVE"},
+    },
+    rows:[{metric,values:{"1":observation("0",{period_end:"2025-01-01",period_class:"INSTANT",fiscal_year:2024,fiscal_quarter:null}),"2":observation("1",{period_end:"2024-12-29",period_class:"INSTANT",fiscal_year:2024,fiscal_quarter:null})}}]}));
+  h.S.explorerSelected=new Set(["1","2","3"]);h.get("#comparison-metrics").selectedOptions=[{value:id}];
+  await h.renderComparison();
+  const [heading,body]=h.get("#comparison-result").innerHTML.split("<tbody>");
+  assert.equal((heading.match(/연간 2024-01-01 ~ 2024-12-31/g)||[]).length,3);
+  assert.equal((body.match(/class="comparison-period-exception"/g)||[]).length,1);
+  assert.match(body,/기준일 2024-12-28/);
+});
+
 test("unsupported quarter inventory disables interim modes with a local explanation",async()=>{
   const h=harness(()=>{throw new Error("not supported")});
   h.get("#explorer-basis").options=[{value:"ANNUAL"},{value:"QUARTERLY"},{value:"TTM"}];
