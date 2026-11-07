@@ -9,6 +9,14 @@ import pytest
 
 from sec_xbrl.metrics import quarterly_screening as producer
 from sec_xbrl.metrics.screening import digest_value, sha256_file, write_json
+from sec_xbrl.metrics.statement_metric_evidence import (
+    CONTINUITY_CATALOG,
+    LEGACY_REVENUE,
+    NEW_REVENUE,
+    STANDARD_CAPEX,
+    STATEMENT_EVIDENCE_VERSION,
+    read_statement_metric_evidence,
+)
 from sec_xbrl.screening.quarterly import QuarterlyScreeningMetricReader
 from tests.screening.test_quarterly_screening_producer import (
     AS_OF,
@@ -68,12 +76,12 @@ def _inputs():
     return columns, cells, traces
 
 
-def _records(inputs=None, *, catalog_version=producer.CATALOG_VERSION):
+def _records(inputs=None, *, catalog_version=producer.CATALOG_VERSION, statement_evidence=None):
     columns, cells, traces = inputs or _inputs()
     return producer.build_quarterly_company_records(
         ticker="TEST", cik=CIK, financial_as_of=AS_OF, columns=columns,
         rows=_profile_rows(), cells=cells, traces=traces, spine=producer._quarter_spine(AS_OF),
-        catalog_version=catalog_version)
+        catalog_version=catalog_version, statement_evidence=statement_evidence)
 
 
 def _row(rows, metric, year=2026, quarter=3):
@@ -81,8 +89,11 @@ def _row(rows, metric, year=2026, quarter=3):
                 == (metric, year, quarter))
 
 
-def _publication(tmp_path, *, legacy=False, mutate=None, inputs=None, catalog_version=producer.CATALOG_VERSION):
-    rows, inventory = _records(inputs, catalog_version=catalog_version)
+def _publication(tmp_path, *, legacy=False, mutate=None, inputs=None,
+                 catalog_version=producer.CATALOG_VERSION, evidence_pin=None):
+    evidence = read_statement_metric_evidence(evidence_pin, AS_OF) if evidence_pin else None
+    rows, inventory = _records(inputs, catalog_version=catalog_version, statement_evidence=evidence)
+    config = {"statement_metric_evidence": evidence_pin} if evidence_pin else {}
     definitions = copy.deepcopy(list(producer.LEGACY_DEFINITIONS if legacy else producer.quarterly_metric_definitions(catalog_version)))
     ids = {row["metric_id"] for row in definitions}
     rows = [row for row in rows if row["metric_id"] in ids]
@@ -93,7 +104,7 @@ def _publication(tmp_path, *, legacy=False, mutate=None, inputs=None, catalog_ve
     manifest = {"schema_version": producer.VERSION, "fixture_kind": "SYNTHETIC_QUARTERLY_41",
                 "financial_as_of": AS_OF, "global_quarter_spine": producer._quarter_spine(AS_OF),
                 "universe": {"ciks": [CIK], "company_count": 1, "company_membership_sha256": membership},
-                "annual_parent": {"company_membership_sha256": membership}, "config": {},
+                "annual_parent": {"company_membership_sha256": membership}, "config": config,
                 "governance_parents": [], "files": {}, "counts": {}}
     if not legacy:
         manifest["catalog_version"] = catalog_version
@@ -104,7 +115,7 @@ def _publication(tmp_path, *, legacy=False, mutate=None, inputs=None, catalog_ve
         manifest["files"][filename] = {"sha256": sha256_file(path), "size": path.stat().st_size,
                                         "record_count": len(records)}
         manifest["counts"][name] = len(records)
-    identity = {"config": {}, "annual_parent": manifest["annual_parent"], "definitions": definitions,
+    identity = {"config": config, "annual_parent": manifest["annual_parent"], "definitions": definitions,
                 "support": support, "observations": rows, "period_inventory": inventory, "sources": []}
     manifest["publication_id"] = "quarterly-screening-metrics-" + digest_value(identity)[:24]
     write_json(tmp_path / producer.MANIFEST, manifest)
@@ -384,3 +395,89 @@ def test_prepared_derived_quarter_keeps_period_raw_and_parent_scope_gates(tmp_pa
     with pytest.raises(ValueError):
         QuarterlyScreeningMetricReader(_publication(
             tmp_path, inputs=_inputs_with_derived_q2_cfo(), mutate=mutate))
+
+
+def _revenue_statement_row(lineage, *, fact_id=None):
+    elected = lineage["selected_source_fact_id"]
+    primary = fact_id or elected
+    return {
+        "version": STATEMENT_EVIDENCE_VERSION,
+        "cik": CIK, "source_fact_id": primary,
+        "equivalent_source_fact_ids": sorted({elected, primary}),
+        "statement_type": "IS", "row_label": "Revenues",
+        "period_start": lineage["context_start_date"], "period_end": lineage["context_end_date"],
+        "end_convention": "EXCLUSIVE", "value": lineage["value_numeric"], "dimensions": [], "unit": "USD",
+        "raw_concept_id": "raw-revenue", "source_document": "primary.htm", "statement_role_id": "income-role",
+        "source_table_id": "table-id", "source_row_id": "row-id",
+        "table_locator": "/table", "row_locator": "/table/tr", "cell_locator": "/table/tr/td[2]",
+        **{field: lineage[field] for field in (
+            "accession", "source_filing_id", "source_snapshot_id", "context_id", "unit_id",
+            "period_class", "filed_date", "report_date", "raw_concept_qname", "raw_concept_namespace_uri",
+        )},
+        **dict.fromkeys(("snapshot_manifest_sha256", "package_sha256", "source_document_sha256", "source_table_sha256"), "a" * 64),
+    }
+
+
+@pytest.mark.parametrize("defect", (None, "forged_elected_id", "early_available_date", "changed_comparative"))
+def test_continuity_revenue_keeps_raw_bindings_and_proof_availability(tmp_path, defect):
+    inputs = _inputs()
+    transitions = {}
+    for cell, trace in zip(inputs[1], inputs[2], strict=True):
+        lineage = trace["value_lineage"]
+        if cell["row_id"] == "capex":
+            lineage["raw_concept_qname"] = STANDARD_CAPEX
+        if cell["row_id"] != "revenue":
+            continue
+        coordinate = (cell["fiscal_year"], cell["fiscal_quarter"])
+        if coordinate <= (2026, 1):
+            lineage["raw_concept_qname"] = LEGACY_REVENUE
+        else:
+            lineage.update(raw_concept_qname=NEW_REVENUE, company_canonical_concept_id="company:new-revenue")
+        if coordinate in {(2026, 1), (2026, 2)}:
+            accession = lineage["accession"]
+            lineage["source_snapshot_id"] = f"l1:{CIK}:{accession.replace('-', '')}:{'a' * 16}"
+            transitions[coordinate] = lineage
+    old = _revenue_statement_row(transitions[2026, 1], fact_id="primary-old")
+    first_new = _revenue_statement_row(transitions[2026, 2], fact_id="primary-new")
+    comparative = {
+        **old, "raw_concept_qname": NEW_REVENUE,
+        "accession": "0000000001-26-123456", "source_filing_id": "comparative",
+        "source_snapshot_id": f"l1:{CIK}:000000000126123456:{'a' * 16}",
+        "source_fact_id": "primary-comparative", "equivalent_source_fact_ids": ["primary-comparative"],
+        "filed_date": "2026-10-08", "report_date": "2026-09-30",
+    }
+    if defect == "changed_comparative":
+        comparative["value"] = "101"
+    artifact = tmp_path / "occurrences.json"
+    write_json(artifact, {"version": STATEMENT_EVIDENCE_VERSION, "financial_as_of": AS_OF,
+                          "records": [old, first_new, comparative]})
+    pin = {"path": str(artifact), "sha256": sha256_file(artifact)}
+
+    def alter(rows):
+        row = _row(rows, "ttm_revenue")
+        if defect == "forged_elected_id":
+            row["source_lineage"]["revenue_transition"]["elected_old_fact_id"] = "unrelated"
+        if defect == "early_available_date":
+            row["filed_date"] = "2026-10-05"
+
+    root = tmp_path / "quarterly"
+    root.mkdir()
+    _publication(root, inputs=inputs, catalog_version=CONTINUITY_CATALOG, evidence_pin=pin, mutate=alter)
+    if defect in {"forged_elected_id", "early_available_date"}:
+        with pytest.raises(ValueError, match="exact statement overlap|filing date differs"):
+            QuarterlyScreeningMetricReader(root)
+        return
+    reader = QuarterlyScreeningMetricReader(root)
+    selected = _row(reader.observations, "ttm_revenue")
+    if defect == "changed_comparative":
+        assert selected["reason"] == "INPUTS_NOT_COMPATIBLE"
+        return
+    assert selected["value"] == "1000"
+    assert selected["filed_date"] == comparative["filed_date"]
+    proof = selected["source_lineage"]["revenue_transition"]
+    assert proof["old_occurrence"]["source_fact_id"] == "primary-old"
+    assert proof["elected_old_fact_id"] == transitions[2026, 1]["selected_source_fact_id"]
+    assert proof["proof_available_on"] == comparative["filed_date"]
+    assert _row(reader.observations, "ttm_operating_margin")["reason"] == "INPUTS_NOT_COMPATIBLE"
+    old_rows, _ = _records(inputs, catalog_version=producer.ARITHMETIC_CATALOG_VERSION)
+    assert _row(old_rows, "ttm_revenue")["reason"] == "INPUTS_NOT_COMPATIBLE"

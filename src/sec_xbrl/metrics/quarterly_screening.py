@@ -44,6 +44,16 @@ from sec_xbrl.metrics.screening import (
     sha256_file,
     write_json,
 )
+from sec_xbrl.metrics.statement_metric_evidence import (
+    CAPEX_POLICY,
+    CONTINUITY_CATALOG,
+    PRODUCTIVE_ASSETS,
+    REVENUE_POLICY,
+    OccurrenceIndex,
+    matching_statement_occurrence,
+    read_statement_metric_evidence,
+    revenue_transition_proof,
+)
 
 VERSION = "quarterly-screening-metric-manifest-v1"
 CONFIG_VERSION = "quarterly-screening-metric-config-v1"
@@ -357,12 +367,31 @@ ARITHMETIC_METRIC_DEFINITIONS = tuple(
 )
 
 
+_CONTINUITY_METRIC_IDS = {
+    "quarter_capex", "quarter_standardized_fcf", "quarter_fcf_margin",
+    "ttm_standardized_fcf", "ttm_fcf_margin", "ttm_revenue",
+}
+CONTINUITY_DEFINITIONS = tuple(
+    {
+        **copy.deepcopy(row),
+        "definition_version": row["definition_version"] + "-continuity-v3",
+        **({"rule_version": row["rule_version"] + "-continuity-v3"}
+           if row["metric_id"] != "quarter_capex" else {}),
+        "continuity_policy": REVENUE_POLICY if row["metric_id"] == "ttm_revenue" else CAPEX_POLICY,
+    }
+    if row["metric_id"] in _CONTINUITY_METRIC_IDS else copy.deepcopy(row)
+    for row in ARITHMETIC_METRIC_DEFINITIONS
+)
+
+
 def quarterly_metric_definitions(catalog_version: str = CATALOG_VERSION) -> tuple[dict[str, Any], ...]:
     """Select an explicit immutable policy catalog; default stays strict."""
     if catalog_version == CATALOG_VERSION:
         return METRIC_DEFINITIONS
     if catalog_version == ARITHMETIC_CATALOG_VERSION:
         return ARITHMETIC_METRIC_DEFINITIONS
+    if catalog_version == CONTINUITY_CATALOG:
+        return CONTINUITY_DEFINITIONS
     raise ValueError("unsupported quarterly metric catalog")
 
 
@@ -394,7 +423,10 @@ def publish_quarterly_screening_metrics(
         raise ValueError("annual and quarterly company membership differ")
     generic_identity = _open_generic_identity_parent(annual)
 
-    definitions = copy.deepcopy(list(quarterly_metric_definitions(config.get("catalog_version", CATALOG_VERSION))))
+    catalog = config.get("catalog_version", CATALOG_VERSION)
+    definitions = copy.deepcopy(list(quarterly_metric_definitions(catalog)))
+    evidence = (read_statement_metric_evidence(config["statement_metric_evidence"], config["financial_as_of"])
+                if catalog == CONTINUITY_CATALOG else None)
     all_observations: list[dict[str, Any]] = []
     all_inventory: list[dict[str, Any]] = []
     sources: list[dict[str, Any]] = []
@@ -409,7 +441,8 @@ def publish_quarterly_screening_metrics(
             financial_as_of=config["financial_as_of"],
             client=client,
             spine=config["global_quarter_spine"],
-            catalog_version=config.get("catalog_version", CATALOG_VERSION),
+            catalog_version=catalog,
+            statement_evidence=evidence,
         )
         all_observations.extend(observations)
         all_inventory.extend(inventory)
@@ -508,6 +541,11 @@ def publish_quarterly_screening_metrics(
             ],
         }
         write_json(staging / MANIFEST, manifest)
+        if catalog == CONTINUITY_CATALOG:
+            from sec_xbrl.screening.quarterly import QuarterlyScreeningMetricReader
+
+            QuarterlyMetricReader(staging)
+            QuarterlyScreeningMetricReader(staging)
         atomic_replace(staging, destination_path)
     except Exception:
         if staging.exists():
@@ -516,7 +554,8 @@ def publish_quarterly_screening_metrics(
     publication = QuarterlyMetricPublication(
         destination_path, publication_id, destination_path / MANIFEST
     )
-    QuarterlyMetricReader(destination_path).verify_all()
+    if catalog != CONTINUITY_CATALOG:
+        QuarterlyMetricReader(destination_path).verify_all()
     return publication
 
 
@@ -644,6 +683,9 @@ def _validate_config(value: Any) -> dict[str, Any]:
     quarterly_metric_definitions(catalog)
     financial_as_of = require_string(value.get("financial_as_of"), "financial_as_of")
     date.fromisoformat(financial_as_of)
+    has_evidence = "statement_metric_evidence" in value
+    if has_evidence != (catalog == CONTINUITY_CATALOG):
+        raise ValueError("statement metric evidence requires the explicit continuity catalog")
     companies = value.get("companies")
     if not isinstance(companies, list) or not companies:
         raise ValueError("quarterly metric config requires companies")
@@ -679,6 +721,7 @@ def _validate_config(value: Any) -> dict[str, Any]:
         "global_quarter_spine": copy.deepcopy(expected_spine),
         "companies": sorted(normalized, key=lambda row: row["cik"]),
         **({"catalog_version": catalog} if catalog != CATALOG_VERSION else {}),
+        **({"statement_metric_evidence": copy.deepcopy(value["statement_metric_evidence"])} if has_evidence else {}),
     }
 
 
@@ -798,6 +841,7 @@ def _company_records(
     client: Any,
     spine: list[dict[str, Any]],
     catalog_version: str = CATALOG_VERSION,
+    statement_evidence: OccurrenceIndex | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     columns = client._records(ticker, VIEW, "columns")
     rows = client._records(ticker, VIEW, "core_rows")
@@ -807,6 +851,19 @@ def _company_records(
         for digit in "0123456789abcdef"
         for trace in client._records(ticker, VIEW, f"trace_{digit}")
     ]
+    capex_candidates = []
+    if statement_evidence and any(
+        item["cik"] == cik and item["raw_concept_qname"] == PRODUCTIVE_ASSETS
+        for item in statement_evidence.values()
+    ):
+        productive_nodes = {
+            node["node_id"] for node in client._records(ticker, VIEW, "nodes")
+            if node.get("concept") == PRODUCTIVE_ASSETS
+        }
+        capex_candidates = [
+            cell for cell in client._records(ticker, VIEW, "cells")
+            if cell.get("node_id") in productive_nodes and cell.get("period_class") == "QTD_3M"
+        ]
     return build_quarterly_company_records(
         ticker=ticker,
         cik=cik,
@@ -817,6 +874,8 @@ def _company_records(
         traces=traces,
         spine=spine,
         catalog_version=catalog_version,
+        statement_evidence=statement_evidence,
+        capex_candidates=capex_candidates,
     )
 
 
@@ -831,9 +890,15 @@ def build_quarterly_company_records(
     traces: list[dict[str, Any]],
     spine: list[dict[str, Any]],
     catalog_version: str = CATALOG_VERSION,
+    statement_evidence: OccurrenceIndex | None = None,
+    capex_candidates: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Build one company's fixed-spine records from already prepared data."""
     definitions = quarterly_metric_definitions(catalog_version)
+    if (statement_evidence is not None) != (catalog_version == CONTINUITY_CATALOG):
+        raise ValueError("statement metric evidence requires the explicit continuity catalog")
+    reported_definitions = tuple(row for row in definitions if row.get("source_row_id"))
+    generic_definitions = tuple(row for row in definitions if row.get("input_contract") and row["observation_basis"] != "TTM")
     ticker = require_ticker(ticker, "ticker")
     cik = require_cik(cik, "cik")
     date.fromisoformat(financial_as_of)
@@ -851,8 +916,12 @@ def build_quarterly_company_records(
     for cell in cells:
         cells_by_row.setdefault(str(cell.get("row_id")), []).append(cell)
 
+    capex_by_column: dict[str, list[dict[str, Any]]] = {}
+    for candidate in capex_candidates or []:
+        capex_by_column.setdefault(candidate["column_id"], []).append(candidate)
+
     direct_all: dict[str, list[dict[str, Any]]] = {}
-    for definition in REPORTED_DEFINITIONS:
+    for definition in reported_definitions:
         direct_all[definition["metric_id"]] = _prepared_metric_rows(
             ticker=ticker,
             cik=cik,
@@ -861,6 +930,8 @@ def build_quarterly_company_records(
             cells=cells_by_row.get(definition["source_row_id"], []),
             trace_by_cell=trace_by_cell,
             column_by_id=column_by_id,
+            capex_by_column=capex_by_column if definition.get("continuity_policy") == CAPEX_POLICY else None,
+            statement_evidence=statement_evidence,
         )
     inventory = _period_inventory(ticker, cik, spine, direct_all)
     output: list[dict[str, Any]] = []
@@ -869,7 +940,7 @@ def build_quarterly_company_records(
     internal_keys = display_keys | {(row["calendar_year"], row["calendar_quarter"])
                                     for values in direct_all.values() for row in values}
     internal_spine = [{"calendar_year": y, "calendar_quarter": q} for y, q in sorted(internal_keys)]
-    for definition in REPORTED_DEFINITIONS:
+    for definition in reported_definitions:
         grouped: dict[tuple[int, int], list[dict[str, Any]]] = {}
         for row in direct_all[definition["metric_id"]]:
             grouped.setdefault((row["calendar_year"], row["calendar_quarter"]), []).append(row)
@@ -905,7 +976,7 @@ def build_quarterly_company_records(
                     fiscal_conflicts.add(coordinate)
                 else:
                     fiscal_index[coordinate] = row
-    for definition in GENERIC_DEFINITIONS:
+    for definition in generic_definitions:
         for bucket in internal_spine:
             key = (bucket["calendar_year"], bucket["calendar_quarter"])
             row = _generic_observation(
@@ -938,10 +1009,29 @@ def build_quarterly_company_records(
                 definition=definition, bucket=key,
                 current_by_bucket=output_by_metric_bucket,
                 fiscal_index=fiscal_index, inventory=inventory,
+                **({"statement_evidence": statement_evidence} if definition["metric_id"] == "ttm_revenue" else {}),
             )
             output.append(row)
     output.sort(key=lambda row: (row["metric_id"], row["calendar_year"], row["calendar_quarter"]))
     return output, inventory
+
+
+def _attach_capex_occurrences(
+    checked: dict[str, Any], evidence: OccurrenceIndex,
+) -> dict[str, Any] | None:
+    if checked["availability_status"] != "AVAILABLE" or Decimal(checked["value"]) < 0:
+        return None
+    lineage = checked["source_lineage"]
+    sources = [lineage] if checked["source_kind"] == "REPORTED" else lineage["derivation_inputs"]
+    occurrences = [
+        matching_statement_occurrence(source, evidence)
+        for source in sources if source.get("raw_concept_qname") == PRODUCTIVE_ASSETS
+    ]
+    if len(occurrences) != len(sources) or not occurrences or any(item is None for item in occurrences):
+        return None
+    lineage["capex_purchase_occurrences"] = copy.deepcopy(occurrences)
+    checked["observation_id"] = _observation_id(checked)
+    return checked
 
 
 def _prepared_metric_rows(
@@ -953,6 +1043,8 @@ def _prepared_metric_rows(
     cells: list[dict[str, Any]],
     trace_by_cell: dict[str, dict[str, Any]],
     column_by_id: dict[str, dict[str, Any]],
+    capex_by_column: dict[str, list[dict[str, Any]]] | None = None,
+    statement_evidence: OccurrenceIndex | None = None,
 ) -> list[dict[str, Any]]:
     result = []
     for cell in cells:
@@ -977,6 +1069,21 @@ def _prepared_metric_rows(
             column=column,
             bucket=bucket,
         )
+        if (capex_by_column and statement_evidence
+            and cell.get("status") == "UNAVAILABLE"
+            and cell.get("source_reason") == "REQUIRED_ITEM_NOT_IN_PREPARED_DATA"):
+            candidates = capex_by_column.get(cell["column_id"], [])
+            if len(candidates) == 1:
+                candidate = {**candidates[0], "row_id": "capex"}
+                if (candidate.get("end") == end
+                    and (not column.get("actual_start_date") or candidate.get("start") == column["actual_start_date"])
+                    and not candidate.get("quality_blocking")
+                    and candidate.get("quality_status") != "BLOCK"):
+                    alternative = _prepared_observation(
+                        ticker=ticker, cik=cik, financial_as_of=financial_as_of, definition=definition,
+                        cell=candidate, trace=trace_by_cell[candidate["cell_id"]], column=column, bucket=bucket,
+                    )
+                    prepared = _attach_capex_occurrences(alternative, statement_evidence) or prepared
         result.append(prepared)
     return result
 
@@ -1998,6 +2105,7 @@ def _ttm_observation(
     fiscal_index: dict[tuple[str, int, str], dict[str, Any]],
     inventory: list[dict[str, Any]],
     definition: dict[str, Any] = TTM_DEFINITION,
+    statement_evidence: OccurrenceIndex | None = None,
 ) -> dict[str, Any]:
     source_metric = definition["input_metric_id"]
     current = current_by_bucket.get((source_metric, *bucket))
@@ -2014,6 +2122,7 @@ def _ttm_observation(
             for y, q in coordinates
         ]
     reasons = []
+    transition = None
     if len(inputs) != 4 or any(row is None or row.get("availability_status") != "AVAILABLE" for row in inputs):
         reasons.append("INPUTS_NOT_COMPATIBLE")
     else:
@@ -2023,7 +2132,10 @@ def _ttm_observation(
         if any(a["period_end"] != b["period_start"] for a, b in pairwise(prepared)):
             reasons.append("INPUTS_NOT_CONTIGUOUS")
         if len({canonical_json(_ttm_semantic_binding(row)) for row in prepared}) != 1:
-            reasons.append("INPUTS_NOT_COMPATIBLE")
+            if statement_evidence is not None and definition.get("continuity_policy") == REVENUE_POLICY:
+                transition = revenue_transition_proof(prepared, statement_evidence)
+            if transition is None:
+                reasons.append("INPUTS_NOT_COMPATIBLE")
         bases = [row.get("basis_version") for row in prepared]
         if (
             (any(not isinstance(value, str) or not value for value in bases)
@@ -2042,10 +2154,10 @@ def _ttm_observation(
             "dimensions",
             "selection_view",
             "selection_as_of_date",
-            "company_canonical_concept_id",
             "canonical_mapping_version",
             "structural_version",
             "recast_version",
+            *(("company_canonical_concept_id",) if transition is None else ()),
         ):
             if len({canonical_json(row.get(field)) for row in prepared}) != 1:
                 reasons.append("INPUTS_NOT_COMPATIBLE")
@@ -2057,7 +2169,7 @@ def _ttm_observation(
         )
     prepared = [row for row in inputs if row is not None]
     value = _decimal_string(_exact_sum(Decimal(row["value"]) for row in prepared))
-    return _derived_output_base(
+    result = _derived_output_base(
         ticker=ticker,
         cik=cik,
         financial_as_of=financial_as_of,
@@ -2070,6 +2182,11 @@ def _ttm_observation(
         compatibility_policy=(ARITHMETIC_POLICY if prepared[0]["basis_version"] is None
                               else "DECLARED_BASIS:" + prepared[0]["basis_version"]),
     )
+    if transition is not None:
+        result["source_lineage"]["revenue_transition"] = copy.deepcopy(transition)
+        result["filed_date"] = max(result["filed_date"], transition["proof_available_on"])
+        result["observation_id"] = _observation_id(result)
+    return result
 
 
 def _ttm_margin_observation(
@@ -2324,7 +2441,7 @@ def main(argv: list[str] | None = None) -> int:
     publish = subparsers.add_parser("publish")
     publish.add_argument("--config", type=Path, required=True)
     publish.add_argument("--destination", type=Path, required=True)
-    publish.add_argument("--catalog-version", choices=(CATALOG_VERSION, ARITHMETIC_CATALOG_VERSION),
+    publish.add_argument("--catalog-version", choices=(CATALOG_VERSION, ARITHMETIC_CATALOG_VERSION, CONTINUITY_CATALOG),
                          help="Require the same explicit catalog selection in --config; omission preserves the config/default policy")
     status = subparsers.add_parser("status")
     status.add_argument("--publication", type=Path, required=True)

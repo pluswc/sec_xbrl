@@ -11,6 +11,16 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
+from sec_xbrl.metrics.statement_metric_evidence import (
+    CAPEX_POLICY,
+    CONTINUITY_CATALOG,
+    PRODUCTIVE_ASSETS,
+    REVENUE_POLICY,
+    STANDARD_CAPEX,
+    matching_statement_occurrence,
+    read_statement_metric_evidence,
+    revenue_transition_proof,
+)
 from sec_xbrl.screening.common import (
     canonical_json,
     contained_file,
@@ -36,7 +46,12 @@ AVAILABILITY = {"AVAILABLE", "UNAVAILABLE"}
 EXPANDED_CATALOG = "quarterly-investor-41-v1"
 ARITHMETIC_CATALOG = "quarterly-investor-41-arithmetic-ttm-v2"
 TTM_BASIS_POLICY = "DECLARED_EQUAL_OR_ALL_NULL_ARITHMETIC_V1"
-_EXPANDED_CATALOGS = {EXPANDED_CATALOG, ARITHMETIC_CATALOG}
+_ARITHMETIC_CATALOGS = {ARITHMETIC_CATALOG, CONTINUITY_CATALOG}
+_EXPANDED_CATALOGS = {EXPANDED_CATALOG, *_ARITHMETIC_CATALOGS}
+_CONTINUITY_CAPEX_METRICS = {
+    'quarter_capex', 'quarter_standardized_fcf', 'quarter_fcf_margin',
+    'ttm_standardized_fcf', 'ttm_fcf_margin',
+}
 _ARITHMETIC_TTM_AMOUNT_INPUTS = {
     "ttm_revenue": "quarter_revenue",
     "ttm_operating_income": "quarter_operating_income",
@@ -156,6 +171,14 @@ class QuarterlyScreeningMetricReader:
         ):
             raise ValueError("quarterly metric definitions are not unique and prefixed")
         catalog = self.manifest.get("catalog_version")
+        config = self.manifest.get("config") or {}
+        has_evidence = "statement_metric_evidence" in config
+        if has_evidence != (catalog == CONTINUITY_CATALOG):
+            raise ValueError("statement metric evidence requires the explicit continuity catalog")
+        self._statement_evidence = (
+            read_statement_metric_evidence(config["statement_metric_evidence"], self.manifest["financial_as_of"])
+            if has_evidence else {}
+        )
         if catalog not in {None, *_EXPANDED_CATALOGS}:
             raise ValueError("unsupported quarterly metric catalog")
         if catalog in _EXPANDED_CATALOGS and set(definitions) != EXPANDED_METRIC_IDS:
@@ -163,15 +186,28 @@ class QuarterlyScreeningMetricReader:
         if catalog is None and _EXPANDED_ONLY_TTM.intersection(definitions):
             raise ValueError("expanded quarterly metrics require an explicit catalog version")
         for metric, definition in definitions.items():
+            expected_policy = None
+            if catalog == CONTINUITY_CATALOG:
+                if metric in _CONTINUITY_CAPEX_METRICS:
+                    expected_policy = CAPEX_POLICY
+                elif metric == "ttm_revenue":
+                    expected_policy = REVENUE_POLICY
+            if definition.get("continuity_policy") != expected_policy:
+                raise ValueError("quarterly continuity definition policy differs")
+            if expected_policy == CAPEX_POLICY and not definition.get("definition_version", "").endswith("-continuity-v3"):
+                raise ValueError("quarterly CAPEX continuity requires a versioned definition")
             if not metric.startswith("ttm_"):
                 continue
-            if catalog == ARITHMETIC_CATALOG:
+            if catalog in _ARITHMETIC_CATALOGS:
                 margin = metric.endswith("_margin")
                 if not margin and definition.get("input_metric_id") != _ARITHMETIC_TTM_AMOUNT_INPUTS[metric]:
                     raise ValueError("arithmetic TTM amount requires its exact governed input metric")
                 version = ("quarter-" + metric.replace("_", "-") + "-arithmetic-v2"
                            if margin else "quarter-ttm-arithmetic-v2")
                 rule = version if margin else "quarter-ttm-contiguous-arithmetic-v2"
+                if expected_policy is not None:
+                    version += "-continuity-v3"
+                    rule += "-continuity-v3"
                 if (definition.get("basis_policy") != TTM_BASIS_POLICY
                     or definition.get("definition_version") != version or definition.get("rule_version") != rule):
                     raise ValueError("arithmetic TTM requires its exact versioned basis contract")
@@ -306,7 +342,7 @@ class QuarterlyScreeningMetricReader:
             if row.get("period_class") != definition.get("observation_basis"):
                 raise ValueError("quarterly observation period class differs from definition")
             if (definition.get("observation_basis") == "TTM" and not row.get("basis_version")
-                and self.manifest.get("catalog_version") != ARITHMETIC_CATALOG):
+                and self.manifest.get("catalog_version") not in _ARITHMETIC_CATALOGS):
                 raise ValueError("available TTM observation requires a basis version")
         if row.get("period_end") is not None:
             if row.get("end_convention") != "EXCLUSIVE":
@@ -327,6 +363,19 @@ class QuarterlyScreeningMetricReader:
         """Check declared scope and input dates; never evaluate financial formulas."""
         lineage = row["source_lineage"]
         kind = row["source_kind"]
+        declared_transition = lineage.get("revenue_transition")
+        if "revenue_transition" in lineage and (
+            definition.get("continuity_policy") != REVENUE_POLICY
+            or self.manifest.get("catalog_version") != CONTINUITY_CATALOG
+            or not isinstance(declared_transition, dict)
+        ):
+            raise ValueError("revenue transition is outside the continuity definition")
+        declared_purchases = lineage.get("capex_purchase_occurrences")
+        if "capex_purchase_occurrences" in lineage and (
+            row["metric_id"] != "quarter_capex" or definition.get("continuity_policy") != CAPEX_POLICY
+            or not isinstance(declared_purchases, list)
+        ):
+            raise ValueError("CAPEX purchase occurrence is outside the continuity definition")
         inputs = lineage.get("derivation_inputs")
         if not isinstance(inputs, list) or not all(isinstance(x, dict) for x in inputs):
             raise ValueError("quarterly derivation inputs must be an explicit list")
@@ -393,6 +442,15 @@ class QuarterlyScreeningMetricReader:
                     raise ValueError("TTM derived input definition is missing")
                 self._verify_observation(source, {source_metric: source_definition})
         self._verify_selected_eligibility(row, lineage, sources)
+        if row["metric_id"] == "quarter_capex" and definition.get("continuity_policy") == CAPEX_POLICY:
+            qnames = {source.get("raw_concept_qname") for source in sources}
+            if qnames == {PRODUCTIVE_ASSETS}:
+                matches = [matching_statement_occurrence(source, self._statement_evidence) for source in sources]
+                if (any(item is None for item in matches) or matches != declared_purchases
+                    or Decimal(row["value"]) < 0):
+                    raise ValueError("CAPEX source lacks exact qualified purchase occurrence")
+            elif qnames != {STANDARD_CAPEX} or declared_purchases is not None:
+                raise ValueError("CAPEX cumulative anchors mix or misuse statement policies")
 
         if kind == "REPORTED":
             for field in (
@@ -427,6 +485,7 @@ class QuarterlyScreeningMetricReader:
                 raise ValueError(f"quarterly derived input {field} differs")
         if any(source["basis_version"] != row.get("basis_version") for source in sources):
             raise ValueError("quarterly derived input basis differs from observation")
+        proof = None
         if kind == "DERIVED_QUARTER":
             later, earlier = sources
             expected_classes = {
@@ -458,7 +517,13 @@ class QuarterlyScreeningMetricReader:
                 raise ValueError("TTM requires four contiguous QTD inputs matching output scope")
             if self.manifest.get("catalog_version") in _EXPANDED_CATALOGS:
                 if len({canonical_json(_ttm_binding(source)) for source in sources}) != 1:
-                    raise ValueError("TTM semantic inputs differ")
+                    if (definition.get("continuity_policy") == REVENUE_POLICY
+                        and self.manifest.get("catalog_version") == CONTINUITY_CATALOG):
+                        proof = revenue_transition_proof(sources, self._statement_evidence)
+                    if proof is None or proof != declared_transition:
+                        raise ValueError("TTM semantic inputs differ without exact statement overlap")
+                elif declared_transition is not None:
+                    raise ValueError("TTM revenue transition is unnecessary for equal inputs")
                 for a, b in pairwise(sources):
                     year, quarter = _fiscal_coordinate(a)
                     expected_coordinate = (year, quarter + 1) if quarter < 4 else (year + 1, 1)
@@ -466,7 +531,10 @@ class QuarterlyScreeningMetricReader:
                         raise ValueError("TTM fiscal inputs must be consecutive")
                 if _fiscal_coordinate(row) != _fiscal_coordinate(sources[-1]):
                     raise ValueError("TTM output fiscal endpoint differs")
-        if row["filed_date"] != max(source["filed_date"] for source in sources):
+        known_on = max(source["filed_date"] for source in sources)
+        if proof is not None:
+            known_on = max(known_on, proof["proof_available_on"])
+        if row["filed_date"] != known_on:
             raise ValueError("quarterly derived filing date differs from source inputs")
         if row["report_date"] != sources[0 if kind == "DERIVED_QUARTER" else -1]["report_date"]:
             raise ValueError("quarterly derived report date differs from endpoint source")
@@ -728,7 +796,7 @@ class QuarterlyScreeningMetricReader:
 
     def _verify_ttm_basis(self, row: dict, inputs: list[dict], definition: dict) -> str:
         bases = [item.get("basis_version") for item in inputs]
-        if self.manifest.get("catalog_version") == ARITHMETIC_CATALOG:
+        if self.manifest.get("catalog_version") in _ARITHMETIC_CATALOGS:
             if definition.get("basis_policy") != TTM_BASIS_POLICY:
                 raise ValueError("arithmetic TTM basis policy is missing")
             if all(value is None for value in bases):
@@ -759,7 +827,7 @@ class QuarterlyScreeningMetricReader:
                     for role, metric in (("NUMERATOR", numerator), ("DENOMINATOR", "quarter_revenue"))]
         lineage = row["source_lineage"]
         inputs = lineage.get("derivation_inputs")
-        arithmetic = self.manifest.get("catalog_version") == ARITHMETIC_CATALOG
+        arithmetic = self.manifest.get("catalog_version") in _ARITHMETIC_CATALOGS
         basis_contract = TTM_BASIS_POLICY if arithmetic else "ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"
         expected_assurance = (self._verify_ttm_basis(row, inputs, definition)
                               if isinstance(inputs, list) and len(inputs) == 8 and arithmetic

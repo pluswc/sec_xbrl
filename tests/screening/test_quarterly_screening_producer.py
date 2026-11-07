@@ -22,6 +22,12 @@ from sec_xbrl.metrics.quarterly_screening import (
     publish_quarterly_screening_metrics,
 )
 from sec_xbrl.metrics.screening import sha256_file
+from sec_xbrl.metrics.statement_metric_evidence import (
+    CONTINUITY_CATALOG,
+    PRODUCTIVE_ASSETS,
+    STATEMENT_EVIDENCE_VERSION,
+)
+from sec_xbrl.screening.quarterly import QuarterlyScreeningMetricReader
 
 CIK = "0000000001"
 AS_OF = "2026-10-10"
@@ -928,14 +934,56 @@ def test_fiscal_coordinate_conflict_does_not_reappear_on_third_duplicate() -> No
     assert qoq["availability_status"] == "UNAVAILABLE"
 
 
+@pytest.mark.parametrize("continuity", [False, True])
 def test_immutable_publication_roundtrip_and_payload_tamper(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, continuity: bool,
 ) -> None:
     columns, cells, traces = _one_quarter_inputs()
+    evidence_config = {}
+    extra_records = {}
+    if continuity:
+        candidate = next(row for row in cells if row["row_id"] == "capex")
+        lineage = next(row["value_lineage"] for row in traces if row["cell_id"] == candidate["cell_id"])
+        lineage.update(
+            raw_concept_qname=PRODUCTIVE_ASSETS, value_numeric="0",
+            source_snapshot_id=f"l1:{CIK}:000000000125000001:{'a' * 16}",
+        )
+        missing = {**candidate, "status": "UNAVAILABLE", "value": None,
+                   "source_reason": "REQUIRED_ITEM_NOT_IN_PREPARED_DATA"}
+        cells[cells.index(candidate)] = missing
+        candidate = {**candidate, "value": "0"}
+        extra_records = {
+            "nodes": [{"node_id": "capex", "concept": PRODUCTIVE_ASSETS}],
+            "cells": [{**candidate, "node_id": "capex"}],
+        }
+        item = {
+            "version": STATEMENT_EVIDENCE_VERSION, "cik": CIK,
+            "source_fact_id": lineage["selected_source_fact_id"],
+            "equivalent_source_fact_ids": [lineage["selected_source_fact_id"]],
+            "statement_type": "CF", "row_label": "Purchases of property and equipment",
+            "period_start": candidate["start"], "period_end": candidate["end"], "end_convention": "EXCLUSIVE",
+            "value": "0", "dimensions": [], "unit": "USD", "raw_concept_id": "raw-capex",
+            "source_document": "primary.htm", "statement_role_id": "cashflow-role",
+            "source_table_id": "table-id", "source_row_id": "row-id",
+            "table_locator": "/table", "row_locator": "/table/tr", "cell_locator": "/table/tr/td[2]",
+            **{field: lineage[field] for field in (
+                "accession", "source_filing_id", "source_snapshot_id", "context_id", "unit_id",
+                "period_class", "filed_date", "report_date", "raw_concept_qname", "raw_concept_namespace_uri",
+            )},
+            **dict.fromkeys(("snapshot_manifest_sha256", "package_sha256", "source_document_sha256", "source_table_sha256"), "a" * 64),
+        }
+        evidence_path = tmp_path / "statement-evidence.json"
+        evidence_path.write_text(json.dumps({"version": STATEMENT_EVIDENCE_VERSION,
+                                             "financial_as_of": AS_OF, "records": [item]}), encoding="utf-8")
+        evidence_config = {
+            "catalog_version": CONTINUITY_CATALOG,
+            "statement_metric_evidence": {"path": str(evidence_path), "sha256": sha256_file(evidence_path)},
+        }
     records = {
         "columns": columns,
         "core_rows": _profile_rows(),
         "core_cells": cells,
+        **extra_records,
     }
     for digit in "0123456789abcdef":
         records[f"trace_{digit}"] = []
@@ -984,6 +1032,7 @@ def test_immutable_publication_roundtrip_and_payload_tamper(
                     "source_commit_sha": "b" * 40,
                 "annual_metric_root": str(annual_root),
                 "annual_metric_manifest_sha256": sha256_file(annual_manifest),
+                **evidence_config,
                 "companies": [
                     {
                         "ticker": "TEST",
@@ -1008,6 +1057,17 @@ def test_immutable_publication_roundtrip_and_payload_tamper(
         "observations": 328,
         "period_inventory": 8,
     }
+
+    if continuity:
+        reader = QuarterlyScreeningMetricReader(destination)
+        capex = next(row for row in reader.observations if row["metric_id"] == "quarter_capex" and row["value"] is not None)
+        assert capex["value"] == "0"
+        assert capex["source_lineage"]["capex_purchase_occurrences"] == [item]
+        original = evidence_path.read_text(encoding="utf-8")
+        evidence_path.write_text(original + " ", encoding="utf-8")
+        with pytest.raises(ValueError, match="differs from pin"):
+            QuarterlyScreeningMetricReader(destination)
+        evidence_path.write_text(original, encoding="utf-8")
 
     payload = destination / "quarter_metric_observations.json"
     payload.write_text(payload.read_text(encoding="utf-8") + " ", encoding="utf-8")
