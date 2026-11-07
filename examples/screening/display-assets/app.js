@@ -365,7 +365,89 @@ function renderProfile(){const p=S.profile,definitions=p.groups.flatMap(x=>x.met
 async function openAnnualProfile(cik,button){const token=++explorerBasis.profileToken,key=explorerContextKey();S.lastFocus=button;const d=S.explorerDataset||S.defaultDataset;const profile=await api(`/api/company-profile?dataset_id=${encodeURIComponent(d.dataset_id)}&cik=${encodeURIComponent(cik)}&${explorerBasis.latestAnnual?"latest=true":`fiscal_year=${S.explorerYear}`}`);if(token!==explorerBasis.profileToken||key!==explorerContextKey())return;explorerBasis.profileBasis="ANNUAL";S.profile=profile;S.profileMetric=explorerBasis.profileMetrics.ANNUAL;profileTrendCaption(false);renderProfile();$("#company-profile").hidden=false;$("#company-profile").focus()}
 function closeProfile(){explorerBasis.profileToken++;explorerBasis.seriesToken++;$("#company-profile").hidden=true;S.lastFocus?.focus()}
 
-async function renderAnnualComparison(){const token=++explorerBasis.comparisonToken,key=explorerContextKey();const ids=[...$("#comparison-metrics").selectedOptions].map(x=>x.value),ciks=[...S.explorerSelected];if(ciks.length<2||ciks.length>4)throw new Error("비교할 기업을 2~4개 선택해 주세요.");if(!ids.length)throw new Error("비교 지표를 하나 이상 선택해 주세요.");const d=S.explorerDataset||S.defaultDataset,params=new URLSearchParams({dataset_id:d.dataset_id,ciks:ciks.join(","),metric_ids:ids.join(","),...(explorerBasis.latestAnnual?{latest:"true"}:{fiscal_year:String(S.explorerYear)})}),r=await api(`/api/company-comparison?${params}`);if(token!==explorerBasis.comparisonToken||key!==explorerContextKey())return;$("#comparison-result").innerHTML=`<p>${esc(r.date_limitation)}</p><table><thead><tr><th>지표 · 단위</th>${r.companies.map(x=>`<th>${esc(x.name||x.ticker)}<small>${esc(r.period_scope==="LATEST_COMPANY"?companyPeriodCaption(r.actual_periods[x.cik]):r.actual_periods[x.cik]?explorerPeriod({actual_period:r.actual_periods[x.cik]}):"선택 연도 자료 없음")}</small></th>`).join("")}</tr></thead><tbody>${r.rows.map(row=>`<tr><th>${esc(row.metric.label)}<small>${esc(unitLabel(row.metric))}</small></th>${r.companies.map(x=>`<td>${explorerValue(row.values[x.cik],row.metric)}</td>`).join("")}</tr>`).join("")}</tbody></table>`}
+function comparisonPeriodKind(observation,metric){
+  return observation?.period_class||metric.observation_basis||metric.period_class;
+}
+function comparisonDate(value){
+  if(typeof value!=="string"||!/^\d{4}-\d{2}-\d{2}$/.test(value))return null;
+  const date=new Date(value+"T00:00:00Z");
+  return Number.isFinite(date.getTime())&&date.toISOString().slice(0,10)===value?value:null;
+}
+function comparisonPeriod(observation,kind){
+  if(!observation||observation.bucket_status==="PERIOD_CONFLICT")return null;
+  const periodEnd=comparisonDate(observation.period_end);
+  if(observation.period_end&&(!periodEnd||(observation.end_convention&&observation.end_convention!=="EXCLUSIVE")))return null;
+  const end=periodEnd?inclusiveEnd(periodEnd):comparisonDate(observation.context_end_date);
+  if(!end)return null;
+  const start=kind==="INSTANT"||kind==="ANCHOR"?null:comparisonDate(observation.period_start);
+  if(kind!=="INSTANT"&&kind!=="ANCHOR"&&(!["FY","QTD_3M","TTM"].includes(kind)||!start||start>=end))return null;
+  return {kind,start,end,year:observation.fiscal_year,quarter:observation.fiscal_quarter};
+}
+function sharedComparisonPeriod(cells,anchor,basis){
+  if(anchor?.bucket_status==="PERIOD_CONFLICT")return null;
+  if(basis==="ANNUAL"){
+    const annual=comparisonPeriod(anchor,"FY");
+    if(annual)return annual;
+  }
+  const kind={ANNUAL:"FY",QUARTERLY:"QTD_3M",TTM:"TTM"}[basis];
+  const available=cells.flatMap(({observation,metric})=>{
+    if(observation?.availability_status!=="AVAILABLE"||observation.value==null||observation.quality_blocking||observation.quality_status==="BLOCK")return [];
+    const period=comparisonPeriod(observation,comparisonPeriodKind(observation,metric));
+    return period?[period]:[];
+  });
+  const spans=available.filter(period=>period.kind===kind);
+  const candidates=spans.length?spans:basis==="TTM"?[]:available.filter(period=>period.kind==="INSTANT");
+  const counts=new Map();
+  let shared=null,maximum=0;
+  for(const period of candidates){
+    const key=JSON.stringify(period),count=(counts.get(key)||0)+1;
+    counts.set(key,count);
+    if(count>maximum){shared=period;maximum=count}
+  }
+  return shared||comparisonPeriod(anchor,"ANCHOR");
+}
+function comparisonPeriodCaption(period){
+  if(!period)return "실제 기간 확인 불가";
+  const end=period.end;
+  const fiscal=period.year?`FY${period.year}${period.quarter?" "+period.quarter:""}`:"";
+  const caption=period.start?`${({FY:"연간",QTD_3M:"분기",TTM:"TTM"})[period.kind]} ${period.start} ~ ${end}`
+    :`${period.kind==="INSTANT"?"기준일":"기준 종료일"} ${end}`;
+  return fiscal?`${caption} · ${fiscal}`:caption;
+}
+function comparisonValue(observation,metric,shared,basis){
+  const value=basis==="ANNUAL"?observation:preparedExplorerObservation(observation);
+  if(value?.value==null){
+    const reason=observation?.reason||observation?.unavailable_reason||observation?.reason_codes?.[0];
+    const message=({
+      REQUIRED_ITEM_NOT_IN_PREPARED_DATA:"준비 자료에서 항목을 확인할 수 없음",
+      INPUTS_NOT_COMPATIBLE:basis==="TTM"?"분기 합계 조건을 충족하지 않음":null,
+      SEMANTIC_IDENTITY_MISMATCH:"보고 항목 기준이 다름",
+    })[reason];
+    const blocked=observation?.quality_blocking||observation?.quality_status==="BLOCK";
+    return explorerValue(message&&!blocked?{...value,value:null,reason_labels:[message]}:value,metric);
+  }
+  const period=comparisonPeriod(observation,comparisonPeriodKind(observation,metric));
+  const sameKindAndStart=period?.kind===shared?.kind&&period?.start===shared?.start;
+  const labeledInstant=period?.kind==="INSTANT"&&comparisonPeriodKind(null,metric)==="INSTANT";
+  const differs=period&&(!shared||period.end!==shared.end||
+    (!sameKindAndStart&&!labeledInstant)||
+    (period.year&&shared.year&&period.year!==shared.year)||
+    (period.quarter&&shared.quarter&&period.quarter!==shared.quarter));
+  const exception=differs?`<small class="comparison-period-exception">${esc(comparisonPeriodCaption(period))}</small>`:"";
+  return explorerValue(value,metric)+exception;
+}
+function comparisonTable(companies,rows,periods,basis){
+  return `<table><thead><tr><th scope="col">지표 · 단위</th>${companies.map(company=>`<th scope="col">${esc([company.name,company.ticker===company.name?null:company.ticker].filter(Boolean).join(" · "))}<small class="comparison-company-period">${esc(comparisonPeriodCaption(periods.get(company.cik)))}</small></th>`).join("")}</tr></thead><tbody>${rows.map(({metric,values})=>{
+    const instant=comparisonPeriodKind(null,metric)==="INSTANT";
+    const unit=unitLabel(metric)+(instant?" · 기말 기준":"");
+    return `<tr><th scope="row">${esc(metric.label)}<small>${esc(unit)}</small></th>${companies.map(company=>`<td>${comparisonValue(values[company.cik],metric,periods.get(company.cik),basis)}</td>`).join("")}</tr>`;
+  }).join("")}</tbody></table>`;
+}
+async function renderAnnualComparison(){const token=++explorerBasis.comparisonToken,key=explorerContextKey();const ids=[...$("#comparison-metrics").selectedOptions].map(x=>x.value),ciks=[...S.explorerSelected];if(ciks.length<2||ciks.length>4)throw new Error("비교할 기업을 2~4개 선택해 주세요.");if(!ids.length)throw new Error("비교 지표를 하나 이상 선택해 주세요.");const d=S.explorerDataset||S.defaultDataset,params=new URLSearchParams({dataset_id:d.dataset_id,ciks:ciks.join(","),metric_ids:ids.join(","),...(explorerBasis.latestAnnual?{latest:"true"}:{fiscal_year:String(S.explorerYear)})}),r=await api(`/api/company-comparison?${params}`);if(token!==explorerBasis.comparisonToken||key!==explorerContextKey())return;const periods=new Map(r.companies.map(company=>{
+  const anchor=r.actual_periods[company.cik];
+  const period=sharedComparisonPeriod(r.rows.map(row=>({metric:row.metric,observation:row.values[company.cik]})),anchor,"ANNUAL");
+  return [company.cik,period&&!period.year?{...period,year:r.selected_fiscal_year}:period];
+}));$("#comparison-result").innerHTML=`<p>${esc(r.date_limitation)}</p>`+comparisonTable(r.companies,r.rows,periods,"ANNUAL")}
 function openAnnualComparison(){const metrics=S.explorerCatalog?.metrics||[];if(!metrics.length)throw new Error("전체 탐색 지표 정의를 불러오지 못했습니다.");$("#comparison-metrics").innerHTML=metrics.map(x=>`<option value="${x.metric_id}" ${EXPLORER_PRESETS.CORE.includes(x.metric_id)?"selected":""}>${esc(x.label)}</option>`).join("");$("#comparison-panel").hidden=false;$("#comparison-panel").scrollIntoView({block:"nearest"})}
 function bindAnnualExplorer(){$$('[data-view]').forEach(x=>x.onclick=e=>{e.preventDefault();window.history.replaceState(null,"",x.getAttribute("href"));showView(x.dataset.view,true)});$("#explorer-year").onchange=async()=>{explorerBasis.latestAnnual=$("#explorer-year").value==="LATEST";if(!explorerBasis.latestAnnual)S.explorerYear=Number($("#explorer-year").value);await loadExplorer(explorerBasis.latestAnnual?null:S.explorerYear);await loadLibrary()};$("#explorer-query").oninput=()=>loadExplorer().catch(fail);$("#explorer-preset").onchange=()=>{updateExplorerSort();loadExplorer().catch(fail)};$("#explorer-sort").onchange=()=>loadExplorer().catch(fail);$("#explorer-direction").onchange=()=>loadExplorer().catch(fail);$("#library-query").oninput=()=>loadLibrary().catch(fail);$("#library-category").onchange=()=>loadLibrary().catch(fail);$("#compare-selected").onclick=openComparison;$("#close-comparison").onclick=()=>$("#comparison-panel").hidden=true;$("#run-comparison").onclick=()=>renderComparison().catch(fail);$("#close-profile").onclick=closeProfile;$("#profile-metric").onchange=renderProfileTrend;$("#company-profile").addEventListener("keydown",e=>{if(e.key==="Escape"){closeProfile();return}if(e.key!=="Tab")return;const f=$$("#company-profile button:not([disabled]),#company-profile select:not([disabled]),#company-profile a[href]"),a=f[0],b=f.at(-1);if(e.shiftKey&&document.activeElement===a){e.preventDefault();b.focus()}else if(!e.shiftKey&&document.activeElement===b){e.preventDefault();a.focus()}})}
 
@@ -555,8 +637,19 @@ async function renderComparison(){
     const results=await Promise.all(ids.map(metric_id=>api(`/api/quarter-comparison?${new URLSearchParams({dataset_id:explorerDataset().dataset_id,ciks:ciks.join(","),metric_id,...(period==="LATEST"?{latest:"true"}:{calendar_year:coordinate[1],calendar_quarter:coordinate[2]})})}`)));
     if(token!==explorerBasis.comparisonToken||key!==explorerContextKey())return;
     if(results.some((result,index)=>result.metric_id!==ids[index]||(period==="LATEST"?result.period_scope!=="LATEST_COMPANY":periodCoordinate(result)!==period)||result.rows.length!==ciks.length||result.rows.some(row=>!ciks.includes(row.company.cik))))throw new Error("비교 응답의 범위가 선택과 다릅니다.");
-    const companies=results[0].rows.map(row=>row.company);
-    $("#comparison-result").innerHTML=`<p>${period==="LATEST"?"회사별 최신":period} ${explorerBasisLabel()} · 기업마다 실제 공시 기간과 회계표시가 다릅니다.</p><table><thead><tr><th>지표 · 단위</th>${companies.map(company=>`<th>${esc(company.name||company.ticker)}<small>${esc(company.ticker)}</small></th>`).join("")}</tr></thead><tbody>${results.map((result,index)=>{const metric=explorerMetric(ids[index]);return`<tr><th>${esc(metric.label)}<small>${esc(unitLabel(metric))}</small></th>${companies.map(company=>{const observation=preparedExplorerObservation(result.rows.find(row=>row.company.cik===company.cik)?.observation);return`<td>${explorerValue(observation,metric)}<small>${esc(period==="LATEST"?companyPeriodCaption(result.rows.find(row=>row.company.cik===company.cik)?.period):interimPeriodCaption(observation))}</small></td>`}).join("")}</tr>`}).join("")}</tbody></table>`;
+    const companies=results[0].rows.map(row=>row.company),basis=explorerBasis.basis;
+    const rows=results.map((result,index)=>({
+      metric:explorerMetric(ids[index]),
+      values:Object.fromEntries(result.rows.map(row=>[row.company.cik,row.observation])),
+    }));
+    const periods=new Map(companies.map(company=>{
+      const anchor=period==="LATEST"
+        ?results[0].rows.find(row=>row.company.cik===company.cik)?.period
+        :explorerBasis.inventory?.rows.find(row=>row.cik===company.cik&&periodCoordinate(row)===period);
+      const cells=rows.map(row=>({metric:row.metric,observation:row.values[company.cik]}));
+      return [company.cik,sharedComparisonPeriod(cells,anchor,basis)];
+    }));
+    $("#comparison-result").innerHTML=`<p>${period==="LATEST"?"회사별 최신":period} ${explorerBasisLabel()} · 기업마다 실제 공시 기간과 회계표시가 다릅니다.</p>`+comparisonTable(companies,rows,periods,basis);
   }catch(error){if(token===explorerBasis.comparisonToken&&key===explorerContextKey())$("#comparison-result").innerHTML=`<p class="message error">${esc(error.message)}</p>`}
 }
 function bindExplorer(){
