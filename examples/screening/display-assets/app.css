@@ -101,3 +101,44 @@ thead th{position:sticky;top:0;z-index:4;background:#e9e6dc}
 .batch-availability [hidden]{display:none}
 #batch-status{flex-basis:100%;margin:0;color:var(--slate);font-size:11px}
 #screen-batch-status{margin:0;font-size:11px;overflow-wrap:anywhere}
+
+/* Workflow layout keeps applied context and primary work above occasional settings. */
+body>header{position:static}
+.workflow-disclosure{min-width:0;border:1px solid var(--line)}
+.workflow-disclosure>summary{cursor:pointer;color:var(--blue);font-size:14px;padding:8px 12px;min-height:40px}
+.batch-source{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--line)}
+#batch-editor{flex:1 1 22rem;max-width:100%;border:0}
+#batch-editor>summary{padding:4px 0;overflow-wrap:anywhere}
+#batch-applied-summary{font-size:11px;color:var(--ink);margin-right:8px}
+.batch-change-label{font-weight:650;white-space:nowrap}
+#batch-use-screen{min-height:40px;max-width:100%}
+#batch-editor .batch-availability{padding:8px 0 0;border:0}
+.batch-editor-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+#batch-help,#batch-status{flex:0 0 100%;margin:0;color:var(--slate);font-size:11px;overflow-wrap:anywhere}
+#batch-status:empty{display:none}
+#batch-status.explorer-error{color:var(--red)}
+.explorer-tools{grid-template-columns:minmax(10rem,2fr) repeat(2,minmax(7rem,1fr)) minmax(6rem,auto);gap:8px;padding:8px 16px}
+.explorer-tools label:first-child{grid-column:auto}
+.explorer-tools label{gap:4px;min-width:0}
+.explorer-tools input,.explorer-tools select{min-width:0;max-width:100%;min-height:36px}
+.explorer-display-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:0 8px 8px}
+.explorer-display[open]{grid-column:1/-1}
+.guide-condition{margin-top:8px}
+.guide-condition .add-row{padding:0 12px 8px}
+.criteria.compact .section-head p,.criteria.compact #execute,.criteria:not(.preview-ready) #save-result{display:none}
+.workspace:not(.result-ready){display:none}
+#results-draft-note{color:var(--amber)}
+#history-current-tab{color:var(--slate);font-size:11px}
+.history-toolbar [aria-pressed="true"]{background:var(--blue-soft)}
+.history-saved-results{margin:12px 0}
+.history:not(.export-ready) #export-full-csv,.history:not(.export-ready) #export-selected-xlsx{display:none}
+@media(max-width:760px){
+  .batch-source{padding:8px 12px}
+  #batch-editor{flex-basis:100%}
+  .explorer-tools{grid-template-columns:repeat(2,minmax(0,1fr));margin:0;padding:8px 12px;background:var(--sheet);border-left:0}
+  .explorer-display-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:390px){
+  .explorer-tools input,.explorer-tools select{width:100%}
+  .batch-availability label{flex:1 1 min(100%,10rem)}
+}

@@ -181,11 +181,46 @@ test("latest query and saved policy use anchored data, while fixed quarter remai
   h.S.screenAvailability=pinned;h.get("#dataset").value="current50";
   h.get("#frequency").value="QUARTERLY";h.get("#period-mode").value="LATEST_COMPANY_QUARTER_V1";
   const policy=h.screeningPeriodPolicy();assert.equal(policy.mode,"LATEST_COMPANY_QUARTER_V1");
-  assert.deepEqual(JSON.parse(JSON.stringify(policy.availability)),pinned);assert.match(h.availabilityCaption(pinned),/실제 배치/);
+  assert.deepEqual(JSON.parse(JSON.stringify(policy.availability)),pinned);assert.match(h.availabilityCaption(pinned),/확보 기록 기준/);
   h.get("#period-mode").value="FIXED_CALENDAR_QUARTER_END";h.get("#calendar-quarter").value="2026Q2";
   const fixed=h.screeningPeriodPolicy();assert.equal(fixed.calendar_quarter,2);assert.equal(fixed.availability.publication_id,"p");
   h.S.screenAvailability=null;assert.equal(h.screeningPeriodPolicy().availability,undefined);
   h.S.screenAvailability=pinned;
   h.get("#period-mode").value="LATEST_COMPANY_QUARTER_V1";h.get("#dataset").value="different";
   assert.throws(()=>h.screeningPeriodPolicy(),/조회 배치/);
+});
+
+
+test("applied source stays distinct from draft and lookup failure retains the prior matrix",async()=>{
+  const pinned={mode:"ACTUAL",dataset_id:"current50",publication_id:"p",financial_as_of:"2026-10-25",ready_at:"2026-11-06T19:00:00Z",decision_date:"2026-11-06",lag:0};
+  const h=harness(()=>{throw new Error("no verified batch was eligible on the selected date")});
+  h.batchView.enabled=true;h.batchView.snapshot=pinned;
+  h.get("#batch-mode").value="ACTUAL";h.get("#batch-date").value="2026-11-07";h.get("#batch-lag").value="1";
+  h.get("#batch-applied-summary").textContent=h.availabilityCaption(pinned);
+  h.get("#explorer-body").innerHTML="<tr>직전 적용 자료</tr>";
+  const prior=h.get("#batch-applied-summary").textContent;
+  await h.applyBatchChoice({focus:true});
+  assert.match(h.calls[0],/decision_date=2026-11-07&lag=1/);
+  assert.equal(h.get("#batch-applied-summary").textContent,prior);
+  assert.equal(h.get("#explorer-body").innerHTML,"<tr>직전 적용 자료</tr>");
+  assert.equal(h.batchView.snapshot,pinned);assert.equal(h.get("#batch-editor").open,true);
+  assert.match(h.get("#batch-status").textContent,/자료 기준을 유지/);
+});
+
+test("source selection folds only after a ready matrix and distinguishes a later table failure",async()=>{
+  const pinned={mode:"PREPARED_SIMULATION",dataset_id:"current50",publication_id:"p",financial_as_of:"2026-10-25"};
+  const h=harness(()=>pinned);
+  h.batchView.enabled=true;h.batchView.datasets=[{dataset_id:"current50",publication_id:"p"}];
+  h.get("#batch-mode").value="PREPARED_SIMULATION";h.get("#batch-dataset").value="current50";
+  vm.runInContext("loadExplorer = async()=>{explorerBasis.readyKey=explorerContextKey()}; ensureExplorerInventory=()=>null",h.context);
+  await h.applyBatchChoice();
+  assert.equal(h.get("#batch-editor").open,false);
+  assert.match(h.get("#batch-applied-summary").textContent,/준비된 자료로 가정.*2026-10-25/);
+  assert.equal(h.get("#batch-use-screen").hidden,false);
+  assert.equal(h.get("#batch-status").textContent,"");
+  vm.runInContext("loadExplorer = async()=>{explorerBasis.readyKey=null}",h.context);
+  await h.applyBatchChoice();
+  assert.equal(h.get("#batch-editor").open,true);
+  assert.match(h.get("#batch-status").textContent,/기업표를 불러오지 못했습니다/);
+  assert.doesNotMatch(h.get("#batch-status").textContent,/유지/);
 });

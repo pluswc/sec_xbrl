@@ -35,9 +35,9 @@ function latestScreenPolicy(policy){return [LATEST_ANNUAL_POLICY,LATEST_QUARTER_
 function quarterlyScreenPolicy(policy){return ["FIXED_CALENDAR_QUARTER_END",LATEST_QUARTER_POLICY].includes(policy?.mode)}
 function availabilityCaption(snapshot){
   if(!snapshot)return "배치를 선택해 주세요.";
-  if(snapshot.mode==="PREPARED_SIMULATION")return `준비 자료 기준 가정 조회 · 재무 기준일 ${snapshot.financial_as_of} · 실제 가용 이력 미적용`;
+  if(snapshot.mode==="PREPARED_SIMULATION")return `준비된 자료로 가정 · 재무 기준일 ${snapshot.financial_as_of} · 실제 가용 이력 미적용`;
   const ready=new Date(snapshot.ready_at).toLocaleString("ko-KR",{timeZone:"America/New_York"});
-  return `실제 배치 · 뉴욕 ${ready} 조회 가능 확인 · 판단일 ${snapshot.decision_date} · 사용지연 ${snapshot.lag}거래일 · 재무 기준일 ${snapshot.financial_as_of}`;
+  return `확보 기록 기준 · 뉴욕 ${ready} 조회 가능 확인 · 판단일 ${snapshot.decision_date} · 사용지연 ${snapshot.lag}거래일 · 재무 기준일 ${snapshot.financial_as_of}`;
 }
 function syncScreenPeriodModes(){
   if(!batchView.enabled)return;
@@ -67,9 +67,9 @@ function screeningPeriodPolicy(){
     :{mode:"LATEST_COMPLETE_ANNUAL",offset:Number($("#period-offset").value)};
 }
 function revisionContent(){const mode=$("#universe-mode").value;let universe={mode:"ALL_PREPARED"};if(mode==="CIKS")universe={mode,ciks:[...S.companySelection]};if(mode==="SIC")universe={mode,sic_codes:[$("#industry-select").value]};const period=screeningPeriodPolicy();return{universe,predicates:$$(".predicate").map(r=>{const m=metricById(r.querySelector(".metric").value);return{metric_id:m.metric_id,operator:r.querySelector(".operator").value,threshold:thresholdToApi(r.querySelector(".threshold").value,m),definition_version:m.definition_version}}),period_policy:period,columns:$$('[name="visible-column"]:checked').map(x=>x.value),sort:{column:$("#sort-column").value,direction:$("#sort-direction").value}}}
-function markDirty(){S.dirty=true;S.preview=null;$("#save-result").disabled=true;$("#save-state").textContent=S.revision?"수정됨 · 저장 필요":"저장 전 · 저장 필요"}
+function markDirty(){S.dirty=true;S.preview=null;syncScreeningPresentation(true);$("#save-result").disabled=true;$("#save-state").textContent=S.revision?"수정됨 · 저장 필요":"저장 전 · 저장 필요"}
 function isRevisionEdit(t){return t instanceof Element&&!t.closest("#saved-screen,#open-screen,#dataset,#metric-category,#metric-search,#company-query")}
-function setCriteriaCompact(c){$(".criteria").classList.toggle("compact",c);$("#toggle-criteria").setAttribute("aria-expanded",String(!c));$("#toggle-criteria").textContent=c?"조건 펼치기":"조건 접기"}
+function setCriteriaCompact(c){$(".criteria").classList.toggle("compact",c);$("#toggle-criteria").setAttribute("aria-expanded",String(!c));$("#toggle-criteria").textContent=c?"조건 편집":"조건 접기"}
 
 // Recoverable history is a journal projection, separate from financial evaluation.
 const journalHistory={configured:null,capability:null,snapshot:null,promise:null,version:0,epoch:0,request:0,error:"",pending:false,trash:false,confirm:null,selected:new Set()};
@@ -145,7 +145,10 @@ function syncHistorySelectionControls(){
   $("#history-clear-selection").disabled=blocked||!count;
   $("#history-bulk-action").textContent=`선택 ${count}개 ${journalHistory.trash?"복원":"삭제"}`;
   $("#history-bulk-action").disabled=blocked||!count;
-  $("#history-selection-tools").hidden=journalHistory.configured!==true;
+  $("#history-selection-tools").hidden=journalHistory.configured!==true||Boolean(journalHistory.error)||!entries.length;
+  $("#history-selected-count").hidden=!count;
+  $("#history-clear-selection").hidden=!count;
+  $("#history-bulk-action").hidden=!count;
   $$('[data-history-select]').forEach(input=>{
     input.checked=journalHistory.selected.has(historySelectionKey({kind:input.dataset.historyKind,record_id:input.dataset.historyId}));
     input.disabled=blocked;input.closest('[data-history-row]')?.classList.toggle("history-selected",input.checked);
@@ -181,6 +184,8 @@ function renderHistoryControls(){
   $("#history-active").disabled=busy;$("#history-trash").disabled=busy;
   $("#history-retry").disabled=busy;$("#history-lifecycle").setAttribute("aria-busy",String(busy));
   $("#history-status").textContent=journalHistory.error||(configured?`활성 조건 ${S.screens.length} · 결과 ${S.runs.length} · 메모 ${S.decisions.length} · 휴지통 ${journalHistory.snapshot?.trash.length||0}`:"삭제·복원 연결이 설정되지 않았습니다. 기존 이력 조회를 사용합니다.");
+  const tab=$("#history-current-tab");
+  if(tab)tab.textContent=journalHistory.trash?"현재 보기 · 휴지통":"현재 보기 · 활성 이력";
   $("#history-status").classList.toggle("explorer-error",blocked);
   $("#history-retry").textContent=blocked?"이력 다시 연결":"이력 새로고침";
   $("#timeline").innerHTML=blocked?'<li class="empty">이력을 불러올 수 없습니다. 다시 연결해 주세요. 숨긴 기록을 원본 목록으로 대신 표시하지 않습니다.</li>':historyEntries().map(x=>`<li data-history-row="${esc(x.record_id)}" data-history-kind="${x.kind}" data-history-id="${esc(x.record_id)}">${configured?`<label class="history-checkbox"><input type="checkbox" data-history-select data-history-kind="${x.kind}" data-history-id="${esc(x.record_id)}" aria-label="${esc(historyRecordTitle(x.kind,x.record).slice(0,120))} 선택"></label>`:""}<div><b>${({REVISION:"조건",RUN:"결과",DECISION:"판단 메모"})[x.kind]}</b> · ${esc(historyRecordTitle(x.kind,x.record))}<time>${esc(x.record.created_at||"")}</time><small>${esc(x.record_id)}</small></div>${configured?`<button type="button" class="quiet" data-history-action="${x.deleted?"restore":"delete"}" ${x.deleted?"data-history-restore":"data-history-delete"} data-history-kind="${x.kind}" data-history-id="${esc(x.record_id)}" ${busy?'disabled':''}>${x.deleted?"복원":"삭제"}</button>`:""}</li>`).join("")||`<li class="empty">${journalHistory.trash?"휴지통이 비어 있습니다.":"아직 이력이 없습니다."}</li>`;
@@ -244,13 +249,20 @@ async function submitHistoryAction(){
 }
 function mountJournalHistory(){
   const controls=document.createElement("section");controls.id="history-lifecycle";
-  controls.innerHTML='<div class="history-toolbar"><button id="history-active" type="button" class="quiet" aria-pressed="true">활성 이력</button><button id="history-trash" type="button" class="quiet" aria-pressed="false" hidden>휴지통</button><button id="history-retry" type="button" class="quiet">이력 새로고침</button></div><div id="history-selection-tools" class="history-toolbar" hidden><button id="history-select-all" type="button" class="quiet">전체 선택</button><button id="history-clear-selection" type="button" class="quiet">선택 해제</button><span id="history-selected-count" role="status" aria-live="polite">선택 0개</span><button id="history-bulk-action" type="button" disabled>선택 0개 삭제</button></div><p id="history-status" role="status" aria-live="polite"></p>';
-  $("#timeline").before(controls);
+  controls.innerHTML='<div class="history-toolbar"><button id="history-active" type="button" class="quiet" aria-pressed="true">활성 이력</button><button id="history-trash" type="button" class="quiet" aria-pressed="false" hidden>휴지통</button><button id="history-retry" type="button" class="quiet">이력 새로고침</button><small id="history-current-tab">현재 보기 · 활성 이력</small></div><div id="history-selection-tools" class="history-toolbar" hidden><button id="history-select-all" type="button" class="quiet">전체 선택</button><button id="history-clear-selection" type="button" class="quiet">선택 해제</button><span id="history-selected-count" role="status" aria-live="polite">선택 0개</span><button id="history-bulk-action" type="button" disabled>선택 0개 삭제</button></div><p id="history-status" role="status" aria-live="polite"></p>';
+  const timeline=$("#timeline"),comparison=$("#old-run").closest(".compare");
+  timeline.before(controls);
+  const savedResults=document.createElement("details");
+  savedResults.className="history-saved-results workflow-disclosure";
+  savedResults.innerHTML="<summary>저장 결과 열기·비교</summary>";
+  timeline.after(savedResults);
+  savedResults.append(comparison,$("#run-diff"));
+  $("#toggle-history").hidden=true;
   const dialog=document.createElement("dialog");dialog.id="history-confirm";dialog.setAttribute("aria-labelledby","history-confirm-title");
   dialog.innerHTML='<h3 id="history-confirm-title"></h3><p id="history-confirm-item"></p><p id="history-confirm-note" class="muted"></p><p id="history-confirm-error" role="alert"></p><div class="button-row"><button id="history-confirm-refresh" type="button" class="quiet" hidden>이력 새로 확인</button><button id="history-confirm-cancel" type="button" class="quiet">취소</button><button id="history-confirm-submit" type="button">확인</button></div>';
   document.body.append(dialog);
   $("#history-active").onclick=()=>switchHistoryView(false);$("#history-trash").onclick=()=>switchHistoryView(true);
-  $("#history-select-all").onclick=()=>selectHistoryItems("all");$("#history-clear-selection").onclick=()=>selectHistoryItems("clear");
+  $("#history-select-all").onclick=()=>{selectHistoryItems("all");$("#history-clear-selection").focus()};$("#history-clear-selection").onclick=()=>{selectHistoryItems("clear");$("#history-select-all").focus()};
   $("#history-bulk-action").onclick=()=>confirmSelectedHistory($("#history-bulk-action"));
   $("#timeline").onchange=event=>{const input=event.target.closest("[data-history-select]");if(input)selectHistoryItems("toggle",input.dataset.historyKind,input.dataset.historyId,input.checked)};
   $("#history-retry").onclick=()=>retryHistory();
@@ -276,10 +288,25 @@ async function switchFrequency(){clearResult();const target=$("#frequency").valu
 
 async function execute(){const content=revisionContent();clearResult();$("#result-body").innerHTML='<tr><td colspan="5" class="empty">기업을 찾는 중…</td></tr>';const r=await api("/api/preview",{method:"POST",body:JSON.stringify({content,dataset_id:$("#dataset").value})});S.preview=r;setRun(r,content);toast("시험 실행입니다. 필요한 결과만 저장하세요.")}
 async function saveResult(){const p=S.preview;if(!p)throw new Error("조건을 시험 실행한 뒤 결과를 저장해 주세요.");const name=$("#screen-name").value.trim()||"스크리닝 결과",sameRevision=S.revision?.content_hash===p.condition_hash&&(!S.revision.saved_context||S.revision.saved_context.dataset_id===p.dataset_id);const r=await api("/api/results",{method:"POST",body:JSON.stringify({name,content:p.content,dataset_id:p.dataset_id,preview_hash:p.preview_hash,revision_id:sameRevision?S.revision.revision_id:null})});S.preview=null;setRun(r,p.content);await refreshRuns();toast("결과를 저장했습니다. 이력에서 다시 열 수 있습니다.")}
-function syncResultActions(){const blocked=journalHistory.configured===true&&(Boolean(journalHistory.error)||journalHistory.pending),saved=Boolean(S.run?.run_id)&&!blocked;["#save-screen","#open-screen","#open-run","#compare-runs"].forEach(id=>{if(blocked)$(id).disabled=true;else if(!S.busy)$(id).disabled=false});$("#save-result").disabled=S.busy||blocked||!S.preview;["#export-selected-csv","#export-selected-xlsx","#export-full-csv","#export-full-xlsx","#save-decision"].forEach(id=>$(id).disabled=S.busy||!saved)}
+function syncScreeningPresentation(changed=false){
+  $("#results-title")?.closest?.(".workspace")?.classList.toggle("result-ready",Boolean(S.run));
+  $(".criteria")?.classList.toggle("preview-ready",Boolean(S.preview));
+  $("#history-title")?.closest?.(".history")?.classList.toggle("export-ready",Boolean(S.run?.run_id));
+  const note=$("#results-draft-note");
+  if(note&&(!S.run||changed))note.hidden=!S.run;
+}
+function mountScreeningPresentation(){
+  $(".criteria .section-head p").textContent="조건과 실행 결과는 따로 저장할 수 있습니다.";
+  const note=document.createElement("p");
+  note.id="results-draft-note";note.hidden=true;
+  note.textContent="마지막 실행 결과입니다. 편집한 조건을 보려면 다시 시험 실행하세요.";
+  $("#counts").after(note);
+  syncScreeningPresentation();
+}
+function syncResultActions(){syncScreeningPresentation();const blocked=journalHistory.configured===true&&(Boolean(journalHistory.error)||journalHistory.pending),saved=Boolean(S.run?.run_id)&&!blocked;["#save-screen","#open-screen","#open-run","#compare-runs"].forEach(id=>{if(blocked)$(id).disabled=true;else if(!S.busy)$(id).disabled=false});$("#save-result").disabled=S.busy||blocked||!S.preview;["#export-selected-csv","#export-selected-xlsx","#export-full-csv","#export-full-xlsx","#save-decision"].forEach(id=>$(id).disabled=S.busy||!saved)}
 async function withBusy(action){if(S.busy)return;S.busy=true;$("#criteria-error").hidden=true;const controls=$$("#criteria-form input,#criteria-form select,#criteria-form button,.criteria .button-row button,#open-run,#compare-runs,#result-body button.company,[data-guide-add]");const before=controls.map(x=>[x,x.disabled]);controls.forEach(x=>x.disabled=true);syncResultActions();try{return await action()}finally{S.busy=false;before.forEach(([x,disabled])=>{if(x.isConnected)x.disabled=disabled});syncResultActions()}}
 function clearResult(){S.run=null;S.preview=null;S.resultContent=null;S.selected.clear();$("#result-body").innerHTML='<tr><td colspan="5" class="empty">조건을 시험 실행하면 결과가 표시됩니다.</td></tr>';$("#counts").textContent="실행 전";$("#evidence").hidden=true;syncResultActions()}
-function setRun(r,content){S.run=r;S.resultContent=content||S.revision?.content;S.selected.clear();$("#period-context").textContent=latestScreenPolicy(r.period_policy)?`회사별 최신 · ${availabilityCaption(r.period_policy.availability)}`:r.period_policy.mode==="FIXED_FISCAL_YEAR"?`FY${r.period_policy.fiscal_year}`:r.period_policy.mode==="FIXED_CALENDAR_QUARTER_END"?quarterLabel(r.period_policy):`최근 완료 연도${r.period_policy.offset?` -${r.period_policy.offset}`:""}`;$("#asof").textContent=r.financial_as_of;$("#counts").textContent=`${r.run_id?"저장된 결과":"시험 결과 · 저장 전"} · 대상 ${r.counts.target} · 충족 ${r.counts.pass} · 미충족 ${r.counts.fail} · 확인 필요 ${r.counts.undetermined}`;renderRows();syncResultActions();setCriteriaCompact(true)}
+function setRun(r,content){S.run=r;const note=$("#results-draft-note");if(note)note.hidden=true;S.resultContent=content||S.revision?.content;S.selected.clear();$("#period-context").textContent=latestScreenPolicy(r.period_policy)?`회사별 최신 · ${availabilityCaption(r.period_policy.availability)}`:r.period_policy.mode==="FIXED_FISCAL_YEAR"?`FY${r.period_policy.fiscal_year}`:r.period_policy.mode==="FIXED_CALENDAR_QUARTER_END"?quarterLabel(r.period_policy):`최근 완료 연도${r.period_policy.offset?` -${r.period_policy.offset}`:""}`;$("#asof").textContent=r.financial_as_of;$("#counts").textContent=`${r.run_id?"저장된 결과":"시험 결과 · 저장 전"} · 대상 ${r.counts.target} · 충족 ${r.counts.pass} · 미충족 ${r.counts.fail} · 확인 필요 ${r.counts.undetermined}`;renderRows();syncResultActions();setCriteriaCompact(true)}
 function selectedMetrics(){return(S.resultContent?.predicates||[]).map(x=>metricById(x.metric_id))}
 function decisionFor(cik){const e=S.decisions.filter(x=>x.cik===cik);return e.length?`<span class="badge review">${decisionLabel(e.at(-1).state)}</span>`:'<span class="muted">기록 없음</span>'}
 function renderRows(){if(!S.run)return;const ms=selectedMetrics(),latest=latestScreenPolicy(S.run.period_policy),showCompany=!S.admin||columnEnabled(S.resultContent.columns,"company");$("#result-head").innerHTML=`<tr><th><span class="sr-only">선택</span></th><th ${showCompany?'':'hidden'}>기업</th><th>결과</th>${latest?"<th>선택 재무기간</th>":""}${ms.map(m=>`<th>${esc(m.label)}<br><small>${unitLabel(m)}</small></th>`).join("")}<th>관심상태</th></tr>`;const rows=S.run.rows.filter(r=>S.activeFilter==="ALL"||r.aggregate===S.activeFilter).filter(r=>$("#show-all").checked||r.aggregate==="PASS");$("#result-body").innerHTML=rows.length?rows.map(row=>`<tr data-cik="${row.cik}" class="${S.selected.has(row.cik)?'selected':''}"><td><input type="checkbox" aria-label="${esc(row.ticker)} 선택" ${S.selected.has(row.cik)?'checked':''}></td><td ${showCompany?'':'hidden'}><button class="company" data-open="${row.cik}"><strong>${esc(row.name||row.ticker)}</strong><small>${esc(row.ticker)}</small></button></td><td><span class="badge ${row.aggregate.toLowerCase()}">${aggregateLabel(row.aggregate)}</span></td>${latest?`<td>${esc(companyPeriodCaption(row.resolved_period))}</td>`:""}${row.predicates.map(p=>{const m=metricById(p.metric_id),o=p.observation||{},missing=o.value===null||o.value===undefined;return`<td class="metric-cell" title="${missing?esc(businessReason(p.reason)):esc(m.label+' · '+(o.period_end||o.context_end_date||''))}">${missing?'—':numberMarkup(o.value,m)}${missing?'<small>자료 확인 필요</small>':''}</td>`}).join("")}<td>${decisionFor(row.cik)}</td></tr>`).join(""):`<tr><td colspan="${4+ms.length+(latest?1:0)}" class="empty">해당하는 기업이 없습니다.</td></tr>`;$$('[data-cik] input').forEach(x=>x.onchange=()=>{const c=x.closest("tr").dataset.cik;x.checked?S.selected.add(c):S.selected.delete(c);renderRows()});$$('[data-open]').forEach(x=>x.onclick=()=>withBusy(()=>openEvidence(x.dataset.open,x)).catch(fail))}
@@ -324,7 +351,7 @@ function updateCompareButton(){const n=S.explorerSelected.size,b=$("#compare-sel
 async function loadExplorerCatalog(d){const key=`${d.dataset_id}:${S.explorerYear}`;if(S.explorerCatalogKey===key&&S.explorerCatalog)return S.explorerCatalog;const token=++S.explorerCatalogToken,r=await api(`/api/metric-library?dataset_id=${encodeURIComponent(d.dataset_id)}&fiscal_year=${S.explorerYear}`);if(token!==S.explorerCatalogToken)return null;const current=S.explorerDataset||S.defaultDataset;if(current?.dataset_id!==d.dataset_id||Number(r.selected_fiscal_year)!==Number(S.explorerYear))return null;if(d.definition_count&&r.metrics.length!==d.definition_count)throw new Error("전체 탐색 지표 정의를 불러오지 못했습니다.");S.explorerCatalog=r;S.explorerCatalogKey=key;return r}
 
 async function loadAnnualExplorer(year=null){const d=S.explorerDataset||S.defaultDataset;if(!d)return;const q=$("#explorer-query").value.trim(),sort=$("#explorer-sort").value||"company",direction=$("#explorer-direction").value||"asc",params=new URLSearchParams({dataset_id:d.dataset_id,sort,direction});if(explorerBasis.latestAnnual)params.set("latest","true");else if(year||S.explorerYear)params.set("fiscal_year",String(year||S.explorerYear));if(q)params.set("query",q);const token=++S.explorerToken,r=await api(`/api/explorer?${params}`);if(token!==S.explorerToken)return;S.explorer=r;S.explorerYear=r.selected_fiscal_year??r.default_fiscal_year;await loadExplorerCatalog(d);if(token!==S.explorerToken)return;$("#explorer-asof").textContent=r.financial_as_of;const y=$("#explorer-year");if(batchView.enabled||!y.options.length)y.innerHTML=(batchView.snapshot?'<option value="LATEST">회사별 최신</option>':"")+r.fiscal_years.map(x=>`<option value="${x.fiscal_year}">FY${x.fiscal_year} · ${x.companies_prepared}/${r.company_count}</option>`).join("");y.value=explorerBasis.latestAnnual?"LATEST":String(r.selected_fiscal_year);renderExplorer()}
-function renderLibrary(){const r=S.library;if(!r)return;$("#library-year-label").textContent=`FY${r.selected_fiscal_year} · ${r.selected_year_company_count}/${r.company_count}개 기업`;const groups=r.categories.map(c=>({label:c.label,metrics:r.metrics.filter(m=>m.category===c.code)})).filter(g=>g.metrics.length);$("#library-groups").innerHTML=groups.map(g=>`<section class="metric-group"><h3>${esc(g.label)} <small>${g.metrics.length}개</small></h3><div class="metric-grid">${g.metrics.map(m=>`<article class="metric-card"><div><span class="metric-kind">${esc(m.source_label)} · ${esc(m.period_label)} · ${esc(m.unit_kind==="MONEY"?"USD":"%")}</span><h4>${esc(m.label)}</h4><p>${esc(m.meaning)}</p><p class="muted">${esc(m.use)}</p><strong class="coverage">FY${r.selected_fiscal_year} ${m.selected_year_coverage.companies_available}/${m.selected_year_coverage.companies_total}개 기업</strong></div><div class="add-row"><label>조건값 (${m.unit_kind==="MONEY"?"백만 달러":"%"})<input data-guide-threshold="${m.metric_id}" inputmode="decimal" value="0"></label><button type="button" class="quiet" data-guide-add="${m.metric_id}">조건에 추가</button></div></article>`).join("")}</div></section>`).join("")||'<p class="empty">검색 조건에 맞는 지표가 없습니다.</p>';$$('[data-guide-add]').forEach(x=>x.onclick=()=>withBusy(()=>addGuideMetric(x.dataset.guideAdd)).catch(fail))}
+function renderLibrary(){const r=S.library;if(!r)return;$("#library-year-label").textContent=`연간 FY${r.selected_fiscal_year} · 자료 있음 ${r.selected_year_company_count}/${r.company_count}개 기업`;const groups=r.categories.map(c=>({label:c.label,metrics:r.metrics.filter(m=>m.category===c.code)})).filter(g=>g.metrics.length);$("#library-groups").innerHTML=groups.map(g=>`<section class="metric-group"><h3>${esc(g.label)} <small>${g.metrics.length}개</small></h3><div class="metric-grid">${g.metrics.map(m=>`<article class="metric-card"><div><span class="metric-kind">${esc(m.source_label)} · ${esc(m.period_label)} · ${esc(m.unit_kind==="MONEY"?"USD":"%")}</span><h4>${esc(m.label)}</h4><p>${esc(m.meaning)}</p><p class="muted">${esc(m.use)}</p><strong class="coverage">FY${r.selected_fiscal_year} ${m.selected_year_coverage.companies_available}/${m.selected_year_coverage.companies_total}개 기업</strong></div><details class="guide-condition workflow-disclosure"><summary>조건에 사용</summary><div class="add-row"><label>조건값 (${m.unit_kind==="MONEY"?"백만 달러":"%"})<input data-guide-threshold="${m.metric_id}" inputmode="decimal" value="0"></label><button type="button" class="quiet" data-guide-add="${m.metric_id}">조건에 추가</button></div></details></article>`).join("")}</div></section>`).join("")||'<p class="empty">검색 조건에 맞는 지표가 없습니다.</p>';$$('[data-guide-add]').forEach(x=>x.onclick=()=>withBusy(()=>addGuideMetric(x.dataset.guideAdd)).catch(fail))}
 
 async function loadLibrary(){const d=S.explorerDataset||S.defaultDataset;if(!d)return;const params=new URLSearchParams({dataset_id:d.dataset_id,fiscal_year:String(S.explorerYear)}),q=$("#library-query").value.trim(),c=$("#library-category").value;if(q)params.set("query",q);if(c)params.set("category",c);const token=++S.libraryToken;await loadExplorerCatalog(d);if(token!==S.libraryToken)return;const r=await api(`/api/metric-library?${params}`);if(token!==S.libraryToken)return;S.library=r;renderLibrary();updateExplorerSort()}
 function guideCompatibility(content){const definitions=new Map((S.explorerCatalog?.metrics||[]).map(x=>[x.metric_id,x.definition_version]));return content.predicates.filter(x=>definitions.get(x.metric_id)!==x.definition_version)}
@@ -534,8 +561,16 @@ async function renderComparison(){
 }
 function bindExplorer(){
   bindAnnualExplorer();explorerBasis.annualPresetLabels=Object.fromEntries([...$("#explorer-preset").options].map(option=>[option.value,option.textContent]));const tools=$(".explorer-tools"),basis=document.createElement("label"),period=document.createElement("label"),notice=document.createElement("p");
-  basis.innerHTML='보기 기준<select id="explorer-basis"><option value="ANNUAL">연간</option><option value="QUARTERLY" disabled>분기</option><option value="TTM" disabled>TTM</option></select>';tools.querySelector("label").after(basis);
-  period.innerHTML='종료 분기<select id="explorer-quarter"></select>';period.hidden=true;$("#explorer-year").closest("label").after(period);
+  basis.innerHTML='재무 빈도<select id="explorer-basis"><option value="ANNUAL">연간</option><option value="QUARTERLY" disabled>분기</option><option value="TTM" disabled>TTM</option></select>';tools.querySelector("label").after(basis);
+  period.innerHTML='재무 기간<select id="explorer-quarter"></select>';period.hidden=true;$("#explorer-year").closest("label").after(period);
+  $(".explorer-view .section-head p").textContent="기업별 실제 재무기간과 지표를 비교합니다.";
+  const yearLabel=$("#explorer-year").closest("label");
+  yearLabel.firstChild.textContent="재무 기간";
+  const display=document.createElement("details");
+  display.className="explorer-display workflow-disclosure";
+  display.innerHTML='<summary>표시·정렬</summary><div class="explorer-display-fields"></div>';
+  tools.append(display);
+  display.lastElementChild.append(...["#explorer-preset","#explorer-sort","#explorer-direction"].map(id=>$(id).closest("label")));
   notice.id="explorer-message";notice.className="explorer-message";notice.setAttribute("role","status");notice.setAttribute("aria-live","polite");notice.hidden=true;tools.after(notice);
   $("#explorer-basis").onchange=()=>switchExplorerBasis().catch(error=>explorerNotice(error.message,true));
   $("#explorer-quarter").onchange=()=>{explorerBasis.periods[explorerBasis.basis]=$("#explorer-quarter").value;invalidateExplorerDetails();loadExplorer()};
@@ -780,7 +815,11 @@ function closeExplorerComparison(returnFocus=true){
 function syncExplorerSelectionUI(){
   $$('[data-explorer-select]').forEach(input=>input.checked=S.explorerSelected.has(input.dataset.explorerCik));
   if(!explorerSelection.mounted)return;
-  const count=S.explorerSelected.size;$("#explorer-selection-count").textContent=`선택 기업 ${count}/4`;
+  const count=S.explorerSelected.size;
+  $("#explorer-selection-tray").hidden=count===0;
+  $("#compare-selected").hidden=count<2;
+  const hint=$(".compare-hint");if(hint)hint.hidden=count>0;
+  $("#explorer-selection-count").textContent=`선택 기업 ${count}/4`;
   $("#explorer-selection-status").textContent=explorerSelection.message||(count<2?"기업을 2~4개 선택하면 비교할 수 있습니다.":"필터로 보이지 않는 선택 기업도 비교에 포함됩니다.");
   $("#explorer-selection-list").innerHTML=[...S.explorerSelected].map(cik=>{const company=explorerSelectedCompany(cik);return`<li><button type="button" class="quiet" data-remove-explorer-cik="${esc(cik)}" aria-label="${esc(company.ticker||company.name)} 선택 해제"><strong>${esc(company.ticker)}</strong> ${esc(company.name)} <span aria-hidden="true">×</span></button></li>`}).join("");
   $$('[data-remove-explorer-cik]').forEach(button=>button.onclick=()=>transitionExplorerSelection("remove",button.dataset.removeExplorerCik,false,null,button));
@@ -802,7 +841,7 @@ function transitionExplorerSelection(action,cik=null,checked=false,company=null,
   return{accepted:true,changed:true};
 }
 function mountExplorerSelection(){
-  const tray=document.createElement("section");tray.id="explorer-selection-tray";tray.className="explorer-selection-tray";
+  const tray=document.createElement("section");tray.id="explorer-selection-tray";tray.className="explorer-selection-tray";tray.hidden=true;
   tray.innerHTML='<div class="selection-tray-heading"><strong id="explorer-selection-count"></strong><button id="explorer-selection-clear" type="button" class="quiet">선택 모두 해제</button></div><ul id="explorer-selection-list"></ul><p id="explorer-selection-status" role="status" aria-live="polite"></p>';
   $("#explorer-count").closest(".explorer-summary").after(tray);
   const clear=document.createElement("button");clear.id="comparison-selection-clear";clear.type="button";clear.className="quiet";clear.textContent="선택 모두 해제";$("#close-comparison").before(clear);
@@ -830,29 +869,70 @@ function resetExplorerBatch(snapshot){
   batchView.snapshot=snapshot;batchView.fixedOnly=!snapshot;
   $("#batch-use-screen").disabled=!snapshot;
 }
-async function applyBatchChoice(){
+function appliedBatchCaption(){
+  if(batchView.snapshot)return availabilityCaption(batchView.snapshot);
+  if(batchView.fixedOnly)return `제공 자료에서 기간 선택 · 재무 기준일 ${S.defaultDataset.financial_as_of}`;
+  return "적용된 자료 기준 없음";
+}
+function renderAppliedBatch(){
+  $("#batch-applied-summary").textContent=appliedBatchCaption();
+  $("#batch-use-screen").hidden=!batchView.snapshot;
+  $("#batch-cancel").hidden=!(batchView.snapshot||batchView.fixedOnly);
+}
+function closeBatchEditor(focus=false){
+  $("#batch-editor").open=false;
+  if(focus)$("#batch-editor-summary").focus({preventScroll:true});
+}
+async function applyBatchChoice({focus=false}={}){
   const token=++batchView.token,mode=$("#batch-mode").value;
   const params=new URLSearchParams({mode});
   if(mode==="PREPARED_SIMULATION")params.set("dataset_id",$("#batch-dataset").value);
-  else{
+  else if(mode==="ACTUAL"){
     if($("#batch-date").value)params.set("decision_date",$("#batch-date").value);
     params.set("lag",$("#batch-lag").value||"0");
   }
-  $("#batch-status").textContent="조회할 배치를 확인하는 중입니다…";
-  $("#batch-apply").disabled=true;$("#batch-use-screen").disabled=true;
+  const status=$("#batch-status"),editor=$("#batch-editor");
+  status.textContent="자료 기준을 확인하는 중입니다…";
+  $("#batch-apply").disabled=true;$("#batch-cancel").disabled=true;$("#batch-use-screen").disabled=true;
+  status.classList.toggle("explorer-error",false);
   try{
-    const snapshot=await api(`/api/batch-availability?${params}`);if(token!==batchView.token)return;
-    resetExplorerBatch(snapshot);$("#batch-status").textContent=availabilityCaption(snapshot);
-    await loadExplorer();if(S.explorerYear)await loadLibrary();
-    ensureExplorerInventory();
-  }catch(error){
-    if(token===batchView.token){
-      const message=error.message.includes("no verified batch")?"선택한 날짜에 확인된 실제 배치가 없습니다. 가정 조회 또는 고정 기간 보기를 선택할 수 있습니다.":error.message;
-      const current=batchView.snapshot?availabilityCaption(batchView.snapshot):batchView.fixedOnly?"고정 기간 보기":"";
-      $("#batch-status").textContent=current?`${message} · 현재 표시: ${current}`:message;
+    try{
+      const snapshot=mode==="PROVIDED_FIXED"?null:await api(`/api/batch-availability?${params}`);
+      if(token!==batchView.token)return;
+      resetExplorerBatch(snapshot);
+      renderAppliedBatch();
+    }catch(error){
+      if(token===batchView.token){
+        const message=error.message.includes("no verified batch")?"선택한 날짜에 확인된 실제 배치가 없습니다. 다른 날짜나 자료 기준을 선택할 수 있습니다.":error.message;
+        const retained=batchView.snapshot||batchView.fixedOnly;
+        status.textContent=retained?`${message} · 적용 중인 자료 기준을 유지했습니다.`:message;
+        status.classList.toggle("explorer-error",true);
+        editor.open=true;
+      }
+      return;
     }
-  }finally{if(token===batchView.token){$("#batch-apply").disabled=false;$("#batch-use-screen").disabled=!batchView.snapshot}}
+
+    status.textContent="선택한 자료의 기업표를 불러오는 중입니다…";
+    await loadExplorer();
+    if(token!==batchView.token)return;
+    if(explorerBasis.readyKey===explorerContextKey()){
+      status.textContent="";
+      closeBatchEditor(focus);
+    }else{
+      status.textContent="자료 기준을 적용했습니다. 기업표를 불러오지 못했습니다.";
+      status.classList.toggle("explorer-error",true);
+      editor.open=true;
+    }
+    if(S.explorerYear)await loadLibrary().catch(error=>explorerNotice(error.message,true));
+    ensureExplorerInventory();
+  }finally{
+    if(token===batchView.token){
+      $("#batch-apply").disabled=false;$("#batch-cancel").disabled=false;
+      $("#batch-use-screen").disabled=!batchView.snapshot;
+    }
+  }
 }
+
 function batchDatasetCaption(dataset){
   const count=dataset.company_count??dataset.counts?.companies;
   const scope=dataset.quarter_definition_count>0?"연간·분기·TTM":"연간";
@@ -862,30 +942,49 @@ function mountBatchAvailability(status){
   if(!status.batch_availability)return;
   batchView.enabled=true;batchView.datasets=status.datasets.filter(item=>item.definition_count||item.quarter_definition_count);
   if(!batchView.datasets.length){batchView.enabled=false;return}
-  const panel=document.createElement("div");panel.className="batch-availability";
-  panel.innerHTML=`<label>조회 기준<select id="batch-mode"><option value="ACTUAL">실제 배치 이력</option><option value="PREPARED_SIMULATION">준비 자료 기준 가정 조회</option></select></label>
-    <label>준비 자료<select id="batch-dataset">${batchView.datasets.map(item=>`<option value="${esc(item.dataset_id)}">${esc(batchDatasetCaption(item))}</option>`).join("")}</select></label>
-    <label>판단일 (뉴욕, 비우면 오늘)<input id="batch-date" type="date"></label>
-    <label>사용지연 (미국 거래일)<input id="batch-lag" type="number" min="0" step="1" value="0"></label>
-    <button id="batch-apply" type="button">배치 조회</button>
-    <button id="batch-fixed" type="button" class="quiet">기존 고정 기간 보기</button>
-    <button id="batch-use-screen" type="button" class="quiet" disabled>이 배치로 새 조건</button>
-    <p id="batch-status" role="status"></p>`;
+  const panel=document.createElement("div");
+  panel.className="batch-source";
+  panel.innerHTML=`<details id="batch-editor" class="workflow-disclosure" open>
+    <summary id="batch-editor-summary"><span id="batch-applied-summary">적용된 자료 기준 없음</span><span class="batch-change-label">자료 기준 변경</span></summary>
+    <div class="batch-availability">
+      <label>자료 기준<select id="batch-mode"><option value="ACTUAL">확보 기록 기준</option><option value="PREPARED_SIMULATION">준비된 자료로 가정</option><option value="PROVIDED_FIXED">제공 자료에서 기간 선택</option></select></label>
+      <label>준비 자료<select id="batch-dataset">${batchView.datasets.map(item=>`<option value="${esc(item.dataset_id)}">${esc(batchDatasetCaption(item))}</option>`).join("")}</select></label>
+      <label>판단일 (뉴욕, 비우면 오늘)<input id="batch-date" type="date"></label>
+      <label>사용지연 (미국 거래일)<input id="batch-lag" type="number" min="0" step="1" value="0"></label>
+      <p id="batch-help"></p>
+      <div class="batch-editor-actions"><button id="batch-apply" type="button">적용</button><button id="batch-cancel" type="button" class="quiet" hidden>취소</button></div>
+      <p id="batch-status" role="status"></p>
+    </div>
+  </details>
+  <button id="batch-use-screen" type="button" class="quiet" hidden>이 기준으로 스크리닝</button>`;
   $(".explorer-tools").before(panel);
+  $("#explorer-asof").closest(".year-context").hidden=true;
   const note=document.createElement("p");note.id="screen-batch-status";note.className="muted";note.hidden=true;
   $("#period-mode").closest("label").after(note);
-  const toggle=()=>{const actual=$("#batch-mode").value==="ACTUAL";$("#batch-dataset").closest("label").hidden=actual;for(const id of ["#batch-date","#batch-lag"])$(id).closest("label").hidden=!actual};
+  const toggle=()=>{
+    const mode=$("#batch-mode").value,actual=mode==="ACTUAL";
+    $("#batch-dataset").closest("label").hidden=mode!=="PREPARED_SIMULATION";
+    for(const id of ["#batch-date","#batch-lag"])$(id).closest("label").hidden=!actual;
+    $("#batch-help").textContent=actual?"판단일까지 확보가 확인된 자료를 사용합니다. 재무 기준일은 공시 자료의 범위입니다."
+      :mode==="PREPARED_SIMULATION"?"선택한 발행물의 재무 기준일을 사용합니다. 과거 실제 확보 여부는 반영하지 않습니다."
+      :"현재 제공되는 자료에서 회계연도 또는 종료 분기를 직접 고릅니다.";
+  };
   $("#batch-mode").value="ACTUAL";
   $("#batch-dataset").value=batchView.datasets.at(-1).dataset_id;
-  $("#batch-mode").onchange=toggle;$("#batch-apply").onclick=applyBatchChoice;toggle();
-  $("#batch-fixed").onclick=async()=>{
-    ++batchView.token;$("#batch-apply").disabled=false;
-    resetExplorerBatch(null);$("#batch-status").textContent=`고정 기간 보기 · 재무 기준일 ${S.defaultDataset.financial_as_of}`;
-    await loadExplorer();if(S.explorerYear)await loadLibrary();ensureExplorerInventory();
+  $("#batch-mode").onchange=toggle;
+  $("#batch-apply").onclick=()=>applyBatchChoice({focus:true});
+  $("#batch-cancel").onclick=()=>{
+    const snapshot=batchView.snapshot;
+    $("#batch-mode").value=snapshot?.mode||"PROVIDED_FIXED";
+    if(snapshot)$("#batch-dataset").value=snapshot.dataset_id;
+    $("#batch-date").value=snapshot?.decision_date||"";
+    $("#batch-lag").value=String(snapshot?.lag??0);
+    $("#batch-status").textContent="";toggle();closeBatchEditor(true);
   };
+  toggle();
   $("#batch-use-screen").onclick=()=>{if(batchView.snapshot)withBusy(async()=>{await newScreen();showView("screening",true)}).catch(fail)};
 }
-async function boot(){mountJournalHistory();const s=await api("/api/status"),d=s.datasets.at(-1),explorer=d;S.defaultDataset=d;S.explorerDataset=explorer;$("#dataset").innerHTML=s.datasets.map(x=>`<option value="${x.dataset_id}">${x.dataset_id}</option>`).join("");$("#dataset").value=d.dataset_id;$("#asof").textContent=d.financial_as_of;await loadInputContext(d.dataset_id);await refreshScreens();await refreshRuns();await refreshDecisions();$("#predicates").innerHTML="";predicateRow();renderTimeline();syncResultActions();mountAdmin();bindExplorer();mountBatchAvailability(s);if(batchView.enabled){await applyBatchChoice();if(batchView.snapshot){S.screenAvailability=batchView.snapshot;$("#dataset").value=batchView.snapshot.dataset_id;$("#asof").textContent=batchView.snapshot.financial_as_of;await loadInputContext(batchView.snapshot.dataset_id);$("#predicates").replaceChildren();predicateRow();syncScreenPeriodModes();$("#period-mode").value=LATEST_ANNUAL_POLICY;togglePeriod()}}else{await loadExplorer();await loadLibrary()}const initial=({"#library-title":"library","#criteria-title":"screening","#results-title":"screening","#history-title":"history"})[location.hash]||"explorer";showView(initial);$("#criteria-form").addEventListener("input",e=>{if(isRevisionEdit(e.target))markDirty()});$("#criteria-form").addEventListener("change",e=>{if(isRevisionEdit(e.target))markDirty()})}
+async function boot(){mountScreeningPresentation();mountJournalHistory();const s=await api("/api/status"),d=s.datasets.at(-1),explorer=d;S.defaultDataset=d;S.explorerDataset=explorer;$("#dataset").innerHTML=s.datasets.map(x=>`<option value="${x.dataset_id}">${x.dataset_id}</option>`).join("");$("#dataset").value=d.dataset_id;$("#asof").textContent=d.financial_as_of;await loadInputContext(d.dataset_id);await refreshScreens();await refreshRuns();await refreshDecisions();$("#predicates").innerHTML="";predicateRow();renderTimeline();syncResultActions();mountAdmin();bindExplorer();mountBatchAvailability(s);if(batchView.enabled){await applyBatchChoice();if(batchView.snapshot){S.screenAvailability=batchView.snapshot;$("#dataset").value=batchView.snapshot.dataset_id;$("#asof").textContent=batchView.snapshot.financial_as_of;await loadInputContext(batchView.snapshot.dataset_id);$("#predicates").replaceChildren();predicateRow();syncScreenPeriodModes();$("#period-mode").value=LATEST_ANNUAL_POLICY;togglePeriod()}}else{await loadExplorer();await loadLibrary()}const initial=({"#library-title":"library","#criteria-title":"screening","#results-title":"screening","#history-title":"history"})[location.hash]||"explorer";showView(initial);$("#criteria-form").addEventListener("input",e=>{if(isRevisionEdit(e.target))markDirty()});$("#criteria-form").addEventListener("change",e=>{if(isRevisionEdit(e.target))markDirty()})}
 $("#add-predicate").onclick=()=>{predicateRow();markDirty()};$("#metric-category").onchange=refreshMetricOptions;$("#metric-search").oninput=refreshMetricOptions;$("#company-query").oninput=renderCompanyOptions;$("#company-select").onchange=syncCompanySelection;$("#universe-mode").onchange=toggleUniverse;$("#period-mode").onchange=togglePeriod;$("#frequency").onfocus=()=>{S.frequencyDrafts[S.frequency]={content:revisionContent(),name:$("#screen-name").value,revision:S.revision,dirty:S.dirty,dataset:{dataset_id:$("#dataset").value,financial_as_of:$("#asof").textContent}}};$("#frequency").onchange=()=>withBusy(switchFrequency).catch(fail);
 async function openSavedScreenRecord(record,datasetId=null){const epoch=journalHistory.epoch,dependency=Boolean(datasetId);if(!record)return;if(!dependency&&historyHidden("REVISION",record.revision_id))throw new Error("휴지통에서 조건을 복원한 뒤 다시 열어 주세요.");if(!datasetId){record=await api(`/api/saved-conditions/${record.revision_id}`);datasetId=record.open_dataset_id||$("#dataset").value||S.defaultDataset.dataset_id;}if(epoch!==journalHistory.epoch)return;clearResult();$("#dataset").value=datasetId;await loadInputContext(datasetId);if(epoch!==journalHistory.epoch)return;const quarterly=quarterlyScreenPolicy(record.content.period_policy);$("#frequency").value=quarterly?"QUARTERLY":"ANNUAL";if(quarterly){const [catalog,periods]=await Promise.all([api(`/api/quarter-metric-catalog?dataset_id=${encodeURIComponent(datasetId)}`),api(`/api/quarter-periods?dataset_id=${encodeURIComponent(datasetId)}`)]);S.catalog=catalog;S.quarterSpine=periods.spine;$("#calendar-quarter").innerHTML=periods.spine.map(x=>`<option value="${x.calendar_year}Q${x.calendar_quarter}">${quarterLabel(x)}</option>`).join("")}if(epoch!==journalHistory.epoch)return;loadScreenRecord(record);$("#saved-screen").value=record.revision_id;setCriteriaCompact(false);if(record.context_origin==="UNKNOWN")toast("과거 저장 자료를 확인할 수 없어 현재 선택 자료로 조건을 열었습니다.");else if(record.context_origin==="HISTORICAL_RUN")toast("이 조건의 과거 실행 자료로 열었습니다.");showView("screening",true)}
 $("#open-screen").onclick=()=>withBusy(async()=>{const record=S.screens.find(x=>x.revision_id===$("#saved-screen").value);if(!record)throw new Error("저장 조건 버전을 선택해 주세요.");await openSavedScreenRecord(record)}).catch(fail);
