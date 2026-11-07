@@ -299,7 +299,8 @@ def test_explicit_none_scope_isolates_and_restores_outer_after_exception(tmp_pat
         compat.resolve_source_compatibility(_pin(old))
 
 
-def test_latest_consumer_transition_reopens_old_and_new_combined_without_replaying_history(tmp_path, monkeypatch):
+@pytest.mark.parametrize("continuity", [False, True])
+def test_latest_consumer_transition_reopens_old_and_new_combined_without_replaying_history(tmp_path, monkeypatch, continuity):
     from sec_xbrl.screening.dataset_v3 import ScreeningDatasetV3Reader, publish_screening_dataset_v3
     from sec_xbrl.screening.service import ScreeningService
 
@@ -353,3 +354,111 @@ def test_latest_consumer_transition_reopens_old_and_new_combined_without_replayi
     assert len(service.status()["datasets"]) == 2
     with pytest.raises(ValueError, match="inventories"):
         compat.resolve_source_compatibility(_pin(prior))
+
+    if not continuity:
+        return
+
+    from sec_xbrl.metrics.quarterly_screening import publish_quarterly_screening_metrics
+    from sec_xbrl.metrics.statement_metric_evidence import (
+        CONTINUITY_CATALOG,
+        STATEMENT_EVIDENCE_VERSION,
+    )
+    from sec_xbrl.screening import dataset_v3
+
+    latest_archive = tmp_path / "source-latest"
+    shutil.copytree(current, latest_archive)
+    for name in compat._CONTINUITY_CHANGES:
+        with (current / name).open("a") as stream:
+            stream.write("\n# approved continuity source change\n")
+    v4_inputs = {
+        "origin_source_root": Path(packet["origin_source_root"]),
+        "preserved_controls": packet["preserved_controls"],
+        "routine_histories": [{key: row[key] for key in ("report", "build_manifest", "history_manifest")}
+                              for row in packet["routine_histories"]],
+        "supersedes": {"packet": _pin(latest), "source_root": str(latest_archive),
+                       "completed_publications": completed},
+        "continuity": True,
+    }
+    bootstrap = tmp_path / "continuity-bootstrap.json"
+    write_json(bootstrap, compat.prepare_source_compatibility_packet(**v4_inputs) | {"status": "ROOT_APPROVED"})
+    old_quarter = json.loads(Path(completed["quarterly_metrics"]["path"]).read_text())
+    evidence = tmp_path / "statement-evidence.json"
+    write_json(evidence, {"version": STATEMENT_EVIDENCE_VERSION,
+                          "financial_as_of": old_quarter["financial_as_of"], "records": []})
+    quarter_config = tmp_path / "continuity-quarter-config.json"
+    write_json(quarter_config, old_quarter["config"] | {
+        "catalog_version": CONTINUITY_CATALOG, "statement_metric_evidence": _pin(evidence),
+    })
+    with compat.use_source_compatibility(_pin(bootstrap)):
+        for ancestor in (latest, prior, origin):
+            assert compat.resolve_source_compatibility(_pin(ancestor)).declaration == _pin(bootstrap)
+        quarter = publish_quarterly_screening_metrics(quarter_config, tmp_path / "continuity-quarter")
+        assert ScreeningDatasetV3Reader(new_root).manifest["dataset_id"] == "latest-combined"
+
+    final = tmp_path / "continuity-final.json"
+    write_json(final, compat.prepare_source_compatibility_packet(
+        **v4_inputs, quarterly_successor=_pin(quarter.manifest_path),
+    ) | {"status": "ROOT_APPROVED"})
+    combined = tmp_path / "continuity-config.json"
+    combined_config = config | {
+        "dataset_id": "continuity-combined", "source_compatibility": _pin(final),
+        "quarterly_metric_root": str(quarter.root), "quarterly_manifest_sha256": sha256_file(quarter.manifest_path),
+        "quarterly_successor": _pin(quarter.manifest_path),
+    }
+    write_json(combined, combined_config)
+    with compat.use_source_compatibility(_pin(final)) as witness:
+        assert witness.controls["QUARTERLY_STATEMENT_EVIDENCE"] == _pin(evidence)
+        assert witness.controls["QUARTERLY_SUCCESSOR_CONFIG"] == _pin(quarter_config)
+        for ancestor in (latest, prior, origin):
+            assert compat.resolve_source_compatibility(_pin(ancestor)).declaration == _pin(final)
+        for key, value in (
+            ("source_compatibility", None),
+            ("source_compatibility", _pin(bootstrap)),
+            ("source_compatibility", _pin(latest)),
+            ("quarterly_successor", completed["quarterly_metrics"]),
+        ):
+            write_json(combined, combined_config | {key: value})
+            with pytest.raises(ValueError, match="approved continuity scope"):
+                publish_screening_dataset_v3(combined, tmp_path / "rejected-combined")
+        write_json(combined, {key: value for key, value in combined_config.items() if key != "quarterly_successor"})
+        with pytest.raises(ValueError, match="explicit successor pin"):
+            publish_screening_dataset_v3(combined, tmp_path / "rejected-combined")
+    assert not (tmp_path / "rejected-combined").exists()
+
+    write_json(combined, combined_config)
+    combined_root = publish_screening_dataset_v3(combined, tmp_path / "continuity-combined")
+    service = ScreeningService(
+        {"prior-combined": old_root, "latest-combined": new_root, "continuity-combined": combined_root},
+        tmp_path / "continuity-journal.sqlite", source_compatibility=_pin(final),
+    )
+    service.require_publication("prior-combined", old_publication)
+    assert len(service.status()["datasets"]) == 3
+    assert ScreeningDatasetV3Reader(combined_root).quarterly.publication_id == quarter.publication_id
+
+    original = evidence.read_bytes()
+    promote = dataset_v3._publish_verified_v3
+
+    def change_evidence_after_verification(*args, **kwargs):
+        evidence.write_bytes(original + b" ")
+        try:
+            return promote(*args, **kwargs)
+        finally:
+            evidence.write_bytes(original)
+
+    monkeypatch.setattr(dataset_v3, "_publish_verified_v3", change_evidence_after_verification)
+    destination = tmp_path / "invalidated-combined"
+    with pytest.raises(ValueError, match="changed|differs"):
+        publish_screening_dataset_v3(combined, destination)
+    assert not destination.exists()
+
+    changed_manifest = json.loads(quarter.manifest_path.read_text())
+    changed_manifest["governance_parents"] = []
+    invalid_child = tmp_path / "invalid-child" / quarter.manifest_path.name
+    invalid_child.parent.mkdir()
+    write_json(invalid_child, changed_manifest)
+    invalid_packet = tmp_path / "invalid-continuity-packet.json"
+    write_json(invalid_packet, compat.prepare_source_compatibility_packet(
+        **v4_inputs, quarterly_successor=_pin(invalid_child),
+    ) | {"status": "ROOT_APPROVED"})
+    with pytest.raises(ValueError, match="preserve the approved parent scope"):
+        compat.resolve_source_compatibility(_pin(invalid_packet))
