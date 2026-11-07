@@ -297,3 +297,59 @@ def test_explicit_none_scope_isolates_and_restores_outer_after_exception(tmp_pat
         assert compat.resolve_source_compatibility(_pin(old)).declaration == _pin(path)
     with pytest.raises(ValueError, match="inventories"):
         compat.resolve_source_compatibility(_pin(old))
+
+
+def test_latest_consumer_transition_reopens_old_and_new_combined_without_replaying_history(tmp_path, monkeypatch):
+    from sec_xbrl.screening.dataset_v3 import ScreeningDatasetV3Reader, publish_screening_dataset_v3
+    from sec_xbrl.screening.service import ScreeningService
+
+    prior, previous, origin, _, current, completed = _supersession(tmp_path, monkeypatch, public_parents=True)
+    config = {
+        "schema_version": "screening-prepare-config-v3", "dataset_id": "prior-combined",
+        "annual_dataset_root": str(Path(completed["annual_dataset"]["path"]).parent),
+        "annual_manifest_sha256": completed["annual_dataset"]["sha256"],
+        "quarterly_metric_root": str(Path(completed["quarterly_metrics"]["path"]).parent),
+        "quarterly_manifest_sha256": completed["quarterly_metrics"]["sha256"],
+        "source_compatibility": _pin(prior),
+    }
+    old_config = tmp_path / "prior-config.json"
+    write_json(old_config, config)
+    old_root = publish_screening_dataset_v3(old_config, tmp_path / "prior-combined")
+    old_publication = ScreeningDatasetV3Reader(old_root).publication_id
+    archive = tmp_path / "source408"
+    shutil.copytree(current, archive)
+    for name in compat._LATEST_CHANGES:
+        with (current / name).open("a") as stream:
+            stream.write("\n# approved latest consumer change\n")
+    latest = tmp_path / "latest-compatibility.json"
+    packet = compat.prepare_source_compatibility_packet(
+        origin_source_root=Path(previous["origin_source_root"]),
+        preserved_controls=previous["preserved_controls"],
+        routine_histories=[{key: row[key] for key in ("report", "build_manifest", "history_manifest")}
+                           for row in previous["routine_histories"]],
+        supersedes={"packet": _pin(prior), "source_root": str(archive), "completed_publications": completed},
+        latest=True,
+    )
+    packet["status"] = "ROOT_APPROVED"
+    write_json(latest, packet)
+    config.update(dataset_id="latest-combined", source_compatibility=_pin(latest))
+    new_config = tmp_path / "latest-config.json"
+    write_json(new_config, config)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("prior History checks must not repeat")
+    monkeypatch.setattr(history.HistoryPublicationReader, "validate", forbidden)
+    monkeypatch.setattr(history.HistoryPublicationReader, "verify_all", forbidden)
+    new_root = publish_screening_dataset_v3(new_config, tmp_path / "latest-combined")
+    with pytest.raises(ValueError, match="inventories"):
+        ScreeningDatasetV3Reader(old_root)
+    with compat.use_source_compatibility(_pin(latest)):
+        for old_pin in (prior, origin):
+            assert compat.resolve_source_compatibility(_pin(old_pin)).declaration == _pin(latest)
+    service = ScreeningService(
+        {"prior-combined": old_root, "latest-combined": new_root},
+        tmp_path / "journal.sqlite", source_compatibility=_pin(latest),
+    )
+    service.require_publication("prior-combined", old_publication)
+    assert len(service.status()["datasets"]) == 2
+    with pytest.raises(ValueError, match="inventories"):
+        compat.resolve_source_compatibility(_pin(prior))

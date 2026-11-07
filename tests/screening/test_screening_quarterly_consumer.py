@@ -139,9 +139,9 @@ from sec_xbrl.screening.service import ScreeningService
 from sec_xbrl.screening.store import ScreeningStore
 
 
-def _quarter_service(tmp_path: Path) -> ScreeningService:
+def _quarter_service(tmp_path: Path, *, wire_root: Path | None = None) -> ScreeningService:
     wire = QuarterlyScreeningMetricReader(
-        Path(__file__).parents[1] / "fixtures" / "screening_quarterly_wire_v5"
+        wire_root or Path(__file__).parents[1] / "fixtures" / "screening_quarterly_wire_v5"
     )
     reader = object.__new__(ScreeningDatasetV3Reader)
     reader.publication_id = "synthetic-v3-dataset"

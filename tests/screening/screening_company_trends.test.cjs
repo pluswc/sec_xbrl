@@ -127,3 +127,37 @@ test("metric requests own their token; same-context filter loading does not disc
   for(const [cik,item]of pending)item.resolve(profile(cik));await Promise.all([old,current]);
   assert.equal(h.state.model.context.definition.metric_id,"net_income");assert.equal(h.calls.length,2);
 });
+
+test("latest trends request guarded series even after caching the same fixed coordinate",async()=>{
+  const h=harness(url=>{
+    const q=new URLSearchParams(url.split("?")[1]),p=profile(q.get("cik"));
+    if(q.has("latest"))p.series.revenue.find(row=>row.fiscal_year===2025).value=null;
+    return p;
+  });
+  const fixed=h.companyTrendContext("revenue");
+  const old=await h.cachedCompanyTrendSeries(fixed,"1");
+  assert.equal(old.rows.find(row=>row.fiscal_year===2025).value,"500000000");
+  const latest={...fixed,ends:{"1":2025,"2":2025}};
+  const held=await h.cachedCompanyTrendSeries(latest,"1");
+  assert.equal(held.rows.find(row=>row.fiscal_year===2025).value,null);
+  assert.match(h.calls.at(-1),/latest=true/);
+  assert.doesNotMatch(h.calls.at(-1),/fiscal_year=/);
+  assert.equal(h.calls.length,2);
+
+  const q=harness(url=>{
+    const payload=quarterSeries();
+    const params=new URLSearchParams(url.split("?")[1]);
+    const endpoint=payload.observations.find(row=>row.calendar_year===2026&&row.calendar_quarter===2);
+    if(params.has("latest"))Object.assign(endpoint,{value:null,availability_status:"UNAVAILABLE",reason:"PERIOD_MISMATCH"});
+    return payload;
+  });
+  interim(q);
+  const context=q.companyTrendContext("quarter_revenue");
+  await q.cachedCompanyTrendSeries(context,"1");
+  const guarded={...context,ends:{"1":"2026Q2","2":"2026Q2"}};
+  const result=await q.cachedCompanyTrendSeries(guarded,"1");
+  const chart=q.alignCompanyTrend(guarded,[result]);
+  assert.equal(chart.series[0].points.at(-1).observation.value,null);
+  assert.match(q.calls.at(-1),/latest=true/);
+  assert.equal(q.calls.length,2);
+});

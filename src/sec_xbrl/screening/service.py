@@ -6,9 +6,12 @@ import csv
 import hashlib
 import json
 import uuid
+from contextlib import nullcontext
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sec_xbrl.screening.common import (
     canonical_json,
@@ -22,7 +25,14 @@ from sec_xbrl.screening.company_descriptions import CompanyDescriptionReader
 from sec_xbrl.screening.dataset import ScreeningDatasetReader
 from sec_xbrl.screening.dataset_v2 import ScreeningDatasetV2Reader, open_screening_dataset
 from sec_xbrl.screening.dataset_v3 import ScreeningDatasetV3Reader
-from sec_xbrl.screening.explorer import ScreeningExplorer, public_copy
+from sec_xbrl.screening.explorer import (
+    LATEST_PERIOD_MODES,
+    LATEST_QUARTER,
+    ScreeningExplorer,
+    latest_company_period,
+    latest_period_observation,
+    public_copy,
+)
 from sec_xbrl.screening.store import ScreeningStore
 
 ENGINE_VERSION = "screening-executor-v1"
@@ -60,6 +70,62 @@ def _preview_response(
     }
 
 
+
+_NY = ZoneInfo("America/New_York")
+_FIXED_QUARTER = "FIXED_CALENDAR_QUARTER_END"
+_QUARTER_MODES = frozenset({_FIXED_QUARTER, LATEST_QUARTER})
+
+
+def _batch_date(value: str) -> date:
+    parsed = date.fromisoformat(value)
+    if parsed.isoformat() != value:
+        raise ValueError("batch date requires YYYY-MM-DD")
+    return parsed
+
+
+def _batch_timestamp(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    if parsed.utcoffset() is None:
+        raise ValueError("batch readiness timestamp requires a timezone")
+    return parsed.astimezone(UTC)
+
+
+def _batch_evidence(
+    evidence: dict[str, Any] | None, datasets: dict[str, Any]
+) -> tuple[dict[str, datetime], tuple[date, date, tuple[date, ...]] | None]:
+    if evidence is None:
+        return {}, None
+    if (not isinstance(evidence, dict)
+        or set(evidence) != {"schema_version", "registrations", "sessions"}
+        or evidence["schema_version"] != "screening-batch-availability-v1"
+        or not isinstance(evidence["registrations"], list)):
+        raise ValueError("unsupported batch availability evidence")
+    registrations = {}
+    for row in evidence["registrations"]:
+        if not isinstance(row, dict) or set(row) != {"dataset_id", "publication_id", "ready_at"}:
+            raise ValueError("batch registration requires dataset, publication and readiness timestamp")
+        dataset_id = require_string(row["dataset_id"], "batch dataset ID")
+        reader = datasets.get(dataset_id)
+        if reader is None or reader.publication_id != row["publication_id"] or dataset_id in registrations:
+            raise ValueError("batch registration publication differs or is duplicated")
+        ready = _batch_timestamp(row["ready_at"])
+        if _batch_date(reader.manifest["financial_as_of"]) > ready.astimezone(_NY).date():
+            raise ValueError("batch readiness precedes its financial cutoff")
+        registrations[dataset_id] = ready
+    sessions = evidence["sessions"]
+    if sessions is None:
+        return registrations, None
+    if not isinstance(sessions, dict) or set(sessions) != {"from", "through", "dates"}:
+        raise ValueError("trading sessions require an explicit coverage range")
+    start, end = _batch_date(sessions["from"]), _batch_date(sessions["through"])
+    if not isinstance(sessions["dates"], list):
+        raise TypeError("trading session dates must be a list")
+    dates = tuple(_batch_date(value) for value in sessions["dates"])
+    if start > end or dates != tuple(sorted(set(dates))) or any(not start <= day <= end for day in dates):
+        raise ValueError("trading session inventory dates or range differ")
+    return registrations, (start, end, dates)
+
+
 class ScreeningService:
     """Application service over verified publications and an append-only store."""
 
@@ -69,19 +135,24 @@ class ScreeningService:
         store: ScreeningStore | Path | str,
         *,
         company_descriptions: CompanyDescriptionReader | None = None,
+        source_compatibility: dict[str, str] | None = None,
+        batch_evidence: dict[str, Any] | None = None,
     ) -> None:
         if not isinstance(datasets, dict) or not datasets:
             raise ValueError("at least one screening dataset is required")
+        self.source_compatibility = source_compatibility
         self.datasets: dict[str, ScreeningDatasetReader | ScreeningDatasetV2Reader] = {}
         self.explorers: dict[str, ScreeningExplorer] = {}
-        for dataset_id, root in datasets.items():
-            dataset_id = require_string(dataset_id, "dataset catalog ID")
-            reader = open_screening_dataset(root)
-            if reader.manifest["dataset_id"] != dataset_id:
-                raise ValueError("dataset catalog ID differs from publication")
-            self.datasets[dataset_id] = reader
-            if isinstance(reader, (ScreeningDatasetV2Reader, ScreeningDatasetV3Reader)):
-                self.explorers[dataset_id] = ScreeningExplorer(reader)
+        with self._compatibility_scope():
+            for dataset_id, root in datasets.items():
+                dataset_id = require_string(dataset_id, "dataset catalog ID")
+                reader = open_screening_dataset(root)
+                if reader.manifest["dataset_id"] != dataset_id:
+                    raise ValueError("dataset catalog ID differs from publication")
+                self.datasets[dataset_id] = reader
+                if isinstance(reader, (ScreeningDatasetV2Reader, ScreeningDatasetV3Reader)):
+                    self.explorers[dataset_id] = ScreeningExplorer(reader)
+        self.batch_registrations, self.batch_sessions = _batch_evidence(batch_evidence, self.datasets)
         if company_descriptions is not None:
             bound = self.datasets.get(company_descriptions.dataset_id)
             if bound is None or bound.publication_id != company_descriptions.dataset.publication_id:
@@ -89,10 +160,91 @@ class ScreeningService:
         self.company_descriptions = company_descriptions
         self.store = store if isinstance(store, ScreeningStore) else ScreeningStore(store)
 
+    def _compatibility_scope(self):
+        if self.source_compatibility is None:
+            return nullcontext()
+        from sec_xbrl.financial_source_compatibility import use_source_compatibility
+
+        return use_source_compatibility(self.source_compatibility)
+
+    def _batch_snapshot(
+        self, dataset_id: str, mode: str, decision_date: date | None, lag: int,
+    ) -> dict[str, Any]:
+        reader = self._dataset(dataset_id)
+        return {
+            "mode": mode,
+            "dataset_id": dataset_id,
+            "publication_id": reader.publication_id,
+            "financial_as_of": reader.manifest["financial_as_of"],
+            "ready_at": self.batch_registrations[dataset_id].isoformat() if mode == "ACTUAL" else None,
+            "decision_date": decision_date.isoformat() if decision_date else None,
+            "lag": lag,
+        }
+
+    def _eligible_batch(self, ready: datetime, day: date, lag: int, now: datetime) -> bool:
+        ready_day = ready.astimezone(_NY).date()
+        if ready > now or ready_day > day:
+            return False
+        if not lag:
+            return True
+        if self.batch_sessions is None:
+            raise ValueError("positive lag requires a pinned US trading session inventory")
+        start, end, dates = self.batch_sessions
+        if not start <= ready_day <= day <= end:
+            raise ValueError("trading session inventory does not cover the readiness and decision dates")
+        return sum(ready_day < session <= day for session in dates) >= lag
+
+    def batch_availability(
+        self, *, mode: str, dataset_id: str | None = None, decision_date: str | None = None, lag: int = 0,
+    ) -> dict[str, Any]:
+        if type(lag) is not int or lag < 0:
+            raise ValueError("lag must be a nonnegative trading session count")
+        if mode == "PREPARED_SIMULATION":
+            if dataset_id is None or decision_date is not None or lag:
+                raise ValueError("prepared simulation uses a selected publication and its own cutoff")
+            return self._batch_snapshot(dataset_id, mode, None, 0)
+        if mode != "ACTUAL" or dataset_id is not None:
+            raise ValueError("actual availability selects a registered batch by decision date")
+        now = datetime.now(UTC)
+        today = now.astimezone(_NY).date()
+        day = _batch_date(decision_date) if decision_date is not None else today
+        if day > today:
+            raise ValueError("decision date is in the future")
+        candidates = sorted(self.batch_registrations.items(), key=lambda pair: pair[1], reverse=True)
+        selected = [(key, ready) for key, ready in candidates if ready <= now and ready.astimezone(_NY).date() <= day]
+        for key, ready in selected:
+            if self._eligible_batch(ready, day, lag, now):
+                if sum(other == ready for _, other in selected) != 1:
+                    raise ValueError("batch readiness is ambiguous at the selected timestamp")
+                return self._batch_snapshot(key, mode, day, lag)
+        raise ValueError("no verified batch was eligible on the selected date")
+
+    def _validate_batch_snapshot(self, snapshot: dict[str, Any], reader: Any) -> None:
+        dataset_id = reader.manifest["dataset_id"]
+        mode = snapshot.get("mode")
+        if mode == "PREPARED_SIMULATION":
+            expected = self._batch_snapshot(dataset_id, mode, None, 0)
+        elif mode == "ACTUAL":
+            ready = self.batch_registrations.get(dataset_id)
+            day = _batch_date(snapshot["decision_date"])
+            lag = snapshot["lag"]
+            now = datetime.now(UTC)
+            if (ready is None or type(lag) is not int or lag < 0 or day > now.astimezone(_NY).date()
+                or not self._eligible_batch(ready, day, lag, now)):
+                raise ValueError("saved batch readiness is unverified or ineligible")
+            expected = self._batch_snapshot(dataset_id, mode, day, lag)
+        else:
+            raise ValueError("unknown batch availability mode")
+        if snapshot != expected:
+            raise ValueError("batch availability snapshot differs from the registered publication")
+
     def status(self) -> dict[str, Any]:
+        with self._compatibility_scope():
+            datasets = [reader.verify_all() for reader in self.datasets.values()]
         status = {
             "engine_version": ENGINE_VERSION,
-            "datasets": [reader.verify_all() for reader in self.datasets.values()],
+            "datasets": datasets,
+            "batch_availability": {"registered": len(self.batch_registrations)},
             "screens": len(self.store.list_screens()),
             "runs": len(self.store.list_runs()),
         }
@@ -208,7 +360,7 @@ class ScreeningService:
         }
 
     def quarter_series(
-        self, dataset_id: str, *, cik: str, metric_id: str, limit: int = 8
+        self, dataset_id: str, *, cik: str, metric_id: str, limit: int = 8, latest: bool = False
     ) -> dict[str, Any]:
         reader = self._quarter_dataset(dataset_id)
         cik = require_cik(cik)
@@ -223,6 +375,9 @@ class ScreeningService:
         if not rows:
             raise ValueError("quarter series is not prepared")
         rows.sort(key=lambda row: (row["calendar_year"], row["calendar_quarter"]))
+        if latest:
+            anchor = latest_company_period(reader, cik, quarterly=True)
+            rows = self._latest_series(rows, anchor, cik=cik, quarterly=True)
         return {
             "metric": next(
                 row for row in reader.quarter_definitions if row["metric_id"] == metric_id
@@ -231,43 +386,50 @@ class ScreeningService:
         }
 
     def quarter_explorer(
-        self, dataset_id: str, *, calendar_year: int, calendar_quarter: int
+        self, dataset_id: str, *, calendar_year: int | None = None, calendar_quarter: int | None = None, latest: bool = False
     ) -> dict[str, Any]:
         reader = self._quarter_dataset(dataset_id)
-        _validate_period_policy(
-            {
+        if not latest:
+            _validate_period_policy({
                 "mode": "FIXED_CALENDAR_QUARTER_END",
                 "calendar_year": calendar_year,
                 "calendar_quarter": calendar_quarter,
-            }
-        )
+            })
+        elif calendar_year is not None or calendar_quarter is not None:
+            raise ValueError("latest company periods cannot be combined with a fixed quarter")
         inventory = {
             (row["cik"], row["calendar_year"], row["calendar_quarter"]): row
             for row in reader.quarter_period_inventory
         }
         rows = []
         for company in reader.companies:
+            period = (latest_company_period(reader, company["cik"], quarterly=True) if latest
+                      else inventory[(company["cik"], calendar_year, calendar_quarter)])
+            prepared = period is not None and (not latest or period["bucket_status"] == "PERIOD_AVAILABLE")
+            row_year = period["calendar_year"] if prepared else None
+            row_quarter = period["calendar_quarter"] if prepared else None
             observations = {
-                row["metric_id"]: json.loads(canonical_json(row))
+                row["metric_id"]: public_copy(
+                    latest_period_observation(row, period, cik=company["cik"], quarterly=True)
+                    if latest else row
+                )
                 for row in reader.quarter_observations
                 if row["cik"] == company["cik"]
-                and row["calendar_year"] == calendar_year
-                and row["calendar_quarter"] == calendar_quarter
+                and row["calendar_year"] == row_year
+                and row["calendar_quarter"] == row_quarter
             }
             rows.append(
                 {
                     "company": json.loads(canonical_json(company)),
-                    "period": json.loads(
-                        canonical_json(inventory[(company["cik"], calendar_year, calendar_quarter)])
-                    ),
+                    "period": json.loads(canonical_json(period)),
                     "metrics": observations,
                 }
             )
         selected_metrics = []
         for metric in self.quarter_metric_catalog(dataset_id):
-            matching = [row["metrics"][metric["metric_id"]] for row in rows]
+            matching = [row["metrics"].get(metric["metric_id"]) for row in rows]
             available = sum(
-                item["availability_status"] == "AVAILABLE"
+                item is not None and item["availability_status"] == "AVAILABLE"
                 and not item.get("quality_blocking")
                 and item.get("quality_status") != "BLOCK"
                 for item in matching
@@ -289,6 +451,7 @@ class ScreeningService:
             "financial_as_of": reader.manifest["financial_as_of"],
             "metrics": selected_metrics,
             "rows": rows,
+            **({"period_scope": "LATEST_COMPANY"} if latest else {}),
         }
 
     def quarter_comparison(
@@ -297,42 +460,60 @@ class ScreeningService:
         *,
         ciks: list[str],
         metric_id: str,
-        calendar_year: int,
-        calendar_quarter: int,
+        calendar_year: int | None = None,
+        calendar_quarter: int | None = None,
+        latest: bool = False,
     ) -> dict[str, Any]:
         reader = self._quarter_dataset(dataset_id)
         if len(ciks) < 2 or len(ciks) > 4 or len(set(ciks)) != len(ciks):
             raise ValueError("quarter comparison requires two to four unique companies")
+        if latest and (calendar_year is not None or calendar_quarter is not None):
+            raise ValueError("latest company periods cannot be combined with a fixed quarter")
+        if latest and not any(row["metric_id"] == metric_id for row in reader.quarter_definitions):
+            raise ValueError("quarter comparison metric is not prepared")
         rows = []
         for raw in ciks:
             cik = require_cik(raw)
             company = reader.company(cik)
+            period = latest_company_period(reader, cik, quarterly=True) if latest else None
+            if latest and (period is None or period["bucket_status"] != "PERIOD_AVAILABLE"):
+                rows.append({"company": company, "observation": None, "period": public_copy(period)})
+                continue
+            row_year = period["calendar_year"] if latest else calendar_year
+            row_quarter = period["calendar_quarter"] if latest else calendar_quarter
             matches = [
                 row
                 for row in reader.quarter_observations
                 if row["cik"] == cik
                 and row["metric_id"] == metric_id
-                and row["calendar_year"] == calendar_year
-                and row["calendar_quarter"] == calendar_quarter
+                and row["calendar_year"] == row_year
+                and row["calendar_quarter"] == row_quarter
             ]
             if len(matches) != 1:
                 raise ValueError("quarter comparison cell is not unique")
-            rows.append({"company": company, "observation": json.loads(canonical_json(matches[0]))})
+            rows.append({
+                "company": company, "observation": public_copy(
+                    latest_period_observation(matches[0], period, cik=cik, quarterly=True)
+                    if latest else matches[0]
+                ),
+                **({"period": json.loads(canonical_json(period))} if latest else {}),
+            })
         signatures = {
             (
                 r["observation"]["definition_version"],
                 r["observation"]["unit"],
                 r["observation"]["selection_as_of_date"],
             )
-            for r in rows
+            for r in rows if r["observation"] is not None
         }
-        if len(signatures) != 1:
+        if len(signatures) > 1 or (not latest and not signatures):
             raise ValueError("quarter comparison scope is incompatible")
         return {
             "calendar_year": calendar_year,
             "calendar_quarter": calendar_quarter,
             "metric_id": metric_id,
             "rows": rows,
+            **({"period_scope": "LATEST_COMPANY"} if latest else {}),
         }
 
     def company_explorer(
@@ -341,6 +522,7 @@ class ScreeningService:
         *,
         fiscal_year: int | None = None,
         query: str | None = None,
+        latest: bool = False,
         sort: str = "company",
         direction: str = "asc",
     ) -> dict[str, Any]:
@@ -348,6 +530,7 @@ class ScreeningService:
         return public_copy(
             self._explorer(dataset_id).explore(
                 fiscal_year=fiscal_year,
+                latest=latest,
                 query=query,
                 sort=sort,
                 direction=direction,
@@ -372,13 +555,14 @@ class ScreeningService:
         )
 
     def company_profile(
-        self, dataset_id: str, *, cik: str, fiscal_year: int | None = None
+        self, dataset_id: str, *, cik: str, fiscal_year: int | None = None, latest: bool = False
     ) -> dict[str, Any]:
         """Return a run-independent company profile over prepared observations."""
         result = public_copy(
             self._explorer(dataset_id).company_profile(
                 cik=cik,
                 fiscal_year=fiscal_year,
+                latest=latest,
             )
         )
         if (
@@ -414,6 +598,7 @@ class ScreeningService:
         ciks: list[str],
         metric_ids: list[str],
         fiscal_year: int | None = None,
+        latest: bool = False,
     ) -> dict[str, Any]:
         """Return a same-year matrix for two to four prepared companies."""
         return public_copy(
@@ -421,10 +606,11 @@ class ScreeningService:
                 ciks=ciks,
                 metric_ids=metric_ids,
                 fiscal_year=fiscal_year,
+                latest=latest,
             )
         )
 
-    def metric_series(self, dataset_id: str, *, cik: str, metric_id: str) -> dict[str, Any]:
+    def metric_series(self, dataset_id: str, *, cik: str, metric_id: str, latest: bool = False) -> dict[str, Any]:
         reader = self._dataset(dataset_id)
         cik = require_cik(cik)
         metric_id = require_string(metric_id, "metric_id")
@@ -438,7 +624,27 @@ class ScreeningService:
         if not rows:
             raise ValueError("metric is not prepared for this company")
         rows.sort(key=lambda row: (row["fiscal_year"], row["period_class"], row["view"]))
+        if latest:
+            anchor = latest_company_period(reader, cik, quarterly=False)
+            rows = self._latest_series(rows, anchor, cik=cik, quarterly=False)
         return {"company": reader.company(cik), "metric_id": metric_id, "observations": rows}
+
+    @staticmethod
+    def _latest_series(
+        rows: list[dict[str, Any]], anchor: dict[str, Any] | None, *, cik: str, quarterly: bool,
+    ) -> list[dict[str, Any]]:
+        if anchor is None:
+            return []
+        fields = ("calendar_year", "calendar_quarter") if quarterly else ("fiscal_year",)
+        end = tuple(anchor[key] for key in fields)
+        result = []
+        for row in rows:
+            coordinate = tuple(row[key] for key in fields)
+            if coordinate <= end:
+                result.append(latest_period_observation(
+                    row, anchor if coordinate == end else None, cik=cik, quarterly=quarterly,
+                ))
+        return result
 
     def metadata_inventory(
         self,
@@ -649,7 +855,7 @@ class ScreeningService:
             "run_id": run_id,
             "company": {key: row[key] for key in ("cik", "ticker", "name", "sic_code")},
             "evaluation": evaluation,
-            "trace": evaluation.get("observation", {}).get("trace"),
+            "trace": (evaluation.get("observation") or {}).get("trace"),
         }
 
     def compare_peers(
@@ -879,7 +1085,7 @@ class ScreeningService:
             )
             if reader is not None:
                 quarterly = (
-                    content.get("period_policy", {}).get("mode") == "FIXED_CALENDAR_QUARTER_END"
+                    content.get("period_policy", {}).get("mode") in _QUARTER_MODES
                 )
                 supports = [
                     row
@@ -903,7 +1109,12 @@ class ScreeningService:
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate metric predicate")
         _validate_universe(content.get("universe"))
-        _validate_period_policy(content.get("period_policy"))
+        policy = content.get("period_policy")
+        _validate_period_policy(policy)
+        if "availability" in policy:
+            if reader is None:
+                raise ValueError("latest company policy requires a pinned dataset")
+            self._validate_batch_snapshot(policy["availability"], reader)
         columns = content.get("columns")
         if (
             not isinstance(columns, list)
@@ -925,16 +1136,34 @@ class ScreeningService:
         company: dict[str, Any],
         content: dict[str, Any],
     ) -> dict[str, Any]:
+        policy = content["period_policy"]
+        latest = policy["mode"] in LATEST_PERIOD_MODES
+        anchor = None
+        if latest:
+            quarterly = policy["mode"] == LATEST_QUARTER
+            anchor = latest_company_period(reader, company["cik"], quarterly=quarterly)
+            if anchor is not None:
+                policy = ({"mode": _FIXED_QUARTER, "calendar_year": anchor["calendar_year"],
+                           "calendar_quarter": anchor["calendar_quarter"]} if quarterly
+                          else {"mode": "FIXED_FISCAL_YEAR", "fiscal_year": anchor["fiscal_year"]})
         evaluations = []
+        conflict = anchor is not None and anchor.get("bucket_status") == "PERIOD_CONFLICT"
         for predicate in content["predicates"]:
-            observation = _find_observation(
+            observation = None if latest and (anchor is None or conflict) else _find_observation(
                 reader,
                 company["cik"],
                 predicate["metric_id"],
-                content["period_policy"],
+                policy,
                 definition_version=predicate["definition_version"],
             )
-            evaluations.append(_evaluate_predicate(predicate, observation))
+            if latest:
+                observation = latest_period_observation(
+                    observation, anchor, cik=company["cik"], quarterly=quarterly,
+                )
+            evaluation = _evaluate_predicate(predicate, observation)
+            if conflict:
+                evaluation["reason"] = "PERIOD_CONFLICT"
+            evaluations.append(evaluation)
         valid_fail = any(row["result"] == "FAIL" for row in evaluations)
         quality_blocking = any(row["quality_blocking"] for row in evaluations)
         if valid_fail:
@@ -952,6 +1181,7 @@ class ScreeningService:
             "aggregate": aggregate,
             "quality_blocking": quality_blocking,
             "predicates": evaluations,
+            **({"resolved_period": public_copy(anchor)} if latest else {}),
         }
 
 
@@ -1093,15 +1323,21 @@ def _validate_universe(value: Any) -> None:
 
 
 def _validate_period_policy(value: Any) -> None:
-    modes = {"FIXED_FISCAL_YEAR", "LATEST_COMPLETE_ANNUAL", "FIXED_CALENDAR_QUARTER_END"}
+    modes = {"FIXED_FISCAL_YEAR", "LATEST_COMPLETE_ANNUAL", _FIXED_QUARTER} | LATEST_PERIOD_MODES
     if not isinstance(value, dict) or value.get("mode") not in modes:
         raise ValueError("invalid period policy")
-    if value["mode"] == "FIXED_FISCAL_YEAR":
+    if "availability" in value and not isinstance(value["availability"], dict):
+        raise TypeError("period availability must be a batch snapshot")
+    fields = set(value) - {"availability"}
+    if value["mode"] in LATEST_PERIOD_MODES:
+        if set(value) != {"mode", "availability"} or not isinstance(value["availability"], dict):
+            raise ValueError("latest company policy requires a batch availability snapshot")
+    elif value["mode"] == "FIXED_FISCAL_YEAR":
         year = value.get("fiscal_year")
         if (
             type(year) is not int
             or not 1900 <= year <= 2200
-            or set(value) != {"mode", "fiscal_year"}
+            or fields != {"mode", "fiscal_year"}
         ):
             raise ValueError("fixed annual policy requires one fiscal year")
     elif value["mode"] == "LATEST_COMPLETE_ANNUAL":
@@ -1115,7 +1351,7 @@ def _validate_period_policy(value: Any) -> None:
             or not 1900 <= year <= 2200
             or type(quarter) is not int
             or quarter not in {1, 2, 3, 4}
-            or set(value) != {"mode", "calendar_year", "calendar_quarter"}
+            or fields != {"mode", "calendar_year", "calendar_quarter"}
         ):
             raise ValueError("fixed calendar quarter-end policy requires one year and quarter")
 

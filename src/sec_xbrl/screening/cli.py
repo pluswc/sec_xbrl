@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sqlite3
 import sys
@@ -76,6 +77,8 @@ def _parser() -> argparse.ArgumentParser:
     status.add_argument("--dataset", type=Path, required=True)
     server = commands.add_parser("serve", help="start the loopback dashboard")
     server.add_argument("--catalog", type=Path, required=True)
+    server.add_argument("--source-compatibility", nargs=2, metavar=("PATH", "SHA256"))
+    server.add_argument("--batch-availability", nargs=2, metavar=("PATH", "SHA256"))
     server.add_argument("--store", type=Path, required=True)
     server.add_argument("--exports", type=Path, required=True)
     server.add_argument("--host", default="127.0.0.1")
@@ -136,13 +139,27 @@ def main(argv: list[str] | None = None) -> int:
         _print(reader.verify_all())
     elif args.command == "serve":
         catalog = _catalog(args.catalog)
-        descriptions = _serve_descriptions(args, catalog)
+        from sec_xbrl.financial_source_compatibility import use_source_compatibility
+
+        compatibility = _optional_pin(args.source_compatibility)
+        batch_pin = _optional_pin(args.batch_availability)
+        options: dict[str, Any] = {}
+        if batch_pin is not None:
+            data = Path(batch_pin["path"]).read_bytes()
+            if hashlib.sha256(data).hexdigest() != batch_pin["sha256"]:
+                raise ValueError("batch availability evidence changed during loading")
+            options["batch_evidence"] = json.loads(data)
+        if compatibility is not None:
+            options["source_compatibility"] = compatibility
+        with use_source_compatibility(compatibility):
+            descriptions = _serve_descriptions(args, catalog)
         if args.require_existing_store:
             _validate_existing_store(args.store)
         service = ScreeningService(
             catalog,
             ScreeningStore(args.store),
             company_descriptions=descriptions,
+            **options,
         )
         _print(
             {
@@ -162,6 +179,15 @@ def main(argv: list[str] | None = None) -> int:
     else:
         _print({"store": str(restore_store(args.backup, args.destination))})
     return 0
+
+
+def _optional_pin(value: list[str] | None) -> dict[str, str] | None:
+    if value is None:
+        return None
+    from sec_xbrl.history_selection import _pin
+
+    path, sha256 = value
+    return _pin({"path": path, "sha256": sha256})
 
 
 def _catalog(path: Path) -> dict[str, Path]:
