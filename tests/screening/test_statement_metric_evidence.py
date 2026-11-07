@@ -144,3 +144,13 @@ def test_revenue_primary_occurrence_attests_only_exact_same_raw_aspects():
     elected["decimals"] = "-3"
     assert evidence._statement_occurrences(prepared, filing=filing, snapshot_id="snapshot",
                                            snapshot_manifest_sha256="manifest") == ()
+
+
+def test_evidence_pin_rejects_working_directory_relative_path(tmp_path, monkeypatch):
+    artifact = tmp_path / "evidence.json"
+    artifact.write_bytes(b"{}")
+    monkeypatch.chdir(tmp_path)
+    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    for path in (artifact.name, "", None):
+        with pytest.raises(ValueError, match="nonempty absolute path"):
+            evidence.read_statement_metric_evidence({"path": path, "sha256": digest}, "2026-10-25")

@@ -198,7 +198,10 @@ def read_statement_metric_evidence(pin: dict[str, Any], financial_as_of: str) ->
 
     if not isinstance(pin, dict) or set(pin) != {"path", "sha256"}:
         raise ValueError("statement metric evidence requires an exact file pin")
-    path = regular_file(Path(pin["path"]), "statement metric evidence")
+    declared_path = pin["path"]
+    if not isinstance(declared_path, str) or not declared_path.strip() or not Path(declared_path).is_absolute():
+        raise ValueError("statement metric evidence requires a nonempty absolute path")
+    path = regular_file(Path(declared_path), "statement metric evidence")
     data = path.read_bytes()
     if hashlib.sha256(data).hexdigest() != pin["sha256"]:
         raise ValueError("statement metric evidence differs from pin")
