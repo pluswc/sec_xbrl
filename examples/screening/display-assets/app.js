@@ -377,8 +377,10 @@ function comparisonPeriod(observation,kind){
   if(!observation||observation.bucket_status==="PERIOD_CONFLICT")return null;
   const periodEnd=comparisonDate(observation.period_end);
   if(observation.period_end&&(!periodEnd||(observation.end_convention&&observation.end_convention!=="EXCLUSIVE")))return null;
-  const end=periodEnd?inclusiveEnd(periodEnd):comparisonDate(observation.context_end_date);
-  if(!end)return null;
+  const recordedEnd=periodEnd||comparisonDate(observation.context_end_date);
+  if(!recordedEnd)return null;
+  const exclusive=periodEnd||observation.context_end_convention==="SOURCE_CONTEXT_END_EXCLUSIVE";
+  const end=exclusive?inclusiveEnd(recordedEnd):recordedEnd;
   const start=kind==="INSTANT"||kind==="ANCHOR"?null:comparisonDate(observation.period_start);
   if(kind!=="INSTANT"&&kind!=="ANCHOR"&&(!["FY","QTD_3M","TTM"].includes(kind)||!start||start>=end))return null;
   return {kind,start,end,year:observation.fiscal_year,quarter:observation.fiscal_quarter};

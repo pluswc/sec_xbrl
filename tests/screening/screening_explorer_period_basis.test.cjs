@@ -133,15 +133,19 @@ test("latest TTM comparison uses TTM spans, anchor-only dates and no conflicted 
   assert.match(body,/aria-label="자료 없음: 분기 합계 조건을 충족하지 않음"/);
 });
 
-test("annual comparison preserves context-end date and displays a differing instant",async()=>{
+test("annual comparison honors legacy context-end conventions and displays a differing instant",async()=>{
   const id="debt",metric={metric_id:id,label:"부채",period_class:"INSTANT",unit_kind:"MONEY",unit:"USD"};
-  const h=harness(()=>({selected_fiscal_year:2024,date_limitation:"기간 주의",companies:[{cik:"1",name:"Alpha"},{cik:"2",name:"Beta"}],
-    actual_periods:{"1":{period_start:"2024-01-01",context_end_date:"2024-12-31"},"2":{period_start:"2024-01-01",period_end:"2025-01-01"}},
+  const h=harness(()=>({selected_fiscal_year:2024,date_limitation:"기간 주의",companies:[{cik:"1",name:"Alpha"},{cik:"2",name:"Beta"},{cik:"3",name:"Gamma"}],
+    actual_periods:{
+      "1":{period_start:"2024-01-01",context_end_date:"2024-12-31"},
+      "2":{period_start:"2024-01-01",period_end:"2025-01-01"},
+      "3":{period_start:"2024-01-01",context_end_date:"2025-01-01",context_end_convention:"SOURCE_CONTEXT_END_EXCLUSIVE"},
+    },
     rows:[{metric,values:{"1":observation("0",{period_end:"2025-01-01",period_class:"INSTANT",fiscal_year:2024,fiscal_quarter:null}),"2":observation("1",{period_end:"2024-12-29",period_class:"INSTANT",fiscal_year:2024,fiscal_quarter:null})}}]}));
-  h.S.explorerSelected=new Set(["1","2"]);h.get("#comparison-metrics").selectedOptions=[{value:id}];
+  h.S.explorerSelected=new Set(["1","2","3"]);h.get("#comparison-metrics").selectedOptions=[{value:id}];
   await h.renderComparison();
   const [heading,body]=h.get("#comparison-result").innerHTML.split("<tbody>");
-  assert.equal((heading.match(/연간 2024-01-01 ~ 2024-12-31/g)||[]).length,2);
+  assert.equal((heading.match(/연간 2024-01-01 ~ 2024-12-31/g)||[]).length,3);
   assert.equal((body.match(/class="comparison-period-exception"/g)||[]).length,1);
   assert.match(body,/기준일 2024-12-28/);
 });
