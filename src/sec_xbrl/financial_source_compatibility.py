@@ -18,6 +18,12 @@ from sec_xbrl.screening.common import digest_value, read_json, sha256_file
 VERSION = "financial-source-compatibility-v1"
 SUPERSEDING_VERSION = "financial-source-compatibility-v2"
 LATEST_VERSION = "financial-source-compatibility-v3"
+CONTINUITY_VERSION = "financial-source-compatibility-v4"
+_PREDECESSOR_VERSIONS = {
+    SUPERSEDING_VERSION: VERSION,
+    LATEST_VERSION: SUPERSEDING_VERSION,
+    CONTINUITY_VERSION: LATEST_VERSION,
+}
 ORIGIN_REVISION = "451205b08fed2617d6e04f3c209e1a21b8aa9f29"
 # Exact responsibilities approved for this repair; no accounting/Raw validator changes.
 _ALLOWED = frozenset({
@@ -33,6 +39,16 @@ _LATEST_CHANGES = frozenset({
     "screening/explorer.py", "screening/service.py", "screening/server.py",
     "screening/cli.py",
 })
+_STATEMENT_EVIDENCE_SOURCE = "metrics/statement_metric_evidence.py"
+_CONTINUITY_CHANGES = frozenset({
+    "financial_source_compatibility.py", "screening/dataset_v3.py",
+    "metrics/quarterly_screening.py", "screening/quarterly.py", _STATEMENT_EVIDENCE_SOURCE,
+})
+_TRANSITION_CHANGES = {
+    SUPERSEDING_VERSION: _SUPERSEDING_CHANGES,
+    LATEST_VERSION: _LATEST_CHANGES,
+    CONTINUITY_VERSION: _CONTINUITY_CHANGES,
+}
 _COMPLETED_PUBLICATIONS = frozenset({"identity", "annual_metrics", "annual_dataset", "quarterly_metrics"})
 _ISSUER = object()
 _ACTIVE: ContextVar[SourceCompatibility | None] = ContextVar("financial_source_compatibility", default=None)
@@ -130,13 +146,12 @@ def resolve_source_compatibility(declaration: dict | None) -> SourceCompatibilit
     active = _ACTIVE.get()
     if active is not None:
         active.check()
-        supersedes = active.payload.get("supersedes")
-        ancestors = [] if supersedes is None else [supersedes["packet"]]
-        if active.payload["schema_version"] == LATEST_VERSION:
-            ancestors.append(active.controls["SUPERSEDED:SUPERSEDED:SOURCE_COMPATIBILITY"])
-        if pin in ancestors:
-            # Recheck exact bytes/inventories; the scope does not cache acceptance.
-            return _resolve_packet(active.declaration, current_root=_current_source_root())
+        role = "SUPERSEDED:SOURCE_COMPATIBILITY"
+        while role in active.controls:
+            if pin == active.controls[role]:
+                # Recheck exact bytes/inventories; the scope does not cache acceptance.
+                return _resolve_packet(active.declaration, current_root=_current_source_root())
+            role = "SUPERSEDED:" + role
     return _resolve_packet(pin, current_root=_current_source_root())
 
 
@@ -159,12 +174,13 @@ def _resolve_packet(declaration: dict, *, current_root: Path, expected_version: 
               "origin_source_sha256s", "current_source_sha256s", "approved_changes",
               "preserved_controls", "routine_histories"}
     version = value.get("schema_version") if isinstance(value, dict) else None
-    latest = version == LATEST_VERSION
-    superseding = version in (SUPERSEDING_VERSION, LATEST_VERSION)
+    superseding = isinstance(version, str) and version in _PREDECESSOR_VERSIONS
     if superseding:
         fields.add("supersedes")
+    if version == CONTINUITY_VERSION and "quarterly_successor" in value:
+        fields.add("quarterly_successor")
     if (not isinstance(value, dict) or set(value) != fields
-        or version not in (VERSION, SUPERSEDING_VERSION, LATEST_VERSION)
+        or (version != VERSION and not superseding)
         or (expected_version is not None and version != expected_version) or value["status"] != "ROOT_APPROVED"
         or value["origin_revision"] != ORIGIN_REVISION):
         raise ValueError("source compatibility needs exact directed ROOT approval")
@@ -176,12 +192,16 @@ def _resolve_packet(declaration: dict, *, current_root: Path, expected_version: 
     allowed = _ALLOWED
     if superseding:
         allowed |= _SUPERSEDING_CHANGES
-    if latest:
+    if version in (LATEST_VERSION, CONTINUITY_VERSION):
         allowed |= _LATEST_CHANGES
+    additions = {"financial_source_compatibility.py"}
+    if version == CONTINUITY_VERSION:
+        allowed |= _CONTINUITY_CHANGES
+        additions.add(_STATEMENT_EVIDENCE_SOURCE)
     if (value["origin_source_sha256s"] != origin or value["current_source_sha256s"] != current
         or not changes or set(changes) - allowed
         or value["approved_changes"] != changes
-        or any(row["current"] is None or (row["origin"] is None and name != "financial_source_compatibility.py")
+        or any(row["current"] is None or (row["origin"] is None and name not in additions)
                for name, row in changes.items())):
         raise ValueError("source compatibility inventories or approved exact changes differ")
     controls = {"SOURCE_COMPATIBILITY": pin}
@@ -226,11 +246,11 @@ def _resolve_packet(declaration: dict, *, current_root: Path, expected_version: 
         archive = Path(prior["source_root"])
         old = _resolve_packet(
             prior["packet"], current_root=archive,
-            expected_version=SUPERSEDING_VERSION if latest else VERSION,
+            expected_version=_PREDECESSOR_VERSIONS[version],
         )
         archived = old.payload["current_source_sha256s"]
         delta = {name for name in set(archived) | set(current) if archived.get(name) != current.get(name)}
-        if not delta or delta - (_LATEST_CHANGES if latest else _SUPERSEDING_CHANGES):
+        if not delta or delta - _TRANSITION_CHANGES[version]:
             raise ValueError("superseding compatibility changes unknown source responsibilities")
         if (old.payload["origin_source_root"] != value["origin_source_root"]
             or old.payload["origin_source_sha256s"] != value["origin_source_sha256s"]):
@@ -243,23 +263,71 @@ def _resolve_packet(declaration: dict, *, current_root: Path, expected_version: 
         if not isinstance(completed, dict) or set(completed) != _COMPLETED_PUBLICATIONS:
             raise ValueError("superseding compatibility needs four completed publication pins")
         completion_pins = [_pin(completed[name]) for name in sorted(completed)]
-        if latest and completed != old.payload["supersedes"]["completed_publications"]:
-            raise ValueError("latest source compatibility changes a completed publication")
+        if version != SUPERSEDING_VERSION and completed != old.payload["supersedes"]["completed_publications"]:
+            raise ValueError("source compatibility changes a completed publication")
         expected_preserved = old.payload["preserved_controls"]
-        if not latest:
+        if version == SUPERSEDING_VERSION:
             expected_preserved = expected_preserved + completion_pins
         if sorted(preserved, key=lambda item: item["path"]) != sorted(expected_preserved, key=lambda item: item["path"]):
             raise ValueError("superseding compatibility preserved controls differ")
         for name, control in old.controls.items():
             controls[f"SUPERSEDED:{name}"] = control
+        if "quarterly_successor" in value:
+            controls.update(_quarterly_successor_controls(
+                value["quarterly_successor"], completed["quarterly_metrics"],
+            ))
     return SourceCompatibility(pin, value, controls, _ISSUER,
                                digest_value([pin, value, controls]))
+
+
+def _quarterly_successor_controls(declaration: dict, preserved: dict) -> dict:
+    """Bind one new continuity child to the prior quarter's immutable inputs."""
+    from sec_xbrl.metrics.statement_metric_evidence import CONTINUITY_CATALOG
+    from sec_xbrl.screening.quarterly import MANIFEST
+    from sec_xbrl.screening.quarterly import VERSION as QUARTERLY_VERSION
+
+    successor = _pin(declaration)
+    if Path(successor["path"]).name != MANIFEST or successor["path"] == preserved["path"]:
+        raise ValueError("quarterly successor must be a new quarterly manifest")
+    manifest = read_json(Path(successor["path"]))
+    prior = read_json(Path(preserved["path"]))
+    scope = (
+        "schema_version", "fixture_kind", "financial_as_of", "global_quarter_spine",
+        "universe", "annual_parent", "governance_parents",
+    )
+    if (
+        not isinstance(manifest, dict) or not isinstance(prior, dict)
+        or manifest.get("schema_version") != QUARTERLY_VERSION
+        or manifest.get("catalog_version") != CONTINUITY_CATALOG
+        or any(field not in prior or manifest.get(field) != prior[field] for field in scope)
+        or not manifest.get("publication_id") or manifest["publication_id"] == prior.get("publication_id")
+    ):
+        raise ValueError("quarterly successor does not preserve the approved parent scope")
+    config, prior_config = manifest.get("config"), prior.get("config")
+    if (
+        not isinstance(config, dict) or not isinstance(prior_config, dict)
+        or config.get("catalog_version") != CONTINUITY_CATALOG
+        or any(field not in prior_config or config.get(field) != prior_config[field] for field in (
+            "companies", "annual_metric_root", "annual_metric_manifest_sha256",
+            "financial_as_of", "fixture_kind", "global_quarter_spine",
+        ))
+    ):
+        raise ValueError("quarterly successor config does not preserve the approved parent scope")
+    return {
+        "QUARTERLY_SUCCESSOR": successor,
+        "QUARTERLY_SUCCESSOR_CONFIG": _pin({
+            "path": manifest.get("config_path"), "sha256": manifest.get("config_sha256"),
+        }),
+        "QUARTERLY_STATEMENT_EVIDENCE": _pin(config.get("statement_metric_evidence")),
+    }
 
 
 def prepare_source_compatibility_packet(
     *, origin_source_root: Path, preserved_controls: list[dict], routine_histories: list[dict],
     supersedes: dict | None = None,
     latest: bool = False,
+    continuity: bool = False,
+    quarterly_successor: dict | None = None,
 ) -> dict:
     """Prepare a proposal from immutable source bytes and exact report/build/history pins.
 
@@ -296,15 +364,21 @@ def prepare_source_compatibility_packet(
                 for name in sorted(set(origin) | set(current)) if origin.get(name) != current.get(name)},
             "preserved_controls": [_pin(pin) for pin in preserved_controls],
             "routine_histories": reports}
-    if latest and supersedes is None:
+    if (latest or continuity) and supersedes is None:
         raise ValueError("latest compatibility requires the exact prior packet")
+    if (latest and continuity) or (quarterly_successor is not None and not continuity):
+        raise ValueError("quarterly successor requires a distinct continuity compatibility packet")
     if supersedes is not None:
         if not isinstance(supersedes, dict) or set(supersedes) != {"packet", "source_root", "completed_publications"}:
             raise ValueError("packet input requires exact superseded packet/source/publication scope")
-        packet["schema_version"] = LATEST_VERSION if latest else SUPERSEDING_VERSION
+        packet["schema_version"] = (
+            CONTINUITY_VERSION if continuity else LATEST_VERSION if latest else SUPERSEDING_VERSION
+        )
         packet["supersedes"] = {
             "packet": _pin(supersedes["packet"]),
             "source_root": str(Path(supersedes["source_root"])),
             "completed_publications": {name: _pin(pin) for name, pin in supersedes["completed_publications"].items()},
         }
+    if quarterly_successor is not None:
+        packet["quarterly_successor"] = _pin(quarterly_successor)
     return packet
