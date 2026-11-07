@@ -127,6 +127,7 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
                         cik=query["cik"],
                         metric_id=query["metric_id"],
                         limit=int(query.get("limit", 8)),
+                        **({"latest": _bool(query["latest"])} if "latest" in query else {}),
                     )
                 )
             elif parsed.path == "/api/quarter-explorer":
@@ -191,7 +192,8 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
             elif parsed.path == "/api/series":
                 self._json(
                     service.metric_series(
-                        query["dataset_id"], cik=query["cik"], metric_id=query["metric_id"]
+                        query["dataset_id"], cik=query["cik"], metric_id=query["metric_id"],
+                        **({"latest": _bool(query["latest"])} if "latest" in query else {}),
                     )
                 )
             elif parsed.path == "/api/metadata":

@@ -223,3 +223,91 @@ def test_http_batch_and_latest_explorer_use_explicit_query_contract(tmp_path):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_latest_rehashed_quarter_inventory_mismatch_holds_all_latest_paths(tmp_path):
+    import json
+    import shutil
+    from pathlib import Path
+
+    from sec_xbrl.screening.common import sha256_file, write_json
+
+    root = tmp_path / "wire"
+    shutil.copytree(Path(__file__).parents[1] / "fixtures" / "screening_quarterly_wire_v5", root)
+    manifest_path = root / "quarterly_screening_metric_manifest.json"
+    inventory_path = root / "quarter_period_inventory.json"
+    manifest = json.loads(manifest_path.read_bytes())
+    inventory = json.loads(inventory_path.read_bytes())
+    cik, other = "0000000001", "0000000002"
+    anchor = next(row for row in inventory["records"] if row["inventory_id"] == f"quarter-period:{cik}:2026Q3")
+    anchor.update(period_end="2026-09-30", report_date="2026-09-29", reported_duration_days=91)
+    anchor["candidate_periods"][0].update(period_end="2026-09-30", report_date="2026-09-29", duration_days=91)
+    write_json(inventory_path, inventory)
+    manifest["files"][inventory_path.name].update(sha256=sha256_file(inventory_path), size=inventory_path.stat().st_size)
+    write_json(manifest_path, manifest)
+
+    # The wire remains valid under its frozen legacy contract.
+    service = _quarter_service(tmp_path, wire_root=root)
+    key, metric = "synthetic-v3", "quarter_revenue"
+    fixed = service.quarter_explorer(key, calendar_year=2026, calendar_quarter=3)["rows"][0]
+    assert fixed["metrics"][metric]["period_end"] == "2026-10-01"
+    assert fixed["metrics"][metric]["value"] is not None
+    latest = service.quarter_explorer(key, latest=True)["rows"][0]
+    assert latest["period"]["period_end"] == "2026-09-30"
+    compared = service.quarter_comparison(key, ciks=[cik, other], metric_id=metric, latest=True)["rows"][0]
+    series = service.quarter_series(key, cik=cik, metric_id=metric, latest=True)["observations"]
+    assert any(row["value"] is not None for row in series[:-1])
+    for observation in (latest["metrics"][metric], compared["observation"], series[-1]):
+        assert observation["value"] is None
+        assert observation["availability_status"] == "UNAVAILABLE"
+        assert observation["reason"] == "PERIOD_MISMATCH"
+    snapshot = service.batch_availability(mode="PREPARED_SIMULATION", dataset_id=key)
+    content = _condition(LATEST_QUARTER, snapshot, [
+        {"metric_id": metric, "operator": "GTE", "threshold": "0", "definition_version": "quarter-reported-core-v1"},
+    ])
+    evaluated = service.preview(content, key)["rows"][0]["predicates"][0]
+    assert evaluated["result"] == "UNDETERMINED"
+    assert evaluated["reason"] == "PERIOD_MISMATCH"
+    assert service.quarter_series(key, cik=cik, metric_id=metric)["observations"][-1]["value"] == fixed["metrics"][metric]["value"]
+
+
+def test_annual_latest_holds_instant_period_mismatch_and_available_quality_block(tmp_path):
+    service = _annual_service(tmp_path)
+    key, cik = "fixture-v2", "0000000001"
+    reader = service.datasets[key]
+    rows = {row["metric_id"]: row for row in reader.observations if row["cik"] == cik and row["fiscal_year"] == 2026}
+    rows["current_ratio"].update(period_end="2026-09-01", value="11")
+    rows["revenue"].update(quality_status="BLOCK", value="0")
+    latest = service.company_explorer(key, latest=True)["rows"][0]
+    assert latest["resolved_period"]["period_end"] == "2027-01-01"
+    profile = service.company_profile(key, cik=cik, latest=True)
+    compare = service.company_comparison(key, ciks=[cik, "0000000021"], metric_ids=["current_ratio", "revenue"], latest=True)
+    for index, (metric, reason) in enumerate((("current_ratio", "PERIOD_MISMATCH"), ("revenue", "QUALITY_BLOCKED"))):
+        for observation in (latest["metrics"][metric], profile["series"][metric][-1], compare["rows"][index]["values"][cik]):
+            assert observation["value"] is None and reason in observation["reason_codes"]
+        snapshot = service.batch_availability(mode="PREPARED_SIMULATION", dataset_id=key)
+        content = _condition(LATEST_ANNUAL, snapshot, [{
+            "metric_id": metric, "operator": "GTE", "threshold": "0",
+            "definition_version": rows[metric]["metric_definition_version"],
+        }])
+        result = service.preview(content, key)["rows"][0]["predicates"][0]
+        assert result["result"] == "UNDETERMINED" and result["reason"] == reason
+    fixed = service.company_explorer(key, fiscal_year=2026)["rows"][0]["metrics"]
+    assert fixed["current_ratio"]["value"] == "11" and fixed["revenue"]["value"] == "0"
+    rows["revenue"]["quality_status"] = None
+    assert service.company_explorer(key, latest=True)["rows"][0]["metrics"]["revenue"]["value"] == "0"
+
+
+def test_latest_ttm_uses_shared_anchor_end_but_keeps_its_own_start():
+    from sec_xbrl.screening.explorer import latest_period_observation
+
+    anchor = {
+        "cik": "0000000001", "fiscal_year": 2026, "fiscal_quarter": "Q3", "calendar_year": 2026,
+        "calendar_quarter": 3, "period_end": "2026-10-01", "period_start": "2026-07-01",
+        "end_convention": "EXCLUSIVE",
+    }
+    row = {**anchor, "period_start": "2025-10-01", "period_class": "TTM", "availability_status": "AVAILABLE", "value": "0"}
+    assert latest_period_observation(row, anchor, cik=anchor["cik"], quarterly=True)["value"] == "0"
+    for wrong in ({"period_class": "QTD_3M"}, {"fiscal_quarter": "Q2"}, {"end_convention": "INCLUSIVE"}):
+        result = latest_period_observation({**row, **wrong}, anchor, cik=anchor["cik"], quarterly=True)
+        assert result["value"] is None and result["reason"] == "PERIOD_MISMATCH"

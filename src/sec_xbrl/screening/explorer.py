@@ -130,7 +130,7 @@ def latest_company_period(reader: Any, cik: str, *, quarterly: bool) -> dict[str
     }
     if len(fiscal_ends[year]) > 1 or len(starts) > 1:
         return {
-            "fiscal_year": year, "period_start": None, "period_end": None,
+            "cik": cik, "fiscal_year": year, "period_start": None, "period_end": None,
             "bucket_status": "PERIOD_CONFLICT",
         }
     filed_dates = {
@@ -141,12 +141,49 @@ def latest_company_period(reader: Any, cik: str, *, quarterly: bool) -> dict[str
         and lineage.get("filed_date")
     }
     return {
+        "cik": cik,
         "fiscal_year": year,
         "period_start": next(iter(starts)) if len(starts) == 1 else None,
         "period_end": ends[year] or None,
         "end_convention": "EXCLUSIVE",
         "source_filed_dates": sorted(filed_dates),
     }
+
+
+def latest_period_observation(
+    row: dict[str, Any] | None, anchor: dict[str, Any] | None, *, cik: str, quarterly: bool,
+) -> dict[str, Any] | None:
+    """Project a hold when a prepared value cannot be used at the resolved period."""
+    if row is None:
+        return None
+    blocked = bool(row.get("quality_blocking") or row.get("quality_status") == "BLOCK")
+    reason = None
+    if anchor is not None and row["availability_status"] == "AVAILABLE":
+        fields = ("cik", "fiscal_year", "period_end")
+        if quarterly:
+            fields += ("calendar_year", "calendar_quarter", "fiscal_quarter")
+        basis = row.get("period_class")
+        required_basis = {"INSTANT", "QTD_3M", "TTM"} if quarterly else {"INSTANT", "FY"}
+        convention = row.get("end_convention", None if quarterly else "EXCLUSIVE")
+        if anchor.get("bucket_status") == "PERIOD_CONFLICT":
+            reason = "PERIOD_CONFLICT"
+        elif (basis not in required_basis or row.get("cik") != cik
+              or not anchor.get("period_end") or convention != "EXCLUSIVE"
+              or anchor.get("end_convention") != convention
+              or any(row.get(field) is None or row.get(field) != anchor.get(field) for field in fields)
+              or (basis in {"QTD_3M", "FY"}
+                  and (not anchor.get("period_start") or row.get("period_start") != anchor["period_start"]))):
+            reason = "PERIOD_MISMATCH"
+    if blocked and reason is None:
+        reason = row.get("unavailable_reason") or row.get("reason") or "QUALITY_BLOCKED"
+    if reason is None:
+        return row
+    return {
+        **row, "value": None, "availability_status": "UNAVAILABLE",
+        "reason": reason, "unavailable_reason": reason,
+        "diagnostic_reasons": [reason], "quality_blocking": blocked,
+    }
+
 
 class ScreeningExplorer:
     """Indexed, display-only projections from one verified v2 publication."""
@@ -291,16 +328,21 @@ class ScreeningExplorer:
         }
 
     def company_profile(
-        self, *, cik: str, fiscal_year: int | None = None
+        self, *, cik: str, fiscal_year: int | None = None, latest: bool = False
     ) -> dict[str, Any]:
         cik = require_cik(cik)
         if cik not in self.companies:
             raise ValueError("company is not prepared in this dataset")
-        year = self._year(fiscal_year)
+        if latest and fiscal_year is not None:
+            raise ValueError("latest company periods cannot be combined with a fixed year")
+        anchor = latest_company_period(self.reader, cik, quarterly=False) if latest else None
+        if latest and anchor is None:
+            raise ValueError("company has no prepared annual period")
+        year = self._year(anchor["fiscal_year"] if anchor else fiscal_year)
         groups = []
         for category in CATEGORY_ORDER:
             metrics = [
-                self._profile_metric(cik, metric_id, year)
+                self._profile_metric(cik, metric_id, year, anchor=anchor)
                 for metric_id, definition in self.definitions.items()
                 if definition["category"] == category
             ]
@@ -313,7 +355,10 @@ class ScreeningExplorer:
             )
         series = {
             metric_id: [
-                self._observation(cik, metric_id, prepared_year)
+                self._observation(
+                    cik, metric_id, prepared_year, anchor=anchor if prepared_year == year else None,
+                    latest_series=latest,
+                )
                 for prepared_year in self.company_years[cik]
             ]
             for metric_id in self.definitions
@@ -322,8 +367,9 @@ class ScreeningExplorer:
             "company": self._company(self.companies[cik]),
             "prepared_years": self.company_years[cik],
             "year_prepared": year in self.company_years[cik],
-            "actual_period": self._actual_period(cik, year),
-            "summary": [self._profile_metric(cik, metric_id, year) for metric_id in CORE_METRIC_IDS],
+            "actual_period": anchor if latest else self._actual_period(cik, year),
+            **({"resolved_period": anchor} if latest else {}),
+            "summary": [self._profile_metric(cik, metric_id, year, anchor=anchor) for metric_id in CORE_METRIC_IDS],
             "groups": groups,
             "series": series,
         }
@@ -463,14 +509,17 @@ class ScreeningExplorer:
             },
         }
 
-    def _profile_metric(self, cik: str, metric_id: str, fiscal_year: int) -> dict[str, Any]:
+    def _profile_metric(
+        self, cik: str, metric_id: str, fiscal_year: int, *, anchor: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         return {
             "definition": self._definition(metric_id, fiscal_year),
-            "observation": self._observation(cik, metric_id, fiscal_year),
+            "observation": self._observation(cik, metric_id, fiscal_year, anchor=anchor),
         }
 
     def _observation(
         self, cik: str, metric_id: str, fiscal_year: int, *, anchor: dict[str, Any] | None = None,
+        latest_series: bool = False,
     ) -> dict[str, Any]:
         row = self.observations.get((cik, metric_id, fiscal_year))
         conflict = anchor is not None and anchor.get("bucket_status") == "PERIOD_CONFLICT"
@@ -494,6 +543,8 @@ class ScreeningExplorer:
                 "source_filings": [],
                 "quality_status": None,
             }
+        if anchor is not None or latest_series:
+            row = latest_period_observation(row, anchor, cik=cik, quarterly=False)
         codes = _reason_codes(row)
         return {
             "metric_id": metric_id,

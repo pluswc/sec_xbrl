@@ -30,6 +30,7 @@ from sec_xbrl.screening.explorer import (
     LATEST_QUARTER,
     ScreeningExplorer,
     latest_company_period,
+    latest_period_observation,
     public_copy,
 )
 from sec_xbrl.screening.store import ScreeningStore
@@ -359,7 +360,7 @@ class ScreeningService:
         }
 
     def quarter_series(
-        self, dataset_id: str, *, cik: str, metric_id: str, limit: int = 8
+        self, dataset_id: str, *, cik: str, metric_id: str, limit: int = 8, latest: bool = False
     ) -> dict[str, Any]:
         reader = self._quarter_dataset(dataset_id)
         cik = require_cik(cik)
@@ -374,6 +375,9 @@ class ScreeningService:
         if not rows:
             raise ValueError("quarter series is not prepared")
         rows.sort(key=lambda row: (row["calendar_year"], row["calendar_quarter"]))
+        if latest:
+            anchor = latest_company_period(reader, cik, quarterly=True)
+            rows = self._latest_series(rows, anchor, cik=cik, quarterly=True)
         return {
             "metric": next(
                 row for row in reader.quarter_definitions if row["metric_id"] == metric_id
@@ -405,7 +409,10 @@ class ScreeningService:
             row_year = period["calendar_year"] if prepared else None
             row_quarter = period["calendar_quarter"] if prepared else None
             observations = {
-                row["metric_id"]: json.loads(canonical_json(row))
+                row["metric_id"]: public_copy(
+                    latest_period_observation(row, period, cik=company["cik"], quarterly=True)
+                    if latest else row
+                )
                 for row in reader.quarter_observations
                 if row["cik"] == company["cik"]
                 and row["calendar_year"] == row_year
@@ -485,7 +492,10 @@ class ScreeningService:
             if len(matches) != 1:
                 raise ValueError("quarter comparison cell is not unique")
             rows.append({
-                "company": company, "observation": json.loads(canonical_json(matches[0])),
+                "company": company, "observation": public_copy(
+                    latest_period_observation(matches[0], period, cik=cik, quarterly=True)
+                    if latest else matches[0]
+                ),
                 **({"period": json.loads(canonical_json(period))} if latest else {}),
             })
         signatures = {
@@ -548,19 +558,11 @@ class ScreeningService:
         self, dataset_id: str, *, cik: str, fiscal_year: int | None = None, latest: bool = False
     ) -> dict[str, Any]:
         """Return a run-independent company profile over prepared observations."""
-        if latest:
-            if fiscal_year is not None:
-                raise ValueError("latest company periods cannot be combined with a fixed year")
-            period = latest_company_period(self._dataset(dataset_id), require_cik(cik), quarterly=False)
-            if period is None:
-                raise ValueError("company has no prepared annual period")
-            if period.get("bucket_status") == "PERIOD_CONFLICT":
-                raise ValueError("company annual period needs reconciliation")
-            fiscal_year = period["fiscal_year"]
         result = public_copy(
             self._explorer(dataset_id).company_profile(
                 cik=cik,
                 fiscal_year=fiscal_year,
+                latest=latest,
             )
         )
         if (
@@ -587,8 +589,6 @@ class ScreeningService:
             result["company_description"]["publication_id"] = (
                 self.company_descriptions.publication_id
             )
-        if latest:
-            result["resolved_period"] = period
         return result
 
     def company_comparison(
@@ -610,7 +610,7 @@ class ScreeningService:
             )
         )
 
-    def metric_series(self, dataset_id: str, *, cik: str, metric_id: str) -> dict[str, Any]:
+    def metric_series(self, dataset_id: str, *, cik: str, metric_id: str, latest: bool = False) -> dict[str, Any]:
         reader = self._dataset(dataset_id)
         cik = require_cik(cik)
         metric_id = require_string(metric_id, "metric_id")
@@ -624,7 +624,27 @@ class ScreeningService:
         if not rows:
             raise ValueError("metric is not prepared for this company")
         rows.sort(key=lambda row: (row["fiscal_year"], row["period_class"], row["view"]))
+        if latest:
+            anchor = latest_company_period(reader, cik, quarterly=False)
+            rows = self._latest_series(rows, anchor, cik=cik, quarterly=False)
         return {"company": reader.company(cik), "metric_id": metric_id, "observations": rows}
+
+    @staticmethod
+    def _latest_series(
+        rows: list[dict[str, Any]], anchor: dict[str, Any] | None, *, cik: str, quarterly: bool,
+    ) -> list[dict[str, Any]]:
+        if anchor is None:
+            return []
+        fields = ("calendar_year", "calendar_quarter") if quarterly else ("fiscal_year",)
+        end = tuple(anchor[key] for key in fields)
+        result = []
+        for row in rows:
+            coordinate = tuple(row[key] for key in fields)
+            if coordinate <= end:
+                result.append(latest_period_observation(
+                    row, anchor if coordinate == end else None, cik=cik, quarterly=quarterly,
+                ))
+        return result
 
     def metadata_inventory(
         self,
@@ -1136,6 +1156,10 @@ class ScreeningService:
                 policy,
                 definition_version=predicate["definition_version"],
             )
+            if latest:
+                observation = latest_period_observation(
+                    observation, anchor, cik=company["cik"], quarterly=quarterly,
+                )
             evaluation = _evaluate_predicate(predicate, observation)
             if conflict:
                 evaluation["reason"] = "PERIOD_CONFLICT"
