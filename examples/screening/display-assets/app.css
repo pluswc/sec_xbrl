@@ -88,3 +88,9 @@ thead th{position:sticky;top:0;z-index:4;background:#e9e6dc}
 #history-confirm::backdrop{background:rgba(24,34,43,.35)}
 #history-confirm h3{margin-top:0}#history-confirm p{overflow-wrap:anywhere;line-height:1.6}
 #history-confirm .button-row{justify-content:flex-end;gap:8px;margin-top:20px}
+
+/* Bulk selection remains local to the visible history or trash list. */
+#timeline li>div{flex:1}#timeline .history-checkbox{display:inline-flex;align-items:center;justify-content:center;flex:0 0 40px;min-width:40px;min-height:40px;cursor:pointer}#timeline [data-history-select]{width:16px;height:16px;margin:0;accent-color:var(--blue)}
+#timeline li.history-selected{background:var(--blue-soft)}
+#history-selected-count{font-size:11px;color:var(--slate);font-variant-numeric:tabular-nums}
+#history-selection-tools{gap:8px}#history-confirm-item{white-space:pre-line}

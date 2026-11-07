@@ -1,10 +1,15 @@
 # 계획 등록부 — 단일 진입점
 
-2026-11-07 이력 휴지통·복원 구현 후속:
-[저장 이력 계약](../implementation/history-trash-restore-20261107.md)은 조건 버전·저장 결과·
-판단 메모를 같은 journal의 추가 lifecycle event로 개별 숨김/복원한다. 원본 행·재무
-publication은 보존한다. 자체 focused 검사와 private-copy browser 확인을 완료했고,
-독립 검증·원본 migration·새 PR/CI/main/live는 별도 대기다. 개인 SQLite/data는 Git에 넣지 않는다.
+2026-11-07 이력 batch 후속:
+[선택 삭제·복원 계약](../implementation/history-bulk-actions-20261107.md)은 현재 활성/휴지통
+목록의 전체 선택·선택 해제·다중 삭제/복원을 기존 lifecycle transaction에 추가한다.
+자체 focused 검사와 private-copy UAT를 완료했고 새 독립/PR/CI/main/live는 별도 대기다.
+사용자가 이미 원본에서 숨긴 조건4/결과4의 DELETE8개를 그대로 보존한다.
+
+2026-11-07 기존 개별 이력 휴지통 완료(이번 batch와 별도):
+[기존 계약](../implementation/history-trash-restore-20261107.md)의 개별 기능은 PR73으로
+main `f8763ce67337117cc0589e8c8bdc0710d97fb4cd`에 반영됐다. 이전 pending은 당시
+기록이며 이번 batch 상태와 구분한다. 개인 SQLite/data는 Git에 넣지 않는다.
 
 2026-11-07 기존 기준100·선택 usability 완료(이번 휴지통과 별도):
 [정규화·사용성 계약](../implementation/indexed-trends-usability-20261107.md)은 독립/실제

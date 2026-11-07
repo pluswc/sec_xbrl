@@ -159,3 +159,80 @@ def test_fixed_routes_reject_http_sql_fields_and_incompatible_lifecycle_schema(j
         connection.execute("CREATE TABLE journal_lifecycle_events (sequence INTEGER)")
     with pytest.raises(ValueError, match="schema"):
         JournalHistory(path)
+
+
+def test_batch_mixed_roundtrip_preserves_chain_order_raw_rows_and_restart(journal):
+    path, store, revision, run, notes = journal
+    before = raw_tables(path)
+    history = JournalHistory(path)
+    items = [{"kind": "REVISION", "record_id": revision["revision_id"]},
+             {"kind": "RUN", "record_id": run["run_id"]},
+             {"kind": "DECISION", "record_id": notes[-1]["event_id"]}]
+    hidden = history.change_batch(items, "DELETE", 0)
+    assert hidden["version"] == 3 and len(hidden["trash"]) == 3
+    assert hidden["decisions"][-1]["state"] == "HOLD"
+    assert history.change_batch(items, "DELETE", 0) == hidden
+    assert JournalHistory(path).snapshot() == hidden
+    with sqlite3.connect(path) as connection:
+        rows = connection.execute("SELECT sequence,record_kind,record_id,previous_hash,event_hash FROM journal_lifecycle_events ORDER BY sequence").fetchall()
+    assert [(row[1], row[2]) for row in rows] == [(item["kind"], item["record_id"]) for item in items]
+    assert [row[0] for row in rows] == [1, 2, 3]
+    assert rows[0][3] is None and rows[1][3] == rows[0][4] and rows[2][3] == rows[1][4]
+    body = base64.b64encode(json.dumps({"items": items, "expected_version": 3}).encode()).decode()
+    status, restored = history.dispatch({"method": "POST", "path": "/api/history/batch-restore", "body_base64": body})
+    assert status == 200 and restored["version"] == 6 and not restored["trash"]
+    assert restored["decisions"][-1]["state"] == "EXCLUDE"
+    assert raw_tables(path) == before
+    store.integrity_check()
+
+
+def test_batch_validates_entire_scope_before_any_append(journal):
+    path, _, revision, run, _ = journal
+    before = raw_tables(path)
+    history = JournalHistory(path)
+    valid = {"kind": "REVISION", "record_id": revision["revision_id"]}
+    invalid_scopes = [[], None, [valid, valid], [valid, {"kind": "RUN", "record_id": "run-" + "f" * 24}],
+                      [valid, {"kind": "RUN", "record_id": revision["revision_id"]}],
+                      [valid, {"kind": "RUN", "record_id": run["run_id"], "sql": "DELETE"}],
+                      [valid, "not an item"]]
+    for items in invalid_scopes:
+        with pytest.raises((ValueError, TypeError)):
+            history.change_batch(items, "DELETE", 0)
+        assert history.snapshot()["version"] == 0
+    with pytest.raises(ValueError):
+        history.change_batch([valid], "DELETE", True)
+    assert raw_tables(path) == before
+
+
+def test_batch_mid_insert_failure_rolls_back_every_lifecycle_event(journal):
+    path, _, revision, run, _ = journal
+    history = JournalHistory(path)
+    before = raw_tables(path)
+    items = [{"kind": "REVISION", "record_id": revision["revision_id"]}, {"kind": "RUN", "record_id": run["run_id"]}]
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TRIGGER private_reject_second BEFORE INSERT ON journal_lifecycle_events WHEN NEW.sequence=2 BEGIN SELECT RAISE(ABORT,'private injected failure'); END")
+    with pytest.raises(sqlite3.IntegrityError, match="private injected"):
+        history.change_batch(items, "DELETE", 0)
+    assert history.snapshot()["version"] == 0
+    assert not history.snapshot()["trash"]
+    assert raw_tables(path) == before
+    with sqlite3.connect(path) as connection:
+        connection.execute("DROP TRIGGER private_reject_second")
+    assert history.change_batch(items, "DELETE", 0)["version"] == 2
+
+
+def test_batch_mixed_noops_require_current_version_but_complete_retries_are_idempotent(journal):
+    path, _, revision, run, _ = journal
+    history = JournalHistory(path)
+    items = [{"kind": "REVISION", "record_id": revision["revision_id"]}, {"kind": "RUN", "record_id": run["run_id"]}]
+    history.change_batch(items[:1], "DELETE", 0)
+    with pytest.raises(MODULE.Conflict):
+        history.change_batch(items, "DELETE", 0)
+    assert history.snapshot()["version"] == 1
+    assert history.change_batch(items, "DELETE", 1)["version"] == 2
+    assert history.change_batch(items, "DELETE", 0)["version"] == 2
+    request = {"method": "POST", "path": "/api/history/batch-delete", "body_base64": base64.b64encode(json.dumps({"items": items, "expected_version": 0}).encode()).decode()}
+    assert history.dispatch(request)[0] == 200
+    request["body_base64"] = base64.b64encode(json.dumps({"items": items, "expected_version": 2, "extra": True}).encode()).decode()
+    with pytest.raises(ValueError, match="unexpected"):
+        history.dispatch(request)
