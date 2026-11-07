@@ -109,12 +109,14 @@ body>header{position:static}
 .batch-source{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--line)}
 #batch-editor{flex:1 1 22rem;max-width:100%;border:0}
 #batch-editor>summary{padding:4px 0;overflow-wrap:anywhere}
-#batch-applied-summary{font-size:11px;color:var(--ink);margin-right:8px}
-.batch-change-label{font-weight:650;white-space:nowrap}
+#batch-applied-summary{font-size:14px;font-weight:650;color:var(--ink);margin-right:8px}
+#batch-applied-meta{font-size:11px;color:var(--slate);margin-right:8px}
+#batch-applied-meta:empty{display:none}
+.batch-change-label{font-size:12px;font-weight:500;white-space:nowrap}
 #batch-use-screen{min-height:40px;max-width:100%}
 #batch-editor .batch-availability{padding:8px 0 0;border:0}
 .batch-editor-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-#batch-help,#batch-status{flex:0 0 100%;margin:0;color:var(--slate);font-size:11px;overflow-wrap:anywhere}
+#batch-ready-proof,#batch-help,#batch-status{flex:0 0 100%;margin:0;color:var(--slate);font-size:11px;overflow-wrap:anywhere}
 #batch-status:empty{display:none}
 #batch-status.explorer-error{color:var(--red)}
 .explorer-tools{grid-template-columns:minmax(10rem,2fr) repeat(2,minmax(7rem,1fr)) minmax(6rem,auto);gap:8px;padding:8px 16px}

@@ -869,15 +869,20 @@ function resetExplorerBatch(snapshot){
   batchView.snapshot=snapshot;batchView.fixedOnly=!snapshot;
   $("#batch-use-screen").disabled=!snapshot;
 }
-function appliedBatchCaption(){
-  if(batchView.snapshot)return availabilityCaption(batchView.snapshot);
-  if(batchView.fixedOnly)return `제공 자료에서 기간 선택 · 재무 기준일 ${S.defaultDataset.financial_as_of}`;
-  return "적용된 자료 기준 없음";
-}
 function renderAppliedBatch(){
-  $("#batch-applied-summary").textContent=appliedBatchCaption();
-  $("#batch-use-screen").hidden=!batchView.snapshot;
-  $("#batch-cancel").hidden=!(batchView.snapshot||batchView.fixedOnly);
+  const snapshot=batchView.snapshot;
+  const actual=snapshot?.mode==="ACTUAL";
+  const mode=actual?"확보 기록 기준":snapshot?"준비된 자료로 가정":batchView.fixedOnly?"제공 자료에서 기간 선택":"";
+  $("#batch-applied-summary").textContent=mode?`적용 중 · ${mode}`:"적용된 자료 기준 없음";
+  const cutoff=snapshot?.financial_as_of||(batchView.fixedOnly?S.defaultDataset.financial_as_of:null);
+  const meta=actual?`판단일 ${snapshot.decision_date} · 사용지연 ${snapshot.lag}거래일 · 재무 기준일 ${cutoff}`
+    :cutoff?`재무 기준일 ${cutoff}${snapshot?" · 실제 확보 이력 미반영":""}`:"";
+  $("#batch-applied-meta").textContent=meta;
+  const proof=$("#batch-ready-proof");
+  proof.hidden=!actual;
+  proof.textContent=actual?`뉴욕 ${new Date(snapshot.ready_at).toLocaleString("ko-KR",{timeZone:"America/New_York"})} 조회 가능 확인`:"";
+  $("#batch-use-screen").hidden=!snapshot;
+  $("#batch-cancel").hidden=!(snapshot||batchView.fixedOnly);
 }
 function closeBatchEditor(focus=false){
   $("#batch-editor").open=false;
@@ -945,12 +950,13 @@ function mountBatchAvailability(status){
   const panel=document.createElement("div");
   panel.className="batch-source";
   panel.innerHTML=`<details id="batch-editor" class="workflow-disclosure" open>
-    <summary id="batch-editor-summary"><span id="batch-applied-summary">적용된 자료 기준 없음</span><span class="batch-change-label">자료 기준 변경</span></summary>
+    <summary id="batch-editor-summary"><strong id="batch-applied-summary">적용된 자료 기준 없음</strong><small id="batch-applied-meta"></small><span class="batch-change-label">자료 기준 변경</span></summary>
     <div class="batch-availability">
       <label>자료 기준<select id="batch-mode"><option value="ACTUAL">확보 기록 기준</option><option value="PREPARED_SIMULATION">준비된 자료로 가정</option><option value="PROVIDED_FIXED">제공 자료에서 기간 선택</option></select></label>
       <label>준비 자료<select id="batch-dataset">${batchView.datasets.map(item=>`<option value="${esc(item.dataset_id)}">${esc(batchDatasetCaption(item))}</option>`).join("")}</select></label>
       <label>판단일 (뉴욕, 비우면 오늘)<input id="batch-date" type="date"></label>
       <label>사용지연 (미국 거래일)<input id="batch-lag" type="number" min="0" step="1" value="0"></label>
+      <p id="batch-ready-proof" hidden></p>
       <p id="batch-help"></p>
       <div class="batch-editor-actions"><button id="batch-apply" type="button">적용</button><button id="batch-cancel" type="button" class="quiet" hidden>취소</button></div>
       <p id="batch-status" role="status"></p>

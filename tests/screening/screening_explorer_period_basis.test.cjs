@@ -215,7 +215,8 @@ test("source selection folds only after a ready matrix and distinguishes a later
   vm.runInContext("loadExplorer = async()=>{explorerBasis.readyKey=explorerContextKey()}; ensureExplorerInventory=()=>null",h.context);
   await h.applyBatchChoice();
   assert.equal(h.get("#batch-editor").open,false);
-  assert.match(h.get("#batch-applied-summary").textContent,/준비된 자료로 가정.*2026-10-25/);
+  assert.equal(h.get("#batch-applied-summary").textContent,"적용 중 · 준비된 자료로 가정");
+  assert.match(h.get("#batch-applied-meta").textContent,/2026-10-25.*실제 확보 이력 미반영/);
   assert.equal(h.get("#batch-use-screen").hidden,false);
   assert.equal(h.get("#batch-status").textContent,"");
   vm.runInContext("loadExplorer = async()=>{explorerBasis.readyKey=null}",h.context);
