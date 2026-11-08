@@ -20,11 +20,13 @@ SUPERSEDING_VERSION = "financial-source-compatibility-v2"
 LATEST_VERSION = "financial-source-compatibility-v3"
 CONTINUITY_VERSION = "financial-source-compatibility-v4"
 LIABILITY_VERSION = "financial-source-compatibility-v5"
+REVIEWED_VERSION = "financial-source-compatibility-v6"
 _PREDECESSOR_VERSIONS = {
     SUPERSEDING_VERSION: VERSION,
     LATEST_VERSION: SUPERSEDING_VERSION,
     CONTINUITY_VERSION: LATEST_VERSION,
     LIABILITY_VERSION: CONTINUITY_VERSION,
+    REVIEWED_VERSION: LIABILITY_VERSION,
 }
 ORIGIN_REVISION = "451205b08fed2617d6e04f3c209e1a21b8aa9f29"
 # Exact responsibilities approved for this repair; no accounting/Raw validator changes.
@@ -52,11 +54,16 @@ _LIABILITY_SOURCES = frozenset({
 _LIABILITY_CHANGES = _LIABILITY_SOURCES | {
     "financial_source_compatibility.py", "screening/dataset_v3.py", "screening/service.py",
 }
+_REVIEWED_SOURCE = "screening/reviewed_addition.py"
+_REVIEWED_CHANGES = frozenset({
+    "financial_source_compatibility.py", "screening/dataset_v3.py", _REVIEWED_SOURCE,
+})
 _TRANSITION_CHANGES = {
     SUPERSEDING_VERSION: _SUPERSEDING_CHANGES,
     LATEST_VERSION: _LATEST_CHANGES,
     CONTINUITY_VERSION: _CONTINUITY_CHANGES,
     LIABILITY_VERSION: _LIABILITY_CHANGES,
+    REVIEWED_VERSION: _REVIEWED_CHANGES,
 }
 _COMPLETED_PUBLICATIONS = frozenset({"identity", "annual_metrics", "annual_dataset", "quarterly_metrics"})
 _ISSUER = object()
@@ -190,6 +197,8 @@ def _resolve_packet(declaration: dict, *, current_root: Path, expected_version: 
         fields.add("quarterly_successor")
     if version == LIABILITY_VERSION:
         fields.add("liability_addition")
+    if version == REVIEWED_VERSION:
+        fields.add("reviewed_addition")
     if (not isinstance(value, dict) or set(value) != fields
         or (version != VERSION and not superseding)
         or (expected_version is not None and version != expected_version) or value["status"] != "ROOT_APPROVED"
@@ -203,15 +212,18 @@ def _resolve_packet(declaration: dict, *, current_root: Path, expected_version: 
     allowed = _ALLOWED
     if superseding:
         allowed |= _SUPERSEDING_CHANGES
-    if version in (LATEST_VERSION, CONTINUITY_VERSION, LIABILITY_VERSION):
+    if version in (LATEST_VERSION, CONTINUITY_VERSION, LIABILITY_VERSION, REVIEWED_VERSION):
         allowed |= _LATEST_CHANGES
     additions = {"financial_source_compatibility.py"}
-    if version in (CONTINUITY_VERSION, LIABILITY_VERSION):
+    if version in (CONTINUITY_VERSION, LIABILITY_VERSION, REVIEWED_VERSION):
         allowed |= _CONTINUITY_CHANGES
         additions.add(_STATEMENT_EVIDENCE_SOURCE)
-    if version == LIABILITY_VERSION:
+    if version in (LIABILITY_VERSION, REVIEWED_VERSION):
         allowed |= _LIABILITY_CHANGES
         additions |= _LIABILITY_SOURCES
+    if version == REVIEWED_VERSION:
+        allowed |= _REVIEWED_CHANGES
+        additions.add(_REVIEWED_SOURCE)
     if (value["origin_source_sha256s"] != origin or value["current_source_sha256s"] != current
         or not changes or set(changes) - allowed
         or value["approved_changes"] != changes
@@ -292,6 +304,8 @@ def _resolve_packet(declaration: dict, *, current_root: Path, expected_version: 
             ))
         if version == LIABILITY_VERSION:
             controls.update(_liability_addition_controls(value["liability_addition"], old))
+        if version == REVIEWED_VERSION:
+            controls.update(_reviewed_addition_controls(value["reviewed_addition"], old))
     return SourceCompatibility(pin, value, controls, _ISSUER,
                                digest_value([pin, value, controls]))
 
@@ -338,11 +352,11 @@ def _quarterly_successor_controls(declaration: dict, preserved: dict) -> dict:
     }
 
 
-def _liability_addition_pins(value: dict) -> dict:
+def _addition_pins(value: dict) -> dict:
     if not isinstance(value, dict) or set(value) != {"audit", "parent_manifest", "parent_publication_id"}:
-        raise ValueError("liability addition requires exact audit and parent pins")
+        raise ValueError("addition requires exact audit and parent pins")
     if not isinstance(value["parent_publication_id"], str) or not value["parent_publication_id"]:
-        raise ValueError("liability addition requires parent publication identity")
+        raise ValueError("addition requires parent publication identity")
     return {
         "audit": _pin(value["audit"]),
         "parent_manifest": _pin(value["parent_manifest"]),
@@ -351,7 +365,7 @@ def _liability_addition_pins(value: dict) -> dict:
 
 
 def _liability_addition_controls(value: dict, previous: SourceCompatibility) -> dict:
-    pins = _liability_addition_pins(value)
+    pins = _addition_pins(value)
     parent = read_json(Path(pins["parent_manifest"]["path"]))
     config = parent.get("config") or {}
     quarter = previous.controls.get("QUARTERLY_SUCCESSOR")
@@ -368,6 +382,27 @@ def _liability_addition_controls(value: dict, previous: SourceCompatibility) -> 
     return {"LIABILITY_AUDIT": pins["audit"], "LIABILITY_PARENT_MANIFEST": pins["parent_manifest"]}
 
 
+def _reviewed_addition_controls(value: dict, previous: SourceCompatibility) -> dict:
+    pins = _addition_pins(value)
+    parent = read_json(Path(pins["parent_manifest"]["path"]))
+    config = parent.get("config") or {}
+    approved_liability = previous.payload["liability_addition"]
+    quarter = previous.controls["SUPERSEDED:QUARTERLY_SUCCESSOR"]
+    if (
+        Path(pins["parent_manifest"]["path"]).name != "screening_dataset_manifest.json"
+        or parent.get("schema_version") != "screening-dataset-v3"
+        or "reviewed_addition" in parent
+        or parent.get("publication_id") != pins["parent_publication_id"]
+        or parent.get("liability_addition") != approved_liability
+        or config.get("liability_addition") != approved_liability
+        or config.get("source_compatibility") != previous.declaration
+        or parent.get("versions", {}).get("liability_addition_audit_sha256") != approved_liability["audit"]["sha256"]
+        or parent.get("parents", {}).get("quarterly", {}).get("manifest_sha256") != quarter["sha256"]
+    ):
+        raise ValueError("reviewed addition is outside the approved V5 parent publication")
+    return {"REVIEWED_AUDIT": pins["audit"], "REVIEWED_PARENT_MANIFEST": pins["parent_manifest"]}
+
+
 def prepare_source_compatibility_packet(
     *, origin_source_root: Path, preserved_controls: list[dict], routine_histories: list[dict],
     supersedes: dict | None = None,
@@ -375,6 +410,7 @@ def prepare_source_compatibility_packet(
     continuity: bool = False,
     quarterly_successor: dict | None = None,
     liability_addition: dict | None = None,
+    reviewed_addition: dict | None = None,
 ) -> dict:
     """Prepare a proposal from immutable source bytes and exact report/build/history pins.
 
@@ -411,15 +447,16 @@ def prepare_source_compatibility_packet(
                 for name in sorted(set(origin) | set(current)) if origin.get(name) != current.get(name)},
             "preserved_controls": [_pin(pin) for pin in preserved_controls],
             "routine_histories": reports}
-    if (latest or continuity or liability_addition is not None) and supersedes is None:
+    if (latest or continuity or liability_addition is not None or reviewed_addition is not None) and supersedes is None:
         raise ValueError("latest compatibility requires the exact prior packet")
-    if (sum((latest, continuity, liability_addition is not None)) > 1
+    if (sum((latest, continuity, liability_addition is not None, reviewed_addition is not None)) > 1
         or (quarterly_successor is not None and not continuity)):
         raise ValueError("quarterly successor requires a distinct continuity compatibility packet")
     if supersedes is not None:
         if not isinstance(supersedes, dict) or set(supersedes) != {"packet", "source_root", "completed_publications"}:
             raise ValueError("packet input requires exact superseded packet/source/publication scope")
         packet["schema_version"] = (
+            REVIEWED_VERSION if reviewed_addition is not None else
             LIABILITY_VERSION if liability_addition is not None else
             CONTINUITY_VERSION if continuity else LATEST_VERSION if latest else SUPERSEDING_VERSION
         )
@@ -431,5 +468,7 @@ def prepare_source_compatibility_packet(
     if quarterly_successor is not None:
         packet["quarterly_successor"] = _pin(quarterly_successor)
     if liability_addition is not None:
-        packet["liability_addition"] = _liability_addition_pins(liability_addition)
+        packet["liability_addition"] = _addition_pins(liability_addition)
+    if reviewed_addition is not None:
+        packet["reviewed_addition"] = _addition_pins(reviewed_addition)
     return packet

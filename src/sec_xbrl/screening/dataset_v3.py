@@ -56,25 +56,50 @@ def publish_liability_addition(config_path: Path | str, destination: Path | str)
     from sec_xbrl.screening.liability_addition import read_approved_audit
 
     config_file = regular_file(Path(config_path), "liability addition config")
-    config = _read_liability_config(config_file)
+    config = _read_addition_config(config_file, key="liability_addition")
     destination_path = safe_new_destination(Path(destination), "liability addition")
     with use_source_compatibility(config["source_compatibility"]) as witness:
         _require_liability_witness(config, witness)
-        parent = _read_liability_control(witness.controls["LIABILITY_PARENT_MANIFEST"])
-        quarter = _read_liability_control(witness.controls["SUPERSEDED:QUARTERLY_SUCCESSOR"])
+        parent = _read_addition_control(witness.controls["LIABILITY_PARENT_MANIFEST"])
+        quarter = _read_addition_control(witness.controls["SUPERSEDED:QUARTERLY_SUCCESSOR"])
         read_approved_audit(
             witness.controls["LIABILITY_AUDIT"], cutoff=parent["financial_as_of"],
             company_count=quarter["universe"]["company_count"],
         )
-        manifest = _liability_manifest(config_file, config, parent)
+        manifest = _addition_manifest(config_file, config, parent, key="liability_addition")
+    return _stage_addition(config_file, config, manifest, destination_path, key="liability_addition")
+
+
+def publish_reviewed_addition(config_path: Path | str, destination: Path | str) -> Path:
+    """Stage the approved reviewed values without reopening the prepared parent."""
+    from sec_xbrl.financial_source_compatibility import use_source_compatibility
+    from sec_xbrl.screening.reviewed_addition import read_reviewed_audit
+
+    config_file = regular_file(Path(config_path), "reviewed addition config")
+    config = _read_addition_config(config_file, key="reviewed_addition")
+    destination_path = safe_new_destination(Path(destination), "reviewed addition")
+    with use_source_compatibility(config["source_compatibility"]) as witness:
+        _require_reviewed_witness(config, witness)
+        parent = _read_addition_control(witness.controls["REVIEWED_PARENT_MANIFEST"])
+        read_reviewed_audit(
+            witness.controls["REVIEWED_AUDIT"], cutoff=parent["financial_as_of"],
+            quarter_sha=parent["parents"]["quarterly"]["manifest_sha256"],
+        )
+        manifest = _addition_manifest(config_file, config, parent, key="reviewed_addition")
+    return _stage_addition(config_file, config, manifest, destination_path, key="reviewed_addition")
+
+
+def _stage_addition(
+    config_file: Path, config: dict, manifest: dict, destination_path: Path, *, key: str,
+) -> Path:
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     staging = destination_path.parent / f".{destination_path.name}.partial-{uuid.uuid4().hex}"
     staging.mkdir()
     try:
         write_json(staging / MANIFEST, manifest)
-        if _read_liability_config(config_file) != config or sha256_file(config_file) != manifest["config_sha256"]:
-            raise ValueError("liability addition config changed during staging")
-        safe_new_destination(destination_path, "liability addition")
+        if _read_addition_config(config_file, key=key) != config or sha256_file(config_file) != manifest["config_sha256"]:
+            raise ValueError("screening addition config changed during staging")
+        safe_new_destination(destination_path, "screening addition")
         staging.rename(destination_path)
     finally:
         if staging.exists():
@@ -82,10 +107,10 @@ def publish_liability_addition(config_path: Path | str, destination: Path | str)
     return destination_path
 
 
-def _read_liability_control(pin: dict[str, str]) -> dict:
+def _read_addition_control(pin: dict[str, str]) -> dict:
     data = Path(pin["path"]).read_bytes()
     if hashlib.sha256(data).hexdigest() != pin["sha256"]:
-        raise ValueError("liability addition parent control changed")
+        raise ValueError("screening addition parent control changed")
     return json.loads(data)
 
 
@@ -100,24 +125,38 @@ def _require_liability_witness(config: dict, witness: Any) -> None:
         raise ValueError("liability addition requires exact V5 approval")
 
 
-def _read_liability_config(path: Path) -> dict:
-    from sec_xbrl.screening.liability_addition import CONFIG_VERSION as ADDITION_CONFIG_VERSION
+def _require_reviewed_witness(config: dict, witness: Any) -> None:
+    from sec_xbrl.financial_source_compatibility import REVIEWED_VERSION
 
-    config = read_json(path, "liability addition config")
+    if (
+        witness is None or witness.payload["schema_version"] != REVIEWED_VERSION
+        or witness.declaration != config["source_compatibility"]
+        or witness.payload["reviewed_addition"] != config["reviewed_addition"]
+    ):
+        raise ValueError("reviewed addition requires exact V6 approval")
+
+
+def _read_addition_config(path: Path, *, key: str) -> dict:
+    if key == "liability_addition":
+        from sec_xbrl.screening.liability_addition import CONFIG_VERSION as addition_version
+    else:
+        from sec_xbrl.screening.reviewed_addition import CONFIG_VERSION as addition_version
+
+    config = read_json(path, "screening addition config")
     if (
         not isinstance(config, dict)
-        or set(config) != {"schema_version", "dataset_id", "source_compatibility", "liability_addition"}
-        or config.get("schema_version") != ADDITION_CONFIG_VERSION
+        or set(config) != {"schema_version", "dataset_id", "source_compatibility", key}
+        or config.get("schema_version") != addition_version
     ):
-        raise ValueError("unsupported liability addition config")
+        raise ValueError("unsupported screening addition config")
     require_string(config.get("dataset_id"), "dataset_id")
     return config
 
 
-def _liability_manifest(config_file: Path, config: dict, parent: dict) -> dict:
+def _addition_manifest(config_file: Path, config: dict, parent: dict, *, key: str) -> dict:
     if config["dataset_id"] == parent["dataset_id"]:
-        raise ValueError("liability addition requires a new dataset ID")
-    addition = config["liability_addition"]
+        raise ValueError("screening addition requires a new dataset ID")
+    addition = config[key]
     config_hash = sha256_file(config_file)
     identity = {
         "config_path": str(config_file), "config_sha256": config_hash, "config": config,
@@ -126,10 +165,10 @@ def _liability_manifest(config_file: Path, config: dict, parent: dict) -> dict:
     return {
         "schema_version": VERSION, "publication_id": "screening-dataset-" + digest_value(identity)[:24],
         "dataset_id": config["dataset_id"], "config_path": str(config_file),
-        "config_sha256": config_hash, "config": config, "liability_addition": addition,
+        "config_sha256": config_hash, "config": config, key: addition,
         "financial_as_of": parent["financial_as_of"], "fixture_kind": parent["fixture_kind"],
         "sources": copy.deepcopy(parent["sources"]), "parents": copy.deepcopy(parent["parents"]),
-        "versions": {**parent["versions"], "liability_addition_audit_sha256": addition["audit"]["sha256"]},
+        "versions": {**parent["versions"], f"{key}_audit_sha256": addition["audit"]["sha256"]},
     }
 
 
@@ -258,7 +297,9 @@ class ScreeningDatasetV3Reader:
         if self.manifest.get("schema_version") != VERSION:
             raise ValueError("unsupported screening v3 publication")
         self._manifest_sha256 = sha256_file(manifest_path)
-        if "liability_addition" in self.manifest:
+        if "reviewed_addition" in self.manifest:
+            self._open_reviewed_addition()
+        elif "liability_addition" in self.manifest:
             self._open_liability_addition()
         else:
             self._open_combined()
@@ -342,27 +383,70 @@ class ScreeningDatasetV3Reader:
 
     def _open_liability_addition(self) -> None:
         from sec_xbrl.financial_source_compatibility import (
+            REVIEWED_VERSION,
             use_source_compatibility,
         )
         from sec_xbrl.screening.liability_addition import liability_rows
 
+        key = "liability_addition"
         config_file = regular_file(Path(self.manifest["config_path"]), "liability addition config")
-        config = _read_liability_config(config_file)
+        config = _read_addition_config(config_file, key=key)
         with use_source_compatibility(config["source_compatibility"]) as witness:
-            _require_liability_witness(config, witness)
-            parent_pin = witness.controls["LIABILITY_PARENT_MANIFEST"]
-            parent_path = Path(parent_pin["path"])
-            readers = _V3_READERS.get()
-            parent = readers.get(parent_path.parent) if readers is not None else None
-            if parent is None:
-                parent = ScreeningDatasetV3Reader(parent_path.parent)
             if (
-                parent._manifest_sha256 != parent_pin["sha256"]
-                or parent.publication_id != config["liability_addition"]["parent_publication_id"]
-                or self.manifest != _liability_manifest(config_file, config, parent.manifest)
+                witness is not None and witness.payload["schema_version"] == REVIEWED_VERSION
+                and config["source_compatibility"] == witness.controls["SUPERSEDED:SOURCE_COMPATIBILITY"]
+                and witness.controls["REVIEWED_PARENT_MANIFEST"] == {
+                    "path": str(self.root / MANIFEST), "sha256": self._manifest_sha256,
+                }
             ):
-                raise ValueError("liability addition publication or parent identity differs")
-            definition, support, rows = liability_rows(parent, witness.controls["LIABILITY_AUDIT"])
+                prefix = "SUPERSEDED:"
+            else:
+                _require_liability_witness(config, witness)
+                prefix = ""
+            parent = self._addition_parent(
+                config_file, config, witness.controls[f"{prefix}LIABILITY_PARENT_MANIFEST"], key=key,
+            )
+            definition, support, rows = liability_rows(parent, witness.controls[f"{prefix}LIABILITY_AUDIT"])
+        self._share_addition_parent(parent)
+        self.quarter_definitions = [*parent.quarter_definitions, definition]
+        self.quarter_support = [*parent.quarter_support, *support]
+        self.quarter_observations = [*parent.quarter_observations, *rows]
+
+    def _open_reviewed_addition(self) -> None:
+        from sec_xbrl.financial_source_compatibility import use_source_compatibility
+        from sec_xbrl.screening.reviewed_addition import reviewed_rows
+
+        key = "reviewed_addition"
+        config_file = regular_file(Path(self.manifest["config_path"]), "reviewed addition config")
+        config = _read_addition_config(config_file, key=key)
+        with use_source_compatibility(config["source_compatibility"]) as witness:
+            _require_reviewed_witness(config, witness)
+            parent = self._addition_parent(
+                config_file, config, witness.controls["REVIEWED_PARENT_MANIFEST"], key=key,
+            )
+            support, rows = reviewed_rows(parent, witness.controls["REVIEWED_AUDIT"])
+        self._share_addition_parent(parent)
+        self.quarter_definitions = parent.quarter_definitions
+        self.quarter_support = support
+        self.quarter_observations = rows
+
+    def _addition_parent(
+        self, config_file: Path, config: dict, parent_pin: dict, *, key: str,
+    ) -> ScreeningDatasetV3Reader:
+        parent_root = Path(parent_pin["path"]).parent
+        readers = _V3_READERS.get()
+        parent = readers.get(parent_root) if readers is not None else None
+        if parent is None:
+            parent = ScreeningDatasetV3Reader(parent_root)
+        if (
+            parent._manifest_sha256 != parent_pin["sha256"]
+            or parent.publication_id != config[key]["parent_publication_id"]
+            or self.manifest != _addition_manifest(config_file, config, parent.manifest, key=key)
+        ):
+            raise ValueError("screening addition publication or parent identity differs")
+        return parent
+
+    def _share_addition_parent(self, parent: ScreeningDatasetV3Reader) -> None:
         self.publication_id = self.manifest["publication_id"]
         self.annual = parent.annual
         self.quarterly = parent.quarterly
@@ -371,9 +455,6 @@ class ScreeningDatasetV3Reader:
         self.metric_definitions = parent.metric_definitions
         self.metric_support = parent.metric_support
         self.observations = parent.observations
-        self.quarter_definitions = [*parent.quarter_definitions, definition]
-        self.quarter_support = [*parent.quarter_support, *support]
-        self.quarter_observations = [*parent.quarter_observations, *rows]
         self.quarter_period_inventory = parent.quarter_period_inventory
 
     def company(self, cik: str) -> dict[str, Any]:
@@ -420,6 +501,7 @@ def _configured_compatibility(config: dict, *, quarter_path: Path | None = None)
         CONTINUITY_VERSION,
         LATEST_VERSION,
         LIABILITY_VERSION,
+        REVIEWED_VERSION,
         SUPERSEDING_VERSION,
         use_source_compatibility,
     )
@@ -441,6 +523,9 @@ def _configured_compatibility(config: dict, *, quarter_path: Path | None = None)
                 elif (schema == LIABILITY_VERSION and config.get("source_compatibility")
                       == witness.controls["SUPERSEDED:SOURCE_COMPATIBILITY"]):
                     approval = witness.controls["SUPERSEDED:QUARTERLY_SUCCESSOR"]
+                elif (schema == REVIEWED_VERSION and config.get("source_compatibility")
+                      == witness.controls["SUPERSEDED:SUPERSEDED:SOURCE_COMPATIBILITY"]):
+                    approval = witness.controls["SUPERSEDED:SUPERSEDED:QUARTERLY_SUCCESSOR"]
             if (
                 approval is None or config["quarterly_successor"] != approval
                 or approval != {"path": str(quarter_path.absolute()), "sha256": sha256_file(quarter_path)}
@@ -448,7 +533,7 @@ def _configured_compatibility(config: dict, *, quarter_path: Path | None = None)
                 raise ValueError("v3 quarterly successor differs from approved continuity scope")
         if witness is not None:
             if witness.payload["schema_version"] not in {
-                SUPERSEDING_VERSION, LATEST_VERSION, CONTINUITY_VERSION, LIABILITY_VERSION,
+                SUPERSEDING_VERSION, LATEST_VERSION, CONTINUITY_VERSION, LIABILITY_VERSION, REVIEWED_VERSION,
             }:
                 raise ValueError("v3 preserved parents require superseding source compatibility")
             completed = witness.payload["supersedes"]["completed_publications"]
