@@ -1,5 +1,9 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-08 [계산 총부채 6건의 별도 지표 발행 계약](../implementation/screening-metric-definitions.md#2026-11-08-계산-총부채-6건의-별도-지표-발행).
+동결한 공시 증거를 2026Q2의 별도 분기말 지표로 제공한다. 기존 지표·부모·저장 결과를
+계승하며 자체 검증과 독립 검증, 실제 발행 및 운영 전환을 구분한다.
+
 2026-11-07 회사별 최신 기간·가용성 설계 인터뷰:
 [배치 기준과 구현 범위](../implementation/company-latest-availability-20261107.md),
 [가용성 용어](../architecture/GLOSSARY.md)에 준비된 cutoff 우선·최신 실제재무기간·실제

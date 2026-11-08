@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import shutil
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +19,7 @@ from sec_xbrl.screening.common import (
     real_directory,
     regular_file,
     require_string,
+    safe_new_destination,
     sha256_file,
     write_json,
 )
@@ -33,6 +36,101 @@ from sec_xbrl.screening.verified_source_closure import _verify_v3_sources_once
 
 VERSION = "screening-dataset-v3"
 CONFIG_VERSION = "screening-prepare-config-v3"
+_V3_READERS: ContextVar[dict[Path, ScreeningDatasetV3Reader] | None] = ContextVar("v3_readers", default=None)
+
+
+@contextmanager
+def _share_v3_readers() -> Iterator[dict[Path, ScreeningDatasetV3Reader]]:
+    """Share strictly opened v3 readers only within one service initialization."""
+    readers: dict[Path, ScreeningDatasetV3Reader] = {}
+    token = _V3_READERS.set(readers)
+    try:
+        yield readers
+    finally:
+        _V3_READERS.reset(token)
+
+
+def publish_liability_addition(config_path: Path | str, destination: Path | str) -> Path:
+    """Stage an immutable manifest for strict verification at first service open."""
+    from sec_xbrl.financial_source_compatibility import use_source_compatibility
+    from sec_xbrl.screening.liability_addition import read_approved_audit
+
+    config_file = regular_file(Path(config_path), "liability addition config")
+    config = _read_liability_config(config_file)
+    destination_path = safe_new_destination(Path(destination), "liability addition")
+    with use_source_compatibility(config["source_compatibility"]) as witness:
+        _require_liability_witness(config, witness)
+        parent = _read_liability_control(witness.controls["LIABILITY_PARENT_MANIFEST"])
+        quarter = _read_liability_control(witness.controls["SUPERSEDED:QUARTERLY_SUCCESSOR"])
+        read_approved_audit(
+            witness.controls["LIABILITY_AUDIT"], cutoff=parent["financial_as_of"],
+            company_count=quarter["universe"]["company_count"],
+        )
+        manifest = _liability_manifest(config_file, config, parent)
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    staging = destination_path.parent / f".{destination_path.name}.partial-{uuid.uuid4().hex}"
+    staging.mkdir()
+    try:
+        write_json(staging / MANIFEST, manifest)
+        if _read_liability_config(config_file) != config or sha256_file(config_file) != manifest["config_sha256"]:
+            raise ValueError("liability addition config changed during staging")
+        safe_new_destination(destination_path, "liability addition")
+        staging.rename(destination_path)
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+    return destination_path
+
+
+def _read_liability_control(pin: dict[str, str]) -> dict:
+    data = Path(pin["path"]).read_bytes()
+    if hashlib.sha256(data).hexdigest() != pin["sha256"]:
+        raise ValueError("liability addition parent control changed")
+    return json.loads(data)
+
+
+def _require_liability_witness(config: dict, witness: Any) -> None:
+    from sec_xbrl.financial_source_compatibility import LIABILITY_VERSION
+
+    if (
+        witness is None or witness.payload["schema_version"] != LIABILITY_VERSION
+        or witness.declaration != config["source_compatibility"]
+        or witness.payload["liability_addition"] != config["liability_addition"]
+    ):
+        raise ValueError("liability addition requires exact V5 approval")
+
+
+def _read_liability_config(path: Path) -> dict:
+    from sec_xbrl.screening.liability_addition import CONFIG_VERSION as ADDITION_CONFIG_VERSION
+
+    config = read_json(path, "liability addition config")
+    if (
+        not isinstance(config, dict)
+        or set(config) != {"schema_version", "dataset_id", "source_compatibility", "liability_addition"}
+        or config.get("schema_version") != ADDITION_CONFIG_VERSION
+    ):
+        raise ValueError("unsupported liability addition config")
+    require_string(config.get("dataset_id"), "dataset_id")
+    return config
+
+
+def _liability_manifest(config_file: Path, config: dict, parent: dict) -> dict:
+    if config["dataset_id"] == parent["dataset_id"]:
+        raise ValueError("liability addition requires a new dataset ID")
+    addition = config["liability_addition"]
+    config_hash = sha256_file(config_file)
+    identity = {
+        "config_path": str(config_file), "config_sha256": config_hash, "config": config,
+        "parent_publication_id": parent["publication_id"],
+    }
+    return {
+        "schema_version": VERSION, "publication_id": "screening-dataset-" + digest_value(identity)[:24],
+        "dataset_id": config["dataset_id"], "config_path": str(config_file),
+        "config_sha256": config_hash, "config": config, "liability_addition": addition,
+        "financial_as_of": parent["financial_as_of"], "fixture_kind": parent["fixture_kind"],
+        "sources": copy.deepcopy(parent["sources"]), "parents": copy.deepcopy(parent["parents"]),
+        "versions": {**parent["versions"], "liability_addition_audit_sha256": addition["audit"]["sha256"]},
+    }
 
 
 def publish_screening_dataset_v3(config_path: Path | str, destination: Path | str) -> Path:
@@ -155,9 +253,21 @@ class ScreeningDatasetV3Reader:
 
     def __init__(self, root: Path | str) -> None:
         self.root = real_directory(Path(root), "screening v3")
-        self.manifest = read_json(regular_file(self.root / MANIFEST, "v3 manifest"), "v3 manifest")
+        manifest_path = regular_file(self.root / MANIFEST, "v3 manifest")
+        self.manifest = read_json(manifest_path, "v3 manifest")
         if self.manifest.get("schema_version") != VERSION:
             raise ValueError("unsupported screening v3 publication")
+        self._manifest_sha256 = sha256_file(manifest_path)
+        if "liability_addition" in self.manifest:
+            self._open_liability_addition()
+        else:
+            self._open_combined()
+        self.verify_all()
+        readers = _V3_READERS.get()
+        if readers is not None:
+            readers[self.root] = self
+
+    def _open_combined(self) -> None:
         annual_parent = self.manifest["parents"]["annual"]
         quarter_parent = self.manifest["parents"]["quarterly"]
         annual_root = real_directory(Path(annual_parent["root"]), "annual parent")
@@ -229,7 +339,42 @@ class ScreeningDatasetV3Reader:
         self.quarter_support = copy.deepcopy(self.quarterly.support)
         self.quarter_observations = copy.deepcopy(self.quarterly.observations)
         self.quarter_period_inventory = copy.deepcopy(self.quarterly.period_inventory)
-        self.verify_all()
+
+    def _open_liability_addition(self) -> None:
+        from sec_xbrl.financial_source_compatibility import (
+            use_source_compatibility,
+        )
+        from sec_xbrl.screening.liability_addition import liability_rows
+
+        config_file = regular_file(Path(self.manifest["config_path"]), "liability addition config")
+        config = _read_liability_config(config_file)
+        with use_source_compatibility(config["source_compatibility"]) as witness:
+            _require_liability_witness(config, witness)
+            parent_pin = witness.controls["LIABILITY_PARENT_MANIFEST"]
+            parent_path = Path(parent_pin["path"])
+            readers = _V3_READERS.get()
+            parent = readers.get(parent_path.parent) if readers is not None else None
+            if parent is None:
+                parent = ScreeningDatasetV3Reader(parent_path.parent)
+            if (
+                parent._manifest_sha256 != parent_pin["sha256"]
+                or parent.publication_id != config["liability_addition"]["parent_publication_id"]
+                or self.manifest != _liability_manifest(config_file, config, parent.manifest)
+            ):
+                raise ValueError("liability addition publication or parent identity differs")
+            definition, support, rows = liability_rows(parent, witness.controls["LIABILITY_AUDIT"])
+        self.publication_id = self.manifest["publication_id"]
+        self.annual = parent.annual
+        self.quarterly = parent.quarterly
+        self.companies = parent.companies
+        self.metadata = parent.metadata
+        self.metric_definitions = parent.metric_definitions
+        self.metric_support = parent.metric_support
+        self.observations = parent.observations
+        self.quarter_definitions = [*parent.quarter_definitions, definition]
+        self.quarter_support = [*parent.quarter_support, *support]
+        self.quarter_observations = [*parent.quarter_observations, *rows]
+        self.quarter_period_inventory = parent.quarter_period_inventory
 
     def company(self, cik: str) -> dict[str, Any]:
         return self.annual.company(cik)
@@ -274,6 +419,7 @@ def _configured_compatibility(config: dict, *, quarter_path: Path | None = None)
     from sec_xbrl.financial_source_compatibility import (
         CONTINUITY_VERSION,
         LATEST_VERSION,
+        LIABILITY_VERSION,
         SUPERSEDING_VERSION,
         use_source_compatibility,
     )
@@ -286,15 +432,24 @@ def _configured_compatibility(config: dict, *, quarter_path: Path | None = None)
         declares_successor = "quarterly_successor" in config
         if declares_successor != (quarter_manifest.get("catalog_version") == CONTINUITY_CATALOG):
             raise ValueError("v3 continuity quarter requires an explicit successor pin")
-        if declares_successor and (
-            witness is None or witness.payload["schema_version"] != CONTINUITY_VERSION
-            or config.get("source_compatibility") != witness.declaration
-            or config["quarterly_successor"] != witness.controls.get("QUARTERLY_SUCCESSOR")
-            or config["quarterly_successor"] != {"path": str(quarter_path.absolute()), "sha256": sha256_file(quarter_path)}
-        ):
-            raise ValueError("v3 quarterly successor differs from approved continuity scope")
+        if declares_successor:
+            approval = None
+            if witness is not None:
+                schema = witness.payload["schema_version"]
+                if schema == CONTINUITY_VERSION and config.get("source_compatibility") == witness.declaration:
+                    approval = witness.controls.get("QUARTERLY_SUCCESSOR")
+                elif (schema == LIABILITY_VERSION and config.get("source_compatibility")
+                      == witness.controls["SUPERSEDED:SOURCE_COMPATIBILITY"]):
+                    approval = witness.controls["SUPERSEDED:QUARTERLY_SUCCESSOR"]
+            if (
+                approval is None or config["quarterly_successor"] != approval
+                or approval != {"path": str(quarter_path.absolute()), "sha256": sha256_file(quarter_path)}
+            ):
+                raise ValueError("v3 quarterly successor differs from approved continuity scope")
         if witness is not None:
-            if witness.payload["schema_version"] not in {SUPERSEDING_VERSION, LATEST_VERSION, CONTINUITY_VERSION}:
+            if witness.payload["schema_version"] not in {
+                SUPERSEDING_VERSION, LATEST_VERSION, CONTINUITY_VERSION, LIABILITY_VERSION,
+            }:
                 raise ValueError("v3 preserved parents require superseding source compatibility")
             completed = witness.payload["supersedes"]["completed_publications"]
             annual_path = Path(config["annual_dataset_root"]) / MANIFEST
