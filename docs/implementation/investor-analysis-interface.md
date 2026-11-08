@@ -226,3 +226,33 @@ source reviews, the supplemental MSFT Calculation 1.1 source-gap adapter,
 actual versus synthetic evidence, current comparison limitations and local
 independent-verification requirements. A later unreviewed filing never inherits
 a prior economic share or reviewed source-equation approval.
+
+## 2026-11-08 기업 프로필의 매출 구성과 흐름
+
+기업 둘러보기의 재무 프로필에서 **매출 구성과 흐름**을 열고 연간 또는
+분기를 선택한다. 해당 발행물의 재무 기준일에 준비된 최근 4개 회계연도와
+8개 회사 회계분기를 사용한다. 프로필 본문의 단일 기간과는 독립된 창이다.
+사업부문 축과 제품·서비스 축은 별도 보기다. 제품 축에 사업부문도 있으면
+공시의 부문 범위를 유지하며, 같은 이름의 서로 다른 매핑 구간을 연결하지
+않는다. 표에는 선택 기간의 금액과 공시·계산 구분, SEC 공시 색인 링크를
+표시한다. 추이는 선택한 구간만 그리고 누락에서 선을 끊는다.
+
+오프라인 `examples/screening/prepare_revenue_breakdowns.py`는
+`--dataset-manifest`, `--dataset-manifest-sha256`, `--output`을 받는다.
+필요하면 `--cik`를 반복해 범위를 제한한다. 정확히 고정한 부모 분석의
+`overview`, `list_breakdowns`, `axis_timeseries`, `trace`를 재사용한다.
+기존 그래프 연결이 없는 경우 동일 준비 발행의 표준 매출 태그와 명시적
+표준 축에 속한 보고값을 원본 사실 ID로 확인해 표시한다. 각 구간, 부문
+범위 및 출처를 그대로 두며, 서로 다른 준비값이 같은 범위에 경쟁하면
+보류한다. 비중과 전년비는 연결된 기존 검토값이 있을 때만 표시한다.
+
+Windows 브리지에 `--revenue-breakdowns`의 절대 파일 경로와
+`--revenue-breakdowns-sha256`을 함께 전달한다. 준비 파일은 최대 16 MiB,
+기업 응답은 최대 512 KiB다. `GET /api/revenue-breakdowns`는 현재
+데이터셋 ID, 발행 ID, 재무 기준일과 CIK가 맞는 한 기업의 자료만 제공한다.
+기존 재무 서비스와 저장 기록은 기존 경로를 유지한다.
+
+구현자 준비 자료 확인에서는 AMZN과 GOOGL의 최신 연간·분기 분해가 표시
+가능했다. GOOGL 2026Q2 Google Cloud는 24,768백만 USD이고, MSFT FY2026
+Q4 분해는 준비 자료에서 확인되지 않았다. 이 확인은 운영 전환과 독립
+검증에 앞선 결과다.

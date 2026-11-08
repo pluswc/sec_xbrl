@@ -14,6 +14,8 @@ const http = require("node:http");
 const readline = require("node:readline");
 
 const MAX_DISPLAY_ASSET = 2 * 1024 * 1024;
+const MAX_BREAKDOWN_ASSET = 16 * 1024 * 1024;
+const MAX_BREAKDOWN_COMPANY = 512 * 1024;
 const MAX_REQUEST_BODY = 1024 * 1024;
 const MAX_RESPONSE_BODY = 32 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 35000;
@@ -52,6 +54,8 @@ function parseArgs(argv) {
     "--frontend-port",
     "--wsl",
     "--assets-root",
+    "--revenue-breakdowns",
+    "--revenue-breakdowns-sha256",
     "--history-worker",
     "--journal-store",
   ]);
@@ -92,7 +96,15 @@ function parseArgs(argv) {
       throw new Error(`${key} must be an explicit absolute Linux path without aliases`);
     }
   }
+  const hasBreakdowns = Object.hasOwn(values, "--revenue-breakdowns");
+  if (hasBreakdowns !== Object.hasOwn(values, "--revenue-breakdowns-sha256") ||
+      (hasBreakdowns && (!path.isAbsolute(text("--revenue-breakdowns")) ||
+        !/^[0-9a-f]{64}$/u.test(text("--revenue-breakdowns-sha256"))))) {
+    throw new Error("revenue breakdowns require an absolute asset path and SHA-256 pin");
+  }
   return {
+    revenueBreakdowns: hasBreakdowns ? text("--revenue-breakdowns") : null,
+    revenueBreakdownsSha256: hasBreakdowns ? text("--revenue-breakdowns-sha256") : null,
     historyWorker: values["--history-worker"] || null,
     journalStore: values["--journal-store"] || null,
     distribution: text("--distribution"),
@@ -173,6 +185,87 @@ function loadDisplayAssets(root) {
   return { directory, assets };
 }
 
+function loadRevenueBreakdowns(file, digest) {
+  if (!path.isAbsolute(file) || !/^[0-9a-f]{64}$/u.test(digest)) {
+    throw new Error("revenue breakdown asset requires an absolute path and SHA-256 pin");
+  }
+  const source = path.resolve(file);
+  for (let entry = source; ; entry = path.dirname(entry)) {
+    if (fs.lstatSync(entry).isSymbolicLink()) throw new Error("revenue breakdown aliases are forbidden");
+    if (path.dirname(entry) === entry) break;
+  }
+  const descriptor = fs.openSync(source, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  let payload;
+  try {
+    const before = fs.fstatSync(descriptor);
+    if (!before.isFile() || before.size < 1 || before.size > MAX_BREAKDOWN_ASSET) {
+      throw new Error("revenue breakdown asset must be a bounded nonempty file");
+    }
+    const buffer = Buffer.alloc(before.size + 1);
+    const count = fs.readSync(descriptor, buffer, 0, buffer.length, 0);
+    if (count !== before.size || fs.fstatSync(descriptor).size !== before.size ||
+        crypto.createHash("sha256").update(buffer.subarray(0, count)).digest("hex") !== digest) {
+      throw new Error("revenue breakdown asset differs from pin");
+    }
+    payload = JSON.parse(buffer.subarray(0, count).toString("utf8"));
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  const { schema_version, dataset_id, dataset_publication_id, financial_as_of, dataset_manifest_sha256, companies } = payload;
+  if (schema_version !== "screening-revenue-breakdowns-v1" ||
+      ![dataset_id, dataset_publication_id].every(value => typeof value === "string" && /^[A-Za-z0-9_.-]{1,128}$/u.test(value)) ||
+      !/^\d{4}-\d{2}-\d{2}$/u.test(financial_as_of) || !/^[0-9a-f]{64}$/u.test(dataset_manifest_sha256) ||
+      !companies || typeof companies !== "object" || Array.isArray(companies)) {
+    throw new Error("invalid revenue breakdown asset scope");
+  }
+  const scope = { schema_version, dataset_id, dataset_publication_id, financial_as_of, dataset_manifest_sha256 };
+  const byCik = new Map();
+  for (const [cik, company] of Object.entries(companies)) {
+    if (!/^\d{10}$/u.test(cik) || !company || typeof company !== "object" ||
+        ![company.annual, company.quarterly].every(view => view && Array.isArray(view.periods) && view.groups)) {
+      throw new Error("invalid revenue breakdown company scope");
+    }
+    const body = Buffer.from(JSON.stringify({ ...company, ...scope, cik }), "utf8");
+    if (body.length > MAX_BREAKDOWN_COMPANY) throw new Error("revenue breakdown company exceeds response limit");
+    byCik.set(cik, body);
+  }
+  return { scope, byCik };
+}
+
+function serveRevenueBreakdowns(bundle, request, response) {
+  if (request.method !== "GET") {
+    writeJson(response, 405, { error: "매출 구성 자료는 조회만 할 수 있습니다." });
+    return;
+  }
+  if (!bundle) {
+    writeJson(response, 503, { error: "매출 구성 자료가 준비되지 않았습니다." });
+    return;
+  }
+  const query = new URL(request.url, "http://127.0.0.1").searchParams;
+  const keys = ["dataset_id", "dataset_publication_id", "financial_as_of", "cik"];
+  if ([...query].length !== keys.length || keys.some(key => query.getAll(key).length !== 1) ||
+      !/^\d{10}$/u.test(query.get("cik"))) {
+    writeJson(response, 400, { error: "매출 구성 조회 범위를 확인해 주세요." });
+    return;
+  }
+  if (keys.slice(0, 3).some(key => query.get(key) !== bundle.scope[key])) {
+    writeJson(response, 409, { error: "선택한 자료 발행물에는 매출 구성 자료가 준비되지 않았습니다." });
+    return;
+  }
+  const body = bundle.byCik.get(query.get("cik"));
+  if (!body) {
+    writeJson(response, 404, { error: "이 기업의 매출 구성 자료가 준비되지 않았습니다." });
+    return;
+  }
+  response.writeHead(200, {
+    "cache-control": "no-store",
+    "content-length": String(body.length),
+    "content-type": "application/json; charset=utf-8",
+    "x-content-type-options": "nosniff",
+  });
+  response.end(body);
+}
+
 // A separate child owns lifecycle state. Its failures never terminate the financial relay.
 function startHistoryWorker(options) {
   const child = childProcess.spawn(options.wsl, [
@@ -233,6 +326,8 @@ function historyGuardRequired(method, route) {
 function startBridge(options) {
   // Both files must load before listening or starting the relay. HTTP never names a file.
   const bundle = options.assetsRoot ? loadDisplayAssets(options.assetsRoot) : null;
+  const breakdowns = options.revenueBreakdowns
+    ? loadRevenueBreakdowns(options.revenueBreakdowns, options.revenueBreakdownsSha256) : null;
   const relay = childProcess.spawn(
     options.wsl,
     [
@@ -335,7 +430,13 @@ function startBridge(options) {
       request.resume();
       return;
     }
-    const asset = bundle && bundle.assets.get((request.url || "").split("?", 1)[0]);
+    const requestPath = (request.url || "").split("?", 1)[0];
+    if (requestPath === "/api/revenue-breakdowns") {
+      serveRevenueBreakdowns(breakdowns, request, response);
+      request.resume();
+      return;
+    }
+    const asset = bundle && bundle.assets.get(requestPath);
     if (asset) {
       if (method !== "GET") {
         writeJson(response, 405, { error: "display assets require GET" });
@@ -448,4 +549,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { allowedPath, parseArgs, startBridge, loadDisplayAssets, startHistoryWorker, historyGuardRequired };
+module.exports = { allowedPath, parseArgs, startBridge, loadDisplayAssets, loadRevenueBreakdowns, serveRevenueBreakdowns, startHistoryWorker, historyGuardRequired };
