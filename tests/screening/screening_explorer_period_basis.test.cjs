@@ -9,15 +9,15 @@ function node(value=""){
   return{value,hidden:false,innerHTML:"",textContent:"",options:[],selectedOptions:[],classList:{toggle(){}},setAttribute(){},replaceChildren(){this.innerHTML="";this.textContent=""},focus(){},scrollIntoView(){},closest(){return node()},remove(){}};
 }
 function harness(respond){
-  const nodes=new Map(),calls=[];
+  const nodes=new Map(),calls=[],profileButtons=[];
   const get=selector=>{if(!nodes.has(selector))nodes.set(selector,node());return nodes.get(selector)};
   for(const selector of ["#explorer-sort","#explorer-direction","#explorer-preset"]){const element=get(selector);element.value=selector.endsWith("sort")?"company":selector.endsWith("direction")?"asc":"CORE"}
   get("#comparison-metrics").selectedOptions=[{value:"quarter_revenue"}];
-  const context=vm.createContext({URLSearchParams,location:{search:""},Node:{TEXT_NODE:3},document:{querySelector:get,querySelectorAll:()=>[]},fetch:async(url)=>{calls.push(url);const value=await respond(url);return{ok:true,json:async()=>value}}});
+  const context=vm.createContext({URLSearchParams,location:{search:""},Node:{TEXT_NODE:3},document:{querySelector:get,querySelectorAll:selector=>selector==="[data-profile-cik]"?profileButtons:[]},fetch:async(url)=>{calls.push(url);const value=await respond(url);return{ok:true,json:async()=>value}}});
   vm.runInContext(source.slice(0,source.indexOf("async function boot()")),context);
-  const app=vm.runInContext("({state:explorerBasis,S,switchExplorerBasis,chooseExplorerPeriod,preparedExplorerObservation,compareExplorerDecimals,filterSortExplorerRows,cachedExplorerSnapshot,loadExplorer,invalidateExplorerDetails,openAnnualProfile,openProfile,renderComparison,renderProfileTrend,interimMetricIds,ensureExplorerInventory,batchView,applyBatchChoice,screeningPeriodPolicy,availabilityCaption})",context);
+  const app=vm.runInContext("({state:explorerBasis,S,switchExplorerBasis,chooseExplorerPeriod,preparedExplorerObservation,compareExplorerDecimals,filterSortExplorerRows,cachedExplorerSnapshot,loadExplorer,invalidateExplorerDetails,openAnnualProfile,openProfile,closeProfile,showView,showCompanyProfile,loadRevenueBreakdowns,renderComparison,renderProfileTrend,interimMetricIds,ensureExplorerInventory,batchView,applyBatchChoice,screeningPeriodPolicy,availabilityCaption})",context);
   app.S.defaultDataset={dataset_id:"current50"};app.S.explorerYear=2024;
-  return{...app,get,calls,context};
+  return{...app,get,calls,context,profileButtons};
 }
 const core=["revenue","revenue_yoy","operating_margin","net_income","cfo","standardized_fcf","current_ratio","liabilities_to_assets"];
 const quarterIds=[...core,...Array.from({length:24},(_,i)=>`extra${i}`)].map(id=>"quarter_"+id);
@@ -76,6 +76,42 @@ test("annual profile and interim comparison responses cannot cross changed conte
   const comparison=deferred(),c=harness(()=>comparison.promise);prepared(c);c.S.explorerSelected=new Set(["1","2"]);
   const request=c.renderComparison();c.state.basis="TTM";c.invalidateExplorerDetails();comparison.resolve({});await request;
   assert.equal(c.get("#comparison-result").innerHTML,"");assert.equal(c.get("#comparison-panel").hidden,true);
+});
+
+test("inline profile returns focus to the current company row or search after a rerender",()=>{
+  const h=harness(()=>{});
+  const row=node(),trigger=node(),focus=[];
+  trigger.dataset={profileCik:"1"};
+  trigger.closest=()=>row;
+  trigger.focus=()=>focus.push("company");
+  trigger.setAttribute=(key,value)=>{if(key==="aria-expanded")trigger.expanded=value};
+  h.get("#explorer-query").focus=()=>focus.push("search");
+  h.get("#company-profile").focus=()=>focus.push("profile");
+  h.S.profile={company:{cik:"1"}};
+  h.profileButtons.push(trigger);
+  h.showCompanyProfile();
+  assert.equal(trigger.expanded,"true");
+  h.closeProfile();
+  assert.equal(trigger.expanded,"false");
+  h.showCompanyProfile();
+  h.profileButtons.pop();
+  h.closeProfile();
+  assert.deepEqual(focus,["profile","company","profile","search"]);
+});
+
+test("leaving explorer closes the inline profile and drops its pending revenue response",async()=>{
+  const pending=deferred(),h=harness(()=>pending.promise);
+  h.S.defaultDataset.publication_id="publication";
+  h.S.profile={company:{cik:"1"},financial_as_of:"2026-10-25"};
+  const request=h.loadRevenueBreakdowns();
+  assert.equal(h.calls.length,1);
+  h.showView("library");
+  pending.resolve({dataset_id:"current50",dataset_publication_id:"publication",financial_as_of:"2026-10-25",cik:"1",schema_version:"screening-revenue-breakdowns-v1"});
+  await request;
+  assert.equal(h.get("#company-profile").hidden,true);
+  assert.equal(h.get("#profile-revenue-breakdowns").hidden,true);
+  assert.equal(h.get("#revenue-breakdown-content").hidden,true);
+  assert.equal(h.get("#revenue-breakdown-status").textContent,"");
 });
 
 test("comparison validates each metric through existing endpoint and prints actual/fiscal scopes",async()=>{
