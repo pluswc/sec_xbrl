@@ -24,7 +24,7 @@ from sec_xbrl.screening.common import (
 from sec_xbrl.screening.company_descriptions import CompanyDescriptionReader
 from sec_xbrl.screening.dataset import ScreeningDatasetReader
 from sec_xbrl.screening.dataset_v2 import ScreeningDatasetV2Reader, open_screening_dataset
-from sec_xbrl.screening.dataset_v3 import ScreeningDatasetV3Reader
+from sec_xbrl.screening.dataset_v3 import ScreeningDatasetV3Reader, _share_v3_readers
 from sec_xbrl.screening.explorer import (
     LATEST_PERIOD_MODES,
     LATEST_QUARTER,
@@ -143,10 +143,10 @@ class ScreeningService:
         self.source_compatibility = source_compatibility
         self.datasets: dict[str, ScreeningDatasetReader | ScreeningDatasetV2Reader] = {}
         self.explorers: dict[str, ScreeningExplorer] = {}
-        with self._compatibility_scope():
+        with self._compatibility_scope(), _share_v3_readers() as loaded:
             for dataset_id, root in datasets.items():
                 dataset_id = require_string(dataset_id, "dataset catalog ID")
-                reader = open_screening_dataset(root)
+                reader = loaded.get(Path(root).absolute()) or open_screening_dataset(root)
                 if reader.manifest["dataset_id"] != dataset_id:
                     raise ValueError("dataset catalog ID differs from publication")
                 self.datasets[dataset_id] = reader

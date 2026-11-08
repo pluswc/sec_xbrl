@@ -167,3 +167,32 @@ ADI 14,207.062, KO 68,483, TGT 41,615, INTC 99,296백만 USD를
 증거는 `work/liability-statement-20261108/liability-audit-2026q2-afa8a2c7.json`에
 기록했다. 기존 운영 발행과 총부채·매출총이익률·연구개발비·결합 차입금 정의를
 유지했다. 이번 인수 범위는 오프라인 후보다.
+
+## 2026-11-08 계산 총부채 6건의 별도 지표 발행
+
+사용자가 승인한 `quarter_calculated_total_liabilities`는 **분기말 총부채
+(계산값)**이며 기말 USD 지표다. 불변 감사 JSON의 `missing_liability_audits`
+중 승인된 2026Q2 후보 6건만 사용한다. 같은 감사의 연간 후보와 다른
+분기는 포함하지 않는다. 원래 총부채가 준비된 회사도 이 별도 지표에서는
+누락으로 유지한다. 승인된 값을 다시 계산하거나 이후 기말로 이월하지 않는다.
+
+V5 호환 패킷은 최종 V4 패킷, 이전 소스 아카이브, 기존 네 발행물과 후속
+분기 발행물 핀을 계승한다. `prepare_source_compatibility_packet`의
+`liability_addition={audit, parent_manifest, parent_publication_id}`에는
+감사 파일 핀, 통합 부모 manifest 핀과 발행 ID를 지정한다. 감사 파일 핀과
+부모 manifest 핀은 각각 절대 `{path, sha256}`이다.
+
+`screening-prepare-liability-addition-v1` 설정에 새 `dataset_id`,
+최종 V5 `source_compatibility` 핀과 같은 `liability_addition`을 넣는다.
+`screening.dataset_v3.publish_liability_addition(config_path, destination)`은
+새 manifest를 준비하며 부모 전체를 다시 열지 않는다. 격리 서비스의 첫
+시작에서 기존 부모를 정상 검증하고, 원래 값이 비어 있으며 승인 근거의
+공시·기말·금액이 기존 자산 관측값 및 기간과 일치하는지 확인한다. 한
+서비스에서 두 데이터셋이 동일한 부모 읽기 객체를 공유한다. 정상 화면의
+고정 2026Q2와 **모든 지표**에서 확인할 수 있으며, 회사별 최신 기말이
+다른 분기라면 값을 표시하지 않는다.
+
+구현자 집중 검사에서는 6건의 고정·최신·비교·시계열·조건 실행과 변조
+거부, V5의 이전 핀 및 부모 공유를 확인했다. 기존 준비 JSON에서 6개 기업의
+자산·부채 기준 행 12개를 읽어 실제 승인 자료와 대조했다. 실제 발행의 첫
+서비스 시작, 독립 검증 및 운영 인수는 별도 단계다.

@@ -462,3 +462,59 @@ def test_latest_consumer_transition_reopens_old_and_new_combined_without_replayi
     ) | {"status": "ROOT_APPROVED"})
     with pytest.raises(ValueError, match="preserve the approved parent scope"):
         compat.resolve_source_compatibility(_pin(invalid_packet))
+
+    from sec_xbrl.screening import liability_addition
+
+    v4_archive = tmp_path / "source-continuity"
+    shutil.copytree(current, v4_archive)
+    for name in compat._LIABILITY_CHANGES:
+        with (current / name).open("a") as stream:
+            stream.write("\n# approved liability addition source change\n")
+    audit = tmp_path / "approved-audit.json"
+    write_json(audit, {"synthetic_fixture": True})
+    parent_manifest = combined_root / dataset_v3.MANIFEST
+    addition = {"audit": _pin(audit), "parent_manifest": _pin(parent_manifest),
+                "parent_publication_id": json.loads(parent_manifest.read_text())["publication_id"]}
+    v5 = tmp_path / "liability-approval.json"
+    write_json(v5, compat.prepare_source_compatibility_packet(
+        **(v4_inputs | {"continuity": False, "supersedes": {
+            "packet": _pin(final), "source_root": str(v4_archive), "completed_publications": completed,
+        }}),
+        liability_addition=addition,
+    ) | {"status": "ROOT_APPROVED"})
+    overlay_config = tmp_path / "liability-config.json"
+    write_json(overlay_config, {"schema_version": liability_addition.CONFIG_VERSION,
+                                "dataset_id": "liability-overlay", "source_compatibility": _pin(v5),
+                                "liability_addition": addition})
+
+    # Value projection has its own fixed/latest six-candidate tests. This fixture
+    # verifies real approval ancestry and that both catalog IDs share one reader.
+    parents = []
+
+    def project(parent, pin):
+        assert pin == _pin(audit)
+        parents.append(parent)
+        return {"metric_id": liability_addition.METRIC_ID}, [], []
+
+    monkeypatch.setattr(liability_addition, "read_approved_audit", lambda *args, **kwargs: {})
+    monkeypatch.setattr(liability_addition, "liability_rows", project)
+    overlay_root = dataset_v3.publish_liability_addition(overlay_config, tmp_path / "liability-overlay")
+    assert parents == []
+    with compat.use_source_compatibility(_pin(v5)):
+        for ancestor in (final, latest, prior, origin):
+            assert compat.resolve_source_compatibility(_pin(ancestor)).declaration == _pin(v5)
+    for catalog in (
+        {"liability-overlay": overlay_root, "continuity-combined": combined_root},
+        {"continuity-combined": combined_root, "liability-overlay": overlay_root},
+    ):
+        reopened = ScreeningService(catalog, tmp_path / "liability-journal.sqlite", source_compatibility=_pin(v5))
+        old_reader = reopened.datasets["continuity-combined"]
+        new_reader = reopened.datasets["liability-overlay"]
+        assert parents[-1] is old_reader
+        assert new_reader.observations is old_reader.observations
+        assert new_reader.quarterly is old_reader.quarterly
+        assert len(new_reader.quarter_definitions) == len(old_reader.quarter_definitions) + 1
+        reopened.require_publication("continuity-combined", addition["parent_publication_id"])
+    audit.write_text("{}\n")
+    with pytest.raises(ValueError, match="missing, unsafe or changed"):
+        ScreeningDatasetV3Reader(overlay_root)
