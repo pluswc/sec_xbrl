@@ -360,7 +360,7 @@ async function addGuideMetric(id){clearResult();const m=(S.library?.metrics||[])
 function profileObservationCell(o,m){if(o?.value===null||o?.value===undefined){const reason=(o?.reason_labels||[])[0]||"자료 없음";return`<span class="missing" title="${esc(reason)}" aria-label="자료 없음: ${esc(reason)}">—</span>`}const period=o.period_start?`${o.period_start} ~ ${inclusiveEnd(o.period_end)}`:`기준일 ${inclusiveEnd(o.period_end)}`,detail=`${m.source_label||""} · ${period}`;return`<strong title="${esc(detail)}">${numberMarkup(o.value,m)}</strong>`}
 function renderProfileTrendData(){const p=S.profile,id=$("#profile-metric").value,item=p.groups.flatMap(x=>x.metrics).find(x=>x.definition.metric_id===id),m=item.definition,series=p.series[id]||[];S.profileMetric=id;const available=series.filter(x=>x.value!==null&&x.value!==undefined),values=available.map(x=>Number(x.value)),min=Math.min(...values),max=Math.max(...values),span=max-min||1,points=series.map((x,i)=>x.value===null||x.value===undefined?null:{x:38+i*(284/Math.max(series.length-1,1)),y:102-((Number(x.value)-min)/span)*62}),lines=points.slice(1).map((p2,i)=>p2&&points[i]?`<line class="line" x1="${points[i].x}" y1="${points[i].y}" x2="${p2.x}" y2="${p2.y}"/>`:"").join(""),marks=points.map((p2,i)=>p2?`<g><circle class="point" cx="${p2.x}" cy="${p2.y}" r="4"><title>${profileSeriesLabel(series[i])} ${esc(displayValue(series[i].value,m))}</title></circle>${explorerBasis.profileBasis==="ANNUAL"||i===points.findIndex(Boolean)||i===points.findLastIndex(Boolean)?`<text class="value-label" x="${p2.x}" y="${Math.max(p2.y-9,28)}">${esc(displayValue(series[i].value,m))}</text>`:""}</g>`:"").join(""),years=series.map((x,i)=>explorerBasis.profileBasis==="ANNUAL"?`<text class="year-label ${points[i]?"":"missing-year"}" x="${38+i*(284/Math.max(series.length-1,1))}" y="142">${profileSeriesLabel(x)}${points[i]?"":" · 없음"}</text>`:interimAxisCaption(x,38+i*(284/Math.max(series.length-1,1)),!points[i])).join("");$("#profile-chart").innerHTML=available.length?`<svg viewBox="0 0 360 158" role="img" aria-label="${esc(m.label)} ${explorerBasis.profileBasis==="ANNUAL"?"4개 회계연도":"8개 종료 분기"} 흐름. 단위 ${esc(unitLabel(m))}. 누락 연도는 연결하지 않습니다."><text class="chart-label" x="12" y="18">${esc(m.label)} · ${esc(unitLabel(m))}</text><line class="axis" x1="24" y1="116" x2="340" y2="116"/>${lines}${marks}${years}</svg>`:'<p class="empty">표시할 값이 없습니다.</p>';$("#profile-series").innerHTML=`<table class="series-table"><thead><tr><th>${explorerBasis.profileBasis==="ANNUAL"?"회계연도":"종료 분기 · 회사 회계표시"}</th><th>공시 재무기간</th><th>${esc(m.label)} (${esc(unitLabel(m))})</th></tr></thead><tbody>${series.map(x=>`<tr><td>${profileSeriesLabel(x)}${explorerBasis.profileBasis!=="ANNUAL"?`<small>${esc(fiscalLabel(x))}</small>`:""}</td><td>${esc(x.period_start?`${x.period_start} ~ ${inclusiveEnd(x.period_end)}`:`기준일 ${inclusiveEnd(x.period_end)}`)}</td><td>${x.value===null||x.value===undefined?`<span class="missing" title="${esc((x.reason_labels||[])[0]||"자료 없음")}">—</span>`:numberMarkup(x.value,m)}</td></tr>`).join("")}</tbody></table>`}
 function renderCompanyDescription(d){const box=$("#profile-description"),copy=box.querySelector(".description-copy"),meta=box.querySelector(".description-meta");box.querySelectorAll("a").forEach(x=>x.remove());if(!d||d.status!=="AVAILABLE"||!d.text){box.hidden=true;copy.textContent="";meta.textContent="";return}box.hidden=false;copy.textContent=d.text;const checked=(d.checked_at||"").slice(0,10),fixture=d.content_fixture_kind==="SYNTHETIC_DESCRIPTION_FIXTURE"?" · 합성 소개 예시":"";meta.textContent=`현재 회사 정보 · ${d.provider_name||"출처 확인"}${checked?` · ${checked} 확인`:""}${fixture}`;if(d.profile_url){try{const u=new URL(d.profile_url);if(u.protocol==="https:"){const a=document.createElement("a");a.href=u.href;a.target="_blank";a.rel="noopener noreferrer";a.textContent="원문 출처 열기";meta.append(" · ",a)}}catch(_){}}}
-function renderProfile(){const p=S.profile,definitions=p.groups.flatMap(x=>x.metrics.map(y=>y.definition));$("#profile-title").textContent=`${p.company.name||p.company.ticker} 재무 프로필`;$("#profile-intro").innerHTML=`<p><strong>${esc(p.company.ticker)}</strong> · ${esc(p.company.industry||"업종 정보 없음")}</p><p class="muted">재무 기준일 ${esc(p.financial_as_of)} · FY${p.selected_fiscal_year} · ${esc(p.resolved_period?companyPeriodCaption(p.resolved_period):explorerPeriod({actual_period:p.actual_period}))}</p><p class="muted">금액은 백만 USD, 비율은 %로 표시합니다.</p>`;renderCompanyDescription(p.company_description);$("#profile-summary").innerHTML=p.summary.map(x=>`<div class="profile-card"><span>${esc(x.definition.label)} · ${esc(unitLabel(x.definition))}</span>${profileObservationCell(x.observation,x.definition)}</div>`).join("");$("#profile-metric").innerHTML=definitions.map(x=>`<option value="${x.metric_id}">${esc(x.label)}</option>`).join("");$("#profile-metric").value=definitions.some(x=>x.metric_id===S.profileMetric)?S.profileMetric:"revenue";$("#profile-all-metrics").innerHTML=p.groups.map(g=>`<section><h3>${esc(g.label)}</h3><div class="profile-metrics">${g.metrics.map(x=>`<div class="profile-metric"><span>${esc(x.definition.label)} · ${esc(unitLabel(x.definition))}</span>${profileObservationCell(x.observation,x.definition)}</div>`).join("")}</div></section>`).join("");renderProfileTrend()}
+function renderProfile(){resetRevenueBreakdowns();const p=S.profile,definitions=p.groups.flatMap(x=>x.metrics.map(y=>y.definition));$("#profile-title").textContent=`${p.company.name||p.company.ticker} 재무 프로필`;$("#profile-intro").innerHTML=`<p><strong>${esc(p.company.ticker)}</strong> · ${esc(p.company.industry||"업종 정보 없음")}</p><p class="muted">재무 기준일 ${esc(p.financial_as_of)} · FY${p.selected_fiscal_year} · ${esc(p.resolved_period?companyPeriodCaption(p.resolved_period):explorerPeriod({actual_period:p.actual_period}))}</p><p class="muted">금액은 백만 USD, 비율은 %로 표시합니다.</p>`;renderCompanyDescription(p.company_description);$("#profile-summary").innerHTML=p.summary.map(x=>`<div class="profile-card"><span>${esc(x.definition.label)} · ${esc(unitLabel(x.definition))}</span>${profileObservationCell(x.observation,x.definition)}</div>`).join("");$("#profile-metric").innerHTML=definitions.map(x=>`<option value="${x.metric_id}">${esc(x.label)}</option>`).join("");$("#profile-metric").value=definitions.some(x=>x.metric_id===S.profileMetric)?S.profileMetric:"revenue";$("#profile-all-metrics").innerHTML=p.groups.map(g=>`<section><h3>${esc(g.label)}</h3><div class="profile-metrics">${g.metrics.map(x=>`<div class="profile-metric"><span>${esc(x.definition.label)} · ${esc(unitLabel(x.definition))}</span>${profileObservationCell(x.observation,x.definition)}</div>`).join("")}</div></section>`).join("");renderProfileTrend()}
 
 async function openAnnualProfile(cik,button){const token=++explorerBasis.profileToken,key=explorerContextKey();S.lastFocus=button;const d=S.explorerDataset||S.defaultDataset;const profile=await api(`/api/company-profile?dataset_id=${encodeURIComponent(d.dataset_id)}&cik=${encodeURIComponent(cik)}&${explorerBasis.latestAnnual?"latest=true":`fiscal_year=${S.explorerYear}`}`);if(token!==explorerBasis.profileToken||key!==explorerContextKey())return;explorerBasis.profileBasis="ANNUAL";S.profile=profile;S.profileMetric=explorerBasis.profileMetrics.ANNUAL;profileTrendCaption(false);renderProfile();$("#company-profile").hidden=false;$("#company-profile").focus()}
 function closeProfile(){explorerBasis.profileToken++;explorerBasis.seriesToken++;$("#company-profile").hidden=true;S.lastFocus?.focus()}
@@ -675,7 +675,214 @@ function bindExplorer(){
   $("#run-comparison").onclick=()=>renderComparison().catch(error=>{$("#comparison-result").innerHTML=`<p class="message error">${esc(error.message)}</p>`});
   tools.addEventListener("change",event=>{if(event.target.id!=="explorer-basis")explorerBasis.views[explorerBasis.basis]=explorerViewState()});
   mountExplorerSelection();
+  mountRevenueBreakdowns();
   ensureExplorerInventory();
+}
+
+const revenueBreakdowns={token:0,context:null,data:null};
+const REVENUE_MONEY={unit_kind:"MONEY",unit:"USD"},REVENUE_PERCENT={unit_kind:"PERCENT",unit:"PERCENT"};
+
+function mountRevenueBreakdowns(){
+  const panel=document.createElement("details");
+  panel.id="profile-revenue-breakdowns";
+  panel.className="profile-revenue-breakdowns";
+  panel.innerHTML=`<summary>매출 구성과 흐름</summary>
+    <p class="muted">연결 매출과 부문 소계는 별도로 준비된 값입니다. 사업부문과 제품·서비스 항목은 서로 겹칠 수 있습니다.</p>
+    <p id="revenue-breakdown-status" class="muted" role="status"></p>
+    <div id="revenue-breakdown-content" hidden>
+      <div class="revenue-breakdown-controls">
+        <label>재무 빈도<select id="revenue-breakdown-frequency"><option value="annual">연간</option><option value="quarterly">분기</option></select></label>
+        <label>구성 구분<select id="revenue-breakdown-kind"><option value="segments">사업부문</option><option value="products">제품·서비스</option></select></label>
+        <label>표의 회계기간<select id="revenue-breakdown-period"></select></label>
+      </div>
+      <div class="table-wrap" id="revenue-breakdown-table"></div>
+      <p class="muted">비중은 연결 매출 또는 해당 부문 소계를 기준으로 계산합니다. 전년비는 같은 공시에 실린 전년 비교값을 사용하므로 추이의 전년 금액과 다를 수 있습니다. 확인 가능한 기준값이 없으면 —로 표시합니다.</p>
+      <label id="revenue-breakdown-series-label">추이 항목<select id="revenue-breakdown-series"></select></label>
+      <div id="revenue-breakdown-chart" class="trend-chart"></div>
+      <p class="muted">점은 해당 기간의 관측값입니다. 누락된 기간이나 공시 기준이 바뀐 구간은 선으로 연결하지 않습니다.</p>
+    </div>`;
+  $("#profile-summary").after(panel);
+  panel.addEventListener("toggle",()=>{if(panel.open)loadRevenueBreakdowns()});
+  $("#revenue-breakdown-frequency").onchange=()=>renderRevenueBreakdowns();
+  $("#revenue-breakdown-kind").onchange=()=>renderRevenueBreakdowns(true);
+  $("#revenue-breakdown-period").onchange=()=>renderRevenueBreakdownTable();
+  $("#revenue-breakdown-series").onchange=()=>renderRevenueBreakdownTrend();
+}
+function resetRevenueBreakdowns(){
+  const panel=$("#profile-revenue-breakdowns");
+  if(!panel)return;
+  revenueBreakdowns.token++;
+  revenueBreakdowns.context=null;
+  revenueBreakdowns.data=null;
+  panel.open=false;
+  $("#revenue-breakdown-status").textContent="";
+  $("#revenue-breakdown-content").hidden=true;
+}
+async function loadRevenueBreakdowns(){
+  const panel=$("#profile-revenue-breakdowns"),profile=S.profile,dataset=explorerDataset();
+  if(!panel?.open||!profile||!dataset)return;
+  const status=$("#revenue-breakdown-status"),cik=profile.company.cik;
+  if(!dataset.publication_id||!comparisonDate(profile.financial_as_of)){
+    status.textContent="선택한 자료 발행물과 재무 기준일을 확인할 수 없습니다.";
+    return;
+  }
+  if(revenueBreakdowns.context?.profile===profile&&revenueBreakdowns.data)return;
+  const context={profile,key:explorerContextKey(),token:++revenueBreakdowns.token};
+  revenueBreakdowns.context=context;
+  const scope={dataset_id:dataset.dataset_id,dataset_publication_id:dataset.publication_id,financial_as_of:profile.financial_as_of,cik};
+  const current=()=>context.token===revenueBreakdowns.token&&context.profile===S.profile&&context.key===explorerContextKey()&&panel.open;
+  status.textContent="매출 구성 자료를 불러오는 중입니다…";
+  try{
+    const data=await api(`/api/revenue-breakdowns?${new URLSearchParams(scope)}`);
+    if(!current())return;
+    if(Object.keys(scope).some(key=>scope[key]!==data[key])||data.schema_version!=="screening-revenue-breakdowns-v1"){
+      throw new Error("선택한 발행물과 매출 구성 자료가 다릅니다.");
+    }
+    revenueBreakdowns.data=data;
+    $("#revenue-breakdown-frequency").value=explorerBasis.profileBasis==="ANNUAL"?"annual":"quarterly";
+    $("#revenue-breakdown-kind").value="segments";
+    $("#revenue-breakdown-content").hidden=false;
+    renderRevenueBreakdowns();
+  }catch(error){
+    if(current())status.textContent=error.message;
+  }
+}
+function revenuePeriodLabel(period,frequency){
+  return `FY${period.fiscal_year}${frequency==="quarterly"?" Q"+period.fiscal_quarter:""}`;
+}
+function revenueView(){
+  const frequency=$("#revenue-breakdown-frequency").value,kind=$("#revenue-breakdown-kind").value;
+  const view=revenueBreakdowns.data?.[frequency];
+  if(!view)return null;
+  return {frequency,kind,periods:view.periods,rows:view.groups[kind]||[],segments:view.groups.segments||[],totals:view.totals||[]};
+}
+function renderRevenueBreakdowns(keepPeriod=false){
+  const view=revenueView();
+  if(!view)return;
+  const {frequency,periods,rows}=view;
+  const periodSelect=$("#revenue-breakdown-period"),previous=periodSelect.value;
+  periodSelect.innerHTML=periods.map((period,index)=>`<option value="${index}">${esc(revenuePeriodLabel(period,frequency))}</option>`).join("");
+  periodSelect.disabled=!periods.length;
+  if(periods.length)periodSelect.value=keepPeriod&&periods[Number(previous)]?previous:String(periods.length-1);
+  $("#revenue-breakdown-status").textContent=periods.length?
+    `재무 기준일 ${revenueBreakdowns.data.financial_as_of} · 최근 ${periods.length}개 ${frequency==="annual"?"회계연도":"회계분기"} · 백만 USD`:
+    "이 발행물에는 준비된 회계기간이 없습니다.";
+  const series=revenueTrendSeries(rows,periods.length);
+  $("#revenue-breakdown-series-label").hidden=!series.length;
+  $("#revenue-breakdown-chart").hidden=!series.length;
+  const select=$("#revenue-breakdown-series");
+  select.innerHTML=series.map(item=>{
+    const last=item.slots.findLastIndex(Boolean),scope=revenueScopeLabel(item.scope);
+    return `<option value="${esc(item.id)}">${esc(item.label)}${scope?" · "+esc(scope):""} · ${esc(revenuePeriodLabel(periods[last],frequency))}까지</option>`;
+  }).join("");
+  const current=series.find(item=>item.slots.at(-1))||series[0];
+  if(current)select.value=current.id;
+  renderRevenueBreakdownTable();
+  renderRevenueBreakdownTrend();
+}
+function revenueSourceLinks(sources,cik){
+  if(!/^\d{10}$/u.test(cik))return "";
+  const unique=new Map(sources.filter(source=>/^\d{10}-\d{2}-\d{6}$/u.test(source.accession)).map(source=>[source.accession,source]));
+  return [...unique.values()].map(source=>{
+    const accession=source.accession,folder=accession.replaceAll("-","");
+    return `<a href="https://www.sec.gov/Archives/edgar/data/${cik.replace(/^0+/u,"")}/${folder}/${accession}-index.html" target="_blank" rel="noopener noreferrer" title="${esc(accession)} · ${esc(source.filed_date)}">공시 ${esc(source.filed_date)}</a>`;
+  }).join(" ");
+}
+function revenueScopeLabel(scope){
+  if(!scope)return "";
+  return scope.split(":").at(-1).replace(/Member$/u,"").replace(/([a-z0-9])([A-Z])/gu,"$1 $2");
+}
+function renderRevenueBreakdownTable(){
+  const view=revenueView(),table=$("#revenue-breakdown-table");
+  if(!view||!view.periods.length){table.textContent="";return}
+  const index=Number($("#revenue-breakdown-period").value),period=view.periods[index];
+  if(!period){table.textContent="";return}
+  const entries=view.rows.map(row=>({row,cell:row.cells[index]}))
+    .filter(({cell})=>cell&&(cell.value!=null||cell.reason==="COMPETING_PREPARED_SCOPE"));
+  const caption=period.period_end?`${period.period_start} ~ ${inclusiveEnd(period.period_end)}`:"실제 기간을 확인할 수 없습니다.";
+  const groups=new Map();
+  for(const entry of entries){
+    const scope=view.kind==="products"?entry.row.scope:null;
+    if(!groups.has(scope))groups.set(scope,[]);
+    groups.get(scope).push(entry);
+  }
+  const details=[...groups].map(([scope,items])=>{
+    const subtotal=scope?revenueSegmentSubtotal(view.segments,scope,index):null;
+    const heading=scope?`<tr class="revenue-subtotal"><th scope="rowgroup">부문 소계<small>${esc(revenueScopeLabel(scope))}</small></th>
+      ${revenueBreakdownValueCells(subtotal,"이 기간에 확인된 부문 매출이 없습니다.","연결 매출")}</tr>`:"";
+    const rows=items.map(({row,cell})=>`<tr${scope?' class="revenue-subtotal-detail"':""}><th scope="row">${esc(row.label)}</th>
+      ${revenueBreakdownValueCells(cell,"같은 범위의 준비 자료가 일치하지 않습니다.",scope?"부문 소계":"연결 매출")}</tr>`).join("");
+    return `<tbody>${heading}${rows}</tbody>`;
+  }).join("");
+  table.innerHTML=`<table class="series-table"><caption>${esc(caption)}</caption>
+    <thead><tr><th scope="col">공시 항목</th><th scope="col">매출</th><th scope="col">검토 비중 (%)</th><th scope="col">전년비 (%)</th><th scope="col">자료·출처</th></tr></thead>
+    <tbody><tr class="revenue-consolidated"><th scope="row">연결 매출</th>
+      ${revenueBreakdownValueCells(view.totals[index],"이 기간에 확인된 연결 매출이 없습니다.")}</tr></tbody>
+    ${details}</table>${entries.length?"":'<p class="muted">이 회계기간의 매출 구성 자료가 준비되지 않았습니다.</p>'}`;
+}
+function revenueSegmentSubtotal(segments,scope,index){
+  const matches=segments.filter(row=>row.member===scope).map(row=>row.cells[index]).filter(Boolean);
+  const available=matches.filter(cell=>cell.value!=null);
+  if(available.length>1||matches.some(cell=>cell.reason==="COMPETING_PREPARED_SCOPE")){
+    return {value:null,reason:"COMPETING_PREPARED_SCOPE",sources:[]};
+  }
+  return available[0];
+}
+function revenueBreakdownValueCells(cell,missingReason,expectedDenominator){
+  const present=cell?.value!=null,conflict=cell?.reason==="COMPETING_PREPARED_SCOPE";
+  const reason=conflict?"같은 범위의 준비 자료가 일치하지 않습니다.":missingReason;
+  const share=cell?.ratios?.share,yoy=cell?.ratios?.yoy;
+  const denominator=({CONSOLIDATED:"연결 매출",SEGMENT_SUBTOTAL:"부문 소계"})[share?.denominator];
+  const priorCaption=yoy?`${yoy.prior_period_start} ~ ${inclusiveEnd(yoy.prior_period_end)}`:"";
+  const shareReason=expectedDenominator?`같은 공시에서 비중을 계산할 수 있는 분모가 확인되지 않았습니다. 기준은 ${expectedDenominator}입니다.`:"연결 매출은 비중 계산의 기준입니다.";
+  return `<td>${present?numberMarkup(cell.value,REVENUE_MONEY):revenueRate(null,reason)}</td>
+    <td>${revenueRate(cell?.share,shareReason)}${denominator?`<small title="비중의 분모">${denominator}</small>`:""}</td>
+    <td>${revenueRate(cell?.yoy,"같은 공시에 비교할 수 있는 전년 자료가 확인되지 않았습니다.")}${priorCaption?`<small title="${esc(priorCaption)}" aria-label="전년 비교 기간 ${esc(priorCaption)}">같은 공시</small>`:""}</td>
+    <td>${present?(cell.status==="REPORTED"?"공시값":"계산값")+(revenueSourceLinks(cell.sources||[],revenueBreakdowns.data.cik)):(conflict?"범위 확인 필요":"자료 없음")}</td>`;
+}
+function revenueRate(value,reason){
+  return value==null?`<span class="missing" title="${esc(reason)}" aria-label="${esc(reason)}">—</span>`:numberMarkup(value,REVENUE_PERCENT);
+}
+function revenueTrendSeries(rows,periodCount){
+  const groups=new Map();
+  for(const row of rows){
+    const axes=Object.entries(row.axis_members||{}).sort(([left],[right])=>left.localeCompare(right));
+    if(!axes.length)continue;
+    const id=JSON.stringify([row.scope??null,axes]);
+    if(!groups.has(id))groups.set(id,{id,scope:row.scope,slots:Array.from({length:periodCount},()=>[])});
+    const group=groups.get(id);
+    for(const [index,cell] of row.cells.slice(0,periodCount).entries()){
+      if(cell.value!=null||cell.reason==="COMPETING_PREPARED_SCOPE")group.slots[index].push({row,cell});
+    }
+  }
+  return [...groups.values()].flatMap(group=>{
+    const slots=group.slots.map(items=>items.length===1&&items[0].cell.value!=null?items[0]:null);
+    const last=slots.findLastIndex(Boolean);
+    return last<0?[]:[{...group,slots,label:slots[last].row.label}];
+  });
+}
+function renderRevenueBreakdownTrend(){
+  const view=revenueView(),chart=$("#revenue-breakdown-chart");
+  const selected=$("#revenue-breakdown-series").value;
+  const series=view&&revenueTrendSeries(view.rows,view.periods.length).find(item=>item.id===selected);
+  if(!series){chart.textContent="";return}
+  const slots=series.slots;
+  const values=slots.map(item=>item?Number(item.cell.value):null);
+  const available=values.filter(value=>value!==null&&Number.isFinite(value));
+  if(!available.length){chart.textContent="추이 자료가 없습니다.";return}
+  const min=Math.min(...available),span=Math.max(...available)-min||1;
+  const x=index=>34+index*352/Math.max(1,view.periods.length-1);
+  const points=values.map((value,index)=>value==null||!Number.isFinite(value)?null:{x:x(index),y:96-62*(value-min)/span});
+  const lines=points.slice(1).map((point,index)=>{
+    const previous=slots[index]?.row,current=slots[index+1]?.row;
+    return point&&points[index]&&current===previous&&current.mapping_epoch&&!current.mapping_review_required?
+      `<line class="line" x1="${points[index].x}" y1="${points[index].y}" x2="${point.x}" y2="${point.y}"/>`:"";
+  }).join("");
+  const marks=points.map((point,index)=>point?
+    `<circle class="point" cx="${point.x}" cy="${point.y}" r="4"><title>${esc(revenuePeriodLabel(view.periods[index],view.frequency))} ${esc(displayValue(slots[index].cell.value,REVENUE_MONEY))} 백만 USD</title></circle>`:"").join("");
+  const ticks=view.periods.map((period,index)=>`<text x="${x(index)}" y="124" class="year-label ${points[index]?"":"missing-year"}">${esc(String(period.fiscal_year).slice(-2))}${view.frequency==="quarterly"?" Q"+period.fiscal_quarter:""}</text>`).join("");
+  const caption=view.periods.map((period,index)=>`${revenuePeriodLabel(period,view.frequency)} ${points[index]?displayValue(slots[index].cell.value,REVENUE_MONEY)+" 백만 USD":"자료 없음"}`).join(", ");
+  chart.innerHTML=`<svg viewBox="0 0 420 142" role="img" aria-label="${esc(series.label)} · ${esc(caption)}"><line class="axis" x1="24" x2="396" y1="110" y2="110"/>${lines}${marks}${ticks}</svg>`;
 }
 
 // Published same-metric company trends; no screening state or financial calculations.
