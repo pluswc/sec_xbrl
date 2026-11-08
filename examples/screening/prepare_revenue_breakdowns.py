@@ -168,7 +168,33 @@ def project_breakdowns(client: Any, ticker: str, cik: str, cutoff: str, period_c
         cells = [row["cells"].get(key, _gap("PERIOD_NOT_PREPARED")) for key in coordinates]
         if any(cell["value"] is not None or cell["reason"] == "COMPETING_PREPARED_SCOPE" for cell in cells):
             groups[row["group"]].append({**row, "cells": cells})
-    return {"periods": periods, "groups": groups}
+    totals = _consolidated_totals(overview, coordinates, client, context, cik, period_class)
+    return {"periods": periods, "totals": totals, "groups": groups}
+
+
+def _consolidated_totals(
+    overview: dict, coordinates: dict, client: Any, context: dict, cik: str, period_class: str,
+) -> list[dict]:
+    by_period = defaultdict(list)
+    for cell in overview["cells"]:
+        if cell.get("row_id") == "revenue" and cell.get("period_class") == period_class:
+            by_period[_coordinate(cell)].append(cell)
+    totals = []
+    for key, period in coordinates.items():
+        candidates = by_period[key]
+        if len(candidates) > 1:
+            totals.append(_gap("COMPETING_PREPARED_SCOPE"))
+            continue
+        if not candidates or candidates[0].get("status") not in {"REPORTED", "DERIVED"}:
+            totals.append(_gap("PERIOD_NOT_PREPARED"))
+            continue
+        cell = candidates[0]
+        if cell.get("dimensions") != []:
+            totals.append(_gap("PREPARED_OBSERVATION_HELD"))
+            continue
+        trace = client.trace(cell["cell_id"], context=context)["trace"]
+        totals.append(_prepared_cell(cell, trace, period, context, cik))
+    return totals
 
 
 def _coordinate(row: dict) -> tuple[int, int]:

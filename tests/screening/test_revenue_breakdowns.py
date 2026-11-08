@@ -36,7 +36,8 @@ class _Prepared:
         self.edges = [{"parent_id": "segment-lens", "child_id": "segment", "kind": "OBSERVED_DIMENSION",
                        "periods": [[2026, 1], [2026, 3]]}]
         self.cells = [self.cell("segment", 1, "1000000"), self.cell("segment", 3, "3000000"),
-                      self.cell("product", 2, "2000000"), self.cell("geography", 2, "4000000")]
+                      self.cell("product", 2, "2000000"), self.cell("geography", 2, "4000000"),
+                      {**self.cell("consolidated", 2, "99000000"), "row_id": "revenue", "dimensions": []}]
 
     @staticmethod
     def cell(node, quarter, value):
@@ -58,7 +59,8 @@ class _Prepared:
         ]
         columns.append({"fiscal_year": 2026, "fiscal_quarter": 4, "period_class": "QTD_3M",
                         "actual_start_date": "2026-10-01", "actual_end_date": "2027-01-01"})
-        return {"context": {"ticker": ticker, "as_of": CUTOFF, "view": "LATEST_REPORTED"}, "columns": columns}
+        return {"context": {"ticker": ticker, "as_of": CUTOFF, "view": "LATEST_REPORTED"},
+                "columns": columns, "cells": self.cells}
 
     def list_breakdowns(self, row_id, *, context):
         assert row_id == "revenue"
@@ -126,3 +128,17 @@ def test_fallback_never_reopens_hidden_lens_attachment_but_allows_unlinked_perio
     projected = project_breakdowns(fixture, "TEST", CIK, CUTOFF, "QTD_3M", 8)
     product, = projected["groups"]["products"]
     assert [cell["value"] for cell in product["cells"]] == ["1000000", None, None]
+
+
+def test_projects_consolidated_revenue_by_period_with_source_and_no_member_sum():
+    fixture = _Prepared()
+    projected = project_breakdowns(fixture, "TEST", CIK, CUTOFF, "QTD_3M", 8)
+    totals = projected["totals"]
+    assert [cell["value"] for cell in totals] == [None, "99000000", None]
+    assert totals[1]["status"] == "REPORTED"
+    assert totals[1]["sources"][0]["fact_id"] == "fact-consolidated-2"
+    assert totals[0]["reason"] == "PERIOD_NOT_PREPARED"
+    fixture.cells.append({**fixture.cells[-1], "cell_id": "competing-total"})
+    projected = project_breakdowns(fixture, "TEST", CIK, CUTOFF, "QTD_3M", 8)
+    assert projected["totals"][1]["reason"] == "COMPETING_PREPARED_SCOPE"
+    assert projected["totals"][1]["value"] is None

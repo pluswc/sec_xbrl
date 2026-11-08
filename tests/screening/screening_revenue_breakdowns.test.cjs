@@ -37,7 +37,7 @@ test("only a pinned asset and exact GET scope expose one company",t=>{
   assert.equal(request(query,"GET",null).status,503);
 });
 
-test("profile frequency uses its own full window and trend gaps are not connected",()=>{
+function profileHarness(){
   const elements=new Map();
   const get=selector=>{
     if(!elements.has(selector))elements.set(selector,{value:"",textContent:"",innerHTML:"",hidden:false});
@@ -45,7 +45,12 @@ test("profile frequency uses its own full window and trend gaps are not connecte
   };
   const context=vm.createContext({URLSearchParams,location:{search:""},document:{querySelector:get,querySelectorAll:()=>[]}});
   vm.runInContext(source.slice(0,source.indexOf("async function boot()")),context);
-  const app=vm.runInContext("({revenueBreakdowns,revenueView,renderRevenueBreakdownTrend,revenueSourceLinks,revenueTrendSeries})",context);
+  const app=vm.runInContext("({revenueBreakdowns,revenueView,renderRevenueBreakdownTrend,revenueSourceLinks,revenueTrendSeries,renderRevenueBreakdownTable})",context);
+  return {get,app};
+}
+
+test("profile frequency uses its own full window and trend gaps are not connected",()=>{
+  const {get,app}=profileHarness();
   const period=(year,quarter)=>({fiscal_year:year,fiscal_quarter:quarter,period_end:"2026-07-01"});
   const periods=[period(2025,4),period(2026,1),period(2026,2)];
   const row={id:"cloud",label:"Cloud",mapping_epoch:"epoch-a",axis_members:{axis:"cloud"},cells:[{value:"1000000"},{value:null},{value:"2000000"}]};
@@ -84,4 +89,39 @@ test("profile frequency uses its own full window and trend gaps are not connecte
   const link=app.revenueSourceLinks([{accession:"0000000042-26-000001",filed_date:"2026-07-30"}],cik);
   assert.match(link,/https:\/\/www\.sec\.gov\/Archives\/edgar\/data\/42\/000000004226000001\//);
   assert.equal(app.revenueSourceLinks([{accession:"javascript:alert(1)"}],cik),"");
+});
+
+
+test("table places exact parent amounts above grouped details and retains totals in detail gaps",()=>{
+  const {get,app}=profileHarness();
+  const sources=[{accession:"0000000042-26-000001",filed_date:"2026-07-30"}];
+  const amount=(value,status="REPORTED")=>({value,status,sources});
+  const gap={value:null};
+  const scope="issuer:ServicesMember";
+  const periods=[{fiscal_year:2026,fiscal_quarter:2},{fiscal_year:2026,fiscal_quarter:3}];
+  const totals=[amount("119796000000"),amount("121000000000","DERIVED")];
+  const segments=[{member:scope,cells:[amount("94540000000"),gap]},
+    {member:"other:ServicesMember",cells:[amount("999000000"),gap]}];
+  const products=[{label:"Search",scope,cells:[amount("63271000000"),gap]},
+    {label:"Company product",scope:null,cells:[amount("2000000"),gap]}];
+  const view={periods,totals,groups:{segments,products}};
+  app.revenueBreakdowns.data={cik,quarterly:view};
+  get("#revenue-breakdown-frequency").value="quarterly";
+  get("#revenue-breakdown-kind").value="products";
+  get("#revenue-breakdown-period").value="0";
+  const render=()=>{
+    app.renderRevenueBreakdownTable();
+    return get("#revenue-breakdown-table").innerHTML;
+  };
+  const grouped=render();
+  assert.match(grouped,/연결 매출[\s\S]*119,796\.0[\s\S]*scope="rowgroup">부문 소계[\s\S]*94,540\.0[\s\S]*Search/);
+  assert.equal((grouped.match(/부문 소계/g)||[]).length,1);
+  assert.match(grouped,/2026-07-30/);
+  assert.doesNotMatch(grouped,/999\.0/);
+  segments.push({member:scope,cells:[amount("1000000"),gap]});
+  assert.match(render(),/부문 소계[\s\S]*같은 범위의 준비 자료가 일치하지 않습니다/);
+  get("#revenue-breakdown-period").value="1";
+  assert.match(render(),/연결 매출[\s\S]*121,000\.0[\s\S]*계산값[\s\S]*이 회계기간의 매출 구성 자료가 준비되지 않았습니다/);
+  delete view.totals;
+  assert.match(render(),/연결 매출[\s\S]*이 기간에 확인된 연결 매출이 없습니다/);
 });

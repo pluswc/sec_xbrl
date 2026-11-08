@@ -163,3 +163,8 @@ body>header{position:static}
 #revenue-breakdown-table a{color:var(--blue);margin-top:4px}
 #revenue-breakdown-series-label{margin-top:12px}
 #revenue-breakdown-chart{height:148px}
+
+#revenue-breakdown-table .revenue-consolidated{background:var(--inset);font-weight:650}
+#revenue-breakdown-table .revenue-subtotal{background:var(--sheet);font-weight:600}
+#revenue-breakdown-table .revenue-subtotal th,#revenue-breakdown-table .revenue-subtotal td{border-top:1px solid var(--line)}
+#revenue-breakdown-table .revenue-subtotal-detail th{padding-left:20px}
