@@ -141,14 +141,25 @@ def project_breakdowns(client: Any, ticker: str, cik: str, cutoff: str, period_c
                 continue
             node = row["prepared_node"]
             _project_row(series, node, row["cells"], row["importance_history"], coordinates, client, context, cik)
-    nodes = {node["node_id"]: node for node in client._records(ticker, VIEW, "nodes")
+    prepared_nodes = client._records(ticker, VIEW, "nodes")
+    lens_ids = {node["node_id"] for node in prepared_nodes if node.get("kind") == "LENS"}
+    attached = {
+        (edge["child_id"], tuple(period))
+        for edge in client._records(ticker, VIEW, "edges")
+        if edge.get("kind") == "OBSERVED_DIMENSION" and edge["parent_id"] in lens_ids
+        for period in edge["periods"]
+    }
+    nodes = {node["node_id"]: node for node in prepared_nodes
              if node.get("kind") == "VALUE" and node.get("period_class") == period_class
              and node.get("origin_kind") == "STANDARD" and node.get("concept") in REVENUE_QNAMES
              and _axis_identity(node.get("dimensions"))}
     by_node = defaultdict(list)
     for cell in client._records(ticker, VIEW, "cells"):
-        if cell.get("node_id") in nodes and _coordinate(cell) in coordinates and cell.get("status") == "REPORTED":
-            by_node[cell["node_id"]].append(cell)
+        coordinate = _coordinate(cell)
+        node_id = cell.get("node_id")
+        if (node_id in nodes and coordinate in coordinates and (node_id, coordinate) not in attached
+            and cell.get("status") == "REPORTED"):
+            by_node[node_id].append(cell)
     for node_id, cells in by_node.items():
         _project_row(series, nodes[node_id], cells, [], coordinates, client, context, cik, fallback=True)
     _hold_conflicts(series)

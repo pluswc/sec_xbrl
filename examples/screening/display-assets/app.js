@@ -698,7 +698,7 @@ function mountRevenueBreakdowns(){
       <div class="table-wrap" id="revenue-breakdown-table"></div>
       <label id="revenue-breakdown-series-label">추이 항목<select id="revenue-breakdown-series"></select></label>
       <div id="revenue-breakdown-chart" class="trend-chart"></div>
-      <p class="muted">기간 사이의 누락은 연결하지 않습니다. 같은 이름이어도 공시 기준이 달라 확인할 수 없는 항목은 별도 추이로 표시합니다.</p>
+      <p class="muted">점은 해당 기간의 관측값입니다. 누락된 기간이나 공시 기준이 바뀐 구간은 선으로 연결하지 않습니다.</p>
     </div>`;
   $("#profile-summary").after(panel);
   panel.addEventListener("toggle",()=>{if(panel.open)loadRevenueBreakdowns()});
@@ -766,15 +766,15 @@ function renderRevenueBreakdowns(keepPeriod=false){
   $("#revenue-breakdown-status").textContent=periods.length?
     `재무 기준일 ${revenueBreakdowns.data.financial_as_of} · 최근 ${periods.length}개 ${frequency==="annual"?"회계연도":"회계분기"} · 백만 USD`:
     "이 발행물에는 준비된 회계기간이 없습니다.";
-  const series=rows.filter(row=>row.cells.slice(0,periods.length).some(cell=>cell.value!=null));
+  const series=revenueTrendSeries(rows,periods.length);
   $("#revenue-breakdown-series-label").hidden=!series.length;
   $("#revenue-breakdown-chart").hidden=!series.length;
   const select=$("#revenue-breakdown-series");
-  select.innerHTML=series.map(row=>{
-    const last=row.cells.slice(0,periods.length).findLastIndex(cell=>cell.value!=null);
-    return `<option value="${esc(row.id)}">${esc(row.label)} · ${esc(revenuePeriodLabel(periods[last],frequency))}까지</option>`;
+  select.innerHTML=series.map(item=>{
+    const last=item.slots.findLastIndex(Boolean),scope=revenueScopeLabel(item.scope);
+    return `<option value="${esc(item.id)}">${esc(item.label)}${scope?" · "+esc(scope):""} · ${esc(revenuePeriodLabel(periods[last],frequency))}까지</option>`;
   }).join("");
-  const current=series.find(row=>row.cells[periods.length-1]?.value!=null);
+  const current=series.find(item=>item.slots.at(-1))||series[0];
   if(current)select.value=current.id;
   renderRevenueBreakdownTable();
   renderRevenueBreakdownTrend();
@@ -812,24 +812,46 @@ function renderRevenueBreakdownTable(){
 function revenueRate(value,reason){
   return value==null?`<span class="missing" title="${esc(reason)}" aria-label="${esc(reason)}">—</span>`:numberMarkup(value,REVENUE_PERCENT);
 }
+function revenueTrendSeries(rows,periodCount){
+  const groups=new Map();
+  for(const row of rows){
+    const axes=Object.entries(row.axis_members||{}).sort(([left],[right])=>left.localeCompare(right));
+    if(!axes.length)continue;
+    const id=JSON.stringify([row.scope??null,axes]);
+    if(!groups.has(id))groups.set(id,{id,scope:row.scope,slots:Array.from({length:periodCount},()=>[])});
+    const group=groups.get(id);
+    for(const [index,cell] of row.cells.slice(0,periodCount).entries()){
+      if(cell.value!=null||cell.reason==="COMPETING_PREPARED_SCOPE")group.slots[index].push({row,cell});
+    }
+  }
+  return [...groups.values()].flatMap(group=>{
+    const slots=group.slots.map(items=>items.length===1&&items[0].cell.value!=null?items[0]:null);
+    const last=slots.findLastIndex(Boolean);
+    return last<0?[]:[{...group,slots,label:slots[last].row.label}];
+  });
+}
 function renderRevenueBreakdownTrend(){
   const view=revenueView(),chart=$("#revenue-breakdown-chart");
-  const row=view?.rows.find(item=>item.id===$("#revenue-breakdown-series").value);
-  if(!row){chart.textContent="";return}
-  const cells=row.cells.slice(0,view.periods.length);
-  const values=cells.map(cell=>cell.value==null?null:Number(cell.value));
+  const selected=$("#revenue-breakdown-series").value;
+  const series=view&&revenueTrendSeries(view.rows,view.periods.length).find(item=>item.id===selected);
+  if(!series){chart.textContent="";return}
+  const slots=series.slots;
+  const values=slots.map(item=>item?Number(item.cell.value):null);
   const available=values.filter(value=>value!==null&&Number.isFinite(value));
   if(!available.length){chart.textContent="추이 자료가 없습니다.";return}
   const min=Math.min(...available),span=Math.max(...available)-min||1;
   const x=index=>34+index*352/Math.max(1,view.periods.length-1);
   const points=values.map((value,index)=>value==null||!Number.isFinite(value)?null:{x:x(index),y:96-62*(value-min)/span});
-  const lines=points.slice(1).map((point,index)=>point&&points[index]?
-    `<line class="line" x1="${points[index].x}" y1="${points[index].y}" x2="${point.x}" y2="${point.y}"/>`:"").join("");
+  const lines=points.slice(1).map((point,index)=>{
+    const previous=slots[index]?.row,current=slots[index+1]?.row;
+    return point&&points[index]&&current===previous&&current.mapping_epoch&&!current.mapping_review_required?
+      `<line class="line" x1="${points[index].x}" y1="${points[index].y}" x2="${point.x}" y2="${point.y}"/>`:"";
+  }).join("");
   const marks=points.map((point,index)=>point?
-    `<circle class="point" cx="${point.x}" cy="${point.y}" r="4"><title>${esc(revenuePeriodLabel(view.periods[index],view.frequency))} ${esc(displayValue(cells[index].value,REVENUE_MONEY))} 백만 USD</title></circle>`:"").join("");
+    `<circle class="point" cx="${point.x}" cy="${point.y}" r="4"><title>${esc(revenuePeriodLabel(view.periods[index],view.frequency))} ${esc(displayValue(slots[index].cell.value,REVENUE_MONEY))} 백만 USD</title></circle>`:"").join("");
   const ticks=view.periods.map((period,index)=>`<text x="${x(index)}" y="124" class="year-label ${points[index]?"":"missing-year"}">${esc(String(period.fiscal_year).slice(-2))}${view.frequency==="quarterly"?" Q"+period.fiscal_quarter:""}</text>`).join("");
-  const caption=view.periods.map((period,index)=>`${revenuePeriodLabel(period,view.frequency)} ${points[index]?displayValue(cells[index].value,REVENUE_MONEY)+" 백만 USD":"자료 없음"}`).join(", ");
-  chart.innerHTML=`<svg viewBox="0 0 420 142" role="img" aria-label="${esc(row.label)} · ${esc(caption)}"><line class="axis" x1="24" x2="396" y1="110" y2="110"/>${lines}${marks}${ticks}</svg>`;
+  const caption=view.periods.map((period,index)=>`${revenuePeriodLabel(period,view.frequency)} ${points[index]?displayValue(slots[index].cell.value,REVENUE_MONEY)+" 백만 USD":"자료 없음"}`).join(", ");
+  chart.innerHTML=`<svg viewBox="0 0 420 142" role="img" aria-label="${esc(series.label)} · ${esc(caption)}"><line class="axis" x1="24" x2="396" y1="110" y2="110"/>${lines}${marks}${ticks}</svg>`;
 }
 
 // Published same-metric company trends; no screening state or financial calculations.

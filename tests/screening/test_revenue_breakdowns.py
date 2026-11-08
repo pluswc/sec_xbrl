@@ -31,7 +31,10 @@ class _Prepared:
             _node("product", [_dimension(PRODUCT, "issuer:SearchMember"),
                               _dimension(SEGMENT_AXIS, "issuer:ServicesMember")], review=True),
             _node("geography", [_dimension("srt:StatementGeographicalAxis", "issuer:EuropeMember")]),
+            {"node_id": "segment-lens", "kind": "LENS"},
         ]
+        self.edges = [{"parent_id": "segment-lens", "child_id": "segment", "kind": "OBSERVED_DIMENSION",
+                       "periods": [[2026, 1], [2026, 3]]}]
         self.cells = [self.cell("segment", 1, "1000000"), self.cell("segment", 3, "3000000"),
                       self.cell("product", 2, "2000000"), self.cell("geography", 2, "4000000")]
 
@@ -112,3 +115,14 @@ def test_keeps_competing_epochs_separate_and_blocks_bad_source_cells():
     for row in projected["groups"]["segments"]:
         assert all(cell["value"] is None for cell in row["cells"])
         assert row["cells"][-1]["reason"] == "COMPETING_PREPARED_SCOPE"
+
+
+def test_fallback_never_reopens_hidden_lens_attachment_but_allows_unlinked_period():
+    fixture = _Prepared()
+    fixture.nodes.append({"node_id": "hidden-product-lens", "kind": "LENS", "hidden": True})
+    fixture.edges.append({"parent_id": "hidden-product-lens", "child_id": "product",
+                          "kind": "OBSERVED_DIMENSION", "periods": [[2026, 2]]})
+    fixture.cells.append(fixture.cell("product", 1, "1000000"))
+    projected = project_breakdowns(fixture, "TEST", CIK, CUTOFF, "QTD_3M", 8)
+    product, = projected["groups"]["products"]
+    assert [cell["value"] for cell in product["cells"]] == ["1000000", None, None]
