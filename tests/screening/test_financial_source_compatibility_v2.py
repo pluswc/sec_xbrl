@@ -515,6 +515,51 @@ def test_latest_consumer_transition_reopens_old_and_new_combined_without_replayi
         assert new_reader.quarterly is old_reader.quarterly
         assert len(new_reader.quarter_definitions) == len(old_reader.quarter_definitions) + 1
         reopened.require_publication("continuity-combined", addition["parent_publication_id"])
+    from sec_xbrl.screening import reviewed_addition
+
+    v5_archive = tmp_path / "source-liability"
+    shutil.copytree(current, v5_archive)
+    for name in compat._REVIEWED_CHANGES:
+        with (current / name).open("a") as stream:
+            stream.write("\n# approved reviewed-cell source change\n")
+    reviewed_audit = tmp_path / "reviewed-audit.json"
+    write_json(reviewed_audit, {"synthetic_fixture": True})
+    v5_manifest = overlay_root / dataset_v3.MANIFEST
+    review = {"audit": _pin(reviewed_audit), "parent_manifest": _pin(v5_manifest),
+              "parent_publication_id": json.loads(v5_manifest.read_text())["publication_id"]}
+    v6 = tmp_path / "reviewed-approval.json"
+    write_json(v6, compat.prepare_source_compatibility_packet(
+        **(v4_inputs | {"continuity": False, "supersedes": {
+            "packet": _pin(v5), "source_root": str(v5_archive), "completed_publications": completed,
+        }}),
+        reviewed_addition=review,
+    ) | {"status": "ROOT_APPROVED"})
+    review_config = tmp_path / "reviewed-config.json"
+    write_json(review_config, {"schema_version": reviewed_addition.CONFIG_VERSION,
+                               "dataset_id": "reviewed-overlay", "source_compatibility": _pin(v6),
+                               "reviewed_addition": review})
+    reviews = []
+
+    def project_review(parent, pin):
+        assert pin == _pin(reviewed_audit)
+        reviews.append(parent)
+        return parent.quarter_support, parent.quarter_observations
+
+    monkeypatch.setattr(reviewed_addition, "read_reviewed_audit", lambda *args, **kwargs: {})
+    monkeypatch.setattr(reviewed_addition, "reviewed_rows", project_review)
+    review_root = dataset_v3.publish_reviewed_addition(review_config, tmp_path / "reviewed-overlay")
+    assert reviews == []
+    with compat.use_source_compatibility(_pin(v6)):
+        for ancestor in (v5, final, latest, prior, origin):
+            assert compat.resolve_source_compatibility(_pin(ancestor)).declaration == _pin(v6)
+    service = ScreeningService(
+        {"reviewed-overlay": review_root, "liability-overlay": overlay_root, "continuity-combined": combined_root},
+        tmp_path / "reviewed-journal.sqlite", source_compatibility=_pin(v6),
+    )
+    assert reviews[-1] is service.datasets["liability-overlay"]
+    assert parents[-1] is service.datasets["continuity-combined"]
+    assert service.datasets["reviewed-overlay"].quarter_definitions is reviews[-1].quarter_definitions
+    service.require_publication("liability-overlay", review["parent_publication_id"])
     audit.write_text("{}\n")
-    with pytest.raises(ValueError, match="missing, unsafe or changed"):
+    with pytest.raises(ValueError, match="missing, unsafe or changed"), compat.use_source_compatibility(_pin(v6)):
         ScreeningDatasetV3Reader(overlay_root)
