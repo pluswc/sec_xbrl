@@ -696,7 +696,7 @@ function mountRevenueBreakdowns(){
         <label>표의 회계기간<select id="revenue-breakdown-period"></select></label>
       </div>
       <div class="table-wrap" id="revenue-breakdown-table"></div>
-      <p class="muted">비중은 포함 범위와 분모를 검토한 경우에만 표시합니다. 전년비는 같은 공시 기준의 전년 자료가 확인된 경우에만 표시합니다.</p>
+      <p class="muted">비중은 연결 매출 또는 해당 부문 소계를 기준으로 계산합니다. 전년비는 같은 공시에 실린 전년 비교값을 사용하므로 추이의 전년 금액과 다를 수 있습니다. 확인 가능한 기준값이 없으면 —로 표시합니다.</p>
       <label id="revenue-breakdown-series-label">추이 항목<select id="revenue-breakdown-series"></select></label>
       <div id="revenue-breakdown-chart" class="trend-chart"></div>
       <p class="muted">점은 해당 기간의 관측값입니다. 누락된 기간이나 공시 기준이 바뀐 구간은 선으로 연결하지 않습니다.</p>
@@ -809,9 +809,9 @@ function renderRevenueBreakdownTable(){
   const details=[...groups].map(([scope,items])=>{
     const subtotal=scope?revenueSegmentSubtotal(view.segments,scope,index):null;
     const heading=scope?`<tr class="revenue-subtotal"><th scope="rowgroup">부문 소계<small>${esc(revenueScopeLabel(scope))}</small></th>
-      ${revenueBreakdownValueCells(subtotal,"이 기간에 확인된 부문 매출이 없습니다.")}</tr>`:"";
+      ${revenueBreakdownValueCells(subtotal,"이 기간에 확인된 부문 매출이 없습니다.","연결 매출")}</tr>`:"";
     const rows=items.map(({row,cell})=>`<tr${scope?' class="revenue-subtotal-detail"':""}><th scope="row">${esc(row.label)}</th>
-      ${revenueBreakdownValueCells(cell,"같은 범위의 준비 자료가 일치하지 않습니다.")}</tr>`).join("");
+      ${revenueBreakdownValueCells(cell,"같은 범위의 준비 자료가 일치하지 않습니다.",scope?"부문 소계":"연결 매출")}</tr>`).join("");
     return `<tbody>${heading}${rows}</tbody>`;
   }).join("");
   table.innerHTML=`<table class="series-table"><caption>${esc(caption)}</caption>
@@ -828,12 +828,16 @@ function revenueSegmentSubtotal(segments,scope,index){
   }
   return available[0];
 }
-function revenueBreakdownValueCells(cell,missingReason){
+function revenueBreakdownValueCells(cell,missingReason,expectedDenominator){
   const present=cell?.value!=null,conflict=cell?.reason==="COMPETING_PREPARED_SCOPE";
   const reason=conflict?"같은 범위의 준비 자료가 일치하지 않습니다.":missingReason;
+  const share=cell?.ratios?.share,yoy=cell?.ratios?.yoy;
+  const denominator=({CONSOLIDATED:"연결 매출",SEGMENT_SUBTOTAL:"부문 소계"})[share?.denominator];
+  const priorCaption=yoy?`${yoy.prior_period_start} ~ ${inclusiveEnd(yoy.prior_period_end)}`:"";
+  const shareReason=expectedDenominator?`같은 공시에서 비중을 계산할 수 있는 분모가 확인되지 않았습니다. 기준은 ${expectedDenominator}입니다.`:"연결 매출은 비중 계산의 기준입니다.";
   return `<td>${present?numberMarkup(cell.value,REVENUE_MONEY):revenueRate(null,reason)}</td>
-    <td>${revenueRate(cell?.share,"포함 범위와 분모를 검토한 비중이 없습니다.")}</td>
-    <td>${revenueRate(cell?.yoy,"같은 공시 기준의 전년 자료가 확인되지 않았습니다.")}</td>
+    <td>${revenueRate(cell?.share,shareReason)}${denominator?`<small title="비중의 분모">${denominator}</small>`:""}</td>
+    <td>${revenueRate(cell?.yoy,"같은 공시에 비교할 수 있는 전년 자료가 확인되지 않았습니다.")}${priorCaption?`<small title="${esc(priorCaption)}" aria-label="전년 비교 기간 ${esc(priorCaption)}">같은 공시</small>`:""}</td>
     <td>${present?(cell.status==="REPORTED"?"공시값":"계산값")+(revenueSourceLinks(cell.sources||[],revenueBreakdowns.data.cik)):(conflict?"범위 확인 필요":"자료 없음")}</td>`;
 }
 function revenueRate(value,reason){

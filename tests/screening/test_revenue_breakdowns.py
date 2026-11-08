@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from examples.screening.prepare_revenue_breakdowns import (
     SEGMENT_AXIS,
+    _add_revenue_ratios,
+    _same_fiscal_duration,
     project_breakdowns,
 )
 
@@ -98,8 +100,8 @@ def test_projects_stored_lens_and_unlinked_product_with_exact_scope_and_cutoff()
     segment, = projected["groups"]["segments"]
     product, = projected["groups"]["products"]
     assert [cell["value"] for cell in segment["cells"]] == ["1000000", None, "3000000"]
-    assert segment["cells"][2]["share"] == "12.5"
-    assert segment["cells"][2]["yoy"] == "4.25"
+    assert segment["cells"][2]["share"] is None
+    assert segment["cells"][2]["yoy"] is None
     assert product["scope"] == "issuer:ServicesMember"
     assert product["mapping_epoch"] == "epoch-product"
     assert [cell["value"] for cell in product["cells"]] == [None, "2000000", None]
@@ -142,3 +144,99 @@ def test_projects_consolidated_revenue_by_period_with_source_and_no_member_sum()
     projected = project_breakdowns(fixture, "TEST", CIK, CUTOFF, "QTD_3M", 8)
     assert projected["totals"][1]["reason"] == "COMPETING_PREPARED_SCOPE"
     assert projected["totals"][1]["value"] is None
+
+
+CURRENT_PERIOD = {"fiscal_year": 2026, "fiscal_quarter": 2,
+                  "period_start": "2026-04-01", "period_end": "2026-07-01"}
+PRIOR_PERIOD = {"fiscal_year": 2025, "fiscal_quarter": 2,
+                "period_start": "2025-04-01", "period_end": "2025-07-01"}
+SEGMENT_DIMS = [_dimension("raw-segment-axis", "raw-services")]
+PRODUCT_DIMS = [*SEGMENT_DIMS, _dimension("raw-product-axis", "raw-search")]
+
+
+def _reported(fact_id, value, dimensions, *, prior=False, **overrides):
+    period = PRIOR_PERIOD if prior else CURRENT_PERIOD
+    return {
+        "source_snapshot_id": "snapshot", "source_filing_id": "filing", "accession": ACCESSION,
+        "filed_date": "2026-07-25", "source_fact_id": fact_id,
+        "raw_concept_id": "raw-revenue", "raw_concept_qname": CONCEPT,
+        "raw_concept_namespace_uri": "http://fasb.org/us-gaap/2026", "raw_concept_is_standard": True,
+        "raw_dimension_signature": dimensions, "context_period_kind": "DURATION", "context_duration_days": 91,
+        "unit_numerator_measures": '["iso4217:USD"]', "unit_denominator_measures": "[]",
+        "context_start_date": period["period_start"], "context_end_date": period["period_end"],
+        "comparative_type": "PRIOR_YEAR_COMPARABLE" if prior else "CURRENT_FOCUS",
+        "is_nil": False, "reported_or_derived": "REPORTED", "value_numeric": value, **overrides,
+    }
+
+
+def _ratios(current, *comparatives, include_segment=True, **overrides):
+    total = _reported("total", "200", [])
+    segment = _reported("segment", "100", SEGMENT_DIMS)
+
+    def cell(row, **overrides):
+        return {
+            "status": "REPORTED", "cell_id": row["source_fact_id"], "value": row["value_numeric"],
+            "sources": [{"fact_id": row["source_fact_id"], "snapshot_id": row["source_snapshot_id"],
+                         "accession": row["accession"], "filed_date": row["filed_date"],
+                         "qname": row["raw_concept_qname"]}],
+            "share": None, "yoy": None, **overrides,
+        }
+
+    product = cell(current, **overrides)
+    group = {"segments": [{"group": "segments", "scope": None, "member": "services",
+                           "axis_members": {SEGMENT_AXIS: "services"}, "cells": [cell(segment)]}]
+             if include_segment else [],
+             "products": [{"group": "products", "scope": "services", "axis_members": {SEGMENT_AXIS: "services",
+                          PRODUCT: "search"}, "mapping_review_required": True, "cells": [product]}]}
+    _add_revenue_ratios([cell(total)], group, [CURRENT_PERIOD], [PRIOR_PERIOD, CURRENT_PERIOD],
+                        [total, segment, current, *comparatives])
+    return product, group
+
+
+def test_ratio_uses_exact_segment_subtotal_and_same_filing_prior_even_across_mapping_epochs():
+    current = _reported("current", "60", PRODUCT_DIMS)
+    prior = _reported("prior", "50", list(reversed(PRODUCT_DIMS)), prior=True)
+    duplicate = {**prior, "source_fact_id": "prior-other-appearance"}
+    cell, groups = _ratios(current, prior, duplicate)
+    assert cell["share"] == "60.0"
+    assert cell["yoy"] == "20.0"
+    assert cell["ratios"]["share"] == {"denominator": "SEGMENT_SUBTOTAL", "numerator_fact_id": "current",
+                                       "denominator_fact_id": "segment"}
+    evidence = cell["ratios"]["yoy"]
+    assert evidence["prior_fact_ids"] == ["prior", "prior-other-appearance"]
+    assert evidence["prior_period_start"] == "2025-04-01" and evidence["prior_period_end"] == "2025-07-01"
+    assert groups["segments"][0]["cells"][0]["share"] == "50.0"
+    assert _ratios(current, prior, include_segment=False)[0]["share"] is None
+
+
+def test_ratio_holds_bad_legs_and_conflicts_while_preserving_valid_zero():
+    current = _reported("current", "0", PRODUCT_DIMS)
+    prior = _reported("prior", "50", PRODUCT_DIMS, prior=True)
+    zero, _ = _ratios(current, prior)
+    assert (zero["share"], zero["yoy"]) == ("0", "-100")
+    for invalid in (
+        {**prior, "value_numeric": "0"},
+        {**prior, "quality_blocking": True},
+        {**prior, "source_snapshot_id": "other"},
+        {**prior, "filed_date": "2026-11-01"},
+        {**prior, "raw_concept_id": "other"},
+        {**prior, "raw_dimension_signature": [*SEGMENT_DIMS, _dimension("raw-product-axis", "other")]},
+        {**prior, "unit_numerator_measures": '["iso4217:EUR"]'},
+        {**prior, "context_end_date": "2025-07-02"},
+        {**prior, "comparative_type": "CURRENT_FOCUS"},
+    ):
+        assert _ratios(current, invalid)[0]["yoy"] is None
+    assert _ratios(current, prior, {**prior, "source_fact_id": "prior-conflict", "value_numeric": "51"})[0]["yoy"] is None
+    assert _ratios(current, prior, status="DERIVED")[0].get("ratios") is None
+    assert _ratios(current, prior, value="1")[0].get("ratios") is None
+    assert _ratios({**current, "value_numeric": "101"}, prior)[0]["share"] is None
+    assert _ratios({**current, "source_snapshot_id": "other"}, prior)[0]["share"] is None
+    assert _ratios({**current, "raw_concept_qname": "us-gaap:Revenues"}, prior)[0]["share"] is None
+    assert _ratios({**current, "raw_dimension_signature": [_dimension("segment", "other"), PRODUCT_DIMS[1]]},
+                   prior)[0]["share"] is None
+
+
+def test_ratio_duration_allows_fiscal_week_and_leap_shifts_but_rejects_noncomparable_dates():
+    assert _same_fiscal_duration("2024-02-04", "2025-02-09", "2023-02-05", "2024-02-04") == (371, 364)
+    assert _same_fiscal_duration("2024-01-01", "2025-01-01", "2023-01-01", "2024-01-01") == (366, 365)
+    assert _same_fiscal_duration("2026-04-01", "2026-07-01", "2025-04-01", "2025-07-09") is None

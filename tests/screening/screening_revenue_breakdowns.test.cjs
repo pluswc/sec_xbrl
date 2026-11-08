@@ -102,7 +102,10 @@ test("table places exact parent amounts above grouped details and retains totals
   const totals=[amount("119796000000"),amount("121000000000","DERIVED")];
   const segments=[{member:scope,cells:[amount("94540000000"),gap]},
     {member:"other:ServicesMember",cells:[amount("999000000"),gap]}];
-  const products=[{label:"Search",scope,cells:[amount("63271000000"),gap]},
+  const search={...amount("63271000000"),share:"66.92511",yoy:"16.7577",ratios:{
+    share:{denominator:"SEGMENT_SUBTOTAL"},yoy:{prior_period_start:"2025-04-01",prior_period_end:"2025-07-01"}
+  }};
+  const products=[{label:"Search",scope,cells:[search,gap]},
     {label:"Company product",scope:null,cells:[amount("2000000"),gap]}];
   const view={periods,totals,groups:{segments,products}};
   app.revenueBreakdowns.data={cik,quarterly:view};
@@ -115,7 +118,9 @@ test("table places exact parent amounts above grouped details and retains totals
   };
   const grouped=render();
   assert.match(grouped,/연결 매출[\s\S]*119,796\.0[\s\S]*scope="rowgroup">부문 소계[\s\S]*94,540\.0[\s\S]*Search/);
-  assert.equal((grouped.match(/부문 소계/g)||[]).length,1);
+  assert.equal((grouped.match(/scope="rowgroup">부문 소계/g)||[]).length,1);
+  assert.match(grouped,/66\.93[\s\S]*title="비중의 분모">부문 소계/);
+  assert.match(grouped,/16\.76[\s\S]*2025-04-01 ~ 2025-06-30/);
   assert.match(grouped,/2026-07-30/);
   assert.doesNotMatch(grouped,/999\.0/);
   segments.push({member:scope,cells:[amount("1000000"),gap]});
