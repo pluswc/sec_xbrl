@@ -3,6 +3,7 @@ from __future__ import annotations
 from examples.screening.prepare_revenue_breakdowns import (
     SEGMENT_AXIS,
     _add_revenue_ratios,
+    _product_hierarchy,
     _same_fiscal_duration,
     project_breakdowns,
 )
@@ -240,3 +241,144 @@ def test_ratio_duration_allows_fiscal_week_and_leap_shifts_but_rejects_noncompar
     assert _same_fiscal_duration("2024-02-04", "2025-02-09", "2023-02-05", "2024-02-04") == (371, 364)
     assert _same_fiscal_duration("2024-01-01", "2025-01-01", "2023-01-01", "2024-01-01") == (366, 365)
     assert _same_fiscal_duration("2026-04-01", "2026-07-01", "2025-04-01", "2025-07-09") is None
+
+
+def _role(name, members, *, scoped=False):
+    table, line = f"{name}-table", f"{name}-line"
+    relationships = []
+
+    def edge(network, source, target, arcrole, order=1):
+        qname = {"raw-product-axis": PRODUCT, "raw-segment-axis": SEGMENT_AXIS,
+                 "raw-services": "issuer:ServicesMember", "raw-revenue": CONCEPT}
+        kind = "presentation" if network == "PRE" else "definition"
+        relationships.append({
+            "source_snapshot_id": "snapshot", "source_filing_id": "filing", "accession": ACCESSION,
+            "filed_date": "2026-07-25", "role_id": name, "role_uri": f"urn:{name}", "role_definition": name,
+            "network_type": network, "from_raw_concept_id": source, "to_raw_concept_id": target,
+            "to_raw_concept_qname": qname.get(target, target), "to_namespace_uri": "http://fasb.org/us-gaap/2026",
+            "arcrole": arcrole, "order": str(order), "target_role_uri": None, "usable": True,
+            "link_qname": f"link:{kind}Link", "arc_qname": f"link:{kind}Arc",
+            "relationship_id": f"{name}-{network}-{source}-{target}",
+        })
+
+    def pre(source, target, order=1):
+        edge("PRE", source, target, "http://www.xbrl.org/2003/arcrole/parent-child", order)
+
+    def dimensions(axis, domain, values):
+        def definition(source, target, name):
+            edge("DEF", source, target, f"http://xbrl.org/int/dim/arcrole/{name}")
+
+        pre(table, axis)
+        definition(table, axis, "hypercube-dimension")
+        pre(axis, domain)
+        definition(axis, domain, "dimension-domain")
+        for order, member in enumerate(values, 1):
+            pre(domain, member, order)
+            definition(domain, member, "domain-member")
+
+    pre(table, line)
+    pre(line, "raw-revenue")
+    dimensions("raw-product-axis", "product-domain", members)
+    if scoped:
+        dimensions("raw-segment-axis", "segment-domain", ["raw-services"])
+    return relationships
+
+
+def _hierarchy(amounts, roles, *, total="100", scoped=False, edit=None):
+    observations = []
+
+    def cell(name, value, dimensions):
+        row = _reported(name, value, dimensions)
+        observations.append(row)
+        return {"cell_id": name, "value": value, "status": "REPORTED", "reason": None,
+                "sources": [{"fact_id": name, "snapshot_id": "snapshot", "filed_date": row["filed_date"],
+                             "accession": ACCESSION, "qname": CONCEPT}]}
+
+    scope = "issuer:ServicesMember" if scoped else None
+    parent_dimensions = SEGMENT_DIMS if scoped else []
+    parent = cell("total", total, parent_dimensions)
+    products = [
+        {"id": name, "scope": scope, "member": name,
+         "axis_members": {PRODUCT: name, **({SEGMENT_AXIS: scope} if scoped else {})},
+         "cells": [cell(name, value, [*parent_dimensions, _dimension("raw-product-axis", name)])]}
+        for name, value in amounts.items()
+    ]
+    segments = [{"member": scope, "cells": [parent]}] if scoped else []
+    result = {"periods": [CURRENT_PERIOD], "totals": [parent], "groups": {"segments": segments, "products": products}}
+    if edit:
+        edit(result, observations)
+    return _product_hierarchy(result, observations, lambda accession: tuple(roles) if accession == ACCESSION else ())[0]
+
+
+def _display_rows(*rows):
+    return [{"id": item, "children": []} if isinstance(item, str)
+            else {"id": item[0], "children": _display_rows(*item[1])} for item in rows]
+
+
+def test_two_complete_roles_with_shared_member_refine_one_reported_product():
+    groups = _hierarchy({"product": "70", "service": "30", "phone": "50", "tablet": "20"},
+                        [*_role("statement", ["product", "service"]), *_role("detail", ["tablet", "phone", "service"])])
+    layout, = groups
+    assert layout["mode"] == "RECONCILED"
+    assert layout["groups"] == [{"rows": _display_rows(("product", ["tablet", "phone"]), "service")}]
+    assert {row["role_uri"] for row in layout["evidence"]} == {"urn:statement", "urn:detail"}
+    assert layout["parent_fact_id"] == "total"
+
+
+def test_disjoint_complete_roles_stay_separate_even_when_amounts_happen_to_match():
+    roles = [*_role("statement", ["product", "service"]), *_role("detail", ["store", "web"])]
+    layout, = _hierarchy({"product": "70", "service": "30", "store": "70", "web": "30"}, roles)
+    assert layout["mode"] == "DISCLOSURES"
+    assert layout["groups"] == [{"label": "detail", "rows": _display_rows("store", "web")},
+                                {"label": "statement", "rows": _display_rows("product", "service")}]
+
+
+def test_single_role_requires_ordered_contiguous_children_and_reconciled_segment():
+    values = {"search": "60", "video": "10", "network": "10", "advertising": "80", "subscriptions": "20"}
+    roles = _role("detail", list(values), scoped=True)
+    layout, = _hierarchy(values, roles, scoped=True)
+    assert layout["scope"] == "issuer:ServicesMember"
+    assert layout["groups"] == [{"rows": _display_rows(("advertising", ["search", "video", "network"]), "subscriptions")}]
+    assert not _hierarchy(values, _role("detail", ["search", "advertising", "video", "network", "subscriptions"],
+                                       scoped=True), scoped=True)
+    assert not _hierarchy(values, roles, scoped=True, total="101")
+
+
+def test_ambiguous_or_unbound_roles_do_not_imply_hierarchy():
+    values = {"product": "70", "service": "30", "phone": "50", "tablet": "20"}
+    coarse = _role("statement", ["product", "service"])
+    details = _role("detail", ["phone", "tablet", "service"])
+    assert not _hierarchy(values, [*coarse, *details, *_role("other", ["tablet", "phone", "service"])])
+    assert not _hierarchy(values, [*coarse, *[edge for edge in details if edge["network_type"] != "DEF"]])
+    assert not _hierarchy(values, [*coarse, *[{**edge, "source_snapshot_id": "another"} for edge in details]])
+    assert not _hierarchy(values, [*coarse, *details],
+                          edit=lambda result, _: result["totals"][0].update(status="DERIVED"))
+    assert not _hierarchy(values, [*coarse, *details],
+                          edit=lambda _, facts: facts[-1].update(context_end_date="2026-07-02"))
+
+
+
+def test_applicable_def_exclusion_prevents_hierarchy_even_with_positive_role_evidence():
+    values = {"product": "70", "service": "30", "phone": "50", "tablet": "20"}
+    coarse = _role("statement", ["product", "service"])
+    details = _role("detail", ["phone", "tablet", "service"])
+    def_edge = next(edge for edge in details if edge["network_type"] == "DEF")
+
+    def edge(arc, source, target, **overrides):
+        return {**def_edge, "arcrole": f"http://xbrl.org/int/dim/arcrole/{arc}",
+                "from_raw_concept_id": source, "to_raw_concept_id": target,
+                "context_element": "segment", **overrides}
+
+    positive = edge("all", "detail-line", "detail-table")
+    base = [*coarse, *details, positive]
+    assert _hierarchy(values, base)[0]["mode"] == "RECONCILED"
+    assert not _hierarchy(values, [*base, edge("notAll", "raw-revenue", "detail-table")])
+    assert not _hierarchy(values, [*base, edge("notAll", "detail-line", "detail-table", context_element="scenario")])
+    inherited = edge("domain-member", "primary-ancestor", "raw-revenue")
+    assert not _hierarchy(values, [*base, inherited, edge("notAll", "primary-ancestor", "detail-table")])
+    assert not _hierarchy(values, [*base, {**inherited, "role_id": "other", "role_uri": "urn:other",
+                                         "target_role_uri": "urn:detail"}])
+    assert not _hierarchy(values, [*base, edge("notAll", "raw-revenue", "detail-table",
+                                             role_id="other", role_uri="urn:other", target_role_uri="urn:detail")])
+    assert _hierarchy(values, [*base, edge("notAll", "raw-revenue", "other-table")])
+    assert _hierarchy(values, [*base, edge("notAll", "unrelated-primary", "detail-table")])

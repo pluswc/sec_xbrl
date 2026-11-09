@@ -117,8 +117,8 @@ test("table places exact parent amounts above grouped details and retains totals
     return get("#revenue-breakdown-table").innerHTML;
   };
   const grouped=render();
-  assert.match(grouped,/연결 매출[\s\S]*119,796\.0[\s\S]*scope="rowgroup">부문 소계[\s\S]*94,540\.0[\s\S]*Search/);
-  assert.equal((grouped.match(/scope="rowgroup">부문 소계/g)||[]).length,1);
+  assert.match(grouped,/연결 매출[\s\S]*119,796\.0[\s\S]*scope="rowgroup" id="revenue-scope-heading-0">부문 소계[\s\S]*94,540\.0[\s\S]*Search/);
+  assert.equal((grouped.match(/scope="rowgroup" id="revenue-scope-heading-0">부문 소계/g)||[]).length,1);
   assert.match(grouped,/66\.93[\s\S]*title="비중의 분모">부문 소계/);
   assert.match(grouped,/16\.76[\s\S]*2025-04-01 ~ 2025-06-30/);
   assert.match(grouped,/2026-07-30/);
@@ -129,4 +129,58 @@ test("table places exact parent amounts above grouped details and retains totals
   assert.match(render(),/연결 매출[\s\S]*121,000\.0[\s\S]*계산값[\s\S]*이 회계기간의 매출 구성 자료가 준비되지 않았습니다/);
   delete view.totals;
   assert.match(render(),/연결 매출[\s\S]*이 기간에 확인된 연결 매출이 없습니다/);
+});
+
+test("prepared role hierarchy indents reported members and leaves ambiguous rows visible",()=>{
+  const {get,app}=profileHarness();
+  const value=(amount,share)=>({value:amount,status:"REPORTED",share,ratios:{share:{denominator:"SEGMENT_SUBTOTAL"}}});
+  const node=(id,children=[])=>({id,children});
+  const scope="issuer:ServicesMember";
+  const products=[
+    {id:"ad",scope,label:"Services / Advertising",cells:[value("80000000","80")]},
+    {id:"search",scope,label:"Services / Search",cells:[value("60000000","60")]},
+    {id:"video",scope,label:"Services / Video",cells:[value("20000000","20")]},
+    {id:"subs",scope,label:"Subscriptions",cells:[value("20000000","20")]},
+  ];
+  const view={
+    periods:[{fiscal_year:2026,fiscal_quarter:2}],
+    totals:[value("200000000")],
+    groups:{products,segments:[{member:scope,label:"Services",cells:[value("100000000")]}]},
+    product_hierarchy:[[{scope,mode:"RECONCILED",groups:[
+      {rows:[node("ad",[node("search"),node("video")]),node("subs")]}
+    ]}]],
+  };
+  app.revenueBreakdowns.data={cik,quarterly:view};
+  get("#revenue-breakdown-frequency").value="quarterly";
+  get("#revenue-breakdown-kind").value="products";
+  get("#revenue-breakdown-period").value="0";
+  const render=()=>{
+    app.renderRevenueBreakdownTable();
+    return get("#revenue-breakdown-table").innerHTML;
+  };
+  const tree=render();
+  assert.match(tree,/<tbody data-revenue-layout="RECONCILED"><tr class="revenue-subtotal" data-revenue-depth="0"><th scope="rowgroup" id="revenue-scope-heading-0">부문 소계/);
+  assert.match(tree,/data-revenue-depth="1"[^>]+data-revenue-subtotal><th scope="row">Advertising<small>공시 소계/);
+  assert.match(tree,/data-revenue-depth="2"><th scope="row">Search[\s\S]*60\.00[\s\S]*title="비중의 분모">부문 소계/);
+  assert.doesNotMatch(tree,/Services \/ Search/);
+  assert.match(tree,/하위 항목의 합계가 소계와 일치/);
+  const layout=view.product_hierarchy[0][0];
+  layout.groups[0].rows[0].children.push(node("search"));
+  const ambiguous=render();
+  assert.match(ambiguous,/합산 범위 미확인/);
+  assert.doesNotMatch(ambiguous,/data-revenue-depth="2"/);
+  assert.equal((ambiguous.match(/>Search</g)||[]).length,1);
+
+  layout.mode="DISCLOSURES";
+  layout.groups=[{label:"1000 - Statement - Consolidated Operations",rows:[node("ad"),node("subs")]},
+    {label:"2000 - Disclosure - Revenue Detail",rows:[node("search"),node("video")]}];
+  const alternatives=render();
+  assert.equal((alternatives.match(/data-revenue-disclosure/g)||[]).length,2);
+  assert.match(alternatives,/공시 분류 · Consolidated Operations/);
+  assert.match(alternatives,/공시 분류 · Revenue Detail/);
+  assert.equal((alternatives.match(/aria-describedby="revenue-scope-heading-0"/g)||[]).length,4);
+  assert.doesNotMatch(alternatives,/1000 - Statement|data-revenue-depth="2"/);
+
+  get("#revenue-breakdown-kind").value="segments";
+  assert.match(render(),/부문 간 거래 제거/);
 });

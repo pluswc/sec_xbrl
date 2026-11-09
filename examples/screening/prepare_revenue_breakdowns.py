@@ -6,9 +6,10 @@ import hashlib
 import json
 import re
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import date, timedelta
 from decimal import Decimal
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -19,8 +20,13 @@ from sec_xbrl.analytics.quarterly_derived_metrics import percentage_result
 from sec_xbrl.analytics.statement_structure import finite_decimal
 from sec_xbrl.longitudinal.materialization import (
     LAYER2_CONTRACT_VERSION,
+    Layer2PublicationValidationError,
     _run_from_manifest,
     _validate_operational_manifest_shape,
+)
+from sec_xbrl.longitudinal.relationship_index import (
+    FilingRelationshipIndexError,
+    FilingRelationshipIndexReader,
 )
 from sec_xbrl.screening.common import (
     real_directory,
@@ -41,6 +47,7 @@ REVENUE_QNAMES = {
 VIEW = "LATEST_REPORTED"
 RATIO_RULE_VERSION = "same-filing-revenue-ratios-v1"
 OBSERVATIONS = "reported_period_observation"
+PRODUCT_HIERARCHY_VERSION = "disclosed-revenue-role-presentation-v1"
 
 
 def _pinned_json(path: Path, digest: str) -> dict[str, Any]:
@@ -98,10 +105,11 @@ def prepare_revenue_breakdowns(
         ticker = annual_config["ticker"]
         if ticker != quarter_config["ticker"]:
             raise ValueError("revenue breakdown company identity differs")
+        relationship_cache = {}
         company = {
             "ticker": ticker,
-            "annual": _prepare_company(annual_config, cutoff, "FY", 4),
-            "quarterly": _prepare_company(quarter_config, cutoff, "QTD_3M", 8),
+            "annual": _prepare_company(annual_config, cutoff, "FY", 4, relationship_cache),
+            "quarterly": _prepare_company(quarter_config, cutoff, "QTD_3M", 8, relationship_cache),
         }
         if len(_json(company)) > MAX_COMPANY_BYTES:
             raise ValueError("revenue breakdown company exceeds response limit")
@@ -123,7 +131,9 @@ def _json(payload: dict) -> bytes:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
 
-def _prepare_company(declaration: dict, cutoff: str, period_class: str, limit: int) -> dict:
+def _prepare_company(
+    declaration: dict, cutoff: str, period_class: str, limit: int, relationship_cache: dict,
+) -> dict:
     root = real_directory(Path(declaration["analysis_root"]), "revenue breakdown analysis")
     digest = declaration["analysis_manifest_sha256"]
     manifest = _pinned_json(root / "analysis_manifest.json", digest)
@@ -131,9 +141,12 @@ def _prepare_company(declaration: dict, cutoff: str, period_class: str, limit: i
     if client.manifest != manifest or (manifest.get("period_mode") == "ANNUAL") != (period_class == "FY"):
         raise ValueError("revenue breakdown analysis manifest scope differs")
     ticker, cik = declaration["ticker"], declaration["cik"]
-    observations, evidence = _ratio_observations(manifest, ticker, cik, cutoff, period_class)
+    observations, evidence, history = _ratio_observations(manifest, ticker, cik, cutoff, period_class)
     result = project_breakdowns(client, ticker, cik, cutoff, period_class, limit, ratio_observations=observations)
     result["ratio_evidence"] = evidence
+    relationships = _relationship_lookup(history, cik, relationship_cache)
+    result["product_hierarchy_version"] = PRODUCT_HIERARCHY_VERSION
+    result["product_hierarchy"] = _product_hierarchy(result, observations, relationships)
     return result | {"analysis_publication_id": manifest["publication_id"], "analysis_manifest_sha256": digest}
 
 
@@ -192,7 +205,9 @@ def project_breakdowns(
     return {"periods": periods, "totals": totals, "groups": groups, "ratio_rule_version": RATIO_RULE_VERSION}
 
 
-def _ratio_observations(manifest: dict, ticker: str, cik: str, cutoff: str, period_class: str) -> tuple[list[dict], dict]:
+def _ratio_observations(
+    manifest: dict, ticker: str, cik: str, cutoff: str, period_class: str,
+) -> tuple[list[dict], dict, dict]:
     company = manifest["companies"][ticker]
     pins = company.get("source_manifest_hashes") or manifest["source_manifest_hashes"]
     history_pin = pins["history_manifest_sha256"]
@@ -229,7 +244,32 @@ def _ratio_observations(manifest: dict, ticker: str, cik: str, cutoff: str, peri
         "history_manifest_sha256": history_pin,
         "reported_panel_manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
         "reported_observations_sha256": hashlib.sha256(data).hexdigest(),
-    }
+    }, history
+
+
+def _relationship_lookup(history: dict, cik: str, cache: dict) -> Callable[[str], tuple[dict, ...]]:
+    declaration = history["operational_roots"].get("t2")
+    if not declaration:
+        return lambda _: ()
+    try:
+        root = real_directory(Path(declaration), "revenue presentation relationship index")
+        manifest = json.loads(regular_file(root / "layer2_run_manifest.json", "relationship manifest").read_bytes())
+        if manifest.get("run_fingerprint") != history["input_fingerprint"]:
+            return lambda _: ()
+    except (ValueError, OSError):
+        return lambda _: ()
+
+    def lookup(accession: str) -> tuple[dict, ...]:
+        key = (root, accession)
+        if key not in cache:
+            try:
+                edges = FilingRelationshipIndexReader().query_parquet(root, cik=cik, accession=accession)
+                cache[key] = tuple(edge for edge in edges if edge["network_type"] in {"PRE", "DEF"})
+            except (FilingRelationshipIndexError, Layer2PublicationValidationError, ValueError, OSError):
+                cache[key] = ()
+        return cache[key]
+
+    return lookup
 
 
 def _ratio_scope(row: dict) -> tuple | None:
@@ -277,9 +317,7 @@ def _same_fiscal_duration(start: str, end: str, prior_start: str, prior_end: str
     return days, earlier_days
 
 
-def _add_revenue_ratios(
-    totals: list[dict], groups: dict, periods: list[dict], comparison_periods: list[dict], observations: Iterable[dict],
-) -> None:
+def _observation_indexes(observations: Iterable[dict]) -> tuple[dict, dict]:
     by_fact = defaultdict(list)
     by_scope = defaultdict(list)
     for row in observations:
@@ -288,7 +326,13 @@ def _add_revenue_ratios(
             continue
         by_fact[(row["source_snapshot_id"], row["source_fact_id"])].append((scope, row))
         by_scope[(scope, row["context_start_date"], row["context_end_date"], row["comparative_type"])].append(row)
+    return by_fact, by_scope
 
+
+def _add_revenue_ratios(
+    totals: list[dict], groups: dict, periods: list[dict], comparison_periods: list[dict], observations: Iterable[dict],
+) -> None:
+    by_fact, by_scope = _observation_indexes(observations)
     prior_periods = {_coordinate(period): period for period in comparison_periods}
     for index, period in enumerate(periods):
         start, end = period["period_start"], period["period_end"]
@@ -367,6 +411,275 @@ def _bind_ratio_cell(
     if amounts is None or amounts[0] != finite_decimal(cell["value"]):
         return None
     return scope, amounts[0]
+
+
+def _product_hierarchy(
+    result: dict, observations: Iterable[dict], relationships: Callable[[str], tuple[dict, ...]],
+) -> list[list[dict]]:
+    by_fact, by_scope = _observation_indexes(observations)
+    periods = []
+    for index, period in enumerate(result["periods"]):
+        layouts = []
+        periods.append(layouts)
+        start, end = period["period_start"], period["period_end"]
+        if not start or not end:
+            continue
+        days = (date.fromisoformat(end) - date.fromisoformat(start)).days
+        by_segment = defaultdict(list)
+        for row in result["groups"]["products"]:
+            cell = row["cells"][index]
+            if cell["value"] is not None or cell["reason"] == "COMPETING_PREPARED_SCOPE":
+                by_segment[row["scope"]].append((row, cell))
+        for segment, entries in by_segment.items():
+            parents = [row["cells"][index] for row in result["groups"]["segments"] if row["member"] == segment
+                       and (row["cells"][index]["value"] is not None
+                            or row["cells"][index]["reason"] == "COMPETING_PREPARED_SCOPE")] if segment else [result["totals"][index]]
+            if len(parents) != 1:
+                continue
+            parent, = parents
+            bound = _bind_ratio_cell(parent, by_fact, by_scope, start, end, days, int(segment is not None))
+            if bound is None or bound[1] <= 0:
+                continue
+            identity, parent_value = bound
+            members = {}
+            for row, cell in entries:
+                current = _bind_ratio_cell(cell, by_fact, by_scope, start, end, days, len(row["axis_members"]))
+                if current is None or current[0][:-1] != identity[:-1] or current[1] <= 0:
+                    break
+                extra = set(current[0][-1]) - set(identity[-1])
+                if len(extra) != 1 or not set(identity[-1]) < set(current[0][-1]):
+                    break
+                axis, member, *_ = next(iter(extra))
+                if member in members:
+                    break
+                product_axis, = set(row["axis_members"]) & PRODUCT_AXES
+                members[member] = (axis, product_axis, row["member"], row["id"], Fraction(current[1]))
+            else:
+                axes = {(member[0], member[1]) for member in members.values()}
+                if len(members) < 2 or len(axes) != 1:
+                    continue
+                axis, axis_qname = axes.pop()
+                edges = relationships(identity[2])
+                roles = _product_role_partitions(edges, identity, axis, axis_qname, segment, members)
+                layout = _reconcile_product_roles(roles, members, Fraction(parent_value))
+                if layout is not None:
+                    layouts.append({
+                        "scope": segment, "parent_fact_id": parent["sources"][0]["fact_id"],
+                        "accession": identity[2], **layout,
+                    })
+    return periods
+
+
+def _product_role_partitions(
+    edges: Iterable[dict], identity: tuple, axis: str, axis_qname: str, segment: str | None, members: dict,
+) -> list[dict]:
+    by_role = defaultdict(list)
+    redirected_members = set()
+    redirected_cubes = set()
+    for edge in edges:
+        if (
+            (edge["source_snapshot_id"], edge["source_filing_id"], edge["accession"], edge["filed_date"])
+            != identity[:4]
+        ):
+            continue
+        by_role[(edge["role_id"], edge["role_uri"])].append(edge)
+        arc = _dimensional_arc(edge)
+        if target_role := edge["target_role_uri"]:
+            target = (target_role, edge["to_raw_concept_id"])
+            if arc == "domain-member":
+                redirected_members.update((target, (edge["role_uri"], edge["to_raw_concept_id"])))
+            elif arc in {"all", "notAll"}:
+                redirected_cubes.add(target)
+
+    partitions = []
+    for (role_id, uri), role_edges in by_role.items():
+        if not role_id or not uri:
+            continue
+        pre = defaultdict(list)
+        definitions = defaultdict(list)
+        for edge in role_edges:
+            source, target = edge["from_raw_concept_id"], edge["to_raw_concept_id"]
+            if (
+                edge["network_type"] == "PRE" and edge["arcrole"] == "http://www.xbrl.org/2003/arcrole/parent-child"
+                and (edge["link_qname"], edge["arc_qname"]) == ("link:presentationLink", "link:presentationArc")
+            ):
+                pre[source].append(edge)
+            elif arc := _dimensional_arc(edge):
+                definitions[(source, target, arc)].append(edge)
+        shapes = []
+        for table, children in pre.items():
+            table_axes = [edge for edge in children if edge["to_raw_concept_id"] == axis
+                          and edge["to_raw_concept_qname"] == axis_qname]
+            concepts = [(child, leaf) for child in children for leaf in pre.get(child["to_raw_concept_id"], ())
+                        if leaf["to_raw_concept_id"] == identity[4]
+                        and (leaf["to_raw_concept_qname"], leaf["to_namespace_uri"]) == identity[5:7]]
+            if not table_axes or not concepts:
+                continue
+            if len(table_axes) != 1 or len(concepts) != 1:
+                return []
+            for domain_edge in pre.get(axis, ()):
+                domain = domain_edge["to_raw_concept_id"]
+                leaves = pre.get(domain, ())
+                if not any(edge["to_raw_concept_id"] in members for edge in leaves):
+                    continue
+                member_ids = [edge["to_raw_concept_id"] for edge in leaves]
+                orders = [finite_decimal(edge["order"]) for edge in leaves]
+                if (
+                    len(member_ids) != len(set(member_ids)) or None in orders or len(set(orders)) != len(orders)
+                    or any(member not in members or edge["to_raw_concept_qname"] != members[member][2]
+                           or pre.get(member) for edge, member in zip(leaves, member_ids, strict=True))
+                ):
+                    return []
+                pre_proof = [*table_axes, *concepts[0], domain_edge, *leaves]
+                def_proof = _definition_arcs(definitions, [
+                    (table, axis, "hypercube-dimension"), (axis, domain, "dimension-domain"),
+                    *((domain, member, "domain-member") for member in member_ids),
+                ])
+                if def_proof is None or not _hypercube_is_uncontested(
+                    pre, definitions, uri, table, identity[4], redirected_members, redirected_cubes,
+                ):
+                    return []
+                if segment:
+                    (segment_axis, segment_member, *_), = identity[-1]
+                    fixed_scope = _fixed_role_scope(pre, definitions, table, segment_axis, segment_member, segment)
+                    if fixed_scope is None:
+                        return []
+                    pre_proof += fixed_scope[0]
+                    def_proof += fixed_scope[1]
+                if any(edge["target_role_uri"] or edge["usable"] is False for edge in pre_proof):
+                    return []
+                ordered = [member for _, member in sorted(zip(orders, member_ids, strict=True))]
+                shapes.append({
+                    "label": table_axes[0]["role_definition"], "role_uri": uri, "members": ordered,
+                    "relationship_ids": [edge["relationship_id"] for edge in (*pre_proof, *def_proof)],
+                })
+        if len(shapes) > 1:
+            return []
+        partitions.extend(shapes)
+    return sorted(partitions, key=lambda role: (role["label"] or "", role["role_uri"]))
+
+
+def _dimensional_arc(edge: dict) -> str | None:
+    if (
+        edge["network_type"] == "DEF" and edge["arcrole"].startswith("http://xbrl.org/int/dim/arcrole/")
+        and (edge["link_qname"], edge["arc_qname"]) == ("link:definitionLink", "link:definitionArc")
+    ):
+        return edge["arcrole"].rsplit("/", 1)[-1]
+    return None
+
+
+def _hypercube_is_uncontested(
+    pre: dict, definitions: dict, uri: str, table: str, concept: str,
+    redirected_members: set[tuple[str, str]], redirected_cubes: set[tuple[str, str]],
+) -> bool:
+    # PRE is only used to widen the exclusion check. It cannot prove a
+    # positive dimensional relationship or bridge role boundaries.
+    parents = defaultdict(list)
+    for source, children in pre.items():
+        for edge in children:
+            parents[edge["to_raw_concept_id"]].append(source)
+    for source, target, arc in definitions:
+        if arc == "domain-member":
+            parents[target].append(source)
+    ancestors = {concept}
+    pending = [concept]
+    while pending:
+        for parent in parents[pending.pop()]:
+            if parent not in ancestors:
+                ancestors.add(parent)
+                pending.append(parent)
+
+    if (uri, table) in redirected_cubes or any((uri, node) in redirected_members for node in ancestors):
+        return False
+    contexts = set()
+    for node in ancestors:
+        if definitions.get((node, table, "notAll")):
+            return False
+        for edge in definitions.get((node, table, "all"), ()):
+            if edge["target_role_uri"] or edge["context_element"] not in {"segment", "scenario"}:
+                return False
+            contexts.add(edge["context_element"])
+    return len(contexts) <= 1
+
+
+def _definition_arcs(definitions: dict, keys: list[tuple]) -> list[dict] | None:
+    found = []
+    for key in keys:
+        edges = definitions[key]
+        if len(edges) != 1 or edges[0]["target_role_uri"] or edges[0]["usable"] is False:
+            return None
+        found.extend(edges)
+    return found
+
+
+def _fixed_role_scope(
+    pre: dict, definitions: dict, table: str, axis: str, member: str, member_qname: str,
+) -> tuple[list[dict], list[dict]] | None:
+    paths = [
+        (axis_edge, domain_edge, member_edge)
+        for axis_edge in pre[table] if axis_edge["to_raw_concept_id"] == axis
+        and axis_edge["to_raw_concept_qname"] == SEGMENT_AXIS
+        for domain_edge in pre.get(axis, ())
+        for member_edge in pre.get(domain_edge["to_raw_concept_id"], ())
+        if member_edge["to_raw_concept_id"] == member and member_edge["to_raw_concept_qname"] == member_qname
+    ]
+    if len(paths) != 1:
+        return None
+    _, domain_edge, _ = paths[0]
+    domain = domain_edge["to_raw_concept_id"]
+    proof = _definition_arcs(definitions, [
+        (table, axis, "hypercube-dimension"), (axis, domain, "dimension-domain"), (domain, member, "domain-member"),
+    ])
+    return (list(paths[0]), proof) if proof is not None else None
+
+
+def _reconcile_product_roles(roles: list[dict], members: dict, parent: Fraction) -> dict | None:
+    sets = [set(role["members"]) for role in roles]
+    if not sets or set.union(*sets) != set(members):
+        return None
+    amounts = {member: data[-1] for member, data in members.items()}
+
+    def rows(order: Iterable[str], nested: dict | None = None) -> list[dict]:
+        return [{"id": members[member][3], "children": rows(nested[member]) if nested and member in nested else []}
+                for member in order]
+
+    evidence = [{key: value for key, value in role.items() if key != "members"} for role in roles]
+    complete = all(sum(amounts[member] for member in group) == parent for group in sets)
+    if len(sets) > 1 and complete and sum(map(len, sets)) == len(members):
+        return {"mode": "DISCLOSURES", "evidence": evidence,
+                "groups": [{"label": role["label"], "rows": rows(role["members"])} for role in roles]}
+    if len(sets) == 2 and complete:
+        shared = sets[0] & sets[1]
+        coarse, detailed = sorted(range(2), key=lambda index: len(sets[index]))
+        roots = sets[coarse] - shared
+        details = [member for member in roles[detailed]["members"] if member not in shared]
+        if len(roots) == 1 and len(details) >= 2:
+            root, = roots
+            if amounts[root] == sum(amounts[member] for member in details):
+                return {"mode": "RECONCILED", "evidence": evidence,
+                        "groups": [{"rows": rows(roles[coarse]["members"], {root: details})}]}
+    if len(sets) != 1:
+        return None
+    order = roles[0]["members"]
+    total = sum(amounts.values())
+    if total == parent:
+        return {"mode": "VERIFIED", "evidence": evidence, "groups": [{"rows": rows(order)}]}
+    matches = []
+    for index, member in enumerate(order):
+        if total - amounts[member] != parent:
+            continue
+        amount = Fraction(0)
+        for first in range(index - 1, -1, -1):
+            amount += amounts[order[first]]
+            if amount == amounts[member] and index - first >= 2:
+                matches.append((member, order[first:index]))
+            if amount >= amounts[member]:
+                break
+    if len(matches) != 1:
+        return None
+    member, details = matches[0]
+    return {"mode": "RECONCILED", "evidence": evidence,
+            "groups": [{"rows": rows([item for item in order if item not in details], {member: details})}]}
 
 
 def _consolidated_totals(
