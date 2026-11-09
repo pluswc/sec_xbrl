@@ -114,6 +114,58 @@ test("leaving explorer closes the inline profile and drops its pending revenue r
   assert.equal(h.get("#revenue-breakdown-status").textContent,"");
 });
 
+test("financial profile board requests only selected definitions, reuses ordering and discards a closed reply",async()=>{
+  const pending=new Map();
+  const h=harness(url=>{
+    const id=new URLSearchParams(url.split("?")[1]).get("metric_id");
+    const request=deferred();pending.set(id,request);return request.promise;
+  });
+  prepared(h);
+  h.state.profileBasis="QUARTERLY";
+  h.S.defaultDataset.publication_id="P";
+  const asOf="2026-10-25",company={cik:"1"},quarter=inventory.spine[0];
+  h.S.profile={company,financial_as_of:asOf};
+  const defs=[
+    {metric_id:"quarter_revenue",unit_kind:"MONEY",unit:"USD"},
+    {metric_id:"quarter_revenue_yoy",unit_kind:"PERCENT",unit:"PERCENT"},
+    {metric_id:"quarter_cfo",unit_kind:"MONEY",unit:"USD"},
+    {metric_id:"quarter_cfo_yoy",unit_kind:"PERCENT",unit:"PERCENT"},
+  ].map(definition=>({...definition,observation_basis:"QTD_3M",definition_version:"v1"}));
+  h.context.boardFixture={defs,company,asOf,quarter};
+  const {model,update,change,points,growth}=vm.runInContext(`(()=>{
+    renderFinancialProfileBoard=()=>{};
+    const {defs,company,asOf,quarter}=boardFixture;
+    const definitions=new Map(defs.map(definition=>[definition.metric_id,definition]));
+    const selection=createProfileBoard(["quarter_revenue","quarter_cfo"]);
+    const context={basis:"QUARTERLY",end:"2026Q2",dataset:"current50",publication:"P",financialAsOf:asOf,
+      companies:[company],spine:[quarter]};
+    const model={profile:S.profile,definitions,selection,context,slots:companyTrendSlots(context,[]),series:new Map(),key:explorerContextKey()};
+    financialProfileBoard=model;
+    return {model,update:updateFinancialProfileBoard,change:changeProfileBoard,points:financialProfilePoints,growth:financialProfileGrowth};
+  })()`,h.context);
+  assert.equal(growth("quarter_cfo",model.definitions),null);
+  assert.equal(growth("quarter_revenue",model.definitions).metric_id,"quarter_revenue_yoy");
+  update(model);
+  assert.deepEqual([...pending.keys()],["quarter_revenue","quarter_revenue_yoy","quarter_cfo"]);
+  change(model.selection,"quarter_cfo","up");update(model);
+  assert.equal(h.calls.length,3);
+  const resolve=id=>{
+    const definition=model.definitions.get(id);
+    pending.get(id).resolve({metric:definition,observations:[{
+      ...observation("0"),metric_id:id,cik:"1",unit:definition.unit,selection_as_of_date:asOf,
+      period_class:"QTD_3M",end_convention:"EXCLUSIVE",definition_version:"v1",
+    }]});
+  };
+  resolve("quarter_revenue");resolve("quarter_revenue_yoy");
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(points(model,defs[0])[0].value,"0");
+  assert.equal(points(model,defs[1])[0].value,"0");
+  h.closeProfile();resolve("quarter_cfo");
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(model.series.get("quarter_cfo").loading,true);
+  assert.equal(h.calls.length,3);
+});
+
 test("comparison validates each metric through existing endpoint and prints actual/fiscal scopes",async()=>{
   const h=harness(url=>{const metric_id=new URLSearchParams(url.split("?")[1]).get("metric_id");return{calendar_year:2026,calendar_quarter:2,metric_id,rows:[{company:{cik:"1",name:"Alpha",ticker:"A"},observation:observation("109417000000")},{company:{cik:"2",name:"Beta",ticker:"B"},observation:observation(null,{availability_status:"UNAVAILABLE"})}]}});
   prepared(h);h.state.metrics=definitions.slice(0,32);h.S.explorerSelected=new Set(["1","2"]);await h.renderComparison();
