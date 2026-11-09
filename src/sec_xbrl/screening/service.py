@@ -33,7 +33,15 @@ from sec_xbrl.screening.explorer import (
     latest_period_observation,
     public_copy,
 )
+from sec_xbrl.screening.runtime_projection import (
+    ScreeningRuntimeProjection,
+    compact_observation,
+    hydrate_observation,
+    observation_rows,
+)
 from sec_xbrl.screening.store import ScreeningStore
+
+ScreeningReader = ScreeningDatasetReader | ScreeningDatasetV2Reader | ScreeningDatasetV3Reader | ScreeningRuntimeProjection
 
 ENGINE_VERSION = "screening-executor-v1"
 EXPORT_VERSION = "screen-run-export-v1"
@@ -56,19 +64,38 @@ VISIBLE_COLUMNS = {
 
 
 def _preview_response(
-    content: dict[str, Any], dataset_id: str, evaluated: dict[str, Any]
+    content: dict[str, Any], dataset_id: str, evaluated: dict[str, Any], *, include_evidence: bool = True,
 ) -> dict[str, Any]:
     frozen = json.loads(canonical_json(content))
+    transport = {} if include_evidence else {"include_evidence": False}
     result = json.loads(canonical_json(evaluated))
-    preview_hash = digest_value({"dataset_id": dataset_id, "content": frozen, "result": result})
+    preview_hash = digest_value({"dataset_id": dataset_id, "content": frozen, "result": result, **transport})
     return {
         **result,
+        **transport,
         "persistence_state": "PREVIEW",
         "content": frozen,
         "condition_hash": digest_value(frozen),
         "preview_hash": preview_hash,
     }
 
+
+
+def _compact_evaluation(evaluated: dict[str, Any]) -> dict[str, Any]:
+    rows = []
+    for row in evaluated["rows"]:
+        predicates = [
+            {**predicate, "observation": compact_observation(observation)} if
+            (observation := predicate["observation"]) is not None else predicate
+            for predicate in row["predicates"]
+        ]
+        rows.append({**row, "predicates": predicates})
+    return {**evaluated, "rows": rows}
+
+
+def _validate_evidence_option(include_evidence: bool) -> None:
+    if type(include_evidence) is not bool:
+        raise TypeError("include_evidence must be a boolean")
 
 
 _NY = ZoneInfo("America/New_York")
@@ -137,16 +164,23 @@ class ScreeningService:
         company_descriptions: CompanyDescriptionReader | None = None,
         source_compatibility: dict[str, str] | None = None,
         batch_evidence: dict[str, Any] | None = None,
+        runtime_projections: dict[str, dict[str, str]] | None = None,
     ) -> None:
         if not isinstance(datasets, dict) or not datasets:
             raise ValueError("at least one screening dataset is required")
         self.source_compatibility = source_compatibility
-        self.datasets: dict[str, ScreeningDatasetReader | ScreeningDatasetV2Reader] = {}
+        projections = {} if runtime_projections is None else runtime_projections
+        if not isinstance(projections, dict) or not set(projections) <= set(datasets):
+            raise ValueError("runtime projection is outside the screening catalog")
+        self.datasets: dict[str, ScreeningReader] = {}
         self.explorers: dict[str, ScreeningExplorer] = {}
         with self._compatibility_scope(), _share_v3_readers() as loaded:
             for dataset_id, root in datasets.items():
                 dataset_id = require_string(dataset_id, "dataset catalog ID")
-                reader = loaded.get(Path(root).absolute()) or open_screening_dataset(root)
+                if dataset_id in projections:
+                    reader = ScreeningRuntimeProjection(root, projections[dataset_id])
+                else:
+                    reader = loaded.get(Path(root).absolute()) or open_screening_dataset(root)
                 if reader.manifest["dataset_id"] != dataset_id:
                     raise ValueError("dataset catalog ID differs from publication")
                 self.datasets[dataset_id] = reader
@@ -321,12 +355,11 @@ class ScreeningService:
     def quarter_metric_catalog(self, dataset_id: str) -> list[dict[str, Any]]:
         reader = self._quarter_dataset(dataset_id)
         result = []
+        by_metric: dict[str, list[dict]] = {}
+        for row in observation_rows(reader, quarterly=True):
+            by_metric.setdefault(row["metric_id"], []).append(row)
         for definition in reader.quarter_definitions:
-            rows = [
-                row
-                for row in reader.quarter_observations
-                if row["metric_id"] == definition["metric_id"]
-            ]
+            rows = by_metric.get(definition["metric_id"], [])
             result.append(
                 {
                     **json.loads(canonical_json(definition)),
@@ -367,11 +400,7 @@ class ScreeningService:
         metric_id = require_string(metric_id, "metric_id")
         if type(limit) is not int or not 1 <= limit <= 8:
             raise ValueError("quarter series limit must be one to eight")
-        rows = [
-            row
-            for row in reader.quarter_observations
-            if row["cik"] == cik and row["metric_id"] == metric_id
-        ]
+        rows = observation_rows(reader, quarterly=True, cik=cik, metric_id=metric_id)
         if not rows:
             raise ValueError("quarter series is not prepared")
         rows.sort(key=lambda row: (row["calendar_year"], row["calendar_quarter"]))
@@ -382,12 +411,16 @@ class ScreeningService:
             "metric": next(
                 row for row in reader.quarter_definitions if row["metric_id"] == metric_id
             ),
-            "observations": json.loads(canonical_json(rows[-limit:])),
+            "observations": json.loads(canonical_json([
+                hydrate_observation(reader, row, quarterly=True) for row in rows[-limit:]
+            ])),
         }
 
     def quarter_explorer(
-        self, dataset_id: str, *, calendar_year: int | None = None, calendar_quarter: int | None = None, latest: bool = False
+        self, dataset_id: str, *, calendar_year: int | None = None, calendar_quarter: int | None = None,
+        latest: bool = False, include_evidence: bool = True,
     ) -> dict[str, Any]:
+        _validate_evidence_option(include_evidence)
         reader = self._quarter_dataset(dataset_id)
         if not latest:
             _validate_period_policy({
@@ -408,16 +441,16 @@ class ScreeningService:
             prepared = period is not None and (not latest or period["bucket_status"] == "PERIOD_AVAILABLE")
             row_year = period["calendar_year"] if prepared else None
             row_quarter = period["calendar_quarter"] if prepared else None
-            observations = {
-                row["metric_id"]: public_copy(
-                    latest_period_observation(row, period, cik=company["cik"], quarterly=True)
-                    if latest else row
+            matched = observation_rows(
+                reader, quarterly=True, cik=company["cik"], year=row_year, quarter=row_quarter,
+            ) if prepared else []
+            observations = {}
+            for row in matched:
+                selected = (hydrate_observation(reader, row, quarterly=True) if include_evidence
+                            else compact_observation(row))
+                observations[row["metric_id"]] = public_copy(
+                    latest_period_observation(selected, period, cik=company["cik"], quarterly=True) if latest else selected
                 )
-                for row in reader.quarter_observations
-                if row["cik"] == company["cik"]
-                and row["calendar_year"] == row_year
-                and row["calendar_quarter"] == row_quarter
-            }
             rows.append(
                 {
                     "company": json.loads(canonical_json(company)),
@@ -481,20 +514,15 @@ class ScreeningService:
                 continue
             row_year = period["calendar_year"] if latest else calendar_year
             row_quarter = period["calendar_quarter"] if latest else calendar_quarter
-            matches = [
-                row
-                for row in reader.quarter_observations
-                if row["cik"] == cik
-                and row["metric_id"] == metric_id
-                and row["calendar_year"] == row_year
-                and row["calendar_quarter"] == row_quarter
-            ]
+            matches = observation_rows(
+                reader, quarterly=True, cik=cik, metric_id=metric_id, year=row_year, quarter=row_quarter,
+            ) if row_year is not None and row_quarter is not None else []
             if len(matches) != 1:
                 raise ValueError("quarter comparison cell is not unique")
+            full = hydrate_observation(reader, matches[0], quarterly=True)
             rows.append({
                 "company": company, "observation": public_copy(
-                    latest_period_observation(matches[0], period, cik=cik, quarterly=True)
-                    if latest else matches[0]
+                    latest_period_observation(full, period, cik=cik, quarterly=True) if latest else full
                 ),
                 **({"period": json.loads(canonical_json(period))} if latest else {}),
             })
@@ -616,18 +644,15 @@ class ScreeningService:
         metric_id = require_string(metric_id, "metric_id")
         if not any(row["metric_id"] == metric_id for row in reader.metric_support):
             raise ValueError("unknown metric_id")
-        rows = [
-            row
-            for row in reader.observations
-            if row["cik"] == cik and row["metric_id"] == metric_id
-        ]
+        rows = observation_rows(reader, cik=cik, metric_id=metric_id)
         if not rows:
             raise ValueError("metric is not prepared for this company")
         rows.sort(key=lambda row: (row["fiscal_year"], row["period_class"], row["view"]))
         if latest:
             anchor = latest_company_period(reader, cik, quarterly=False)
             rows = self._latest_series(rows, anchor, cik=cik, quarterly=False)
-        return {"company": reader.company(cik), "metric_id": metric_id, "observations": rows}
+        return {"company": reader.company(cik), "metric_id": metric_id,
+                "observations": [hydrate_observation(reader, row) for row in rows]}
 
     @staticmethod
     def _latest_series(
@@ -749,11 +774,15 @@ class ScreeningService:
         }
         return self.store.save_run(payload)
 
-    def preview(self, content: dict[str, Any], dataset_id: str) -> dict[str, Any]:
+    def preview(
+        self, content: dict[str, Any], dataset_id: str, *, include_evidence: bool = True,
+    ) -> dict[str, Any]:
         """Evaluate a draft without writing any journal record."""
-        evaluated = self._evaluate(content, dataset_id)
+        _validate_evidence_option(include_evidence)
+        evaluated = (self._evaluate(content, dataset_id) if include_evidence
+                     else self._evaluate(content, dataset_id, include_evidence=False))
         evaluated.pop("universe")
-        return _preview_response(content, dataset_id, evaluated)
+        return _preview_response(content, dataset_id, evaluated, include_evidence=include_evidence)
 
     def save_result(
         self,
@@ -763,11 +792,14 @@ class ScreeningService:
         dataset_id: str,
         preview_hash: str,
         revision_id: str | None = None,
+        include_evidence: bool = True,
     ) -> dict[str, Any]:
-        """Validate once against the preview digest and persist that same evaluation."""
+        """Validate once against the preview digest and persist the full evaluation."""
+        _validate_evidence_option(include_evidence)
         evaluated = self._evaluate(content, dataset_id)
         universe = evaluated.pop("universe")
-        expected = _preview_response(content, dataset_id, evaluated)
+        compared = evaluated if include_evidence else _compact_evaluation(evaluated)
+        expected = _preview_response(content, dataset_id, compared, include_evidence=include_evidence)
         if require_string(preview_hash, "preview_hash") != expected["preview_hash"]:
             raise ValueError("preview is stale; run the preview again before saving")
         if revision_id is not None:
@@ -782,7 +814,9 @@ class ScreeningService:
             revision_id=revision_id,
         )
 
-    def _evaluate(self, content: dict[str, Any], dataset_id: str) -> dict[str, Any]:
+    def _evaluate(
+        self, content: dict[str, Any], dataset_id: str, *, include_evidence: bool = True,
+    ) -> dict[str, Any]:
         reader = self._dataset(dataset_id)
         self._validate_revision(content, reader=reader)
         targets = _select_universe(reader, content["universe"])
@@ -792,7 +826,9 @@ class ScreeningService:
             "selector": content["universe"],
             "ciks": [row["cik"] for row in targets],
         }
-        rows = [self._evaluate_company(reader, company, content) for company in targets]
+        rows = [
+            self._evaluate_company(reader, company, content, include_evidence=include_evidence) for company in targets
+        ]
         rows = _sort_rows(rows, content["sort"])
         counts = {
             state.lower(): sum(row["aggregate"] == state for row in rows) for state in AGGREGATES
@@ -1039,7 +1075,7 @@ class ScreeningService:
             destination_path.unlink(missing_ok=True)
             raise
 
-    def _dataset(self, dataset_id: str) -> ScreeningDatasetReader | ScreeningDatasetV2Reader:
+    def _dataset(self, dataset_id: str) -> ScreeningReader:
         try:
             return self.datasets[require_string(dataset_id, "dataset_id")]
         except KeyError as exc:
@@ -1047,16 +1083,17 @@ class ScreeningService:
 
     def _explorer(self, dataset_id: str) -> ScreeningExplorer:
         dataset_id = require_string(dataset_id, "dataset_id")
-        if dataset_id not in self.datasets:
-            raise ValueError("unknown screening dataset")
+        reader = self._dataset(dataset_id)
+        if dataset_id not in self.explorers and isinstance(reader, ScreeningRuntimeProjection):
+            self.explorers[dataset_id] = ScreeningExplorer(reader)
         try:
             return self.explorers[dataset_id]
         except KeyError as exc:
             raise ValueError("company explorer requires a v2 screening dataset") from exc
 
-    def _quarter_dataset(self, dataset_id: str) -> ScreeningDatasetV3Reader:
+    def _quarter_dataset(self, dataset_id: str) -> ScreeningDatasetV3Reader | ScreeningRuntimeProjection:
         reader = self._dataset(dataset_id)
-        if not isinstance(reader, ScreeningDatasetV3Reader):
+        if not isinstance(reader, (ScreeningDatasetV3Reader, ScreeningRuntimeProjection)):
             raise TypeError("quarterly analysis requires a v3 screening dataset")
         return reader
 
@@ -1064,7 +1101,7 @@ class ScreeningService:
         self,
         content: dict[str, Any],
         *,
-        reader: ScreeningDatasetReader | ScreeningDatasetV2Reader | None = None,
+        reader: ScreeningReader | None = None,
     ) -> None:
         if not isinstance(content, dict):
             raise TypeError("screen revision must be an object")
@@ -1132,9 +1169,11 @@ class ScreeningService:
 
     def _evaluate_company(
         self,
-        reader: ScreeningDatasetReader | ScreeningDatasetV2Reader,
+        reader: ScreeningReader,
         company: dict[str, Any],
         content: dict[str, Any],
+        *,
+        include_evidence: bool = True,
     ) -> dict[str, Any]:
         policy = content["period_policy"]
         latest = policy["mode"] in LATEST_PERIOD_MODES
@@ -1155,6 +1194,7 @@ class ScreeningService:
                 predicate["metric_id"],
                 policy,
                 definition_version=predicate["definition_version"],
+                include_evidence=include_evidence,
             )
             if latest:
                 observation = latest_period_observation(
@@ -1186,7 +1226,7 @@ class ScreeningService:
 
 
 def _select_universe(
-    reader: ScreeningDatasetReader | ScreeningDatasetV2Reader, selector: dict[str, Any]
+    reader: ScreeningReader, selector: dict[str, Any]
 ) -> list[dict[str, Any]]:
     mode = selector["mode"]
     rows = reader.companies
@@ -1203,49 +1243,43 @@ def _select_universe(
 
 
 def _find_observation(
-    reader: ScreeningDatasetReader | ScreeningDatasetV2Reader,
+    reader: ScreeningReader,
     cik: str,
     metric_id: str,
     policy: dict[str, Any],
     *,
     definition_version: str | None = None,
+    include_evidence: bool = True,
 ) -> dict[str, Any] | None:
     quarterly = policy["mode"] == "FIXED_CALENDAR_QUARTER_END"
-    source_rows = getattr(reader, "quarter_observations", []) if quarterly else reader.observations
-    rows = [row for row in source_rows if row["cik"] == cik and row["metric_id"] == metric_id]
+    fixed_year = policy["mode"] == "FIXED_FISCAL_YEAR"
+    year = policy["calendar_year"] if quarterly else policy["fiscal_year"] if fixed_year else None
+    rows = observation_rows(
+        reader, quarterly=quarterly, cik=cik, metric_id=metric_id, year=year,
+        quarter=policy["calendar_quarter"] if quarterly else None,
+    )
     if definition_version is not None:
         rows = [
-            row
-            for row in rows
-            if row.get("metric_definition_version", row.get("definition_version"))
-            == definition_version
+            row for row in rows
+            if row.get("metric_definition_version", row.get("definition_version")) == definition_version
         ]
-    if policy["mode"] == "FIXED_FISCAL_YEAR":
-        rows = [row for row in rows if row["fiscal_year"] == policy["fiscal_year"]]
-    elif quarterly:
-        rows = [
-            row
-            for row in rows
-            if row["calendar_year"] == policy["calendar_year"]
-            and row["calendar_quarter"] == policy["calendar_quarter"]
-        ]
-        rows = [
-            {
-                **row,
-                "quality_blocking": bool(
-                    row.get("quality_blocking") or row.get("quality_status") == "BLOCK"
-                ),
-                "trace": row.get("source_lineage"),
-            }
-            for row in rows
-        ]
-    else:
+    if not (fixed_year or quarterly):
         rows.sort(key=lambda row: row["fiscal_year"], reverse=True)
         offset = policy.get("offset", 0)
         rows = rows[offset : offset + 1]
     if len(rows) > 1:
         raise ValueError("metric observation is not unique at screening grain")
-    return json.loads(canonical_json(rows[0])) if rows else None
+    if not rows:
+        return None
+    observation = (hydrate_observation(reader, rows[0], quarterly=quarterly) if include_evidence
+                   else compact_observation(rows[0]))
+    if quarterly:
+        observation = {
+            **observation,
+            "quality_blocking": bool(observation.get("quality_blocking") or observation.get("quality_status") == "BLOCK"),
+            **({"trace": observation.get("source_lineage")} if include_evidence else {}),
+        }
+    return public_copy(observation)
 
 
 def _evaluate_predicate(

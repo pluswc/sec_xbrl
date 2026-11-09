@@ -134,6 +134,7 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
                 self._json(
                     service.quarter_explorer(
                         query["dataset_id"],
+                        **({"include_evidence": _bool(query["include_evidence"])} if "include_evidence" in query else {}),
                         **({"latest": _bool(query["latest"])} if "latest" in query else {}),
                         calendar_year=_optional_int(query.get("calendar_year")),
                         calendar_quarter=_optional_int(query.get("calendar_quarter")),
@@ -266,7 +267,10 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
                 )
             elif parsed.path == "/api/preview":
                 self._json(
-                    service.preview(body.get("content"), body.get("dataset_id")),
+                    service.preview(
+                        body.get("content"), body.get("dataset_id"),
+                        **({"include_evidence": body["include_evidence"]} if "include_evidence" in body else {}),
+                    ),
                     HTTPStatus.OK,
                 )
             elif parsed.path == "/api/results":
@@ -277,6 +281,7 @@ def _handler(service: ScreeningService, export_root: Path) -> type[BaseHTTPReque
                         dataset_id=body.get("dataset_id"),
                         preview_hash=body.get("preview_hash"),
                         revision_id=body.get("revision_id"),
+                        **({"include_evidence": body["include_evidence"]} if "include_evidence" in body else {}),
                     ),
                     HTTPStatus.CREATED,
                 )
