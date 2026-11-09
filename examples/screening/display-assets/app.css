@@ -421,6 +421,7 @@ body>header{position:static}
 .financial-board-readout,.revenue-board-readout {
   margin: 8px 0; padding: 8px; border-left: 3px solid var(--blue); background: var(--blue-soft); font-size: 13px;
 }
+.financial-board-readout small { display: block; margin-top: 3px; color: var(--slate); }
 .revenue-board-readout:empty,.financial-board-readout:empty { display: none; }
 .revenue-board-readout p { margin: 0 0 6px; }
 .revenue-board-readout ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }

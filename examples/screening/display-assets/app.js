@@ -848,7 +848,7 @@ const FINANCIAL_GROWTH_BASE=new Map(
 );
 const financialGrowthCache=new Map();
 let financialGrowthCapability;
-const BOARD_RATE={unit_kind:"PERCENT",unit:"%"};
+const BOARD_RATE={label:"전년비",unit_kind:"PERCENT",unit:"%"};
 const BOARD_USD={unit_kind:"MONEY",unit:"USD"};
 const BOARD_AXIS_OPTIONS='<option value="AUTO">자동 범위</option><option value="ZERO">0 포함</option>';
 

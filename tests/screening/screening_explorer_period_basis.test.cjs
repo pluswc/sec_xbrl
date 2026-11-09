@@ -245,7 +245,7 @@ test("negative expansion summary shows direction and magnitude while evidence re
 
 test("board axes adapt to displayed sign ranges and columns retain a zero baseline",()=>{
   const h=harness(()=>{});
-  const {domain,plot,tick}=vm.runInContext('({domain:profileBoardDomain,plot:profileBoardPlot,tick:profileBoardTick})',h.context);
+  const {domain,plot,tick,rate}=vm.runInContext('({domain:profileBoardDomain,plot:profileBoardPlot,tick:profileBoardTick,rate:BOARD_RATE})',h.context);
   assert(domain([98,101],false,"PERCENT").lower>0);
   assert(domain([-101,-98],false,"PERCENT").upper<0);
   assert.equal(domain([98,101],true,"PERCENT").lower,0);
@@ -258,13 +258,14 @@ test("board axes adapt to displayed sign ranges and columns retain a zero baseli
   }
   assert.notEqual(tick(0.00001,0.00001,{unit_kind:"PERCENT"}),tick(0.00002,0.00001,{unit_kind:"PERCENT"}));
   const chart={periods:[{label:"first"},{label:"second"},{label:"third"},{label:"fourth"}],
-    series:[{color:0,label:"Operating income",points:[{value:"3"},{value:"-2",connect:true},{value:null},{value:"0"}]}],
+    series:[{color:0,label:rate.label,points:[{value:"3"},{value:"-2",connect:true},{value:null},{value:"0"}]}],
     definition:{unit_kind:"PERCENT"},label:"전년비"};
   const columns=plot({...chart,type:"COLUMN"});
   assert.match(columns,/board-grid board-zero/);
   assert.match(columns,/board-column-positive/);
   assert.match(columns,/board-column-negative/);
   assert.match(columns,/board-column-zero/);
+  assert.match(columns,/<title>전년비 · first · 3 %<\/title>/);
   assert.doesNotMatch(columns,/class="board-line"|third ·/);
   assert.doesNotMatch(plot({...chart,type:"DOT"}),/class="board-line"/);
   assert.match(plot({...chart,type:"LINE"}),/class="board-line"/);
