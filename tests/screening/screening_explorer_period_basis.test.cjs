@@ -126,6 +126,7 @@ test("financial board ratios use multiples in the exact value and accessible lab
 test("financial profile board requests only selected definitions, reuses ordering and discards a closed reply",async()=>{
   const pending=new Map();
   const h=harness(url=>{
+    if(url==="/api/financial-growth")return {configured:false};
     const id=new URLSearchParams(url.split("?")[1]).get("metric_id");
     const request=deferred();pending.set(id,request);return request.promise;
   });
@@ -157,7 +158,7 @@ test("financial profile board requests only selected definitions, reuses orderin
   update(model);
   assert.deepEqual([...pending.keys()],["quarter_revenue","quarter_revenue_yoy","quarter_cfo"]);
   change(model.selection,"quarter_cfo","up");update(model);
-  assert.equal(h.calls.length,3);
+  assert.equal(h.calls.length,4);
   const resolve=id=>{
     const definition=model.definitions.get(id);
     pending.get(id).resolve({metric:definition,observations:[{
@@ -172,7 +173,87 @@ test("financial profile board requests only selected definitions, reuses orderin
   h.closeProfile();resolve("quarter_cfo");
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(model.series.get("quarter_cfo").loading,true);
-  assert.equal(h.calls.length,3);
+  assert.equal(h.calls.length,4);
+});
+
+test("growth sidecar drops stale company replies and reuses verified bytes for the same scope",async()=>{
+  const response=deferred();
+  const scope={dataset_id:"current50",dataset_publication_id:"P",financial_as_of:"2026-10-25",cik:"1"};
+  const h=harness(url=>url==="/api/financial-growth"?{configured:true,...scope}:response.promise);
+  h.S.profile={company:{cik:"1"}};
+  const setModel=()=>vm.runInContext(`(()=>{
+    renderFinancialProfileBoard=()=>{};
+    const model={profile:S.profile,context:{dataset:"current50",publication:"P",financialAsOf:"2026-10-25"},
+      selection:{order:["cfo"]},slots:[{}],key:explorerContextKey()};
+    financialProfileBoard=model;
+    requestFinancialGrowth(model);
+    return model;
+  })()`,h.context);
+  const old=setModel();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(h.calls.length,2);
+  h.closeProfile();
+  response.resolve({schema_version:"screening-financial-growth-v1",rule_version:"signed-prepared-financial-yoy-v1",
+    ...scope,period_end_convention:"EXCLUSIVE",definitions:{},series:{}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(old.growth.loading,true);
+  h.get("#company-profile").hidden=false;
+  const reopened=setModel();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(reopened.growth.data.cik,"1");
+  assert.equal(h.calls.length,2);
+});
+
+test("financial growth uses exact current amount and dates and reports sign states without numeric bars",()=>{
+  const h=harness(()=>{});
+  const {points,evidence,statuses}=vm.runInContext('({points:financialGrowthPoints,evidence:financialGrowthEvidence,statuses:financialGrowthPeriodStatuses})',h.context);
+  const level={value:"1e3",period_start:"2025-01-01",period_end:"2026-01-01",fiscal_year:2025,observation_id:"new"};
+  const row={current:{...level,value:"1000"},prior:{...level,value:"-50",observation_id:"old"},yoy:null,
+    status:"POSITIVE_TURN",delta:"1050",basis_assurance:"ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"};
+  const definition={metric_id:"cfo",definition_version:"v1"};
+  const model={context:{basis:"ANNUAL"},slots:[{key:2025,label:"FY2025"}],growth:{data:{
+    definitions:{cfo:{basis:"FY",definition_version:"v1"}},series:{cfo:{2025:row}},
+  }}};
+  const [turn]=points(model,definition,[{value:level.value,row:level}]);
+  assert.equal(turn.value,null);
+  assert.match(evidence(turn,true),/영업현금 순유입 전환.*1050 USD.*관측 old.*재작성 기준 검증 없음/s);
+  assert.match(statuses([turn],model.slots,0),/aria-pressed="true".*FY2025.*영업현금 순유입 전환/s);
+  const [mismatch]=points(model,definition,[{value:"1001",row:level}]);
+  assert.equal(mismatch.evidence,undefined);
+  assert.match(mismatch.reason,/금액 또는 실제 기간/);
+  const [dateMismatch]=points(model,definition,[{value:level.value,row:{...level,period_end:"2026-01-02"}}]);
+  assert.equal(dateMismatch.evidence,undefined);
+  const [idMismatch]=points(model,definition,[{value:level.value,row:{...level,observation_id:"another-source"}}]);
+  assert.equal(idMismatch.evidence,undefined);
+});
+
+test("board axes adapt to displayed sign ranges and columns retain a zero baseline",()=>{
+  const h=harness(()=>{});
+  const {domain,plot,tick}=vm.runInContext('({domain:profileBoardDomain,plot:profileBoardPlot,tick:profileBoardTick})',h.context);
+  assert(domain([98,101],false,"PERCENT").lower>0);
+  assert(domain([-101,-98],false,"PERCENT").upper<0);
+  assert.equal(domain([98,101],true,"PERCENT").lower,0);
+  assert.equal(domain([-101,-98],true,"PERCENT").upper,0);
+  assert(domain([-1,2],false,"PERCENT").ticks.includes(0));
+  for(const value of [0,1,-1,1e-14]){
+    const result=domain([value],false,"PERCENT");
+    assert(result.lower<value&&value<result.upper);
+    assert(Number.isFinite(result.step));
+  }
+  assert.notEqual(tick(0.00001,0.00001,{unit_kind:"PERCENT"}),tick(0.00002,0.00001,{unit_kind:"PERCENT"}));
+  const chart={periods:[{label:"first"},{label:"second"},{label:"third"},{label:"fourth"}],
+    series:[{color:0,label:"Operating income",points:[{value:"3"},{value:"-2",connect:true},{value:null},{value:"0"}]}],
+    definition:{unit_kind:"PERCENT"},label:"전년비"};
+  const columns=plot({...chart,type:"COLUMN"});
+  assert.match(columns,/board-grid board-zero/);
+  assert.match(columns,/board-column-positive/);
+  assert.match(columns,/board-column-negative/);
+  assert.match(columns,/board-column-zero/);
+  assert.doesNotMatch(columns,/class="board-line"|third ·/);
+  assert.doesNotMatch(plot({...chart,type:"DOT"}),/class="board-line"/);
+  assert.match(plot({...chart,type:"LINE"}),/class="board-line"/);
+  const truncated=plot({...chart,type:"DOT",series:[{color:0,label:"Operating income",points:[{value:"101"}]}]});
+  assert.match(truncated,/0 생략/);
 });
 
 test("comparison validates each metric through existing endpoint and prints actual/fiscal scopes",async()=>{

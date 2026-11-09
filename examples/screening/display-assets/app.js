@@ -752,25 +752,50 @@ function profileBoardValue(value,definition,reason="준비된 값이 없습니�
   return `<span title="${raw}">${number}</span>${exact?`<small>공표값 ${raw}</small>`:""}`;
 }
 function profileBoardPeriodX(index,count){return 94+(count===1?224:448*index/(count-1))}
-function profileBoardPlot({periods,series,definition,label,active=null,interactive=false}){
+function profileBoardDomain(data,includeZero,unitKind){
+  let lower=Math.min(...data),upper=Math.max(...data);
+  if(includeZero){lower=Math.min(0,lower);upper=Math.max(0,upper)}
+  const flat=lower===upper;
+  const padding=flat?(Math.abs(lower)*.05||(unitKind==="MONEY"?1000000:1)):(upper-lower)*.07;
+  const target=(upper-lower+2*padding)/4;
+  const power=10**Math.floor(Math.log10(target));
+  const step=[1,2,2.5,5,10].find(factor=>factor*power>=target)*power;
+  const first=Math.floor((includeZero&&lower===0&&!flat?0:lower-padding)/step);
+  const last=Math.ceil((includeZero&&upper===0&&!flat?0:upper+padding)/step);
+  const ticks=Array.from({length:last-first+1},(_,index)=>(first+index)*step);
+  return {lower:ticks[0],upper:ticks.at(-1),ticks,step};
+}
+function profileBoardTick(value,step,definition){
+  const scale=definition.unit_kind==="MONEY"?1000000:1;
+  const shown=value/scale,interval=step/scale;
+  if(shown!==0&&(interval<1e-7||Math.abs(shown)>=1e10))return shown.toExponential(2);
+  const places=Math.min(8,Math.max(0,1-Math.floor(Math.log10(interval))));
+  return new Intl.NumberFormat("en-US",{maximumFractionDigits:places}).format(shown);
+}
+function profileBoardPlot({periods,series,definition,label,active=null,interactive=false,includeZero=false,type="LINE"}){
   const data=series.flatMap(line=>line.points.map(point=>point?.value==null?NaN:Number(point.value))).filter(Number.isFinite);
   if(!data.length)return '<p class="board-empty">이 범위에 표시할 값이 없습니다.</p>';
-  let minimum=Math.min(0,...data),maximum=Math.max(0,...data);
-  if(minimum===maximum)maximum=definition.unit_kind==="MONEY"?1000000:1;
+  const columns=type==="COLUMN",domain=profileBoardDomain(data,columns||includeZero,definition.unit_kind);
   const x=index=>profileBoardPeriodX(index,periods.length);
-  const y=value=>126-(value-minimum)*110/(maximum-minimum);
-  const ticks=[maximum,minimum];
-  if(minimum<0&&maximum>0)ticks.splice(1,0,0);
-  const grid=ticks.map(value=>`<line class="board-grid" x1="88" x2="552" y1="${y(value)}" y2="${y(value)}"/><text class="board-y" x="82" y="${y(value)+4}">${esc(displayValue(String(value),definition))}</text>`).join("");
+  const y=value=>126-(value-domain.lower)*110/(domain.upper-domain.lower);
+  const grid=domain.ticks.map(value=>`<line class="board-grid${value===0?" board-zero":""}" x1="88" x2="552" y1="${y(value)}" y2="${y(value)}"/><text class="board-y" x="82" y="${y(value)+4}">${esc(profileBoardTick(value,domain.step,definition))}</text>`).join("");
   const paths=series.map(line=>{
     const [color,dash]=PROFILE_BOARD_STYLES[line.color];
     const points=line.points.map((point,index)=>point?.value!=null&&Number.isFinite(Number(point.value))?
       {x:x(index),y:y(Number(point.value)),...point}:null);
-    const segments=points.slice(1).map((point,index)=>{
+    const segments=type==="LINE"?points.slice(1).map((point,index)=>{
       const previous=points[index];
       return point&&previous&&point.connect?`<line class="board-line" x1="${previous.x}" y1="${previous.y}" x2="${point.x}" y2="${point.y}"/>`:"";
+    }).join(""):"";
+    const marks=points.map((point,index)=>{
+      if(!point)return "";
+      const hit=interactive?`data-board-period="${index}"`:"";
+      const title=`<title>${esc(line.label)} · ${esc(periods[index].label)} · ${esc(profileBoardExact(point.value,definition))}</title>`;
+      if(!columns)return `<circle class="board-point" ${hit} cx="${point.x}" cy="${point.y}" r="4">${title}</circle>`;
+      const zero=y(0),width=22;
+      if(point.y===zero)return `<line class="board-column-zero" ${hit} x1="${point.x-width/2}" x2="${point.x+width/2}" y1="${zero}" y2="${zero}">${title}</line>`;
+      return `<rect class="board-column ${point.y<zero?"board-column-positive":"board-column-negative"}" ${hit} x="${point.x-width/2}" y="${Math.min(point.y,zero)}" width="${width}" height="${Math.abs(point.y-zero)}">${title}</rect>`;
     }).join("");
-    const marks=points.map((point,index)=>point?`<circle class="board-point" ${interactive?`data-board-period="${index}"`:""} cx="${point.x}" cy="${point.y}" r="4"><title>${esc(line.label)} · ${esc(periods[index].label)} · ${esc(profileBoardExact(point.value,definition))}</title></circle>`:"").join("");
     return `<g stroke="${color}" stroke-dasharray="${dash}">${segments}${marks}</g>`;
   }).join("");
   const labels=periods.map((period,index)=>`<text class="board-x" x="${x(index)}" y="146">${esc(period.short||period.label)}</text>`).join("");
@@ -779,7 +804,10 @@ function profileBoardPlot({periods,series,definition,label,active=null,interacti
     const width=periods.length===1?448:448/(periods.length-1);
     return `<rect class="board-period-hit" data-board-period="${index}" x="${Math.max(88,x(index)-width/2)}" y="0" width="${Math.min(552,x(index)+width/2)-Math.max(88,x(index)-width/2)}" height="154"/>`;
   }).join(""):"";
-  return `<div class="board-plot-canvas" tabindex="0" role="region" aria-label="${esc(label)} 차트"><svg viewBox="0 0 570 154" role="img" aria-label="${esc(label)} · ${esc(profileBoardUnit(definition))}">${grid}${marker}${hits}${paths}${labels}</svg></div>`;
+  const axisNote=columns?'<p class="board-axis-note">0 기준</p>':
+    domain.lower>0||domain.upper<0?'<p class="board-axis-note">자동 범위 · 0 생략</p>':"";
+  const chartType=columns?"세로 막대":type==="DOT"?"점":"선";
+  return `${axisNote}<div class="board-plot-canvas" tabindex="0" role="region" aria-label="${esc(label)} ${chartType} 차트"><svg viewBox="0 0 570 154" role="img" aria-label="${esc(label)} · ${chartType} · ${esc(profileBoardUnit(definition))}">${grid}${marker}${hits}${paths}${labels}</svg></div>`;
 }
 
 function bindProfileBoardPeriod(host,selectPeriod,activePeriod){
@@ -814,6 +842,125 @@ function markProfileBoardPeriod(host,index,count){
   });
 }
 
+const FINANCIAL_GROWTH_RULE="signed-prepared-financial-yoy-v1";
+const FINANCIAL_GROWTH_BASE=new Map(
+  ["","quarter_","ttm_"].flatMap(prefix=>["operating_income","cfo","standardized_fcf"].map(id=>[prefix+id,id]))
+);
+const financialGrowthCache=new Map();
+let financialGrowthCapability;
+const BOARD_RATE={unit_kind:"PERCENT",unit:"%"};
+const BOARD_USD={unit_kind:"MONEY",unit:"USD"};
+const BOARD_AXIS_OPTIONS='<option value="AUTO">자동 범위</option><option value="ZERO">0 포함</option>';
+
+function requestFinancialGrowth(model){
+  if(model.growth||!model.slots.length||!model.selection.order.some(id=>FINANCIAL_GROWTH_BASE.has(id)))return;
+  const scope={dataset_id:model.context.dataset,dataset_publication_id:model.context.publication,
+    financial_as_of:model.context.financialAsOf,cik:model.profile.company.cik};
+  if(Object.values(scope).some(value=>typeof value!=="string"||!value)){
+    model.growth={error:"부모 자료의 발행 범위를 확인할 수 없습니다."};
+    return;
+  }
+  model.growth={loading:true};
+  financialGrowthCapability??=api("/api/financial-growth").catch(error=>{
+    financialGrowthCapability=undefined;
+    throw error;
+  });
+  financialGrowthCapability.then(capability=>{
+    if(!ownsFinancialProfileBoard(model))return;
+    const {cik,...dataset}=scope;
+    if(!capability.configured||Object.keys(dataset).some(key=>dataset[key]!==capability[key])){
+      throw new Error("선택한 발행물의 전년 비교 자료가 준비되지 않았습니다.");
+    }
+    const query=new URLSearchParams(scope).toString();
+    let pending=financialGrowthCache.get(query);
+    if(!pending){
+      pending=api(`/api/financial-growth?${query}`).then(data=>{
+        if(data.schema_version!=="screening-financial-growth-v1"||data.rule_version!==FINANCIAL_GROWTH_RULE||data.period_end_convention!=="EXCLUSIVE"||
+            Object.keys(scope).some(key=>scope[key]!==data[key])||data.dataset_manifest_sha256!==capability.dataset_manifest_sha256||
+            !data.definitions||!data.series){
+          throw new Error("전년 비교 발행물의 범위가 선택과 다릅니다.");
+        }
+        return data;
+      }).catch(error=>{
+        if(financialGrowthCache.get(query)===pending)financialGrowthCache.delete(query);
+        throw error;
+      });
+      financialGrowthCache.set(query,pending);
+      if(financialGrowthCache.size>16)financialGrowthCache.delete(financialGrowthCache.keys().next().value);
+    }
+    return pending;
+  }).then(data=>{
+    if(data&&ownsFinancialProfileBoard(model)){model.growth={data};renderFinancialProfileBoard(model)}
+  },error=>{
+    if(ownsFinancialProfileBoard(model)){model.growth={error:error.message};renderFinancialProfileBoard(model)}
+  });
+}
+function financialGrowthReason(reason){
+  return ({
+    CURRENT_UNAVAILABLE:"이 기간의 금액을 비교할 수 없습니다.",
+    PRIOR_NOT_PREPARED:"전년 비교 기간이 준비되지 않았습니다.",
+    PRIOR_UNAVAILABLE:"전년 비교값을 사용할 수 없습니다.",
+    AMBIGUOUS_FISCAL_PERIOD:"회계기간의 관측값을 하나로 확인할 수 없습니다.",
+    INCOMPATIBLE_SCOPE:"전년과 정의, 단위 또는 보고 기준을 맞출 수 없습니다.",
+    INCOMPATIBLE_PERIOD:"전년과 실제 기간을 맞출 수 없습니다.",
+    INCOMPATIBLE_SEMANTICS:"전년과 공시 항목의 의미를 맞출 수 없습니다.",
+    INCOMPATIBLE_TTM_LINEAGE:"두 TTM의 연속 분기 또는 공시 기준을 확인할 수 없습니다.",
+  })[reason]||"이 기간에 발행된 전년 비교가 없습니다.";
+}
+function financialGrowthStatus(id,status){
+  const metric=FINANCIAL_GROWTH_BASE.get(id);
+  const negative={operating_income:"영업손실",cfo:"영업현금 순유출",standardized_fcf:"음수 FCF 규모"}[metric];
+  return ({
+    POSITIVE_TURN:{operating_income:"흑자전환",cfo:"영업현금 순유입 전환",standardized_fcf:"FCF 양수 전환"}[metric],
+    NEGATIVE_TURN:{operating_income:"적자전환",cfo:"영업현금 순유출 전환",standardized_fcf:"FCF 음수 전환"}[metric],
+    NEGATIVE_MAGNITUDE_REDUCED:`${negative} 축소`,
+    NEGATIVE_MAGNITUDE_EXPANDED:`${negative} 확대`,
+    NEGATIVE_MAGNITUDE_UNCHANGED:`${negative} 유지`,
+    ZERO_REACHED:"0 도달",ZERO_BASE:"전년 0 · 비율 없음",ZERO_UNCHANGED:"두 기간 모두 0",
+  })[status]||"";
+}
+function financialGrowthPoints(model,definition,levels){
+  const {data,error,loading}=model.growth||{};
+  const declared=data?.definitions[definition.metric_id];
+  const basis={ANNUAL:"FY",QUARTERLY:"QTD_3M",TTM:"TTM"}[model.context.basis];
+  const bound=declared?.basis===basis&&declared.definition_version===definition.definition_version;
+  return model.slots.map((slot,index)=>{
+    const row=bound?data.series[definition.metric_id]?.[slot.key]:null,level=levels[index];
+    const reason=error||(loading?"전년 비교 자료를 불러오는 중입니다…":financialGrowthReason(row?.reason));
+    if(!row||row.status==="UNAVAILABLE"||level.value==null)return {value:null,reason};
+    const current=row.current,observationId=level.row?.metric_observation_id||level.row?.observation_id;
+    if(!current||current.value==null||shiftDecimal(current.value,0)!==shiftDecimal(level.value,0)||
+        observationId&&observationId!==current.observation_id||
+        ["period_start","period_end","fiscal_year","fiscal_quarter"].some(key=>(current[key]??null)!==(level.row?.[key]??null))){
+      return {value:null,reason:"전년 비교의 현재 관측, 금액 또는 실제 기간이 준비된 수준과 다릅니다."};
+    }
+    const status=financialGrowthStatus(definition.metric_id,row.status);
+    return {value:row.yoy,reason:status||reason,connect:level.connect,evidence:row,status};
+  });
+}
+function financialGrowthEvidence(point,exact=false){
+  const record=point.evidence;
+  if(!record)return "";
+  const status=point.status?`<span class="financial-growth-status" data-growth-status="${esc(record.status)}">${esc(point.status)}</span>`:"";
+  const amount=(value,definition,unit)=>exact?esc(profileBoardExact(value,definition)):`${profileBoardValue(value,definition)} ${unit}`;
+  const magnitude=record.negative_magnitude_change==null?"":`<small>음수 규모 변화 ${amount(record.negative_magnitude_change,BOARD_RATE,"%")}</small>`;
+  const delta=`<small>금액 증감 ${amount(record.delta,BOARD_USD,"백만 USD")}</small>`;
+  if(!exact)return status+magnitude+delta;
+  const evidence=(label,input)=>`<small>${label} ${esc(profileBoardExact(input.value,BOARD_USD))} · ${esc(actualPeriod(input))}<br>관측 ${esc(input.observation_id)}</small>`;
+  const assurance=record.basis_assurance==="ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"?
+    "산술 비교 · 재작성 기준 검증 없음":`선언 기준 ${record.basis_assurance?.replace(/^DECLARED_BASIS:/u,"")||"—"}`;
+  const legs=record.ttm_input_ids?`<small>현재 분기 관측 ${esc(record.ttm_input_ids.current.join(", "))}<br>전년 분기 관측 ${esc(record.ttm_input_ids.prior.join(", "))}</small>`:"";
+  return status+magnitude+delta+evidence("현재",record.current)+evidence("전년",record.prior)+legs+
+    `<small>${esc(assurance)} · 규칙 ${FINANCIAL_GROWTH_RULE}</small>`;
+}
+
+function financialGrowthPeriodStatuses(rates,slots,active){
+  const statuses=rates.map((rate,index)=>rate.status?`<li><button type="button" class="quiet financial-growth-period"
+    data-board-period="${index}" data-growth-status="${esc(rate.evidence.status)}" aria-pressed="${index===active}">
+    <strong>${esc(slots[index].label)}</strong> ${esc(rate.status)}</button></li>`:"").join("");
+  return statuses?`<ul class="financial-growth-periods" aria-label="기간별 전년 비교 상태">${statuses}</ul>`:"";
+}
+
 const PROFILE_GROWTH={"revenue":"revenue_yoy","quarter_revenue":"quarter_revenue_yoy"};
 const PROFILE_BOARD_DEFAULTS={
   ANNUAL:["revenue","operating_income","cfo","standardized_fcf"],
@@ -826,7 +973,11 @@ function mountFinancialProfileBoard(overview){
   section.className="financial-profile-board";
   section.innerHTML=`<h3>재무 비교 보드</h3><p class="muted">지표별 수준과 발행된 전년비를 기간별로 비교합니다. 각 지표의 세로축은 독립적입니다.</p>
     ${PROFILE_BOARD_SELECTION}
-    <label class="financial-board-period">같이 볼 기간<select id="financial-board-period"></select></label>
+    <div class="financial-board-controls">
+      <label>같이 볼 기간<select id="financial-board-period"></select></label>
+      <label>수준 차트<select id="financial-board-chart-type"><option value="DOT">점</option><option value="LINE">선</option></select></label>
+      <label>수준 세로축<select id="financial-board-y-scale">${BOARD_AXIS_OPTIONS}</select></label>
+    </div>
     <div class="financial-board-panels"></div>`;
   $("#profile-summary").after(section);
   const single=document.createElement("details");
@@ -837,6 +988,18 @@ function mountFinancialProfileBoard(overview){
   trend.before(single);single.append(trend);
   single.addEventListener("toggle",()=>{if(single.open&&S.profile&&!$("#company-profile").hidden)renderProfileTrend()});
   financialProfileBoardHost=section;
+  $("#financial-board-chart-type").onchange=event=>{
+    if(ownsFinancialProfileBoard(financialProfileBoard)){
+      financialProfileBoard.chartType=event.target.value;
+      renderFinancialProfileBoard(financialProfileBoard);
+    }
+  };
+  $("#financial-board-y-scale").onchange=event=>{
+    if(ownsFinancialProfileBoard(financialProfileBoard)){
+      financialProfileBoard.includeZero=event.target.value==="ZERO";
+      renderFinancialProfileBoard(financialProfileBoard);
+    }
+  };
   $("#financial-board-period").onchange=event=>updateFinancialBoardPeriod(financialProfileBoard,Number(event.target.value));
   bindProfileBoardPeriod(section,(index,force)=>updateFinancialBoardPeriod(financialProfileBoard,index,force),()=>financialProfileBoard?.active);
 }
@@ -861,6 +1024,8 @@ function beginFinancialProfileBoard(){
     .map(slot=>({...slot,short:annual?slot.label:slot.label.slice(2)}));
   const model={profile,selection,definitions,context,slots,series:new Map(),active:Math.max(0,slots.length-1),key:explorerContextKey()};
   financialProfileBoard=model;
+  $("#financial-board-y-scale").value="AUTO";
+  $("#financial-board-chart-type").value="DOT";
   const select=$("#financial-board-period");
   select.innerHTML=slots.map((slot,index)=>`<option value="${index}">${esc(slot.label)}</option>`).join("");
   select.disabled=!slots.length;
@@ -893,6 +1058,7 @@ function updateFinancialProfileBoard(model){
       });
     }
   }
+  requestFinancialGrowth(model);
   renderFinancialProfileBoard(model);
 }
 function financialProfilePoints(model,definition){
@@ -913,25 +1079,27 @@ function renderFinancialProfileBoard(model){
   const focused=card?.dataset.financialCard;
   const plotIndex=card?[...card.querySelectorAll(".board-plot-canvas")].indexOf(active):-1;
   host.innerHTML=model.selection.order.map(id=>{
-    const definition=model.definitions.get(id),growth=financialProfileGrowth(id,model.definitions),color=model.selection.colors.get(id);
-    const levels=financialProfilePoints(model,definition),rates=growth?financialProfilePoints(model,growth):null;
-    const chart=(metric,points,label)=>{
-      const record=model.series.get(metric.metric_id);
+    const definition=model.definitions.get(id),published=financialProfileGrowth(id,model.definitions),color=model.selection.colors.get(id);
+    const adjunct=FINANCIAL_GROWTH_BASE.has(id),growth=published||(adjunct?BOARD_RATE:null);
+    const levels=financialProfilePoints(model,definition);
+    const rates=published?financialProfilePoints(model,published):adjunct?financialGrowthPoints(model,definition,levels):null;
+    const chart=(metric,points,label,type,record=model.series.get(metric.metric_id))=>{
       const content=record?.loading?'<p class="board-empty" role="status">자료를 불러오는 중입니다…</p>':
         record?.error?`<p class="board-empty explorer-error">${esc(record.error)}</p>`:
-        profileBoardPlot({periods:model.slots,series:[{label:metric.label,color,points}],definition:metric,label,active:model.active,interactive:true});
+        profileBoardPlot({periods:model.slots,series:[{label:metric.label,color,points}],definition:metric,label,type,active:model.active,interactive:true,includeZero:model.includeZero});
       return `<div class="financial-board-plot"><h5>${label} · ${esc(profileBoardUnit(metric))}</h5>${content}</div>`;
     };
     return `<article class="financial-board-card" data-financial-card="${esc(id)}"><h4>${esc(definition.label)}</h4>
-      ${chart(definition,levels,"수준")}
-      ${growth?chart(growth,rates,"전년비"):`<p class="board-empty">${definition.unit_kind==="MONEY"?"이 지표에 대응하는 전년비가 발행되지 않았습니다.":"이 지표는 수준으로 표시합니다. 대응하는 전년비가 발행되지 않았습니다."}</p>`}
+      ${chart(definition,levels,"수준",model.chartType||"DOT")}
+      ${growth?chart(growth,rates,"전년비","COLUMN",adjunct?model.growth:undefined):`<p class="board-empty">${definition.unit_kind==="MONEY"?"이 지표에 대응하는 전년비가 발행되지 않았습니다.":"이 지표는 수준으로 표시합니다. 대응하는 전년비가 발행되지 않았습니다."}</p>`}
+      ${adjunct?financialGrowthPeriodStatuses(rates,model.slots,model.active):""}
       <p class="financial-board-readout" data-financial-readout="${esc(id)}"></p>
       <details data-financial-details="${esc(id)}" ${expanded.has(id)?"open":""}><summary>기간별 값과 실제 기간</summary>
         <div class="table-wrap" tabindex="0" role="region" aria-label="${esc(definition.label)} 기간별 값">
           <table class="series-table"><thead><tr><th scope="col">기간</th><th scope="col">수준 · ${esc(profileBoardUnit(definition))}</th>${growth?'<th scope="col">전년비 (%)</th>':""}</tr></thead>
           <tbody>${model.slots.map((slot,index)=>{
             const level=levels[index],rate=rates?.[index],caption=point=>point?.row?`<small>${esc(actualPeriod(point.row))}${point.row.fiscal_quarter?` · ${esc(fiscalLabel(point.row))}`:""}</small>`:"";
-            return `<tr><th scope="row">${esc(slot.label)}</th><td>${profileBoardValue(level.value,definition,level.reason,true)}${caption(level)}</td>${growth?`<td>${profileBoardValue(rate.value,growth,rate.reason,true)}${caption(rate)}</td>`:""}</tr>`;
+            return `<tr><th scope="row">${esc(slot.label)}</th><td>${profileBoardValue(level.value,definition,level.reason,true)}${caption(level)}</td>${growth?`<td>${profileBoardValue(rate.value,growth,rate.reason,true)}${caption(rate)}${adjunct?financialGrowthEvidence(rate,true):""}</td>`:""}</tr>`;
           }).join("")}</tbody></table></div>
       </details></article>`;
   }).join("")||'<p class="board-empty">비교할 재무 지표를 선택해 주세요.</p>';
@@ -947,12 +1115,17 @@ function updateFinancialBoardPeriod(model,index,force=false){
   model.active=index;
   $("#financial-board-period").value=String(index);
   markProfileBoardPeriod(financialProfileBoardHost,index,model.slots.length);
+  for(const button of financialProfileBoardHost.querySelectorAll(".financial-growth-period")){
+    button.setAttribute("aria-pressed",String(Number(button.dataset.boardPeriod)===index));
+  }
   for(const target of financialProfileBoardHost.querySelectorAll("[data-financial-readout]")){
-    const id=target.dataset.financialReadout,definition=model.definitions.get(id),growth=financialProfileGrowth(id,model.definitions);
-    const level=financialProfilePoints(model,definition)[index],rate=growth?financialProfilePoints(model,growth)[index]:null;
+    const id=target.dataset.financialReadout,definition=model.definitions.get(id),published=financialProfileGrowth(id,model.definitions);
+    const levels=financialProfilePoints(model,definition),level=levels[index],adjunct=FINANCIAL_GROWTH_BASE.has(id);
+    const rate=published?financialProfilePoints(model,published)[index]:adjunct?financialGrowthPoints(model,definition,levels)[index]:null;
+    const growth=published||BOARD_RATE;
     target.innerHTML=`<strong>${esc(model.slots[index].label)}</strong>
       · 수준 ${profileBoardValue(level.value,definition,level.reason)} ${esc(profileBoardUnit(definition))}
-      ${rate?` · 전년비 ${profileBoardValue(rate.value,growth,rate.reason)} %`:""}
+      ${rate?` · 전년비 ${profileBoardValue(rate.value,growth,rate.reason)} %${adjunct?financialGrowthEvidence(rate):""}`:""}
       ${level.row?`<small>${esc(actualPeriod(level.row))}</small>`:""}`;
   }
 }
@@ -1049,6 +1222,7 @@ function mountRevenueBreakdowns(){
           ${PROFILE_BOARD_SELECTION}
           <div class="revenue-board-controls">
             <label>같이 볼 회계기간<select id="revenue-board-period"></select></label>
+            <label>세로축<select id="revenue-board-y-scale">${BOARD_AXIS_OPTIONS}</select></label>
             <label class="revenue-board-check"><input type="checkbox" id="revenue-board-share-toggle"> 비중 보기</label>
           </div>
           <div id="revenue-board-readout" class="revenue-board-readout"></div>
@@ -1325,6 +1499,7 @@ function revenueBoardOptions(lines){
   });
 }
 function mountRevenueBoardControls(){
+  $("#revenue-board-y-scale").onchange=()=>renderRevenueBreakdownTrend();
   $("#revenue-board-share-toggle").onchange=()=>renderRevenueBreakdownTrend();
   $("#revenue-board-period").onchange=event=>updateRevenueBoardPeriod(Number(event.target.value));
   bindProfileBoardPeriod($("#profile-revenue-breakdowns"),updateRevenueBoardPeriod,()=>revenueBreakdowns.board?.active);
@@ -1350,6 +1525,7 @@ function configureRevenueBoard(view){
   periodSelect.innerHTML=model.periods.map(({label},index)=>`<option value="${index}">${esc(label)}</option>`).join("");
   periodSelect.disabled=!model.periods.length;
   $("#revenue-board-share-toggle").checked=model.share;
+  $("#revenue-board-y-scale").value=model.includeZero?"ZERO":"AUTO";
   renderProfileBoardSelection($(".revenue-breakdown-trend"),model.selection,model.options,renderRevenueBreakdownTrend);
 }
 function renderRevenueBreakdownTrend(){
@@ -1359,6 +1535,7 @@ function renderRevenueBreakdownTrend(){
   const labels=new Map(options.map(item=>[item.id,item.label]));
   const visible=selection.order.map(id=>lines.find(line=>line.id===id)).filter(Boolean);
   model.share=$("#revenue-board-share-toggle").checked;
+  model.includeZero=$("#revenue-board-y-scale").value==="ZERO";
   const definitions={amount:REVENUE_MONEY,yoy:REVENUE_PERCENT,share:REVENUE_PERCENT};
   const charts=[
     ["amount","#revenue-breakdown-chart","매출 금액"],
@@ -1371,7 +1548,7 @@ function renderRevenueBreakdownTrend(){
   }));
   for(const [mode,selector,label] of charts){
     const series=model.visible.map(line=>({...line,points:line.points[mode]}));
-    $(selector).innerHTML=profileBoardPlot({periods,series,definition:definitions[mode],label,active,interactive:true});
+    $(selector).innerHTML=profileBoardPlot({periods,series,definition:definitions[mode],label,active,interactive:true,includeZero:model.includeZero});
   }
   $("#revenue-share-panel").hidden=!model.share;
   const values=$("#revenue-board-values");
@@ -1435,7 +1612,7 @@ function companyTrendOwns(context,token){
   return JSON.stringify([...S.explorerSelected].sort())===JSON.stringify(context.ciks)&&$("#comparison-trend-metric").value===context.definition.metric_id;
 }
 function projectTrendObservation(row){
-  const keys=["metric_id","fiscal_year","fiscal_quarter","calendar_year","calendar_quarter","availability_status","value","period_start","period_end","end_convention","definition_version","unit","cik","quality_status","quality_blocking","reason","reason_labels"];
+  const keys=["observation_id","metric_id","fiscal_year","fiscal_quarter","calendar_year","calendar_quarter","availability_status","value","period_start","period_end","end_convention","definition_version","unit","cik","quality_status","quality_blocking","reason","reason_labels"];
   const result=Object.fromEntries(keys.filter(key=>Object.hasOwn(row,key)).map(key=>[key,row[key]]));
   const guarded=preparedExplorerObservation(result);
   if(guarded.value===null&&result.reason_labels?.length)guarded.reason_labels=[...result.reason_labels];

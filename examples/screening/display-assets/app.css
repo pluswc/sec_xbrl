@@ -436,3 +436,20 @@ body>header{position:static}
   .financial-board-panels,.revenue-board-grid { grid-template-columns: minmax(0,1fr); }
   .explorer-v2 .board-order-actions button { padding-inline: 5px; }
 }
+
+.financial-board-controls { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; }
+.financial-board-controls label,.revenue-board-controls label { min-width: min(100%, 108px); }
+.board-zero { stroke: var(--slate); }
+.board-axis-note { margin: 0 0 4px; font-size: 12px; color: var(--slate); }
+.financial-growth-status {
+  display: inline-block; margin: 4px 0 0; padding: 3px 6px; border: 1px solid var(--line);
+  border-radius: 4px; color: var(--ink); background: var(--sheet); font-size: 12px; font-weight: 650;
+}
+.financial-board-card .series-table td { overflow-wrap: anywhere; }
+.board-column { stroke-width: 1; stroke-dasharray: none; }
+.board-column-positive { fill: var(--blue); }
+.board-column-negative { fill: var(--amber); }
+.board-column-zero { stroke-width: 3; stroke-dasharray: none; }
+.financial-growth-periods { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; padding: 0; list-style: none; }
+.financial-growth-periods button { font-size: 12px; }
+.financial-growth-periods [aria-pressed="true"] { background: var(--blue-soft); border-color: var(--blue); }
