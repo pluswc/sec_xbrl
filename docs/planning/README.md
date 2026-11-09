@@ -2,6 +2,8 @@
 
 2026-11-09 [재무 비교 보드 전년 대비 변화 계약](../implementation/financial-growth-insights-20261109.md)은
 차트 전용 파생 발행, 부호별 표시, 실제 기간 근거와 세로축 제어를 정의한다.
+동결 소스 `aaf4ee3257`와 current50 보조 발행을 로컬 18765에서 검증하고 인수했으며
+로컬 main은 `aaf4ee3257`을 포함한다. 원격 push·PR·CI는 미실행이다.
 
 2026-11-09 [재무 비교 보드와 매출 추이 계약](../implementation/financial-comparison-board-20261109.md)은
 복수 지표·항목의 추이와 실제 운영 검증을 기록한다. 동결 소스 `06172d45f2`는
