@@ -67,8 +67,8 @@ python -m pytest -q tests/test_screening_display_assets.py tests/screening/test_
 | 단계 | 상태 |
 | --- | --- |
 | 승인 | 2026-11-09 차트 전용 파생 지표와 세로축 표시 |
-| 구현 | 동결 소스 `aaf4ee32575a8f460bd57d981b35f0191461b7fd` |
-| 독립 검증 | 별도 GPT-6 Astra가 `f4a6dd3c9c`의 전체 Node 73개와 집중 pytest 71개, `aaf4ee3257`의 표시 후속 Node 27개 및 변경 경계를 검증 |
+| 구현 | 동결 소스 `aaf4ee32575a8f460bd57d981b35f0191461b7fd`. 구현자 전체 검사 `f4a6dd3c9c`의 Node 73개, 집중 pytest 71개 통과 |
+| 독립 검증 | 별도 GPT-6 Astra가 `d0941a967b`의 전체 Node 72개와 집중 pytest 71개, 표시 후속 `f4a6dd3c9c`와 `aaf4ee3257`의 집중 Node 각 27개 및 변경 경계를 검증 |
 | 실제 발행과 로컬 인수 | 2026-11-09 리드가 검증된 부모로 부가 발행을 준비하고 운영 주소에서 인수 |
 | 로컬 main | 2026-11-09 `aaf4ee32575a8f460bd57d981b35f0191461b7fd`로 fast-forward |
 | 원격 push·PR·CI·병합 | 미실행 |
@@ -107,8 +107,9 @@ PR81 매출 구성 및 기존 배치·스크리닝 카탈로그를 계속 사용
 `.codex/visualizations/2026/11/08/01a1bb67-6275-70d2-989e-208966314006/financial-growth-20261109/`에
 있다. `bundle-hashes.json`은 운영 파일 네 개, 생산기와 소스 SHA를 연결한다.
 `artifact-check.json`은 1,241개 비교의 대조 결과다. `live-growth-report.json`은
-실제 부호 사례 5건, AAPL 연간·TTM과 차트 전환, `live-board-report.json`은
-기존 보드 검사 15건, `hierarchy-live.json`은 Apple·Alphabet·Amazon의 공시
+실제 부호 사례 5건을 포함한 전년 비교 검사 3그룹과 AAPL 연간·TTM 및 차트 전환을
+기록한다. `live-board-report.json`은 기존 보드 검사 15그룹을 기록하며, 두 검사는
+총 18그룹이다. `hierarchy-live.json`은 Apple·Alphabet·Amazon의 공시
 계층 검사 결과다. 운영 브라우저 오류, 콘솔 오류 및 차단 요청은 0건이었다.
 `live-endpoint-report.json`은 50개사 응답 일치와 잘못된 발행 ID의 409,
 누락 범위의 400을 기록한다. `preserved-input-hashes.json`과
