@@ -779,13 +779,25 @@ function profileBoardPlot({periods,series,definition,label,active=null,interacti
   return `<div class="board-plot-canvas" tabindex="0" role="region" aria-label="${esc(label)} 차트"><svg viewBox="0 0 570 154" role="img" aria-label="${esc(label)} · ${esc(profileBoardUnit(definition))}">${grid}${marker}${hits}${paths}${labels}</svg></div>`;
 }
 
-function bindProfileBoardPeriod(host,selectPeriod){
+function bindProfileBoardPeriod(host,selectPeriod,activePeriod){
   const choose=event=>{
     const target=event.target.closest?.("[data-board-period]");
     if(target)selectPeriod(Number(target.dataset.boardPeriod));
   };
   host.addEventListener("pointerover",event=>{if(event.pointerType!=="touch")choose(event)});
   host.addEventListener("click",choose);
+  host.addEventListener("scroll",event=>{
+    const canvas=event.target;
+    if(!canvas.matches?.(".board-plot-canvas"))return;
+    const offset=canvas.scrollLeft;
+    for(const sibling of host.querySelectorAll(".board-plot-canvas")){
+      if(sibling!==canvas&&sibling.clientWidth&&Math.abs(sibling.scrollLeft-offset)>1)sibling.scrollLeft=offset;
+    }
+  },true);
+  window.addEventListener("resize",()=>{
+    const index=activePeriod();
+    if(index!=null&&!host.closest("[hidden]"))selectPeriod(index,true);
+  });
 }
 function markProfileBoardPeriod(host,index,count){
   const x=profileBoardPeriodX(index,count);
@@ -823,7 +835,7 @@ function mountFinancialProfileBoard(overview){
   single.addEventListener("toggle",()=>{if(single.open&&S.profile&&!$("#company-profile").hidden)renderProfileTrend()});
   financialProfileBoardHost=section;
   $("#financial-board-period").onchange=event=>updateFinancialBoardPeriod(financialProfileBoard,Number(event.target.value));
-  bindProfileBoardPeriod(section,index=>updateFinancialBoardPeriod(financialProfileBoard,index));
+  bindProfileBoardPeriod(section,(index,force)=>updateFinancialBoardPeriod(financialProfileBoard,index,force),()=>financialProfileBoard?.active);
 }
 function financialProfileGrowth(id,definitions){
   const level=definitions.get(id),definition=definitions.get(PROFILE_GROWTH[id]);
@@ -854,7 +866,7 @@ function beginFinancialProfileBoard(){
   updateFinancialProfileBoard(model);
 }
 function ownsFinancialProfileBoard(model){
-  return financialProfileBoard===model&&model.profile===S.profile&&
+  return model&&financialProfileBoard===model&&model.profile===S.profile&&
     model.key===explorerContextKey()&&!$("#company-profile").hidden;
 }
 function updateFinancialProfileBoard(model){
@@ -976,6 +988,7 @@ function showProfileSection(revenue){
   $("#profile-show-overview").setAttribute("aria-pressed",String(!revenue));
   $("#profile-show-revenue").setAttribute("aria-pressed",String(revenue));
   if(revenue)loadRevenueBreakdowns();
+  else if(ownsFinancialProfileBoard(financialProfileBoard))updateFinancialBoardPeriod(financialProfileBoard,financialProfileBoard.active,true);
 }
 function bindExplorer(){
   mountExplorerLayout();
@@ -1081,7 +1094,10 @@ async function loadRevenueBreakdowns(){
     status.textContent="선택한 자료 발행물과 재무 기준일을 확인할 수 없습니다.";
     return;
   }
-  if(revenueBreakdowns.context?.profile===profile&&revenueBreakdowns.data)return;
+  if(revenueBreakdowns.context?.profile===profile&&revenueBreakdowns.data){
+    updateRevenueBoardPeriod(revenueBreakdowns.board?.active,true);
+    return;
+  }
   const context={profile,key:explorerContextKey(),token:++revenueBreakdowns.token};
   revenueBreakdowns.context=context;
   const scope={dataset_id:dataset.dataset_id,dataset_publication_id:dataset.publication_id,financial_as_of:profile.financial_as_of,cik};
@@ -1308,7 +1324,7 @@ function revenueBoardOptions(lines){
 function mountRevenueBoardControls(){
   $("#revenue-board-share-toggle").onchange=()=>renderRevenueBreakdownTrend();
   $("#revenue-board-period").onchange=event=>updateRevenueBoardPeriod(Number(event.target.value));
-  bindProfileBoardPeriod($("#profile-revenue-breakdowns"),updateRevenueBoardPeriod);
+  bindProfileBoardPeriod($("#profile-revenue-breakdowns"),updateRevenueBoardPeriod,()=>revenueBreakdowns.board?.active);
 }
 function configureRevenueBoard(view){
   const lines=revenueBoardLines(view);
