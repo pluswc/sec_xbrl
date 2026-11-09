@@ -114,6 +114,15 @@ test("leaving explorer closes the inline profile and drops its pending revenue r
   assert.equal(h.get("#revenue-breakdown-status").textContent,"");
 });
 
+test("financial board ratios use multiples in the exact value and accessible label",()=>{
+  const h=harness(()=>{});
+  const markup=vm.runInContext('profileBoardValue("1.255",{unit_kind:"RATIO",unit:"1"},"",true)',h.context);
+  assert.match(markup,/title="1\.255 배"/);
+  assert.match(markup,/aria-label="1\.26 배"/);
+  assert.match(markup,/공표값 1\.255 배/);
+  assert.doesNotMatch(markup,/%/);
+});
+
 test("financial profile board requests only selected definitions, reuses ordering and discards a closed reply",async()=>{
   const pending=new Map();
   const h=harness(url=>{

@@ -744,9 +744,12 @@ function profileBoardExact(value,definition){
 }
 function profileBoardUnit(definition){return definition.unit_kind==="RATIO"?"배":unitLabel(definition)}
 function profileBoardValue(value,definition,reason="준비된 값이 없습니다.",exact=false){
-  return value==null?`<span class="missing" title="${esc(reason)}" aria-label="${esc(reason)}">—</span>`:
-    `<span title="${esc(profileBoardExact(value,definition))}">${numberMarkup(value,definition)}</span>
-      ${exact?`<small>공표값 ${esc(profileBoardExact(value,definition))}</small>`:""}`;
+  if(value==null)return `<span class="missing" title="${esc(reason)}" aria-label="${esc(reason)}">—</span>`;
+  const raw=esc(profileBoardExact(value,definition));
+  const text=definition.unit_kind==="RATIO"?esc(displayValue(value,definition)):null;
+  const number=text===null?numberMarkup(value,definition):
+    `<span class="display-number" aria-label="${text} ${profileBoardUnit(definition)}">${text}</span>`;
+  return `<span title="${raw}">${number}</span>${exact?`<small>공표값 ${raw}</small>`:""}`;
 }
 function profileBoardPeriodX(index,count){return 94+(count===1?224:448*index/(count-1))}
 function profileBoardPlot({periods,series,definition,label,active=null,interactive=false}){
