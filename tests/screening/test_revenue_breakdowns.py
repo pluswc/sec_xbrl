@@ -355,3 +355,30 @@ def test_ambiguous_or_unbound_roles_do_not_imply_hierarchy():
                           edit=lambda result, _: result["totals"][0].update(status="DERIVED"))
     assert not _hierarchy(values, [*coarse, *details],
                           edit=lambda _, facts: facts[-1].update(context_end_date="2026-07-02"))
+
+
+
+def test_applicable_def_exclusion_prevents_hierarchy_even_with_positive_role_evidence():
+    values = {"product": "70", "service": "30", "phone": "50", "tablet": "20"}
+    coarse = _role("statement", ["product", "service"])
+    details = _role("detail", ["phone", "tablet", "service"])
+    def_edge = next(edge for edge in details if edge["network_type"] == "DEF")
+
+    def edge(arc, source, target, **overrides):
+        return {**def_edge, "arcrole": f"http://xbrl.org/int/dim/arcrole/{arc}",
+                "from_raw_concept_id": source, "to_raw_concept_id": target,
+                "context_element": "segment", **overrides}
+
+    positive = edge("all", "detail-line", "detail-table")
+    base = [*coarse, *details, positive]
+    assert _hierarchy(values, base)[0]["mode"] == "RECONCILED"
+    assert not _hierarchy(values, [*base, edge("notAll", "raw-revenue", "detail-table")])
+    assert not _hierarchy(values, [*base, edge("notAll", "detail-line", "detail-table", context_element="scenario")])
+    inherited = edge("domain-member", "primary-ancestor", "raw-revenue")
+    assert not _hierarchy(values, [*base, inherited, edge("notAll", "primary-ancestor", "detail-table")])
+    assert not _hierarchy(values, [*base, {**inherited, "role_id": "other", "role_uri": "urn:other",
+                                         "target_role_uri": "urn:detail"}])
+    assert not _hierarchy(values, [*base, edge("notAll", "raw-revenue", "detail-table",
+                                             role_id="other", role_uri="urn:other", target_role_uri="urn:detail")])
+    assert _hierarchy(values, [*base, edge("notAll", "raw-revenue", "other-table")])
+    assert _hierarchy(values, [*base, edge("notAll", "unrelated-primary", "detail-table")])

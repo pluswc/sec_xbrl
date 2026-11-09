@@ -474,12 +474,22 @@ def _product_role_partitions(
     edges: Iterable[dict], identity: tuple, axis: str, axis_qname: str, segment: str | None, members: dict,
 ) -> list[dict]:
     by_role = defaultdict(list)
+    redirected_members = set()
+    redirected_cubes = set()
     for edge in edges:
         if (
             (edge["source_snapshot_id"], edge["source_filing_id"], edge["accession"], edge["filed_date"])
-            == identity[:4]
+            != identity[:4]
         ):
-            by_role[(edge["role_id"], edge["role_uri"])].append(edge)
+            continue
+        by_role[(edge["role_id"], edge["role_uri"])].append(edge)
+        arc = _dimensional_arc(edge)
+        if target_role := edge["target_role_uri"]:
+            target = (target_role, edge["to_raw_concept_id"])
+            if arc == "domain-member":
+                redirected_members.update((target, (edge["role_uri"], edge["to_raw_concept_id"])))
+            elif arc in {"all", "notAll"}:
+                redirected_cubes.add(target)
 
     partitions = []
     for (role_id, uri), role_edges in by_role.items():
@@ -494,11 +504,8 @@ def _product_role_partitions(
                 and (edge["link_qname"], edge["arc_qname"]) == ("link:presentationLink", "link:presentationArc")
             ):
                 pre[source].append(edge)
-            elif (
-                edge["network_type"] == "DEF" and edge["arcrole"].startswith("http://xbrl.org/int/dim/arcrole/")
-                and (edge["link_qname"], edge["arc_qname"]) == ("link:definitionLink", "link:definitionArc")
-            ):
-                definitions[(source, target, edge["arcrole"].rsplit("/", 1)[-1])].append(edge)
+            elif arc := _dimensional_arc(edge):
+                definitions[(source, target, arc)].append(edge)
         shapes = []
         for table, children in pre.items():
             table_axes = [edge for edge in children if edge["to_raw_concept_id"] == axis
@@ -528,7 +535,9 @@ def _product_role_partitions(
                     (table, axis, "hypercube-dimension"), (axis, domain, "dimension-domain"),
                     *((domain, member, "domain-member") for member in member_ids),
                 ])
-                if def_proof is None:
+                if def_proof is None or not _hypercube_is_uncontested(
+                    pre, definitions, uri, table, identity[4], redirected_members, redirected_cubes,
+                ):
                     return []
                 if segment:
                     (segment_axis, segment_member, *_), = identity[-1]
@@ -548,6 +557,49 @@ def _product_role_partitions(
             return []
         partitions.extend(shapes)
     return sorted(partitions, key=lambda role: (role["label"] or "", role["role_uri"]))
+
+
+def _dimensional_arc(edge: dict) -> str | None:
+    if (
+        edge["network_type"] == "DEF" and edge["arcrole"].startswith("http://xbrl.org/int/dim/arcrole/")
+        and (edge["link_qname"], edge["arc_qname"]) == ("link:definitionLink", "link:definitionArc")
+    ):
+        return edge["arcrole"].rsplit("/", 1)[-1]
+    return None
+
+
+def _hypercube_is_uncontested(
+    pre: dict, definitions: dict, uri: str, table: str, concept: str,
+    redirected_members: set[tuple[str, str]], redirected_cubes: set[tuple[str, str]],
+) -> bool:
+    # PRE is only used to widen the exclusion check. It cannot prove a
+    # positive dimensional relationship or bridge role boundaries.
+    parents = defaultdict(list)
+    for source, children in pre.items():
+        for edge in children:
+            parents[edge["to_raw_concept_id"]].append(source)
+    for source, target, arc in definitions:
+        if arc == "domain-member":
+            parents[target].append(source)
+    ancestors = {concept}
+    pending = [concept]
+    while pending:
+        for parent in parents[pending.pop()]:
+            if parent not in ancestors:
+                ancestors.add(parent)
+                pending.append(parent)
+
+    if (uri, table) in redirected_cubes or any((uri, node) in redirected_members for node in ancestors):
+        return False
+    contexts = set()
+    for node in ancestors:
+        if definitions.get((node, table, "notAll")):
+            return False
+        for edge in definitions.get((node, table, "all"), ()):
+            if edge["target_role_uri"] or edge["context_element"] not in {"segment", "scenario"}:
+                return False
+            contexts.add(edge["context_element"])
+    return len(contexts) <= 1
 
 
 def _definition_arcs(definitions: dict, keys: list[tuple]) -> list[dict] | None:

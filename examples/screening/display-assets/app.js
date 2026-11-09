@@ -881,20 +881,22 @@ function renderRevenueBreakdownTable(){
     if(!groups.has(scope))groups.set(scope,[]);
     groups.get(scope).push(entry);
   }
-  const details=[...groups].map(([scope,items])=>{
+  const details=[...groups].map(([scope,items],scopeIndex)=>{
     const subtotal=scope?revenueSegmentSubtotal(view.segments,scope,index):null;
-    const heading=scope?`<tr class="revenue-subtotal" data-revenue-depth="0"><th scope="rowgroup">부문 소계<small>${esc(revenueScopeLabel(scope))}</small></th>
+    const scopeHeadingId=`revenue-scope-heading-${scopeIndex}`;
+    const heading=scope?`<tr class="revenue-subtotal" data-revenue-depth="0"><th scope="rowgroup" id="${scopeHeadingId}">부문 소계<small>${esc(revenueScopeLabel(scope))}</small></th>
       ${revenueBreakdownValueCells(subtotal,"이 기간에 확인된 부문 매출이 없습니다.","연결 매출")}</tr>`:"";
     const firstDepth=scope?1:0,scopeLabel=revenueScopeLabel(scope);
+    const layout=view.productHierarchy[index]?.find(group=>group.scope===scope);
+    const scopeDescription=scope&&layout?.mode==="DISCLOSURES"?` aria-describedby="${scopeHeadingId}"`:"";
     const renderRow=({row,cell},depth=firstDepth,parent=false)=>{
       const parts=row.label.split(" / ");
       const label=scopeLabel&&parts.length===2&&parts[0]===scopeLabel?parts[1]:row.label;
-      return `<tr data-revenue-depth="${depth}"${parent?' class="revenue-hierarchy-parent" data-revenue-subtotal':""}><th scope="row">${esc(label)}${parent?"<small>공시 소계</small>":""}</th>
+      return `<tr data-revenue-depth="${depth}"${parent?' class="revenue-hierarchy-parent" data-revenue-subtotal':""}><th scope="row"${scopeDescription}>${esc(label)}${parent?"<small>공시 소계</small>":""}</th>
         ${revenueBreakdownValueCells(cell,"같은 범위의 준비 자료가 일치하지 않습니다.",scope?"부문 소계":"연결 매출")}</tr>`;
     };
-    const layout=view.productHierarchy[index]?.find(group=>group.scope===scope);
-    const presentation=view.kind==="products"?revenueProductPresentation(layout,items,renderRow,firstDepth):"";
-    if(presentation)return (heading?`<tbody>${heading}</tbody>`:"")+presentation;
+    const presentation=view.kind==="products"?revenueProductPresentation(layout,items,renderRow,firstDepth,heading):"";
+    if(presentation)return presentation;
     const cue=view.kind==="products"?'<tr class="revenue-hierarchy-note"><td colspan="5">합산 범위 미확인 · 공시 항목별로 표시합니다.</td></tr>':"";
     return `<tbody>${heading}${cue}${items.map(item=>renderRow(item)).join("")}</tbody>`;
   }).join("");
@@ -904,7 +906,7 @@ function renderRevenueBreakdownTable(){
       ${revenueBreakdownValueCells(view.totals[index],"이 기간에 확인된 연결 매출이 없습니다.")}</tr></tbody>
     ${details}</table>${entries.length?(view.kind==="segments"?'<p class="muted">연결 매출에는 부문 간 거래 제거 등 조정이 포함될 수 있습니다. 공시 범위가 완전하지 않으면 표의 부문별 금액만으로 연결 매출을 확인할 수 없습니다.</p>':""):'<p class="muted">이 회계기간의 매출 구성 자료가 준비되지 않았습니다.</p>'}`;
 }
-function revenueProductPresentation(layout,items,renderRow,firstDepth){
+function revenueProductPresentation(layout,items,renderRow,firstDepth,scopeHeading){
   if(!["DISCLOSURES","RECONCILED","VERIFIED"].includes(layout?.mode)||!Array.isArray(layout.groups))return "";
   const byId=new Map(items.map(item=>[item.row.id,item]));
   const seen=new Set();
@@ -915,10 +917,14 @@ function revenueProductPresentation(layout,items,renderRow,firstDepth){
     return item;
   };
   const groups=[];
+  const disclosures=layout.mode==="DISCLOSURES";
+  const note=layout.mode==="RECONCILED"?"같은 공시에서 하위 항목의 합계가 소계와 일치합니다.":disclosures?"같은 매출을 보는 별도 공시 분류입니다. 분류 간 항목은 더하지 않습니다.":"";
+  const noteRow=note?`<tr class="revenue-hierarchy-note"><td colspan="5">${note}</td></tr>`:"";
+  if(!disclosures&&layout.groups.length!==1)return "";
   for(const group of layout.groups){
     if(!Array.isArray(group?.rows)||!group.rows.length)return "";
     const label=String(group.label||"").replace(/^\d+\s*-\s*(?:Statement|Disclosure)\s*-\s*/iu,"");
-    if(layout.mode==="DISCLOSURES"&&!label)return "";
+    if(disclosures&&!label)return "";
     let rows="";
     for(const row of group.rows){
       const item=take(row?.id);
@@ -930,12 +936,11 @@ function revenueProductPresentation(layout,items,renderRow,firstDepth){
         rows+=renderRow(entry,firstDepth+1);
       }
     }
-    const heading=layout.mode==="DISCLOSURES"?`<tr class="revenue-disclosure-title"><th colspan="5" scope="rowgroup">공시 분류 · ${esc(label)}</th></tr>`:"";
-    groups.push(`<tbody data-revenue-layout="${layout.mode}"${layout.mode==="DISCLOSURES"?" data-revenue-disclosure":""}>${heading}${rows}</tbody>`);
+    const heading=disclosures?`<tr class="revenue-disclosure-title"><th colspan="5" scope="rowgroup">공시 분류 · ${esc(label)}</th></tr>`:scopeHeading+noteRow;
+    groups.push(`<tbody data-revenue-layout="${layout.mode}"${disclosures?" data-revenue-disclosure":""}>${heading}${rows}</tbody>`);
   }
   if(seen.size!==items.length)return "";
-  const note=layout.mode==="RECONCILED"?"같은 공시에서 하위 항목의 합계가 소계와 일치합니다.":layout.mode==="DISCLOSURES"?"같은 매출을 보는 별도 공시 분류입니다. 분류 간 항목은 더하지 않습니다.":"";
-  return (note?`<tbody><tr class="revenue-hierarchy-note"><td colspan="5">${note}</td></tr></tbody>`:"")+groups.join("");
+  return (disclosures?`<tbody>${scopeHeading}${noteRow}</tbody>`:"")+groups.join("");
 }
 function revenueSegmentSubtotal(segments,scope,index){
   const matches=segments.filter(row=>row.member===scope).map(row=>row.cells[index]).filter(Boolean);
