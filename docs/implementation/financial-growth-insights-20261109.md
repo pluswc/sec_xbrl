@@ -71,7 +71,7 @@ python -m pytest -q tests/test_screening_display_assets.py tests/screening/test_
 | 독립 검증 | 별도 GPT-6 Astra가 `d0941a967b`의 전체 Node 72개와 집중 pytest 71개, 표시 후속 `f4a6dd3c9c`와 `aaf4ee3257`의 집중 Node 각 27개 및 변경 경계를 검증 |
 | 실제 발행과 로컬 인수 | 2026-11-09 리드가 검증된 부모로 부가 발행을 준비하고 운영 주소에서 인수 |
 | 로컬 main | 2026-11-09 `aaf4ee32575a8f460bd57d981b35f0191461b7fd`로 fast-forward |
-| 원격 push·PR·CI·병합 | 미실행 |
+| 원격 전달 | 로컬 인수 시점에는 미실행. 2026-11-09 [PR #82 개설](#2026-11-09-원격-전달) |
 
 ## 실제 발행과 운영 인수
 
@@ -162,7 +162,7 @@ fs.closeSync(log);
 '@ | node - "$release"
 ```
 
-## 2026-11-09 원격 전달 준비
+## 2026-11-09 원격 전달
 
 사용자가 원격 브랜치 push와 main 대상 PR을 승인했다. 확인 시점의 원격 main
 `b5415b940ad84bcc24cc8a139573091140f34de3`은 로컬 인수 이력의 조상이다.
@@ -171,5 +171,10 @@ PR 전 검사에 맞춰 import 순서, 지원하지 않는 리더 타입의 예�
 `f6a71ca9b8d721f2544819ddbe09722e8f61b493d341b3454ca9672ac5dae2a2`는
 정리 전 생산기 SHA-256
 `1b76d5c5804b0ce18502c70ad1b17e4aba9dae400d4b58be50a2e07f62867542`로 생성했다.
-위 운영 증거는 그 생성 이력을 기록한다. 이 후속 커밋의 push, PR, CI 결과는
-별도로 확인한다.
+위 운영 증거는 그 생성 이력을 기록한다.
+
+원격 `codex/financial-growth-insights`에 `45e57e34144e9567a8dcbfa842a5cabdc6629e06`을
+push하고 main 대상 PR #82를 개설했다. 개설 시점의 원격 main은 위 SHA였으며
+추가 변경이나 병합 충돌이 없었다. PR은 열려 있었고 CI는 진행 중이었다.
+이후 상태는 PR 검사 탭에서 확인한다. 원격 병합은 미실행이며 앞서 기록한
+로컬 인수와 운영 발행물은 계속 적용된다. [PR #82](https://github.com/pluswc/sec_xbrl/pull/82), [PR 검사](https://github.com/pluswc/sec_xbrl/pull/82/checks)
