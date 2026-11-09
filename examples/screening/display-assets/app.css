@@ -167,7 +167,6 @@ body>header{position:static}
 #revenue-breakdown-table .revenue-consolidated{background:var(--inset);font-weight:650}
 #revenue-breakdown-table .revenue-subtotal{background:var(--sheet);font-weight:600}
 #revenue-breakdown-table .revenue-subtotal th,#revenue-breakdown-table .revenue-subtotal td{border-top:1px solid var(--line)}
-#revenue-breakdown-table .revenue-subtotal-detail th{padding-left:20px}
 
 /* Company explorer V2 uses the filing paper and annotation colors across both worksheets. */
 .explorer-v2 {
@@ -334,7 +333,11 @@ body>header{position:static}
 .explorer-v2 #revenue-breakdown-table th[scope^="row"] { background: transparent; color: var(--ink); font-size: inherit; overflow-wrap: anywhere; }
 .explorer-v2 #revenue-breakdown-table .revenue-consolidated { background: var(--blue-soft); }
 .explorer-v2 #revenue-breakdown-table .revenue-subtotal { background: var(--inset); }
-.explorer-v2 #revenue-breakdown-table .revenue-subtotal-detail th { padding-left: 24px; }
+#revenue-breakdown-table [data-revenue-depth="1"] th { padding-left: 24px; }
+#revenue-breakdown-table [data-revenue-depth="2"] th { padding-left: 36px; }
+#revenue-breakdown-table .revenue-hierarchy-parent { background: var(--inset); font-weight: 650; }
+#revenue-breakdown-table .revenue-disclosure-title th { background: var(--inset); color: var(--ink); }
+#revenue-breakdown-table .revenue-hierarchy-note td { color: var(--slate); font-size: 11px; }
 .explorer-v2 #revenue-breakdown-table small,
 .explorer-v2 #revenue-breakdown-table a { font-size: 12px; }
 .explorer-v2 #revenue-breakdown-table a { width: fit-content; }
