@@ -161,3 +161,15 @@ child.once('error', error => { console.error(error); process.exitCode = 1; });
 fs.closeSync(log);
 '@ | node - "$release"
 ```
+
+## 2026-11-09 원격 전달 준비
+
+사용자가 원격 브랜치 push와 main 대상 PR을 승인했다. 확인 시점의 원격 main
+`b5415b940ad84bcc24cc8a139573091140f34de3`은 로컬 인수 이력의 조상이다.
+PR 전 검사에 맞춰 import 순서, 지원하지 않는 리더 타입의 예외와 테스트의
+정수 Decimal 리터럴을 정리했다. 계산 규칙과 공표값은 동일하다. 운영 산출물
+`f6a71ca9b8d721f2544819ddbe09722e8f61b493d341b3454ca9672ac5dae2a2`는
+정리 전 생산기 SHA-256
+`1b76d5c5804b0ce18502c70ad1b17e4aba9dae400d4b58be50a2e07f62867542`로 생성했다.
+위 운영 증거는 그 생성 이력을 기록한다. 이 후속 커밋의 push, PR, CI 결과는
+별도로 확인한다.

@@ -13,7 +13,12 @@ from typing import Any
 
 from sec_xbrl.financial_source_compatibility import use_source_compatibility
 from sec_xbrl.metrics.quarterly_screening import _decimal_string, _exact_subtract, _percentage
-from sec_xbrl.metrics.screening import canonical_json, regular_file, safe_new_destination, sha256_file
+from sec_xbrl.metrics.screening import (
+    canonical_json,
+    regular_file,
+    safe_new_destination,
+    sha256_file,
+)
 from sec_xbrl.screening.dataset_v2 import open_screening_dataset
 from sec_xbrl.screening.dataset_v3 import MANIFEST, ScreeningDatasetV3Reader
 
@@ -308,7 +313,7 @@ def publish(manifest_path: Path, manifest_sha256: str, compatibility: dict[str, 
     with use_source_compatibility(compatibility):
         reader = open_screening_dataset(source.parent)
         if not isinstance(reader, ScreeningDatasetV3Reader):
-            raise ValueError("financial growth requires a verified combined screening dataset")
+            raise TypeError("financial growth requires a verified combined screening dataset")
         payload = {**build_artifact(reader, manifest_sha256), "source_compatibility_sha256": compatibility["sha256"]}
     if sha256_file(source) != manifest_sha256:
         raise ValueError("financial growth parent manifest changed while preparing")

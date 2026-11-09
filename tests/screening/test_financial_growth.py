@@ -4,7 +4,12 @@ from decimal import Decimal
 
 import pytest
 
-from examples.screening.prepare_financial_growth import ARITHMETIC, _dates, compare_amounts, compare_periods
+from examples.screening.prepare_financial_growth import (
+    ARITHMETIC,
+    _dates,
+    compare_amounts,
+    compare_periods,
+)
 
 CUTOFF = "2026-10-25"
 
@@ -29,7 +34,7 @@ def test_sign_policy(prior, current, status, yoy, magnitude, delta):
 
 
 def test_small_change_is_not_lost_to_decimal_context():
-    result = compare_amounts(Decimal("1." + "0" * 69 + "1"), Decimal("1"))
+    result = compare_amounts(Decimal("1." + "0" * 69 + "1"), Decimal(1))
     assert Decimal(result["delta"]) == Decimal("1e-70")
     assert Decimal(result["yoy"]) == Decimal("1e-68")
 
