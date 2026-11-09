@@ -227,6 +227,22 @@ test("financial growth uses exact current amount and dates and reports sign stat
   assert.equal(idMismatch.evidence,undefined);
 });
 
+test("negative expansion summary shows direction and magnitude while evidence retains the signed rate",()=>{
+  const h=harness(()=>{});
+  const evidence=vm.runInContext("financialGrowthEvidence",h.context);
+  const reference={observation_id:"id",value:"-10",period_start:"2025-01-01",period_end:"2026-01-01"};
+  const point={status:"영업손실 확대",evidence:{status:"NEGATIVE_MAGNITUDE_EXPANDED",
+    negative_magnitude_change:"-941.860465",delta:"-2835000000",current:reference,prior:reference}};
+  const summary=evidence(point);
+  assert.match(summary,/영업손실 확대.*확대 규모 .*941\.86.* %/s);
+  assert.doesNotMatch(summary,/-941\.86/);
+  assert.match(evidence(point,true),/음수 규모 축소율 -941\.860465 %.*전년 절댓값 − 현재 절댓값/);
+  point.status="영업현금 순유출 축소";
+  point.evidence.status="NEGATIVE_MAGNITUDE_REDUCED";
+  point.evidence.negative_magnitude_change="38.06";
+  assert.match(evidence(point),/축소 규모 .*38\.06.* %/s);
+});
+
 test("board axes adapt to displayed sign ranges and columns retain a zero baseline",()=>{
   const h=harness(()=>{});
   const {domain,plot,tick}=vm.runInContext('({domain:profileBoardDomain,plot:profileBoardPlot,tick:profileBoardTick})',h.context);

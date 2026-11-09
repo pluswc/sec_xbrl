@@ -943,7 +943,12 @@ function financialGrowthEvidence(point,exact=false){
   if(!record)return "";
   const status=point.status?`<span class="financial-growth-status" data-growth-status="${esc(record.status)}">${esc(point.status)}</span>`:"";
   const amount=(value,definition,unit)=>exact?esc(profileBoardExact(value,definition)):`${profileBoardValue(value,definition)} ${unit}`;
-  const magnitude=record.negative_magnitude_change==null?"":`<small>음수 규모 변화 ${amount(record.negative_magnitude_change,BOARD_RATE,"%")}</small>`;
+  const publishedMagnitude=record.negative_magnitude_change;
+  const expanded=record.status==="NEGATIVE_MAGNITUDE_EXPANDED";
+  const direction=expanded?"확대 규모":record.status==="NEGATIVE_MAGNITUDE_REDUCED"?"축소 규모":"음수 규모 변화";
+  const magnitude=publishedMagnitude==null?"":exact?
+    `<small>음수 규모 축소율 ${amount(publishedMagnitude,BOARD_RATE,"%")} · (전년 절댓값 − 현재 절댓값) ÷ 전년 절댓값 × 100</small>`:
+    `<small>${direction} ${amount(expanded?publishedMagnitude.replace(/^-/u,""):publishedMagnitude,BOARD_RATE,"%")}</small>`;
   const delta=`<small>금액 증감 ${amount(record.delta,BOARD_USD,"백만 USD")}</small>`;
   if(!exact)return status+magnitude+delta;
   const evidence=(label,input)=>`<small>${label} ${esc(profileBoardExact(input.value,BOARD_USD))} · ${esc(actualPeriod(input))}<br>관측 ${esc(input.observation_id)}</small>`;
