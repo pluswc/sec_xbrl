@@ -161,8 +161,6 @@ body>header{position:static}
 #revenue-breakdown-table td:nth-child(n+2):nth-child(-n+4){text-align:right;white-space:nowrap}
 #revenue-breakdown-table small,#revenue-breakdown-table a{display:block;color:var(--slate);font-size:11px}
 #revenue-breakdown-table a{color:var(--blue);margin-top:4px}
-#revenue-breakdown-series-label{margin-top:12px}
-#revenue-breakdown-chart{height:148px}
 
 #revenue-breakdown-table .revenue-consolidated{background:var(--blue-soft);font-weight:750}
 #revenue-breakdown-table .revenue-subtotal th,#revenue-breakdown-table .revenue-subtotal td{border-top:1px solid var(--line)}
@@ -313,16 +311,12 @@ body>header{position:static}
 #revenue-breakdown-status:empty { display: none; }
 .explorer-v2 .revenue-breakdown-controls { gap: 8px 12px; margin-bottom: 12px; }
 .explorer-v2 .revenue-breakdown-controls label { flex: 0 1 164px; }
-.revenue-breakdown-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 12px; align-items: start; }
+.revenue-breakdown-layout { display: grid; grid-template-columns: minmax(0,1fr); gap: 12px; }
 .revenue-breakdown-worksheet,
 .revenue-breakdown-trend { min-width: 0; border: 1px solid var(--line); border-radius: var(--panel-radius); }
 .revenue-breakdown-worksheet .table-wrap { border-radius: var(--panel-radius) var(--panel-radius) 0 0; }
 .revenue-breakdown-worksheet > p { margin: 0; padding: 8px 12px; border-top: 1px solid var(--line); }
 .revenue-breakdown-trend { padding: 12px; }
-.revenue-breakdown-trend-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
-.revenue-breakdown-trend-head h4 { margin: 0; font-size: 16px; }
-.explorer-v2 #revenue-breakdown-series-label { margin: 0; flex: 1 1 136px; max-width: 100%; min-width: 0; }
-.explorer-v2 #revenue-breakdown-chart { height: auto; aspect-ratio: 420 / 142; margin: 8px 0; border-radius: var(--control-radius); }
 .revenue-breakdown-trend > p { margin: 0; }
 .revenue-breakdown-note { margin: 12px 0 0; padding: 8px 12px; color: var(--amber); background: #faf2e1; border: 1px solid #e8d7b7; border-radius: var(--control-radius); line-height: 1.55; }
 .explorer-v2 #revenue-breakdown-table table { min-width: 566px; border-collapse: separate; border-spacing: 0; font-size: 14px; }
@@ -353,10 +347,6 @@ body>header{position:static}
   .workbench-brand { padding: 0 8px; }
   .workbench-brand strong { font-size: 18px; }
 }
-@media (max-width: 980px) {
-  .revenue-breakdown-layout { grid-template-columns: minmax(0, 1fr); }
-  .explorer-v2 #revenue-breakdown-chart { max-width: 480px; }
-}
 @media (max-width: 760px) {
   .explorer-v2 main { padding: 12px 12px 28px; }
   .explorer-v2 .task-nav { flex-wrap: wrap; }
@@ -370,3 +360,97 @@ body>header{position:static}
   .explorer-v2 #company-profile { padding: 12px; }
   .explorer-v2 .revenue-breakdown-controls label { flex: 1 1 120px; }
 }
+
+/* Profile boards keep prepared values close to the chart and its shared period control. */
+.financial-profile-board { margin: 16px 0; min-width: 0; }
+.financial-profile-board h3,.revenue-breakdown-trend h4 { margin: 0 0 8px; font-size: 18px; }
+.financial-profile-board > p { margin: 0 0 8px; }
+.profile-board-picker {
+  margin: 8px 0; min-width: 0; border: 1px solid var(--line);
+  border-radius: var(--control-radius); background: var(--sheet);
+}
+.profile-board-picker > summary { min-height: 40px; padding: 8px 12px; cursor: pointer; color: var(--blue); }
+.profile-board-count { margin-left: 4px; color: var(--slate); font-size: 12px; }
+.profile-board-choices {
+  display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,12rem),1fr));
+  gap: 4px; max-height: 15rem; overflow: auto; padding: 4px 8px 8px;
+}
+.explorer-v2 #company-profile .profile-board-choices label {
+  display: flex; flex-direction: row; align-items: center; min-height: 40px; gap: 8px;
+  padding: 4px; overflow-wrap: anywhere; color: var(--ink);
+}
+.profile-board-choices input,.revenue-board-check input { flex: none; width: 16px; height: 16px; margin: 0; }
+.profile-board-order { margin: 8px 0 12px; padding: 0; display: grid; gap: 4px; list-style: none; }
+.financial-profile-board .profile-board-order { grid-template-columns: repeat(auto-fit,minmax(min(100%,20rem),1fr)); }
+.profile-board-order li {
+  display: grid; grid-template-columns: 28px minmax(0,1fr) auto; align-items: center;
+  gap: 6px; padding: 4px 6px; background: var(--inset); border-radius: var(--control-radius);
+}
+.profile-board-order li > span { overflow-wrap: anywhere; }
+.board-order-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.explorer-v2 .board-order-actions button { font-size: 12px; padding: 4px 6px; }
+.board-swatch { display: block; width: 28px; height: 12px; }
+.board-swatch line,.board-swatch circle { stroke-width: 2; }
+.board-swatch circle { fill: var(--sheet); }
+.board-plot-canvas { max-width: 100%; overflow: auto; }
+.board-plot-canvas:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.financial-board-period { max-width: 200px; margin-bottom: 12px; }
+.financial-board-panels { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; align-items: start; }
+.financial-board-card {
+  min-width: 0; padding: 12px; background: var(--sheet);
+  border: 1px solid var(--line); border-radius: var(--panel-radius);
+}
+.financial-board-card h4 { margin: 0 0 8px; font-size: 16px; }
+.financial-board-card summary { cursor: pointer; color: var(--blue); padding: 8px 0; }
+.financial-board-card .table-wrap table { min-width: 280px; }
+.financial-board-card .series-table small,.revenue-board-readout small,#revenue-board-values small { display: block; color: var(--slate); }
+.financial-board-plot,.revenue-board-plot { min-width: 0; margin: 8px 0; padding: 8px; background: var(--inset); border-radius: var(--control-radius); }
+.financial-board-plot h5,.revenue-board-plot h5 { margin: 0 0 4px; font-size: 13px; }
+.board-plot-canvas > svg { display: block; width: 100%; min-width: 440px; height: auto; }
+.board-line { stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+.board-point { fill: var(--sheet); stroke-width: 2; stroke-dasharray: none; }
+.board-grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.board-active-period { stroke: var(--slate); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.board-y,.board-x { fill: var(--ink); font-size: 15px; font-variant-numeric: tabular-nums; }
+.board-y { text-anchor: end; }
+.board-x { text-anchor: middle; }
+.board-period-hit { fill: transparent; cursor: crosshair; }
+.board-empty { margin: 8px 0; padding: 8px 0; color: var(--slate); font-size: 13px; }
+.revenue-board-controls { display: flex; align-items: end; flex-wrap: wrap; gap: 8px 12px; }
+.explorer-v2 #company-profile .revenue-board-check { display: flex; flex-direction: row; align-items: center; min-height: 40px; }
+.financial-board-readout,.revenue-board-readout {
+  margin: 8px 0; padding: 8px; border-left: 3px solid var(--blue); background: var(--blue-soft); font-size: 13px;
+}
+.financial-board-readout small { display: block; margin-top: 3px; color: var(--slate); }
+.revenue-board-readout:empty,.financial-board-readout:empty { display: none; }
+.revenue-board-readout p { margin: 0 0 6px; }
+.revenue-board-readout ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.revenue-board-readout li { display: grid; grid-template-columns: 28px minmax(0,1fr); gap: 2px 6px; align-items: center; }
+.revenue-board-readout li > span:last-child { grid-column: 2; }
+.revenue-board-readout strong { overflow-wrap: anywhere; }
+#revenue-board-values table { min-width: 440px; }
+.revenue-breakdown-trend > .muted { margin: 8px 0; }
+.revenue-board-grid { display: grid; grid-template-columns: minmax(245px,1fr) minmax(0,2fr); gap: 12px; }
+.revenue-board-options,.revenue-board-panels { min-width: 0; }
+.revenue-board-jump { align-self: end; padding: 10px 4px; color: var(--blue); }
+@media (max-width:760px) {
+  .financial-board-panels,.revenue-board-grid { grid-template-columns: minmax(0,1fr); }
+  .explorer-v2 .board-order-actions button { padding-inline: 5px; }
+}
+
+.financial-board-controls { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; }
+.financial-board-controls label,.revenue-board-controls label { min-width: min(100%, 108px); }
+.board-zero { stroke: var(--slate); }
+.board-axis-note { margin: 0 0 4px; font-size: 12px; color: var(--slate); }
+.financial-growth-status {
+  display: inline-block; margin: 4px 0 0; padding: 3px 6px; border: 1px solid var(--line);
+  border-radius: 4px; color: var(--ink); background: var(--sheet); font-size: 12px; font-weight: 650;
+}
+.financial-board-card .series-table td { overflow-wrap: anywhere; }
+.board-column { stroke-width: 1; stroke-dasharray: none; }
+.board-column-positive { fill: var(--blue); }
+.board-column-negative { fill: var(--amber); }
+.board-column-zero { stroke-width: 3; stroke-dasharray: none; }
+.financial-growth-periods { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; padding: 0; list-style: none; }
+.financial-growth-periods button { font-size: 12px; }
+.financial-growth-periods [aria-pressed="true"] { background: var(--blue-soft); border-color: var(--blue); }

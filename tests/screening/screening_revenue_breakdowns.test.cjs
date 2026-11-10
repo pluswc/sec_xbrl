@@ -40,12 +40,12 @@ test("only a pinned asset and exact GET scope expose one company",t=>{
 function profileHarness(){
   const elements=new Map();
   const get=selector=>{
-    if(!elements.has(selector))elements.set(selector,{value:"",textContent:"",innerHTML:"",hidden:false});
+    if(!elements.has(selector))elements.set(selector,{value:"",textContent:"",innerHTML:"",hidden:false,querySelectorAll:()=>[]});
     return elements.get(selector);
   };
   const context=vm.createContext({URLSearchParams,location:{search:""},document:{querySelector:get,querySelectorAll:()=>[]}});
   vm.runInContext(source.slice(0,source.indexOf("async function boot()")),context);
-  const app=vm.runInContext("({revenueBreakdowns,revenueView,renderRevenueBreakdownTrend,revenueSourceLinks,revenueTrendSeries,renderRevenueBreakdownTable})",context);
+  const app=vm.runInContext("({revenueBreakdowns,revenueView,renderRevenueBreakdownTrend,revenueSourceLinks,revenueTrendSeries,renderRevenueBreakdownTable,revenueBoardPoint,revenueBoardLines,revenueBoardOptions,createProfileBoard,changeProfileBoard})",context);
   return {get,app};
 }
 
@@ -58,13 +58,19 @@ test("profile frequency uses its own full window and trend gaps are not connecte
   app.revenueBreakdowns.data={quarterly:{periods,groups:{segments:[row]}}};
   get("#revenue-breakdown-frequency").value="quarterly";
   get("#revenue-breakdown-kind").value="segments";
-  get("#revenue-breakdown-series").value=app.revenueTrendSeries([row],3)[0].id;
   assert.equal(app.revenueView().periods.length,3);
-  app.renderRevenueBreakdownTrend();
-  const chart=get("#revenue-breakdown-chart").innerHTML;
+  const render=(rows,ids=[])=>{
+    const lines=app.revenueTrendSeries(rows,3),view=app.revenueView();
+    const selection=app.createProfileBoard(ids.length?ids:lines.map(line=>line.id));
+    const options=app.revenueBoardOptions(lines);
+    app.revenueBreakdowns.board={view,lines,options,selection,periods:periods.map((_,index)=>({label:`period ${index}`})),active:2};
+    app.renderRevenueBreakdownTrend();
+    return get("#revenue-breakdown-chart").innerHTML;
+  };
+  const chart=render([row]);
   assert.equal((chart.match(/<circle/g)||[]).length,2);
-  assert.doesNotMatch(chart,/<line class="line"/);
-  assert.match(chart,/FY2026 Q1 자료 없음/);
+  assert.doesNotMatch(chart,/<line class="board-line"/);
+  assert.match(get("#revenue-board-values").innerHTML,/이 기간에 준비된 자료가 없습니다/);
   const member={label:"Search",scope:"services",axis_members:{product:"search",segment:"services"}};
   const first={...member,id:"old",mapping_epoch:"old",cells:[{value:"1000000"},{value:null},{value:null}]};
   const second={...member,id:"new",mapping_epoch:"new",axis_members:{segment:"services",product:"search"},
@@ -74,21 +80,72 @@ test("profile frequency uses its own full window and trend gaps are not connecte
   const combined=app.revenueTrendSeries([first,second,foreign],3);
   assert.equal(combined.length,2);
   assert.deepEqual(Array.from(combined[0].slots,item=>item?.cell.value),["1000000","2000000","3000000"]);
-  app.revenueBreakdowns.data.quarterly.groups.segments=[first,second,foreign];
-  get("#revenue-breakdown-series").value=combined[0].id;
-  app.renderRevenueBreakdownTrend();
-  const epochs=get("#revenue-breakdown-chart").innerHTML;
+  const epochs=render([first,second,foreign],[combined[0].id]);
   assert.equal((epochs.match(/<circle/g)||[]).length,3);
-  assert.equal((epochs.match(/<line class="line"/g)||[]).length,1);
-  assert.doesNotMatch(epochs,/9\.0 백만 USD/);
+  assert.equal((epochs.match(/<line class="board-line"/g)||[]).length,1);
+  assert.doesNotMatch(epochs,/9000000 USD/);
   second.mapping_review_required=true;
-  app.renderRevenueBreakdownTrend();
-  assert.doesNotMatch(get("#revenue-breakdown-chart").innerHTML,/<line class="line"/);
+  assert.doesNotMatch(render([first,second]),/<line class="board-line"/);
   second.cells[0]={value:"999000000"};
   assert.equal(app.revenueTrendSeries([first,second],3)[0].slots[0],null);
   const link=app.revenueSourceLinks([{accession:"0000000042-26-000001",filed_date:"2026-07-30"}],cik);
   assert.match(link,/https:\/\/www\.sec\.gov\/Archives\/edgar\/data\/42\/000000004226000001\//);
   assert.equal(app.revenueSourceLinks([{accession:"javascript:alert(1)"}],cik),"");
+});
+
+
+test("revenue boards keep ordered scoped series, zero, published ratios and denominator breaks",()=>{
+  const {get,app}=profileHarness();
+  const periods=[1,2,3].map(fiscal_quarter=>({fiscal_year:2026,fiscal_quarter,period_start:"2026-01-01",period_end:"2026-04-01"}));
+  const cell=(value,yoy,share,denominator)=>({value,yoy,share,ratios:{share:{denominator}}});
+  const first={label:"Search",scope:"issuer:ServicesMember",axis_members:{product:"issuer:SearchMember"},mapping_epoch:"a",
+    cells:[cell("0","0","0","SEGMENT_SUBTOTAL"),cell("2000000",null,"2.25","CONSOLIDATED"),cell("3000000","12.5","3.5","CONSOLIDATED")]};
+  const other={label:"Search",scope:"issuer:OtherMember",axis_members:{product:"issuer:SearchMember"},mapping_epoch:"b",
+    cells:[cell("1000000","2","1","SEGMENT_SUBTOTAL"),cell("2000000","4","2","SEGMENT_SUBTOTAL"),{value:null,reason:"SOURCE_NOT_PREPARED"}]};
+  const lines=app.revenueTrendSeries([first,other],3),ids=lines.map(line=>line.id);
+  const selection=app.createProfileBoard(ids);
+  const originalColor=selection.colors.get(ids[1]);
+  app.changeProfileBoard(selection,ids[1],"up");
+  assert.deepEqual(Array.from(selection.order),[ids[1],ids[0]]);
+  assert.equal(selection.colors.get(ids[1]),originalColor);
+  app.changeProfileBoard(selection,ids[0],"remove");app.changeProfileBoard(selection,ids[0],"add");
+  assert.equal(selection.order.length,2);
+  assert.equal(app.revenueBoardPoint(lines[0],1,"share").connect,false);
+  assert.equal(app.revenueBoardPoint(lines[0],2,"share").connect,true);
+  assert.equal(app.revenueBoardPoint(lines[0],0,"yoy").value,"0");
+  assert.equal(app.revenueBoardPoint(lines[0],1,"yoy").value,null);
+  assert.match(app.revenueBoardPoint(lines[1],2,"amount").reason,/공시 근거/);
+
+  get("#revenue-board-share-toggle").checked=true;
+  app.revenueBreakdowns.board={view:{periods},lines,selection,options:app.revenueBoardOptions(lines),
+    periods:periods.map(period=>({label:`FY2026 Q${period.fiscal_quarter}`})),active:1};
+  app.renderRevenueBreakdownTrend();
+  const amount=get("#revenue-breakdown-chart").innerHTML;
+  assert.equal((amount.match(/<circle/g)||[]).length,5);
+  assert.match(amount,/0 USD/);
+  const growth=get("#revenue-breakdown-growth").innerHTML;
+  const share=get("#revenue-breakdown-share").innerHTML;
+  assert.equal((growth.match(/class="board-line"/g)||[]).length,1);
+  assert.equal((share.match(/class="board-line"/g)||[]).length,2);
+  assert.match(get("#revenue-board-values").innerHTML,/공표값 2.25 %/);
+  assert.match(get("#revenue-board-values").innerHTML,/부문 소계 · Other/);
+  assert.match(get("#revenue-board-readout").innerHTML,/연결 매출/);
+});
+
+
+test("consolidated revenue is an optional distinct series of published points without a share or epoch line",()=>{
+  const {app}=profileHarness();
+  const periods=[{fiscal_year:2025},{fiscal_year:2026},{fiscal_year:2027}];
+  const [total]=app.revenueBoardLines({periods,rows:[],totals:[
+    {value:"1000000",yoy:"0"},
+    {value:"2000000",yoy:"40"},
+    {value:null,reason:"PREPARED_OBSERVATION_HELD"},
+  ]});
+  assert.equal(total.id,"consolidated");
+  assert.equal(app.revenueBoardPoint(total,0,"yoy").value,"0");
+  assert.equal(app.revenueBoardPoint(total,1,"amount").connect,false);
+  assert.equal(app.revenueBoardPoint(total,1,"share").value,null);
+  assert.match(app.revenueBoardPoint(total,2,"amount").reason,/검토 상태/);
 });
 
 

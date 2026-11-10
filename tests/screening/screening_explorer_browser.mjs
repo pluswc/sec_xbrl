@@ -143,6 +143,8 @@ try {
 
   await page.locator('[data-view="explorer"]').click({force: true});
   await page.locator('button.company', {hasText: 'AMD'}).first().click();
+  const singleTrend = page.locator('#profile-single-trend > summary');
+  if (await singleTrend.count()) await singleTrend.click();
   await page.locator('#profile-chart svg').waitFor({state: 'visible'});
   const geometry = [];
   for (const width of [1440, 1024, 768]) {

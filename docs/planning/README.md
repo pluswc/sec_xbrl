@@ -1,5 +1,17 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-09 [재무 비교 보드 전년 대비 변화 계약](../implementation/financial-growth-insights-20261109.md)은
+차트 전용 파생 발행, 부호별 표시, 실제 기간 근거와 세로축 제어를 정의한다.
+동결 소스 `aaf4ee3257`와 current50 보조 발행을 로컬 18765에서 검증하고 인수했으며
+로컬 main은 `aaf4ee3257`을 포함한다. 원격 브랜치에 `45e57e3414`를 push해
+[PR #82](https://github.com/pluswc/sec_xbrl/pull/82)를 개설했다. 개설 시점에는
+CI가 진행 중이었으며 이후 상태는 [PR 검사](https://github.com/pluswc/sec_xbrl/pull/82/checks)에서 확인한다.
+
+2026-11-09 [재무 비교 보드와 매출 추이 계약](../implementation/financial-comparison-board-20261109.md)은
+복수 지표·항목의 추이와 실제 운영 검증을 기록한다. 동결 소스 `06172d45f2`는
+독립 검증과 로컬 인수를 통과했으며 프런트엔드 18765에 적용했다. 로컬 main은
+`6914fb7307`에서 이 구현을 포함한다. 원격 push·PR·CI는 미실행이다.
+
 2026-11-08 [기업 탐색 V2 화면 계약](../implementation/explorer-v2-layout-20261108.md)은
 탐색과 매출 구성 상세의 배치·접근성·검증 및 로컬 재시작을 기록한다. 동결 소스
 `9a690e664b`는 독립 검증과 로컬 인수를 통과했으며 프런트엔드 18765에

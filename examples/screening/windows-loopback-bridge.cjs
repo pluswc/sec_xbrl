@@ -56,6 +56,8 @@ function parseArgs(argv) {
     "--assets-root",
     "--revenue-breakdowns",
     "--revenue-breakdowns-sha256",
+    "--financial-growth",
+    "--financial-growth-sha256",
     "--history-worker",
     "--journal-store",
   ]);
@@ -102,9 +104,17 @@ function parseArgs(argv) {
         !/^[0-9a-f]{64}$/u.test(text("--revenue-breakdowns-sha256"))))) {
     throw new Error("revenue breakdowns require an absolute asset path and SHA-256 pin");
   }
+  const hasGrowth = Object.hasOwn(values, "--financial-growth");
+  if (hasGrowth !== Object.hasOwn(values, "--financial-growth-sha256") ||
+      (hasGrowth && (!path.isAbsolute(text("--financial-growth")) ||
+        !/^[0-9a-f]{64}$/u.test(text("--financial-growth-sha256"))))) {
+    throw new Error("financial growth requires an absolute asset path and SHA-256 pin");
+  }
   return {
     revenueBreakdowns: hasBreakdowns ? text("--revenue-breakdowns") : null,
     revenueBreakdownsSha256: hasBreakdowns ? text("--revenue-breakdowns-sha256") : null,
+    financialGrowth: hasGrowth ? text("--financial-growth") : null,
+    financialGrowthSha256: hasGrowth ? text("--financial-growth-sha256") : null,
     historyWorker: values["--history-worker"] || null,
     journalStore: values["--journal-store"] || null,
     distribution: text("--distribution"),
@@ -185,13 +195,13 @@ function loadDisplayAssets(root) {
   return { directory, assets };
 }
 
-function loadRevenueBreakdowns(file, digest) {
+function loadProfileAsset(file, digest, label, schema, validate) {
   if (!path.isAbsolute(file) || !/^[0-9a-f]{64}$/u.test(digest)) {
-    throw new Error("revenue breakdown asset requires an absolute path and SHA-256 pin");
+    throw new Error(`${label} asset requires an absolute path and SHA-256 pin`);
   }
   const source = path.resolve(file);
   for (let entry = source; ; entry = path.dirname(entry)) {
-    if (fs.lstatSync(entry).isSymbolicLink()) throw new Error("revenue breakdown aliases are forbidden");
+    if (fs.lstatSync(entry).isSymbolicLink()) throw new Error(`${label} aliases are forbidden`);
     if (path.dirname(entry) === entry) break;
   }
   const descriptor = fs.openSync(source, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
@@ -199,62 +209,120 @@ function loadRevenueBreakdowns(file, digest) {
   try {
     const before = fs.fstatSync(descriptor);
     if (!before.isFile() || before.size < 1 || before.size > MAX_BREAKDOWN_ASSET) {
-      throw new Error("revenue breakdown asset must be a bounded nonempty file");
+      throw new Error(`${label} asset must be a bounded nonempty file`);
     }
     const buffer = Buffer.alloc(before.size + 1);
     const count = fs.readSync(descriptor, buffer, 0, buffer.length, 0);
     if (count !== before.size || fs.fstatSync(descriptor).size !== before.size ||
         crypto.createHash("sha256").update(buffer.subarray(0, count)).digest("hex") !== digest) {
-      throw new Error("revenue breakdown asset differs from pin");
+      throw new Error(`${label} asset differs from pin`);
     }
     payload = JSON.parse(buffer.subarray(0, count).toString("utf8"));
   } finally {
     fs.closeSync(descriptor);
   }
   const { schema_version, dataset_id, dataset_publication_id, financial_as_of, dataset_manifest_sha256, companies } = payload;
-  if (schema_version !== "screening-revenue-breakdowns-v1" ||
+  if (schema_version !== schema ||
       ![dataset_id, dataset_publication_id].every(value => typeof value === "string" && /^[A-Za-z0-9_.-]{1,128}$/u.test(value)) ||
       !/^\d{4}-\d{2}-\d{2}$/u.test(financial_as_of) || !/^[0-9a-f]{64}$/u.test(dataset_manifest_sha256) ||
       !companies || typeof companies !== "object" || Array.isArray(companies)) {
-    throw new Error("invalid revenue breakdown asset scope");
+    throw new Error(`invalid ${label} asset scope`);
   }
   const scope = { schema_version, dataset_id, dataset_publication_id, financial_as_of, dataset_manifest_sha256 };
+  const project = validate(payload);
   const byCik = new Map();
   for (const [cik, company] of Object.entries(companies)) {
-    if (!/^\d{10}$/u.test(cik) || !company || typeof company !== "object" ||
-        ![company.annual, company.quarterly].every(view => view && Array.isArray(view.periods) && view.groups)) {
-      throw new Error("invalid revenue breakdown company scope");
+    if (!/^\d{10}$/u.test(cik) || !company || typeof company !== "object" || Array.isArray(company)) {
+      throw new Error(`invalid ${label} company scope`);
     }
-    const body = Buffer.from(JSON.stringify({ ...company, ...scope, cik }), "utf8");
-    if (body.length > MAX_BREAKDOWN_COMPANY) throw new Error("revenue breakdown company exceeds response limit");
+    const body = Buffer.from(JSON.stringify({ ...project(company), ...scope, cik }), "utf8");
+    if (body.length > MAX_BREAKDOWN_COMPANY) throw new Error(`${label} company exceeds response limit`);
     byCik.set(cik, body);
   }
   return { scope, byCik };
 }
 
+function loadRevenueBreakdowns(file, digest) {
+  return loadProfileAsset(file, digest, "revenue breakdown", "screening-revenue-breakdowns-v1", () => company => {
+    if (![company.annual, company.quarterly].every(view => view && Array.isArray(view.periods) && view.groups)) {
+      throw new Error("invalid revenue breakdown company scope");
+    }
+    return company;
+  });
+}
+
+function loadFinancialGrowth(file, digest) {
+  const isRecord = value => value && typeof value === "object" && !Array.isArray(value);
+  const isDecimal = value => typeof value === "string" && /^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/iu.test(value);
+  const nullableDecimal = value => value === null || isDecimal(value);
+  const reference = row => row === null || isRecord(row) && typeof row.observation_id === "string" && row.end_convention === "EXCLUSIVE" &&
+    nullableDecimal(row.value) && ["period_start", "period_end"].every(key => row[key] === null || /^\d{4}-\d{2}-\d{2}$/u.test(row[key]));
+  const statuses = new Set(["UNAVAILABLE", "RATE_AVAILABLE", "ZERO_REACHED", "ZERO_BASE", "ZERO_UNCHANGED",
+    "POSITIVE_TURN", "NEGATIVE_TURN", "NEGATIVE_MAGNITUDE_REDUCED", "NEGATIVE_MAGNITUDE_EXPANDED", "NEGATIVE_MAGNITUDE_UNCHANGED"]);
+  const rowValid = row => isRecord(row) && statuses.has(row.status) && reference(row.current) && reference(row.prior) &&
+    ["yoy", "delta", "negative_magnitude_change"].every(key => nullableDecimal(row[key])) &&
+    (row.status === "UNAVAILABLE" ? row.yoy === null && row.delta === null && row.negative_magnitude_change === null :
+      row.current?.value != null && row.prior?.value != null && row.delta !== null &&
+      typeof row.basis_assurance === "string" && row.basis_assurance.length > 0);
+  return loadProfileAsset(file, digest, "financial growth", "screening-financial-growth-v1", payload => {
+    const { definitions, rule_version, source_compatibility_sha256, period_end_convention } = payload;
+    const metrics = ["operating_income", "cfo", "standardized_fcf"];
+    const expected = Object.fromEntries(Object.entries({FY: "", QTD_3M: "quarter_", TTM: "ttm_"}).flatMap(
+      ([basis, prefix]) => metrics.map(id => [prefix + id, basis])));
+    if (rule_version !== "signed-prepared-financial-yoy-v1" || period_end_convention !== "EXCLUSIVE" || !/^[0-9a-f]{64}$/u.test(source_compatibility_sha256) || !isRecord(definitions) ||
+        Object.keys(definitions).length !== Object.keys(expected).length ||
+        Object.entries(expected).some(([id, basis]) => definitions[id]?.basis !== basis ||
+          typeof definitions[id].definition_version !== "string" || !definitions[id].definition_version ||
+          !["ordinary_yoy", "negative_magnitude_change", "delta"].every(kind => {
+            const formula = definitions[id].formulas?.[kind];
+            return formula?.unit === (kind === "delta" ? "USD" : "PERCENT") &&
+              typeof formula.expression === "string" && typeof formula.eligibility === "string";
+          }))) {
+      throw new Error("invalid financial growth definitions");
+    }
+    return company => {
+      if (Object.entries(company).some(([id, periods]) => !Object.hasOwn(expected, id) || !isRecord(periods) ||
+          Object.entries(periods).some(([slot, row]) => !(expected[id] === "FY" ? /^\d{4}$/u : /^\d{4}Q[1-4]$/u).test(slot) || !rowValid(row)))) {
+        throw new Error("invalid financial growth company series");
+      }
+      return { definitions, rule_version, source_compatibility_sha256, period_end_convention, series: company };
+    };
+  });
+}
+
 function serveRevenueBreakdowns(bundle, request, response) {
+  return serveProfileAsset(bundle, request, response, "매출 구성");
+}
+function serveFinancialGrowth(bundle, request, response) {
+  if (request.method === "GET" && request.url === "/api/financial-growth") {
+    writeJson(response, 200, { configured: Boolean(bundle), ...bundle?.scope });
+    return;
+  }
+  return serveProfileAsset(bundle, request, response, "재무 전년 대비");
+}
+function serveProfileAsset(bundle, request, response, label) {
   if (request.method !== "GET") {
-    writeJson(response, 405, { error: "매출 구성 자료는 조회만 할 수 있습니다." });
+    writeJson(response, 405, { error: `${label} 자료는 조회만 할 수 있습니다.` });
     return;
   }
   if (!bundle) {
-    writeJson(response, 503, { error: "매출 구성 자료가 준비되지 않았습니다." });
+    writeJson(response, 503, { error: `${label} 자료가 준비되지 않았습니다.` });
     return;
   }
   const query = new URL(request.url, "http://127.0.0.1").searchParams;
   const keys = ["dataset_id", "dataset_publication_id", "financial_as_of", "cik"];
   if ([...query].length !== keys.length || keys.some(key => query.getAll(key).length !== 1) ||
       !/^\d{10}$/u.test(query.get("cik"))) {
-    writeJson(response, 400, { error: "매출 구성 조회 범위를 확인해 주세요." });
+    writeJson(response, 400, { error: `${label} 조회 범위를 확인해 주세요.` });
     return;
   }
   if (keys.slice(0, 3).some(key => query.get(key) !== bundle.scope[key])) {
-    writeJson(response, 409, { error: "선택한 자료 발행물에는 매출 구성 자료가 준비되지 않았습니다." });
+    writeJson(response, 409, { error: `선택한 자료 발행물에는 ${label} 자료가 준비되지 않았습니다.` });
     return;
   }
   const body = bundle.byCik.get(query.get("cik"));
   if (!body) {
-    writeJson(response, 404, { error: "이 기업의 매출 구성 자료가 준비되지 않았습니다." });
+    writeJson(response, 404, { error: `이 기업의 ${label} 자료가 준비되지 않았습니다.` });
     return;
   }
   response.writeHead(200, {
@@ -328,6 +396,7 @@ function startBridge(options) {
   const bundle = options.assetsRoot ? loadDisplayAssets(options.assetsRoot) : null;
   const breakdowns = options.revenueBreakdowns
     ? loadRevenueBreakdowns(options.revenueBreakdowns, options.revenueBreakdownsSha256) : null;
+  const growth = options.financialGrowth ? loadFinancialGrowth(options.financialGrowth, options.financialGrowthSha256) : null;
   const relay = childProcess.spawn(
     options.wsl,
     [
@@ -433,6 +502,11 @@ function startBridge(options) {
     const requestPath = (request.url || "").split("?", 1)[0];
     if (requestPath === "/api/revenue-breakdowns") {
       serveRevenueBreakdowns(breakdowns, request, response);
+      request.resume();
+      return;
+    }
+    if (requestPath === "/api/financial-growth") {
+      serveFinancialGrowth(growth, request, response);
       request.resume();
       return;
     }
@@ -549,4 +623,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { allowedPath, parseArgs, startBridge, loadDisplayAssets, loadRevenueBreakdowns, serveRevenueBreakdowns, startHistoryWorker, historyGuardRequired };
+module.exports = { allowedPath, parseArgs, startBridge, loadDisplayAssets, loadRevenueBreakdowns, serveRevenueBreakdowns, loadFinancialGrowth, serveFinancialGrowth, startHistoryWorker, historyGuardRequired };
