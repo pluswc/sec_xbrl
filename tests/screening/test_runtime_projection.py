@@ -83,6 +83,23 @@ def test_opted_in_service_preserves_verified_public_api_and_saved_records(tmp_pa
     assert reader._evidence.cache_info().misses == 0
     assert sha256_file(projected.store.path) == before
 
+    batch = projected.batch_availability(mode="PREPARED_SIMULATION", dataset_id=DATASET)
+    assert batch == legacy.batch_availability(mode="PREPARED_SIMULATION", dataset_id=DATASET)
+    annual_spec = next(row for row in reader.metric_definitions if row["metric_id"] == "revenue")
+    for mode, definition in (
+        ("LATEST_COMPANY_ANNUAL_V1", annual_spec),
+        ("LATEST_COMPANY_QUARTER_V1", spec),
+    ):
+        latest = _condition({"mode": mode, "availability": batch}, definition)
+        assert projected.preview(latest, DATASET, include_evidence=False) == legacy.preview(
+            latest, DATASET, include_evidence=False,
+        )
+    assert projected.quarter_explorer(DATASET, latest=True, include_evidence=False) == legacy.quarter_explorer(
+        DATASET, latest=True, include_evidence=False,
+    )
+    assert reader._evidence.cache_info().misses == 0
+    assert sha256_file(projected.store.path) == before
+
     assert projected.quarter_explorer(DATASET, **coord) == legacy.quarter_explorer(DATASET, **coord)
     full = projected.preview(condition, DATASET)
     assert full == legacy.preview(condition, DATASET)
@@ -104,6 +121,19 @@ def test_opted_in_service_preserves_verified_public_api_and_saved_records(tmp_pa
     assert projected.trace(saved["run_id"], cik=cik, metric_id=spec["metric_id"]) == historical.trace(
         saved["run_id"], cik=cik, metric_id=spec["metric_id"],
     )
+    comparison = historical.save_result(
+        name="same trace", content=condition, dataset_id=DATASET, preview_hash=full["preview_hash"],
+        revision_id=saved["revision_id"],
+    )
+    assert saved["input_hash"] == comparison["input_hash"]
+    assert saved["rows"] == comparison["rows"]
+    path = tmp_path / "reopened-export.json"
+    receipt = historical.export_run(saved["run_id"], path, scope="SELECTED", selected_ciks=[cik])
+    payload = json.loads(path.read_bytes())
+    assert receipt["sha256"] == sha256_file(path)
+    assert receipt["dataset_publication_id"] == verified.publication_id
+    assert payload["rows"] == [row for row in full["rows"] if row["cik"] == cik]
+    assert payload["rows"][0]["predicates"][0]["observation"]["source_lineage"]
     assert sha256_file(root / DATASET_MANIFEST) == original_manifest
 
 
