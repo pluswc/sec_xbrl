@@ -405,3 +405,53 @@ def test_load_failure_is_recorded_as_retryable_arelle_load_state(tmp_path: Path)
     assert state["stage"] == "ARELLE_LOAD"
     assert state["outcome"] == "FAILED"
     assert state["retryable"] is True
+
+
+@pytest.mark.parametrize("code", ("continuationMissing", "continuationCycle", "continuationTarget", "continuationChainNested"))
+def test_broken_continuation_fails_closed_without_reading_poison_lexical(tmp_path: Path, code: str) -> None:
+    class PoisonFact(_Fact):
+        @property
+        def rawValue(self) -> str:
+            pytest.fail("broken continuation must not evaluate rawValue")
+
+        def get(self, key: str) -> str | None:
+            return "broken-continuation" if key == "continuedAt" else None
+
+    fact = PoisonFact("broken")
+    fact.contextID = "ctx"
+    fact.format = "ixt-sec:durwordsen"
+    fatal = f"ix11.11.1.2:{code}"
+    model = type("BrokenModel", (), {"facts": (fact,), "errors": [fatal]})()
+    ingestor = Layer1Ingestor(tmp_path / "snapshots")
+    with pytest.raises(Layer1IngestionError, match=code):
+        ingestor.ingest(_resolved(tmp_path), model)
+    state, = [json.loads(path.read_text()) for path in (tmp_path / "parse_state").rglob("*.json")]
+    assert fatal in state["message"]
+    assert '"lexical_unavailable":"INVALID_CONTINUATION_CHAIN"' in state["message"]
+    assert state["quality_gate"] == "TAXONOMY_AND_TRANSFORM_RESOLUTION"
+    assert not ingestor.snapshot_dir(_resolved(tmp_path)).exists()
+
+
+def test_error_fact_diagnostics_are_bounded_and_do_not_read_valid_fact_lexicals(tmp_path: Path) -> None:
+    class PoisonValidFact(_Fact):
+        @property
+        def rawValue(self) -> str:
+            pytest.fail("valid fact diagnostics must not be persisted")
+
+    facts = [PoisonValidFact("valid")]
+    for index in range(8):
+        fact = _Fact(str(index))
+        fact.xValid = INVALID
+        fact.contextID = "ctx"
+        fact.format = "sec:durhour"
+        fact.rawValue = "x" * 2000
+        facts.append(fact)
+    model = type("InvalidModel", (), {"facts": facts, "errors": ["xmlSchema:valueError"]})()
+    ingestor = Layer1Ingestor(tmp_path / "snapshots")
+    with pytest.raises(Layer1IngestionError):
+        ingestor.ingest(_resolved(tmp_path), model)
+    state, = [json.loads(path.read_text()) for path in (tmp_path / "parse_state").rglob("*.json")]
+    detail = json.loads(state["message"].split("; fact_diagnostics=", 1)[1])
+    assert len(detail) == 5
+    assert all(len(entry["lexical"]) == 512 and entry["lexical_truncated"] for entry in detail)
+    assert all(entry["context"] == "ctx" for entry in detail)

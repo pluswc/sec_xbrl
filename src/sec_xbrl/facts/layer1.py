@@ -121,7 +121,7 @@ class Layer1Extractor:
 
     # Inline transform support changes the set of filings that can be parsed;
     # retain a distinct version for immutable snapshot and parse-state lineage.
-    parser_version = "m2-layer1-v6"
+    parser_version = "m2-layer1-v7"
 
     def extract(
         self,

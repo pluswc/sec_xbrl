@@ -1,5 +1,10 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-11 [공통 SEC durhour와 continuation 실패 진단](../implementation/sec-duration-hour-20261111.md)은
+신규 parser v7과 정확한 history 재열기 자격, bounded error-path 진단을 구현하는
+승인 범위다. 기존 v5/v6와 이미 수락된 18건을 보존하고, 소스 인수 전 실제
+실패 연간 5건 재처리는 수행하지 않는다. 독립 검증·인수·실제 재처리·main은 대기다.
+
 2026-11-11 상태 갱신: [PR #86](https://github.com/pluswc/sec_xbrl/pull/86)은
 main `d58e90ec87e2d51fbabc9b9ca49e983bcef0d80f`에 병합됐다. 아래의 PR86 OPEN/CI 대기
 문구는 전달 당시 snapshot이다. 지역 매출 [PR #87](https://github.com/pluswc/sec_xbrl/pull/87)은
