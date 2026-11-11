@@ -16,6 +16,7 @@ const readline = require("node:readline");
 const MAX_DISPLAY_ASSET = 2 * 1024 * 1024;
 const MAX_BREAKDOWN_ASSET = 16 * 1024 * 1024;
 const MAX_BREAKDOWN_COMPANY = 512 * 1024;
+const MAX_REVENUE_COMPANY = 1024 * 1024;
 const MAX_REQUEST_BODY = 1024 * 1024;
 const MAX_RESPONSE_BODY = 32 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 35000;
@@ -195,7 +196,7 @@ function loadDisplayAssets(root) {
   return { directory, assets };
 }
 
-function loadProfileAsset(file, digest, label, schema, validate) {
+function loadProfileAsset(file, digest, label, schema, validate, maxCompanyBytes = MAX_BREAKDOWN_COMPANY) {
   if (!path.isAbsolute(file) || !/^[0-9a-f]{64}$/u.test(digest)) {
     throw new Error(`${label} asset requires an absolute path and SHA-256 pin`);
   }
@@ -236,7 +237,7 @@ function loadProfileAsset(file, digest, label, schema, validate) {
       throw new Error(`invalid ${label} company scope`);
     }
     const body = Buffer.from(JSON.stringify({ ...project(company), ...scope, cik }), "utf8");
-    if (body.length > MAX_BREAKDOWN_COMPANY) throw new Error(`${label} company exceeds response limit`);
+    if (body.length > maxCompanyBytes) throw new Error(`${label} company exceeds response limit`);
     byCik.set(cik, body);
   }
   return { scope, byCik };
@@ -248,7 +249,7 @@ function loadRevenueBreakdowns(file, digest) {
       throw new Error("invalid revenue breakdown company scope");
     }
     return company;
-  });
+  }, MAX_REVENUE_COMPANY);
 }
 
 function loadFinancialGrowth(file, digest) {

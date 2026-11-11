@@ -241,3 +241,53 @@ test("prepared role hierarchy indents reported members and leaves ambiguous rows
   get("#revenue-breakdown-kind").value="segments";
   assert.match(render(),/부문 간 거래 제거/);
 });
+
+test("geography view descriptors switch without changing legacy rows and missing payload stays empty",()=>{
+  const {get,app}=profileHarness();
+  const geographic={id:"geo",label:"Europe",axis_members:{geo:"Europe",product:"Cloud"},fixed_axis_members:{product:"Cloud"},cells:[]};
+  const periods=[{fiscal_year:2025,fiscal_quarter:0}];
+  app.revenueBreakdowns.data={annual:{periods,groups:{segments:[],products:[],geography:[geographic]},
+    views:[{id:"segments",label:"사업부문"},{id:"products",label:"제품·서비스"},{id:"geography",label:"지역"}]},quarterly:{periods:[],groups:{segments:[],products:[]}}};
+  get("#revenue-breakdown-frequency").value="annual";
+  get("#revenue-breakdown-kind").value="geography";
+  assert.equal(app.revenueView().rows[0],geographic);
+  assert.match(get("#revenue-breakdown-kind").innerHTML,/지역/);
+  get("#revenue-breakdown-frequency").value="quarterly";
+  assert.equal(app.revenueView().rows.length,0);
+  assert.equal(app.revenueView().periods.length,0);
+  get("#revenue-breakdown-kind").value="products";
+  assert.equal(app.revenueView().kind,"products");
+});
+
+test("geography table preserves disclosure labels and fixed scope with an explicit share basis",()=>{
+  const {get,app}=profileHarness();
+  const periods=[{fiscal_year:2025,fiscal_quarter:4,period_start:"2025-01-01",period_end:"2026-01-01"}];
+  const cell={value:"4000000",share:"40",yoy:null,status:"REPORTED",sources:[],ratios:{share:{denominator:"FIXED_SCOPE_REPORTED"}}};
+  const row={id:"geo",label:"Europe as disclosed",axis_members:{geo:"Europe",product:"Cloud"},fixed_axis_members:{product:"issuer:CloudMember"},cells:[cell]};
+  app.revenueBreakdowns.data={cik,annual:{periods,totals:[{value:"100000000",sources:[]}],groups:{geography:[row]}}};
+  get("#revenue-breakdown-frequency").value="annual";
+  get("#revenue-breakdown-kind").value="geography";
+  get("#revenue-breakdown-period").value="0";
+  app.renderRevenueBreakdownTable();
+  const table=get("#revenue-breakdown-table").innerHTML;
+  assert.match(table,/Europe as disclosed/);
+  assert.match(table,/공시 범위 · Cloud/);
+  assert.match(table,/같은 공시 범위의 보고 매출/);
+  assert.match(table,/국가·지역은 서로 겹칠 수/);
+  assert.doesNotMatch(table,/부문 소계<small>/);
+  const [line]=app.revenueTrendSeries([row],1);
+  assert.match(app.revenueBoardOptions([line])[0].label,/공시 범위 Cloud/);
+  assert.equal(app.revenueBoardPoint(line,0,"share").basis,"같은 공시 범위의 보고 매출");
+});
+
+test("revenue response accepts a complete company above the old bound and rejects above one MiB",t=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"revenue-bound-"));
+  t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+  const file=path.join(dir,"companies.json"),view={periods:[],groups:{segments:[],products:[],geography:[]}};
+  const load=bytes=>{
+    fs.writeFileSync(file,JSON.stringify({...scope,schema_version:"screening-revenue-breakdowns-v1",dataset_manifest_sha256:"a".repeat(64),companies:{[cik]:{ticker:"TEST",annual:view,quarterly:view,records:"x".repeat(bytes)}}}));
+    return loadRevenueBreakdowns(file,crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"));
+  };
+  assert.ok(load(600000).byCik.get(cik).length>512*1024);
+  assert.throws(()=>load(1024*1024),/company exceeds response limit/);
+});

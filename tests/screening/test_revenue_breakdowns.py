@@ -382,3 +382,93 @@ def test_applicable_def_exclusion_prevents_hierarchy_even_with_positive_role_evi
                                              role_id="other", role_uri="urn:other", target_role_uri="urn:detail")])
     assert _hierarchy(values, [*base, edge("notAll", "raw-revenue", "other-table")])
     assert _hierarchy(values, [*base, edge("notAll", "unrelated-primary", "detail-table")])
+
+
+def test_geography_registry_retains_fixed_dimensions_and_existing_groups():
+    from examples.screening.prepare_revenue_breakdowns import GEOGRAPHY_AXIS, _supported_axes
+
+    fixture = _Prepared()
+    fixture.nodes.append(_node("scoped-geography", [
+        _dimension(GEOGRAPHY_AXIS, "issuer:EuropeMember"),
+        _dimension(SEGMENT_AXIS, "issuer:CloudMember"),
+        _dimension(PRODUCT, "issuer:ServiceMember"),
+    ]))
+    fixture.cells.append(fixture.cell("scoped-geography", 2, "12"))
+    projected = project_breakdowns(fixture, "TEST", CIK, CUTOFF, "QTD_3M", 8)
+    assert [view["id"] for view in projected["views"]] == ["segments", "products", "geography"]
+    assert len(projected["groups"]["segments"]) == len(projected["groups"]["products"]) == 1
+    geo, scoped = projected["groups"]["geography"]
+    assert geo["fixed_axis_members"] == {}
+    assert scoped["fixed_axis_members"] == {SEGMENT_AXIS: "issuer:CloudMember", PRODUCT: "issuer:ServiceMember"}
+    assert scoped["raw_dimensions"] == fixture.nodes[-1]["dimensions"]
+    assert scoped["cells"][1]["value"] == "12"
+    assert not _supported_axes({GEOGRAPHY_AXIS, "issuer:SimilarGeographyAxis"})
+    assert not _supported_axes({"us-gaap:StatementGeographicalAxis"})
+
+
+def test_geography_share_uses_exact_reported_fixed_scope_or_holds():
+    from examples.screening.prepare_revenue_breakdowns import GEOGRAPHY_AXIS
+
+    def cell(row):
+        return {"status": "REPORTED", "cell_id": row["source_fact_id"], "value": row["value_numeric"],
+                "sources": [{"fact_id": row["source_fact_id"], "snapshot_id": row["source_snapshot_id"],
+                             "accession": row["accession"], "filed_date": row["filed_date"],
+                             "qname": row["raw_concept_qname"]}], "share": None, "yoy": None}
+
+    total = _reported("total", "200", [])
+    parent = _reported("segment", "100", SEGMENT_DIMS)
+    scoped = _reported("scoped", "40", [*SEGMENT_DIMS, _dimension("raw-geography", "raw-europe")])
+    standalone = _reported("standalone", "60", [_dimension("raw-geography", "raw-europe")])
+    for parent_present, expected in ((True, "40.0"), (False, None)):
+        rows = [{"group": "geography", "scope": None, "axis_members": {GEOGRAPHY_AXIS: "europe"},
+                 "fixed_axis_members": {}, "cells": [cell(standalone)]},
+                {"group": "geography", "scope": None,
+                 "axis_members": {GEOGRAPHY_AXIS: "europe", SEGMENT_AXIS: "services"},
+                 "fixed_axis_members": {SEGMENT_AXIS: "services"}, "cells": [cell(scoped)]}]
+        groups = {"geography": rows, "segments": [
+            {"group": "segments", "member": "services", "scope": None,
+             "axis_members": {SEGMENT_AXIS: "services"}, "cells": [cell(parent)]}
+        ] if parent_present else []}
+        _add_revenue_ratios([cell(total)], groups, [CURRENT_PERIOD], [CURRENT_PERIOD],
+                            [total, parent, scoped, standalone])
+        assert rows[0]["cells"][0]["share"] == "30.0"
+        assert rows[1]["cells"][0]["share"] == expected
+        if parent_present:
+            assert rows[1]["cells"][0]["ratios"]["share"]["denominator"] == "FIXED_SCOPE_REPORTED"
+
+
+def test_explicit_new_view_registration_drives_axis_admission_and_grouping(monkeypatch):
+    from examples.screening import prepare_revenue_breakdowns as module
+
+    axis = "srt:MajorCustomersAxis"
+    registration = {"id": "customers", "label": "고객", "axes": [axis],
+                    "fixed_groups": ["segments"], "share_basis": "EXACT_FIXED_SCOPE"}
+    assert not module._supported_axes({axis})
+    monkeypatch.setattr(module, "REVENUE_VIEWS", (*module.REVENUE_VIEWS, registration))
+    assert module._view_for_axes({axis, SEGMENT_AXIS}) == registration
+    fixture = _Prepared()
+    fixture.nodes.append(_node("registered", [_dimension(axis, "issuer:CustomerMember")]))
+    fixture.cells.append(fixture.cell("registered", 2, "20"))
+    result = project_breakdowns(fixture, "TEST", CIK, CUTOFF, "QTD_3M", 8)
+    customer, = result["groups"]["customers"]
+    assert customer["member"] == "issuer:CustomerMember"
+    assert customer["fixed_axis_members"] == {}
+    assert result["views"][-1]["label"] == "고객"
+
+
+def test_payload_bound_counts_entire_response_scope_without_dropping_records(monkeypatch):
+    import pytest
+
+    from examples.screening import prepare_revenue_breakdowns as module
+
+    payload = {"schema_version": module.SCHEMA_VERSION, "dataset_id": "d", "dataset_publication_id": "p",
+               "financial_as_of": CUTOFF, "dataset_manifest_sha256": "a" * 64,
+               "companies": {CIK: {"ticker": "TEST", "records": "x" * 600_000}}}
+    assert module.MAX_COMPANY_BYTES == 1024 * 1024
+    scope = {key: value for key, value in payload.items() if key != "companies"}
+    exact = len(module._json(payload["companies"][CIK] | scope | {"cik": CIK}))
+    monkeypatch.setattr(module, "MAX_COMPANY_BYTES", exact)
+    assert module._bounded_payload(payload) == module._json(payload)
+    monkeypatch.setattr(module, "MAX_COMPANY_BYTES", exact - 1)
+    with pytest.raises(ValueError, match="company TEST exceeds response limit"):
+        module._bounded_payload(payload)
