@@ -32,10 +32,10 @@ ruff check .
 | 단계 | 상태 |
 | --- | --- |
 | 승인 | 2026-11-11 재무 요약 및 숫자 표시 정리 |
-| 구현 | 동결 후보에서 확인 |
-| 독립 검증 | 별도 읽기 전용 검증 대상 |
-| 로컬 인수와 운영 | 별도 판단 |
-| main·PR·CI | 별도 판단 |
+| 구현 | `6b70244d7086473533c087bd3af17b3a5e690070` 동결 |
+| 독립 검증 | 별도 Astra 소스·실제 artifact 검증 PASS, 아래 범위 참조 |
+| 로컬 인수와 운영 | 2026-11-11 리드 인수, 18765 실제 적용·검증 PASS |
+| main·PR·CI | push·PR·CI·main 병합 미수행 |
 
 ## 추가 승인: 선택 지표의 준비된 비교와 작은 차트 쌍
 
@@ -76,3 +76,50 @@ compatibility를 재작성하거나 완화하지 않는다. 새 helper는 그 �
 받는 별도 오프라인 producer 코드다. 기존 v1 builder는 그대로 호출할 수 있으며
 `prepare_financial_growth.publish`는 v2 builder를 사용한다. 재현은 기존 고정
 manifest/compatibility 인자와 새 destination으로 같은 CLI를 실행한다.
+
+## 실제 발행물과 로컬 인수 — 2026-11-11
+
+검증·운영 구현은 `6b70244d7086473533c087bd3af17b3a5e690070`이다.
+이후의 완료 문서 커밋과 구현 SHA를 구분한다. 독립 Astra는 첫 후보에서
+Python 110개를 통과했고, 최종 표시 수정에서 Node 35개를 다시 통과했다.
+작성자의 첫 후보 전체 Node 76개·관련 Python 115개와는 별도 검사 범위다.
+두 표시 수정은 매출 차트의 독립 기간 눈금을 유지하고, 펼친 %p 근거에만
+공표된 `현재 비율−전년 비율` 공식을 표시한다.
+
+실제 v2 artifact는 13,775,140 bytes, 50개 회사, 73개 정의, 23,000개
+기간 결과이며 SHA-256은
+`a9df827eba4c4570bcfc8ef70d32635535479d0227ed4b0b20dc74c2eef62938`이다.
+독립 감사는 기존 9개 지표의 3,000개 결과가 정확히 같고, 발행 가능한
+MONEY 비교 6,389개와 %p 비교 2,309개의 산술이 맞음을 확인했다.
+계산 부채의 준비 입력 계보 부족은 명시적인 예상 보류다. 이전 기간 누락이나
+기존 품질·의미 게이트에 따른 보류도 유지하며 값을 보충하지 않는다.
+
+리드의 실제 preview와 운영 화면 검사는 다음을 통과했다.
+
+- 1920·1464·1024·390px에서 31개 하단 지표의 일관된 행 폭, 문서 가로
+  넘침 없음, 금액 0자리·백분율 1자리. 1920px 비교 카드 높이는
+  703.25px에서 543px(22.8% 감소), 모바일은 532.75px에서 477.3125px다.
+- 순이익·자산·영업이익률의 자동 비교 쌍, 분기·TTM, 항목 추가·삭제·순서,
+  공유 기간 및 모바일 스크롤, 매출 3개 시계열과 비중. Apple·Alphabet·Amazon의
+  기존 계층·원값·원천 접근을 유지했다.
+- 실제 endpoint는 50개 회사의 정확한 결과, 누락 범위 400·다른 발행 범위
+  409를 통과했다. backend 19070을 유지하고 frontend 18765의 새 프로세스는
+  당시 PID 51472였다. 부모 manifest pin `afb910c0…`과 원천·기존 발행물은 유지했다.
+- `history-final.json`은 변경 전 `history-before.json`과 History GET 결과가
+  정확히 같음을 기록한다. `journal-after.json`의 SQLite 원본은 전후 byte-identical이다. SHA-256:
+  `3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`.
+
+선택적 로컬 증거는 프로젝트 `work/financial-summary-readability-20261111/evidence/`
+안의 `independent-artifact-audit.json`과 `artifact-source-pin.json`이다.
+운영·브라우저 증거는 현재 세션 visualization의
+`financial-summary-readability-20261111/` 안에 있다. `live-readability-report.json`,
+`live-endpoint-report.json`, `hierarchy-live.json`, `live-board-report.json`과
+`preview-board-report.json`이
+검사 범위를 기록한다. `bundle-hashes.json`은 고정 자산 해시이며,
+`bridge-growth.json`은 현재 bundle의 전체 재시작 인자다. 재시작할 때는
+해시를 확인한 기존 bundle과 그 `args`를 사용하고, 검증된 부모·history worker·
+19070 endpoint·저널·매출 구성을 임의로 바꾸지 않는다. `runtime.json`과
+`prior.json`은 이전 상태를 기록한 자료이므로 현재 실행 인자로 혼동하지 않는다.
+
+리드는 이 구현과 artifact를 로컬 인수했고 실제 화면에 적용했다.
+원격 push·PR·CI 및 main 병합은 이 완료 기록 시점에 수행하지 않았다.
