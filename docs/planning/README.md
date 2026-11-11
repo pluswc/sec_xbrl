@@ -1,5 +1,12 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-11 상태 갱신: [PR #86](https://github.com/pluswc/sec_xbrl/pull/86)은
+main `d58e90ec87e2d51fbabc9b9ca49e983bcef0d80f`에 병합됐다. 아래의 PR86 OPEN/CI 대기
+문구는 전달 당시 snapshot이다. 지역 매출 [PR #87](https://github.com/pluswc/sec_xbrl/pull/87)은
+기존 head `5d9b221fe0`의 CI 통과 후 이 새 main을 branch에 통합했다. 실행 코드는
+수락된 `92876be5`와 같으며 새 head의 CI·병합 판단은 별도다. PR87 병합 완료를
+이 기록으로 주장하지 않는다.
+
 2026-11-11 [공시 매출의 지역 보기와 명시적 보기 등록](../implementation/revenue-geography-20261111.md)은
 통합 코드 `92876be5b93511c7f96541ecbf82da5a2c049d54`의 독립 PASS·리드 로컬 인수 후
 18765(PID 41344)에 운영 반영했다. 기존 backend19070, 헤더 정렬·재무 요약/growth-v2,
@@ -8,6 +15,13 @@
 운영 인수 당시 상태는 INDEPENDENTLY_VERIFIED / LOCALLY_ACCEPTED / LIVE / main 미병합이었다.
 이후 사용자가 현재 범위의 main 반영을 명시 승인했고 리드가 branch push·PR/CI 전달을
 진행한다. 실제 병합 상태는 Git main의 포함 관계와 PR로 확인하며 과거 snapshot으로 고정하지 않는다.
+
+2026-11-11 원격 전달: 재무 요약·준비된 비교·헤더 정렬의 결합 HEAD
+`42a5785473`(최종 구현 `cbd3ac31530`)을
+[PR #86](https://github.com/pluswc/sec_xbrl/pull/86)으로 전달했다. 전달 당시
+main `b1b783d418`은 그대로이며 OPEN·mergeable, CI는 실행 중이다.
+최종 결과는 [PR checks](https://github.com/pluswc/sec_xbrl/pull/86/checks)를 따른다.
+아래의 로컬 전용 상태는 당시 기록이고 main 병합은 수행하지 않았다.
 
 2026-11-11 [기업 탐색 헤더 정렬](../implementation/explorer-header-sort-20261111.md)은
 기존 정렬 경로를 사용하는 기업명·숫자 헤더 버튼을 기록한다. 구현
