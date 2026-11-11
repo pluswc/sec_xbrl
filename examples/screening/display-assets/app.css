@@ -433,6 +433,9 @@ body>header{position:static}
 .revenue-board-grid { display: grid; grid-template-columns: minmax(245px,1fr) minmax(0,2fr); gap: 12px; }
 .revenue-board-options,.revenue-board-panels { min-width: 0; }
 .revenue-board-jump { align-self: end; padding: 10px 4px; color: var(--blue); }
+@media (max-width:1024px) {
+  .revenue-board-grid { grid-template-columns: minmax(0,1fr); }
+}
 @media (max-width:760px) {
   .financial-board-panels,.revenue-board-grid { grid-template-columns: minmax(0,1fr); }
   .explorer-v2 .board-order-actions button { padding-inline: 5px; }

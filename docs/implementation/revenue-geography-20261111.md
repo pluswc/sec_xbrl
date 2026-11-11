@@ -129,3 +129,18 @@ load에서 50사와 최대 응답 815,217 bytes를 확인했다. 원본 자료 �
 기존 공표 비중 0셀이다. `work/revenue-geography-20261111/fixed-parent-conflict-check.json`에
 결과를 보존한다. 이 보완은 실제 artifact 값을 바꾸지 않으므로 deep rebuild나
 기존 전체 감사는 반복하지 않았고 위 artifact bytes와 SHA-256을 그대로 유지한다.
+
+
+## Compact 화면 보완 — 2026-11-11
+
+고정 scope 보완 후보 `92f2079c44ed0f30a787f3d17968eee5de16191b`의 독립
+소스 PASS 후 리드가 실제 desktop 및 768px preview를 확인했다. 768px에서 기존
+760px breakpoint 밖의 두 열 배치가 유지되어 좁은 plot을 활성 기간으로 자동
+스크롤하면서 왼쪽 Y축 숫자 앞부분이 잘렸다. 승인된 최소 보완으로
+`app.css`의 매출 보드만 1024px 이하에서 한 열로 쌓는다. 기존 desktop 두 열,
+타이포그래피, SVG 최소 크기·축 산술, 다른 재무 보드의 breakpoint는 유지한다.
+
+Focused CSS 검사는 새 breakpoint 범위·선택자·단일 열 선언 및 기존 desktop
+기본 선언을 확인하고, 추가 3줄을 제거하면 이전 CSS와 바이트가 같음을 확인했다.
+JavaScript·Python·50사 artifact는 변경 없으므로 이전 검사·자료 근거를 재사용한다.
+리드의 compact 재촬영과 최종 live 인수는 별도다.
