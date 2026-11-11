@@ -1,5 +1,24 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-11 원격 전달: 재무 요약·준비된 비교·헤더 정렬의 결합 HEAD
+`42a5785473`(최종 구현 `cbd3ac31530`)을
+[PR #86](https://github.com/pluswc/sec_xbrl/pull/86)으로 전달했다. 전달 당시
+main `b1b783d418`은 그대로이며 OPEN·mergeable, CI는 실행 중이다.
+최종 결과는 [PR checks](https://github.com/pluswc/sec_xbrl/pull/86/checks)를 따른다.
+아래의 로컬 전용 상태는 당시 기록이고 main 병합은 수행하지 않았다.
+
+2026-11-11 [기업 탐색 헤더 정렬](../implementation/explorer-header-sort-20261111.md)은
+기존 정렬 경로를 사용하는 기업명·숫자 헤더 버튼을 기록한다. 구현
+`cbd3ac31530`은 독립 Node 33개·Ruff 및 리드의 연간·분기·TTM 실제
+키보드·정렬·기록 보존 검증을 통과했고 18765에 적용했다. 원격
+push·PR·CI·main 병합은 미수행이다.
+
+2026-11-11 [재무 요약 읽기 정리](../implementation/financial-summary-readability-20261111.md)는
+하단 지표 정렬, 반복 상자 축소, 금액·백분율 표시 및 전체 MONEY/PERCENT
+선택 지표의 준비된 전년비/%p 비교를 기록한다. 구현 `6b70244d70`과 실제
+50개 회사·73개 정의 artifact는 독립 검증 및 리드 로컬 인수를 통과했고
+18765에 적용했다. 원격 push·PR·CI·main 병합은 미수행이다.
+
 2026-11-10 [저장 공간 정리 인수 기록](../implementation/storage-retention-cleanup-20261110.md)은
 승인된 MRK 감사 DB와 압축 해제 디렉터리 1,109개의 정리 완료, 보존·복원
 근거 및 Git 생성물 제외 범위를 기록한다. 이 문서·제외 규칙의 PR·CI·main
