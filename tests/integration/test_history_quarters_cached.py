@@ -56,6 +56,7 @@ def test_default_history_build_connects_reported_and_derived_consumer(tmp_path: 
     source_log = tmp_path / "source-execution.log"
     source_log.write_text(capsys.readouterr().out)
     reported = output.parent / "reported-panels"
+    assert not (reported / ".chunks").exists()
     reported_reader = HistoryPublicationReader(reported)
     manifest = reported_reader.manifest
     expected_tables = []

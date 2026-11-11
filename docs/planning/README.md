@@ -1,5 +1,8 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-11 [History 복구 입력 목록 수정](../implementation/history-recovery-inventory-20261111.md)은
+성공 발행에 남은 빈 임시 디렉터리와 엄격한 복구 목록 검사의 충돌을 다룬다.
+
 2026-11-10 [저장 공간 정리 인수 기록](../implementation/storage-retention-cleanup-20261110.md)은
 승인된 MRK 감사 DB와 압축 해제 디렉터리 1,109개의 정리 완료, 보존·복원
 근거 및 Git 생성물 제외 범위를 기록한다. 이 문서·제외 규칙의 PR·CI·main
