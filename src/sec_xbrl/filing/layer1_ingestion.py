@@ -375,13 +375,13 @@ class Layer1Ingestor:
         if fatal:
             raise Layer1IngestionError(
                 "Arelle model has unresolved taxonomy or Inline transform errors: " + "; ".join(fatal)
-                + _failure_fact_details(model, continuation_error=any("continuation" in code.lower() for code in fatal))
+                + _failure_fact_details(model, facts=corpus.facts, continuation_error=any("continuation" in code.lower() for code in fatal))
             )
         if value_failures:
             raise Layer1IngestionError(
                 "Inline transform Fact value evaluation failed "
                 f"(first ordinals and errors: {value_failures[:5]})"
-                + _failure_fact_details(model, ordinals=failed_ordinals)
+                + _failure_fact_details(model, facts=corpus.facts, ordinals=failed_ordinals)
             )
 
         invalid = [
@@ -399,7 +399,7 @@ class Layer1Ingestor:
                 "Fact corpus contains invalid Inline transform/schema values "
                 f"(invalid xValid ordinals: {invalid[:5]}, "
                 f"transform-error sentinel ordinals: {sentinels[:5]})"
-                + _failure_fact_details(model, ordinals=set(invalid) | set(sentinels))
+                + _failure_fact_details(model, facts=corpus.facts, ordinals=set(invalid) | set(sentinels))
             )
 
 
@@ -409,11 +409,19 @@ _MAX_DIAGNOSTIC_TEXT = 512
 
 
 def _failure_fact_details(
-    model: Any, *, ordinals: set[int] | None = None, continuation_error: bool = False,
+    model: Any, *, facts: tuple[Any, ...] | None = None,
+    ordinals: set[int] | None = None, continuation_error: bool = False,
 ) -> str:
     """Report bounded Arelle effective lexicals without reimplementing Inline text."""
+    if facts is None:
+        try:
+            facts = select_fact_corpus(model).facts
+        except Layer1ExtractionError:
+            # An early fatal model error remains authoritative even when the
+            # corpus cannot yet be selected unambiguously for diagnostics.
+            return ""
     details = []
-    for ordinal, fact in enumerate(getattr(model, "facts", ())):
+    for ordinal, fact in enumerate(facts):
         selected = ordinal in ordinals if ordinals is not None else getattr(fact, "xValid", None) == INVALID
         if continuation_error:
             selected = selected or bool(getattr(fact, "get", lambda _: None)("continuedAt"))

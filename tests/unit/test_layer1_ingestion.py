@@ -455,3 +455,53 @@ def test_error_fact_diagnostics_are_bounded_and_do_not_read_valid_fact_lexicals(
     assert len(detail) == 5
     assert all(len(entry["lexical"]) == 512 and entry["lexical_truncated"] for entry in detail)
     assert all(entry["context"] == "ctx" for entry in detail)
+
+
+@pytest.mark.parametrize("legacy_fallback", (False, True))
+@pytest.mark.parametrize("failure_kind", ("invalid", "sentinel", "evaluation", "early-fatal"))
+def test_diagnostic_ordinals_use_selected_tuple_filtered_corpus(
+    tmp_path: Path, legacy_fallback: bool, failure_kind: str,
+) -> None:
+    container = _Fact("tuple")
+    container.isTuple = True
+    valid = _Fact("valid")
+    valid.rawValue = "VALID-LEXICAL"
+
+    class EvaluationFailure(_Fact):
+        @property
+        def value(self) -> str:
+            raise ValueError("bad effective lexical")
+
+    bad = EvaluationFailure("bad") if failure_kind == "evaluation" else _Fact("bad")
+    bad.rawValue = "BAD-LEXICAL"
+    if failure_kind in {"invalid", "early-fatal"}:
+        bad.xValid = INVALID
+    elif failure_kind == "sentinel":
+        bad.value = INVALIDixVALUE
+    attributes = {"factsInInstance" if legacy_fallback else "facts": (container, valid, bad),
+                  "errors": ["xmlSchema:valueError"] if failure_kind == "early-fatal" else []}
+    model = type("SelectedCorpusModel", (), attributes)()
+    ingestor = Layer1Ingestor(tmp_path / "snapshots")
+    with pytest.raises(Layer1IngestionError):
+        ingestor.ingest(_resolved(tmp_path), model)
+    state, = [json.loads(path.read_text()) for path in (tmp_path / "parse_state").rglob("*.json")]
+    detail, = json.loads(state["message"].split("; fact_diagnostics=", 1)[1])
+    assert detail["ordinal"] == 1
+    assert detail["fact_id"] == "bad"
+    assert detail["lexical"] == "BAD-LEXICAL"
+    assert "VALID-LEXICAL" not in state["message"]
+    assert not ingestor.snapshot_dir(_resolved(tmp_path)).exists()
+
+
+def test_early_fatal_error_survives_ambiguous_corpus_diagnostic_selection(tmp_path: Path) -> None:
+    fact = _Fact("one")
+    orphan = _Fact("outside-model-facts")
+    model = type("AmbiguousCorpusModel", (), {
+        "facts": (fact,), "factsInInstance": (orphan,), "errors": ["xmlSchema:valueError"],
+    })()
+    ingestor = Layer1Ingestor(tmp_path / "snapshots")
+    with pytest.raises(Layer1IngestionError, match="xmlSchema:valueError") as caught:
+        ingestor.ingest(_resolved(tmp_path), model)
+    assert "fact_diagnostics" not in str(caught.value)
+    state, = [json.loads(path.read_text()) for path in (tmp_path / "parse_state").rglob("*.json")]
+    assert "xmlSchema:valueError" in state["message"]

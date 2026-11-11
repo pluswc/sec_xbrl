@@ -91,3 +91,19 @@ namespace/context/format/전체 lexical, missing/cycle/wrong target 거부를 �
 운영자가 exact 기존 23건 계획과 별도 ISRG parent에서 5건만 재처리하고 나머지
 18건은 Raw REUSED로 유지한다. 실제 운영 결과·독립 검증·로컬 수락·main 병합은
 각각 그 증거가 생겼을 때 갱신한다. 현재 commit/push/main/수집 완료를 추정하지 않는다.
+
+## 독립 FAIL 반환과 진단 corpus 정렬 보완 — 2026-11-11
+
+초기 후보 `33044c59b92687ee470936aed0fcb22d60a0f54a`는 독립 검증에서 진단
+ordinal 정렬 P2 FAIL을 받았다. 검증기가 선택한 tuple 제외 corpus와 진단 helper의
+원래 model.facts 순서가 달라 정상 Fact의 lexical이 잘못 표시될 수 있었다.
+보완은 모든 선택 후 실패 경로에서 **동일한 corpus.facts**를 진단에 전달한다.
+선택 전 fatal 오류에서는 동일 select_fact_corpus의 legacy factsInInstance fallback을
+사용하며 corpus가 불명확하면 진단만 생략하고 원래 fatal 오류를 유지한다.
+검증 gate·변환·Raw 추출 의미는 변경하지 않는다.
+
+Tuple+정상+실패 Fact의 invalid/sentinel/evaluation/early-fatal 경로와 legacy
+fallback을 함께 검사한 신규 8개 및 불명확한 corpus의 원래 fatal 보존 1개,
+합계 **9 PASS (0.07초)**다. 변경 Python Ruff·diff whitespace도 PASS다.
+이전 578 단위/10 통합 근거는 유지하며 이 보완에서 전체 재실행이나 실제 5건
+재처리는 하지 않았다. 새 동결 SHA의 독립 검증·리드 소스 인수는 별도 대기다.
