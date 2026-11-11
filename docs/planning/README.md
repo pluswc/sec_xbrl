@@ -1,9 +1,12 @@
 # 계획 등록부 — 단일 진입점
 
 2026-11-11 [공통 SEC durhour와 continuation 실패 진단](../implementation/sec-duration-hour-20261111.md)은
-신규 parser v7과 정확한 history 재열기 자격, bounded error-path 진단을 구현하는
-승인 범위다. 기존 v5/v6와 이미 수락된 18건을 보존하고, 소스 인수 전 실제
-실패 연간 5건 재처리는 수행하지 않는다. 독립 검증·인수·실제 재처리·main은 대기다.
+소스 `82cc02eddfd6f05997c5e1e7d2a5c78ab2f4dd08`의 독립 PASS·리드 소스 인수 뒤,
+정상 공개 CLI에서 실패 연간 **5건만 v7 INGESTED**, 기존 **18건 v6 REUSED**로
+23건 Raw를 완성했다. 리드가 신규 manifest/Fact를 독립 읽기 검사해 Raw 5건을
+로컬 인수했다. 원래 162 snapshot 파일·intake·journal bytes를 보존했다.
+전체 Nasdaq 작업은 계속되며 v7 binding profile B 및 ISRG History/quality/재무
+발행은 미준비다. main은 NOT_MERGED이고 실제 동작 소스 82cc02ed는 유지한다.
 
 2026-11-11 상태 갱신: [PR #86](https://github.com/pluswc/sec_xbrl/pull/86)은
 main `d58e90ec87e2d51fbabc9b9ca49e983bcef0d80f`에 병합됐다. 아래의 PR86 OPEN/CI 대기

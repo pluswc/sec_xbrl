@@ -1,6 +1,8 @@
 # SEC durhour와 continuation-aware 실패 진단 — 2026-11-11
 
-상태: APPROVED / IMPLEMENTED 후보. 독립 검증·리드 소스 인수·실제 재처리·main 반영은 대기다.
+최신 상태(2026-11-11): 소스 82cc02ed의 INDEPENDENTLY_VERIFIED / LOCALLY_ACCEPTED,
+실제 Raw 5건 재처리 LOCALLY_ACCEPTED. main NOT_MERGED이며 History/quality/재무 발행은 미준비다.
+아래 대기 문구는 당시 단계의 기록이고 마지막 실제 Raw 인수 기록이 이를 갱신한다.
 기준 main은 `f46460086ea52a7ad5238ef04b21d528627b6e2c`다.
 
 ## 승인 범위와 의미
@@ -107,3 +109,48 @@ fallback을 함께 검사한 신규 8개 및 불명확한 corpus의 원래 fatal
 합계 **9 PASS (0.07초)**다. 변경 Python Ruff·diff whitespace도 PASS다.
 이전 578 단위/10 통합 근거는 유지하며 이 보완에서 전체 재실행이나 실제 5건
 재처리는 하지 않았다. 새 동결 SHA의 독립 검증·리드 소스 인수는 별도 대기다.
+
+
+## Slice A 독립 소스 인수와 실제 Raw 5건 인수 — 2026-11-11
+
+리드는 동결 소스 `82cc02eddfd6f05997c5e1e7d2a5c78ab2f4dd08`의 별도 읽기 전용
+독립 검증 **PASS**를 수락했다. 운영자는 해당 소스가 고정된 동안 기존 공개
+`sec_xbrl.collection_operations collect` CLI와 정확한 기존 23건 계획을 사용해
+별도 `collection-isrg-hour-v7` parent/private cache에서 실행했다. 완료 후
+리드는 신규 5개 manifest 및 concept/fact Parquet를 독립적으로 읽어 검사했으며,
+공시를 다시 parse하지 않고 실제 Raw 결과를 **LOCALLY_ACCEPTED**로 판단했다.
+
+결과는 **23건 complete = 기존 v6 18건 REUSED + 실패했던 연간 5건만 v7 INGESTED**다.
+전체 23건을 재parse하지 않았다. 신규 5건 각각의 source/materialized Fact 수는
+아래처럼 정확히 일치한다. 모두 주당 최소 시간의 `PT20H`와 기간의 `P1Y`를
+보존하며 2022–2025 네 continuation 사례도 포함한다. 원래 word-duration 문법을
+수정하거나 첫 노드 `one`만을 변환하지 않았다.
+
+| Accession | source Fact 수 = materialized Fact 수 |
+| --- | --- |
+| 0001035267-22-000014 | 1,612 |
+| 0001035267-23-000019 | 1,579 |
+| 0001035267-24-000021 | 1,626 |
+| 0001035267-25-000017 | 1,661 |
+| 0001035267-26-000010 | 1,611 |
+
+실제 CLI는 7.332030612초, process-tree peak RSS 873,040 KiB(약 0.833 GiB)였고
+운영 상한 4GiB 이내였다. 원래 snapshot **162개 파일**, 원래 ISRG intake 및
+사용자 journal bytes는 변하지 않았다. Journal SHA-256은
+`3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`다.
+새 intake SHA-256은
+`c232256552dca826a3d33e115758cf5f610a54e79189e92ae8a425885e710c41`다.
+기존 source 조사 및 baseline은 유지했다.
+
+세부 로컬 증거는 `work/nasdaq100-expansion-20261111/ISRG-raw5-actual/`의
+`resource-and-preservation.json`, `raw-inspection.json`에 있다. 전자는 CLI
+완료 직후 검사 대기 상태이고 후자의 `RAW5_VERIFIED_18_REUSED_NO_FINANCIAL_QUALIFICATION_YET`가
+후속 read-only 검사를 기록한다. 이 tracked 계약의 소스 SHA·수락 범위·수량·보존
+판단이 인계 기준이며 로컬 임시 디렉터리 없이도 범위와 상태를 이해할 수 있다.
+
+이 완료는 **Raw slice A만**의 인수다. 전체 Nasdaq 확대는 다른 운영자가 계속하며
+완료로 선언하지 않는다. v7 public source-binding profile B qualification은
+아직 미구현·미수락이고 **ISRG History/quality/financial publication은 미시작·미준비**다.
+단순 history v7 재열기 자격을 이러한 downstream 발행 승인으로 해석하지 않는다.
+main 병합·원격 push·PR은 이 소스 전달에서 수행하지 않았다. 이 후속 commit은
+문서만 변경하며 실제 적재·검증 소스는 정확히 82cc02ed로 유지한다.
