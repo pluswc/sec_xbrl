@@ -310,10 +310,47 @@ function syncScreeningPresentation(changed=false){
   const note=$("#results-draft-note");
   if(note&&(!S.run||changed))note.hidden=!S.run;
 }
+function mountScreeningWorkbench(){
+  const form=$("#criteria-form");if(form.dataset.workbenchMounted)return;
+  form.dataset.workbenchMounted="true";
+  const identity=form.querySelector(".condition-identity"),name=$("#screen-name").closest("label");
+  const saved=document.createElement("details");saved.className="screening-saved-controls";
+  saved.innerHTML='<summary>저장 조건 불러오기</summary><div class="screening-saved-fields"></div>';
+  saved.querySelector(".screening-saved-fields").append($("#saved-screen").closest("label"),$("#open-screen"));
+  const period=document.createElement("fieldset");period.className="screening-period-fields";
+  period.innerHTML='<legend>분석 기간</legend>';
+  period.append(...["#frequency","#period-mode","#fiscal-year","#calendar-quarter","#period-offset"].map(id=>$(id).closest("label")));
+  const inputContext=document.createElement("div");inputContext.className="screening-input-context";
+  inputContext.append(period,form.querySelector(".company-scope"));
+  identity.replaceChildren(name,saved);identity.after(inputContext);
+  const workspace=$("#results-title").closest(".workspace"),toolbar=document.createElement("div");
+  toolbar.className="screening-result-toolbar";
+  toolbar.append(workspace.querySelector(".filters"),workspace.querySelector(".pass-only"));
+  workspace.querySelector(".section-head").after(toolbar);
+}
+function screeningResultMetricCell(predicate,metric){
+  const observation=predicate.observation||{},missing=observation.value===null||observation.value===undefined;
+  const reason=missing?businessReason(predicate.reason):"",period=actualPeriod(observation);
+  const value=missing?reason:`${displayValue(observation.value,metric)} ${unitLabel(metric)}`;
+  const tooltip=`${metric.label} · ${value} · 실제 기간 ${period}${missing?"":` · 공표값 ${observation.value} ${metric.unit||unitLabel(metric)}`}`;
+  const content=missing?`<span class="missing" aria-label="${esc(tooltip)}">—</span><small>자료 확인 필요</small>`:
+    `<span class="display-number explorer-value" title="${esc(tooltip)}" aria-label="${esc(tooltip)}"><span class="number-text">${esc(displayValue(observation.value,metric))}</span><span class="number-clipped" aria-hidden="true">…</span></span>`;
+  return `<td class="metric-cell" title="${esc(tooltip)}">${content}</td>`;
+}
+function displayTableColumnRoles(role,headings){
+  return headings.map((cell,index)=>{
+    if(cell.hidden)return "hidden";
+    if(role==="explorer")return ["select","company","period"][index]||"number";
+    if(role==="results")return index===0?"select":index===1?"company":index===2||index===headings.length-1?"status":cell.dataset?.displayRole==="period"?"period":"number";
+    if(role==="comparison")return index===0?"label":"number";
+    return index===(role==="peer"?3:2)?"number":index===(role==="peer"?2:1)?"period":"context";
+  });
+}
 function mountScreeningPresentation(){
+  mountScreeningWorkbench();
   $(".criteria .section-head p").textContent="조건과 실행 결과는 따로 저장할 수 있습니다.";
   const note=document.createElement("p");
-  note.id="results-draft-note";note.hidden=true;
+  note.id="results-draft-note";note.hidden=true;note.setAttribute("role","status");
   note.textContent="마지막 실행 결과입니다. 편집한 조건을 보려면 다시 시험 실행하세요.";
   $("#counts").after(note);
   syncScreeningPresentation();
@@ -324,7 +361,7 @@ function clearResult(){S.run=null;S.preview=null;S.resultContent=null;S.selected
 function setRun(r,content){S.run=r;const note=$("#results-draft-note");if(note)note.hidden=true;S.resultContent=content||S.revision?.content;S.selected.clear();$("#period-context").textContent=latestScreenPolicy(r.period_policy)?`회사별 최신 · ${availabilityCaption(r.period_policy.availability)}`:r.period_policy.mode==="FIXED_FISCAL_YEAR"?`FY${r.period_policy.fiscal_year}`:r.period_policy.mode==="FIXED_CALENDAR_QUARTER_END"?quarterLabel(r.period_policy):`최근 완료 연도${r.period_policy.offset?` -${r.period_policy.offset}`:""}`;$("#asof").textContent=r.financial_as_of;$("#counts").textContent=`${r.run_id?"저장된 결과":"시험 결과 · 저장 전"} · 대상 ${r.counts.target} · 충족 ${r.counts.pass} · 미충족 ${r.counts.fail} · 확인 필요 ${r.counts.undetermined}`;renderRows();syncResultActions();setCriteriaCompact(true)}
 function selectedMetrics(){return(S.resultContent?.predicates||[]).map(x=>metricById(x.metric_id))}
 function decisionFor(cik){const e=S.decisions.filter(x=>x.cik===cik);return e.length?`<span class="badge review">${decisionLabel(e.at(-1).state)}</span>`:'<span class="muted">기록 없음</span>'}
-function renderRows(){if(!S.run)return;const ms=selectedMetrics(),latest=latestScreenPolicy(S.run.period_policy),showCompany=!S.admin||columnEnabled(S.resultContent.columns,"company");$("#result-head").innerHTML=`<tr><th><span class="sr-only">선택</span></th><th ${showCompany?'':'hidden'}>기업</th><th>결과</th>${latest?"<th>선택 재무기간</th>":""}${ms.map(m=>`<th>${esc(m.label)}<br><small>${unitLabel(m)}</small></th>`).join("")}<th>관심상태</th></tr>`;const rows=S.run.rows.filter(r=>S.activeFilter==="ALL"||r.aggregate===S.activeFilter).filter(r=>$("#show-all").checked||r.aggregate==="PASS");$("#result-body").innerHTML=rows.length?rows.map(row=>`<tr data-cik="${row.cik}" class="${S.selected.has(row.cik)?'selected':''}"><td><input type="checkbox" aria-label="${esc(row.ticker)} 선택" ${S.selected.has(row.cik)?'checked':''}></td><td ${showCompany?'':'hidden'}><button class="company" data-open="${row.cik}"><strong>${esc(row.name||row.ticker)}</strong><small>${esc(row.ticker)}</small></button></td><td><span class="badge ${row.aggregate.toLowerCase()}">${aggregateLabel(row.aggregate)}</span></td>${latest?`<td>${esc(companyPeriodCaption(row.resolved_period))}</td>`:""}${row.predicates.map(p=>{const m=metricById(p.metric_id),o=p.observation||{},missing=o.value===null||o.value===undefined;return`<td class="metric-cell" title="${missing?esc(businessReason(p.reason)):esc(m.label+' · '+(o.period_end||o.context_end_date||''))}">${missing?'—':numberMarkup(o.value,m)}${missing?'<small>자료 확인 필요</small>':''}</td>`}).join("")}<td>${decisionFor(row.cik)}</td></tr>`).join(""):`<tr><td colspan="${4+ms.length+(latest?1:0)}" class="empty">해당하는 기업이 없습니다.</td></tr>`;$$('[data-cik] input').forEach(x=>x.onchange=()=>{const c=x.closest("tr").dataset.cik;x.checked?S.selected.add(c):S.selected.delete(c);renderRows()});$$('[data-open]').forEach(x=>x.onclick=()=>withBusy(()=>openEvidence(x.dataset.open,x)).catch(fail))}
+function renderRows(){if(!S.run)return;const ms=selectedMetrics(),latest=latestScreenPolicy(S.run.period_policy),showCompany=!S.admin||columnEnabled(S.resultContent.columns,"company");$("#result-head").innerHTML=`<tr><th><span class="sr-only">선택</span></th><th ${showCompany?'':'hidden'}>기업</th><th>결과</th>${latest?'<th data-display-role="period">선택 재무기간</th>':""}${ms.map(m=>`<th title="${esc(m.label)} · ${esc(unitLabel(m))}">${esc(explorerMetricCaption(m))}<br><small>${esc(unitLabel(m))}</small></th>`).join("")}<th>관심상태</th></tr>`;const rows=S.run.rows.filter(r=>S.activeFilter==="ALL"||r.aggregate===S.activeFilter).filter(r=>$("#show-all").checked||r.aggregate==="PASS");$("#result-body").innerHTML=rows.length?rows.map(row=>`<tr data-cik="${row.cik}" class="${S.selected.has(row.cik)?'selected':''}"><td><input type="checkbox" aria-label="${esc(row.ticker)} 선택" ${S.selected.has(row.cik)?'checked':''}></td><td ${showCompany?'':'hidden'}><button class="company" data-open="${row.cik}" title="${esc(row.name||row.ticker)} · ${esc(row.ticker)}" aria-label="${esc(row.name||row.ticker)} 재무 상세 열기"><strong>${esc(row.name||row.ticker)}</strong><small>${esc(row.ticker)}</small></button></td><td><span class="badge ${row.aggregate.toLowerCase()}">${aggregateLabel(row.aggregate)}</span></td>${latest?`<td>${esc(companyPeriodCaption(row.resolved_period).replace(" · 공시일 ","\n공시일 "))}</td>`:""}${row.predicates.map(predicate=>screeningResultMetricCell(predicate,metricById(predicate.metric_id))).join("")}<td>${decisionFor(row.cik)}</td></tr>`).join(""):`<tr><td colspan="${4+ms.length+(latest?1:0)}" class="empty">해당하는 기업이 없습니다.</td></tr>`;$$('[data-cik] input').forEach(x=>x.onchange=()=>{const c=x.closest("tr").dataset.cik;x.checked?S.selected.add(c):S.selected.delete(c);renderRows()});$$('[data-open]').forEach(x=>x.onclick=()=>withBusy(()=>openEvidence(x.dataset.open,x)).catch(fail))}
 
 async function openEvidence(cik,b){S.lastFocus=b;S.evidenceRow=S.run.rows.find(x=>x.cik===cik);const r=S.evidenceRow;$("#evidence-title").textContent=`${r.name||r.ticker} 재무 상세`;$("#evidence-metric").innerHTML=r.predicates.map(x=>`<option value="${x.metric_id}">${esc(metricById(x.metric_id).label)}</option>`).join("");const p=await api(`/api/peers?dataset_id=${encodeURIComponent(S.run.dataset_id)}&dataset_publication_id=${encodeURIComponent(S.run.dataset_publication_id)}&cik=${cik}`);$("#peer-company").innerHTML='<option value="">기업 선택</option>'+p.peers.filter(x=>x.financial_prepared).map(x=>`<option value="${x.cik}">${esc((x.tickers||[])[0]||x.name)}</option>`).join("");$("#peer-comparison").textContent="같은 업종의 넓은 후보군이며 재무항목이 같다는 뜻은 아닙니다.";$("#evidence").dataset.cik=cik;$("#evidence").hidden=false;await renderMetricEvidence();$("#evidence").focus()}
 function metricHelp(m){return m.description||({revenue_yoy:"올해 매출과 직전 회계연도 매출을 비교한 성장률입니다.",gross_margin:"매출총이익을 매출로 나눈 비율입니다.",operating_margin:"영업이익을 매출로 나눈 비율입니다.",net_margin:"순이익을 매출로 나눈 비율입니다.",standardized_fcf:"영업활동 현금흐름에서 유형자산 취득 지출을 뺀 표준화 지표입니다. 회사가 별도로 제시하는 FCF와 같다는 뜻은 아닙니다.",fcf_margin:"표준화 FCF를 매출로 나눈 비율입니다.",current_ratio:"유동자산을 유동부채로 나눈 기말 비율입니다.",liabilities_to_equity:"부채총계를 자본으로 나눈 비율입니다. 부채총계는 차입금과 다릅니다.",liabilities_to_assets:"부채총계를 자산으로 나눈 비율입니다.",net_debt:"직접 보고된 결합 차입금에서 현금 및 현금성자산을 뺀 금액입니다."})[m.metric_id]||"회사가 보고한 공시 항목입니다."}
@@ -2268,13 +2305,7 @@ function prepareDisplayTable(table){
     table.before(wrap);wrap.append(table);
   }
   const headings=[...table.tHead?.rows[0]?.cells||[]],style=getComputedStyle(table),width=name=>parseFloat(style.getPropertyValue(name));
-  const roles=headings.map((cell,index)=>{
-    if(cell.hidden)return"hidden";
-    if(role==="explorer")return["select","company","period"][index]||"number";
-    if(role==="results")return index===0?"select":index===1?"company":index===2||index===headings.length-1?"status":"number";
-    if(role==="comparison")return index===0?"label":"number";
-    return index===(role==="peer"?3:2)?"number":index===(role==="peer"?2:1)?"period":"context";
-  });
+  const roles=displayTableColumnRoles(role,headings);
   const widths=roles.map(kind=>kind==="hidden"?0:kind==="status"?width("--status-column"):kind==="context"?(role==="series"?92:112):kind==="number"&&role==="comparison"?188:width({select:"--select-column",company:"--company-column",period:"--period-column",number:"--number-column",label:"--label-column"}[kind]));
   let group=table.querySelector(":scope > colgroup");
   if(!group){group=document.createElement("colgroup");table.prepend(group)}

@@ -568,3 +568,55 @@ g.board-item-active .board-line { stroke-width: 4; }
 .revenue-breakdown-trend:has(.board-item-active) g[data-board-item]:not(.board-item-active) { opacity: .35; }
 .revenue-breakdown-trend:has(.board-item-active) .board-near-legend button:not(.board-item-active) { opacity: .65; }
 .board-context a { display: inline-block; margin-top: 4px; color: var(--blue); }
+/* Screening worksheet: precise conditions at a bounded distance, results at content width. */
+.explorer-v2 .criteria #criteria-form { max-width: 1032px; padding: 16px; }
+.explorer-v2 .criteria .condition-identity { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: start; }
+.explorer-v2 .criteria .condition-identity > label { flex: 0 1 400px; width: 100%; }
+.explorer-v2 .criteria label { font-size: 13px; line-height: 1.4; }
+.explorer-v2 .criteria input:not([type="checkbox"]),.explorer-v2 .criteria select { font-size: 14px; min-width: 0; width: 100%; }
+.explorer-v2 .criteria fieldset { min-width: 0; border: 0; border-top: 1px solid var(--line); padding: 12px 0 0; margin: 16px 0; }
+.explorer-v2 .criteria legend { color: var(--ink); font-size: 14px; font-weight: 650; padding: 0 8px 0 0; }
+.screening-saved-controls { flex: 0 1 480px; min-width: 0; width: 100%; }
+.screening-saved-controls summary { cursor: pointer; color: var(--blue); font-size: 13px; padding: 4px 0; }
+.screening-saved-fields { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 8px; padding-top: 8px; }
+.explorer-v2 .criteria .screening-saved-fields button { width: fit-content; }
+.explorer-v2 .criteria .screening-period-fields { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 0; }
+.explorer-v2 .criteria .screening-period-fields > label { flex: 0 1 200px; min-width: 140px; }
+.explorer-v2 .criteria .company-scope { grid-template-columns: minmax(0,320px) minmax(0,480px); gap: 12px; }
+.explorer-v2 .criteria .catalog-tools { grid-template-columns: minmax(140px,180px) minmax(0,360px) auto; justify-content: start; gap: 12px; }
+.explorer-v2 .criteria .predicate { grid-template-columns: minmax(240px,1fr) 100px 176px 64px; max-width: 1000px; align-items: start; gap: 8px; }
+.explorer-v2 .criteria .predicate > .remove { margin-top: 23px; }
+.explorer-v2 .criteria .metric-hint { font-size: 12px; line-height: 1.5; font-weight: 400; }
+.explorer-v2 .criteria #money-note { font-size: 12px; white-space: nowrap; }
+.explorer-v2 .criteria .view-settings { max-width: 800px; }
+.explorer-v2 .workspace { --select-column: 36px; --company-column: 240px; --status-column: 120px; --period-column: 220px; --number-column: 140px; }
+.explorer-v2 .workspace > .section-head { align-items: start; flex-wrap: wrap; }
+.screening-result-toolbar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 8px 16px; }
+.explorer-v2 .screening-result-toolbar .filters { padding: 0; margin: 0; flex-wrap: wrap; }
+.explorer-v2 .screening-result-toolbar .pass-only { margin: 0; padding: 4px 0; }
+.explorer-v2 .workspace .display-table .company strong { font-size: 14px; }
+.explorer-v2 .workspace .display-table th { font-size: 14px; }
+.explorer-v2 .workspace .display-table small { font-size: 12px; }
+.explorer-v2 .workspace .display-table .period-cell { font-size: 13px; line-height: 1.45; white-space: pre-line; overflow-wrap: normal; word-break: keep-all; text-align: left; }
+@media (max-width:760px) {
+  .explorer-v2 .criteria #criteria-form { padding: 12px; }
+  .explorer-v2 .criteria .company-scope,.explorer-v2 .criteria .catalog-tools { grid-template-columns: minmax(0,1fr); }
+  .explorer-v2 .criteria .predicate { grid-template-columns: minmax(0,1fr) 100px; }
+  .explorer-v2 .criteria .predicate > label:first-child { grid-column: 1/-1; }
+  .explorer-v2 .criteria .predicate > label:nth-child(2) { grid-column: 2; grid-row: 2; }
+  .explorer-v2 .criteria .predicate > label:nth-child(3) { grid-column: 1; grid-row: 2; }
+  .explorer-v2 .criteria .predicate > .remove { grid-column: 2; margin-top: 0; justify-self: end; }
+  .explorer-v2 .criteria .screening-period-fields > label { flex: 1 1 140px; }
+  .explorer-v2 .workspace { --select-column: 32px; --company-column: 144px; }
+}
+
+.explorer-v2 .criteria { max-width: 1064px; }
+.screening-input-context { min-width: 0; }
+.explorer-v2 .criteria .view-settings > div { grid-template-columns: minmax(0,180px) minmax(0,180px) minmax(0,1fr); }
+@media (min-width:1100px) {
+  .screening-input-context { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 24px; align-items: start; }
+  .explorer-v2 .criteria .screening-input-context .company-scope { display: block; }
+  .explorer-v2 .criteria .screening-input-context .company-scope > label { max-width: 480px; margin-bottom: 8px; }
+}
+@media (max-width:760px) { .explorer-v2 .criteria .view-settings > div { grid-template-columns: minmax(0,1fr); padding-inline: 0; } }
+.explorer-v2 .criteria .screening-period-fields > #screen-batch-status { order: 1; flex: 1 0 100%; margin: 4px 0 0; font-size: 12px; line-height: 1.5; }
