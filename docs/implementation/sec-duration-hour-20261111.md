@@ -154,3 +154,51 @@ fallback을 함께 검사한 신규 8개 및 불명확한 corpus의 원래 fatal
 단순 history v7 재열기 자격을 이러한 downstream 발행 승인으로 해석하지 않는다.
 main 병합·원격 push·PR은 이 소스 전달에서 수행하지 않았다. 이 후속 commit은
 문서만 변경하며 실제 적재·검증 소스는 정확히 82cc02ed로 유지한다.
+
+
+## Slice B: v7 public binding/quality 자격 보완 — 2026-11-12
+
+사용자는 A의 main 통합 과정에서 확인한 default-v7 binding 누락의 최소 보완을
+승인했다. 리드는 새 v7 profile의 의미와 복잡한 hour source의 제한을 확정했다.
+B는 `source_bindings.py`, `metric_quality.py`의 정상 준비/읽기 경로와 focused
+테스트만 보완하며 수락된 parser A `82cc02eddfd6f05997c5e1e7d2a5c78ab2f4dd08`의
+변환·오류 진단·Raw 계보를 변경하지 않는다. 실제 5건 재parse나 완료된 회사의
+quality 감사·발행은 이 소스 구현에서 반복하지 않는다.
+
+정확한 신규 등록은 다음과 같다.
+
+- parser: `m2-layer1-v7`
+- profile: `sec-inline-duration-hour-approved-lexical-and-metadata-v1`
+- canonical parser source: `82cc02eddfd6f05997c5e1e7d2a5c78ab2f4dd08`
+- transform rule: `sec-duration-hour-conformance-v1`
+
+기존 v5/v6 profile 사전·source commit·rule version과 기존 quality의 공통
+RULE_VERSIONS는 그대로다. v1 publication도 변경하지 않고 기존 exact-v5 제한을
+유지한다. 별도 경계 회귀에서 v7 snapshot의 v1 발행 및 자체 재해시한 v7 선언의
+v1 재열기를 모두 거부함을 확인했다. v2 producer,
+producer-completeness scan과 reader는 각 snapshot의 정확한 parser profile에
+따라 duration 증거를 허용한다. `durhour`는 v7에서만 추가되며 v5/v6·미등록 v8에
+hour 자격을 주지 않는다. 문서의 원본 hash, Raw fact/context/concept/locator,
+전체 증거 completeness와 값 일치 검사는 유지한다. Unknown/self-declared/tampered
+profile을 허용하는 wildcard나 gate bypass는 없다.
+
+Quality의 hour 기대값은 A의 `_hour_duration`을 그대로 호출하여 `PT20H`, 부호와
+소수 절삭 의미를 재사용한다. 기존 day/week/month/year의 계산과 결과는 같다.
+Hour 증거가 `continuedAt` 또는 `ix:exclude`를 가지면 직접 노드의 itertext를
+전체 lexical로 승인하지 않고 `complete direct lexical` 오류로 **fail closed**한다.
+이 제한은 B의 source-evidence qualification에만 적용한다. A가 이미 보존한
+정상 continuation Raw나 기존 durwordsen 문법을 변경하지 않는다. 향후 복잡한
+hour source를 지원하려면 별도 완전 lexical qualification이 필요하다.
+
+자체 source-binding/quality 단위 회귀 **29 PASS(2.10초)**와 변경 Python Ruff,
+diff whitespace가 PASS다. 새 사례는 현재 default parser v7만의 정상
+prepare-source-index→binding→quality→reader 경로, 혼합 v6/v7, canonical82 pin,
+PT20H 증거와 Raw bytes 보존, 기존 v5/v6 profile의 정확한 사전 보존,
+미등록/재해시된 tampered profile 거부, 복잡한 hour source 거부 및 PT21H로 잘못
+정규화된 Raw의 정상 quality 준비 거부를 포함한다. History는 이 fixture에서
+기존 테스트 helper로 대체하며 실제 ISRG History/quality 성공을 주장하지 않는다.
+
+상태: B IMPLEMENTED 후보 / 독립 검증·리드 수락 대기. A의 실제 5건 Raw 인수와
+18건 재사용·보존은 유지한다. Main 통합은 사용자 승인 아래 별도 PR/CI 절차로
+진행하며 B의 자체 테스트만으로 병합/실제 재무 발행 완료를 주장하지 않는다.
+Nasdaq의 기존 동결 401/882 queue·운영 자료·journal은 수정하지 않았다.
