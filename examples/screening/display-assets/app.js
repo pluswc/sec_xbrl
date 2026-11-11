@@ -1271,7 +1271,7 @@ function mountRevenueBreakdowns(){
     <div id="revenue-breakdown-content" hidden>
       <div class="revenue-breakdown-controls">
         <label>재무 빈도<select id="revenue-breakdown-frequency"><option value="annual">연간</option><option value="quarterly">분기</option></select></label>
-        <label>구성 구분<select id="revenue-breakdown-kind"><option value="segments">사업부문</option><option value="products">제품·서비스</option></select></label>
+        <label>구성 구분<select id="revenue-breakdown-kind"><option value="segments">사업부문</option><option value="products">제품·서비스</option><option value="geography">지역</option></select></label>
         <label>표의 회계기간<select id="revenue-breakdown-period"></select></label>
         <a class="revenue-board-jump" href="#revenue-breakdown-trend-title">항목별 추이로 이동 ↓</a>
       </div>
@@ -1363,11 +1363,19 @@ async function loadRevenueBreakdowns(){
 function revenuePeriodLabel(period,frequency){
   return `FY${period.fiscal_year}${frequency==="quarterly"?" Q"+period.fiscal_quarter:""}`;
 }
+const REVENUE_VIEW_DEFAULTS=[{id:"segments",label:"사업부문"},{id:"products",label:"제품·서비스"},{id:"geography",label:"지역"}];
+function revenueViewDescriptors(view){
+  return Array.isArray(view?.views)&&view.views.length?view.views:REVENUE_VIEW_DEFAULTS;
+}
 function revenueView(){
-  const frequency=$("#revenue-breakdown-frequency").value,kind=$("#revenue-breakdown-kind").value;
-  const view=revenueBreakdowns.data?.[frequency];
+  const frequency=$("#revenue-breakdown-frequency").value;
+  const select=$("#revenue-breakdown-kind"),view=revenueBreakdowns.data?.[frequency];
   if(!view)return null;
-  return {frequency,kind,periods:view.periods,rows:view.groups[kind]||[],segments:view.groups.segments||[],totals:view.totals||[],productHierarchy:view.product_hierarchy||[]};
+  const descriptors=revenueViewDescriptors(view),previous=select.value;
+  select.innerHTML=descriptors.map(item=>`<option value="${esc(item.id)}">${esc(item.label)}</option>`).join("");
+  select.value=descriptors.some(item=>item.id===previous)?previous:descriptors[0].id;
+  const kind=select.value;
+  return {frequency,kind,periods:view.periods||[],rows:view.groups?.[kind]||[],segments:view.groups?.segments||[],totals:view.totals||[],productHierarchy:view.product_hierarchy||[]};
 }
 function renderRevenueBreakdowns(keepPeriod=false){
   const view=revenueView();
@@ -1421,8 +1429,8 @@ function renderRevenueBreakdownTable(){
     const renderRow=({row,cell},depth=firstDepth,parent=false)=>{
       const parts=row.label.split(" / ");
       const label=scopeLabel&&parts.length===2&&parts[0]===scopeLabel?parts[1]:row.label;
-      return `<tr data-revenue-depth="${depth}"${parent?' class="revenue-hierarchy-parent" data-revenue-subtotal':""}><th scope="row"${scopeDescription}>${esc(label)}${parent?"<small>공시 소계</small>":""}</th>
-        ${revenueBreakdownValueCells(cell,"같은 범위의 준비 자료가 일치하지 않습니다.",scope?"부문 소계":"연결 매출")}</tr>`;
+      return `<tr data-revenue-depth="${depth}"${parent?' class="revenue-hierarchy-parent" data-revenue-subtotal':""}><th scope="row"${scopeDescription}>${esc(label)}${view.kind==="geography"&&Object.keys(row.fixed_axis_members||{}).length?`<small>공시 범위 · ${esc(Object.values(row.fixed_axis_members).map(revenueScopeLabel).join(" / "))}</small>`:""}${parent?"<small>공시 소계</small>":""}</th>
+        ${revenueBreakdownValueCells(cell,"같은 범위의 준비 자료가 일치하지 않습니다.",Object.keys(row.fixed_axis_members||{}).length?"같은 공시 범위의 보고 매출":scope?"부문 소계":"연결 매출")}</tr>`;
     };
     const presentation=view.kind==="products"?revenueProductPresentation(layout,items,renderRow,firstDepth,heading):"";
     if(presentation)return presentation;
@@ -1433,7 +1441,7 @@ function renderRevenueBreakdownTable(){
     <thead><tr><th scope="col">공시 항목</th><th scope="col">매출</th><th scope="col">검토 비중 (%)</th><th scope="col">전년비 (%)</th><th scope="col">자료·출처</th></tr></thead>
     <tbody><tr class="revenue-consolidated" data-revenue-depth="0"><th scope="row">연결 매출</th>
       ${revenueBreakdownValueCells(view.totals[index],"이 기간에 확인된 연결 매출이 없습니다.")}</tr></tbody>
-    ${details}</table>${entries.length?(view.kind==="segments"?'<p class="muted">연결 매출에는 부문 간 거래 제거 등 조정이 포함될 수 있습니다. 공시 범위가 완전하지 않으면 표의 부문별 금액만으로 연결 매출을 확인할 수 없습니다.</p>':""):'<p class="muted">이 회계기간의 매출 구성 자료가 준비되지 않았습니다.</p>'}`;
+    ${details}</table>${view.kind==="geography"?'<p class="muted">원래 공시의 지역 구분입니다. 국가·지역은 서로 겹칠 수 있으며 전체 지역의 합계나 소재지·청구지·고객 위치의 동일 기준을 뜻하지 않습니다. 고정된 공시 범위의 보고 매출을 확인할 수 있을 때만 그 범위의 비중을 표시합니다.</p>':""}${entries.length?(view.kind==="segments"?'<p class="muted">연결 매출에는 부문 간 거래 제거 등 조정이 포함될 수 있습니다. 공시 범위가 완전하지 않으면 표의 부문별 금액만으로 연결 매출을 확인할 수 없습니다.</p>':""):'<p class="muted">이 회계기간의 매출 구성 자료가 준비되지 않았습니다.</p>'}`;
 }
 function revenueProductPresentation(layout,items,renderRow,firstDepth,scopeHeading){
   if(!["DISCLOSURES","RECONCILED","VERIFIED"].includes(layout?.mode)||!Array.isArray(layout.groups))return "";
@@ -1483,7 +1491,7 @@ function revenueBreakdownValueCells(cell,missingReason,expectedDenominator){
   const present=cell?.value!=null,conflict=cell?.reason==="COMPETING_PREPARED_SCOPE";
   const reason=conflict?"같은 범위의 준비 자료가 일치하지 않습니다.":missingReason;
   const share=cell?.ratios?.share,yoy=cell?.ratios?.yoy;
-  const denominator=({CONSOLIDATED:"연결 매출",SEGMENT_SUBTOTAL:"부문 소계"})[share?.denominator];
+  const denominator=({CONSOLIDATED:"연결 매출",SEGMENT_SUBTOTAL:"부문 소계",FIXED_SCOPE_REPORTED:"같은 공시 범위의 보고 매출"})[share?.denominator];
   const priorCaption=yoy?`${yoy.prior_period_start} ~ ${inclusiveEnd(yoy.prior_period_end)}`:"";
   const shareReason=expectedDenominator?`같은 공시에서 비중을 계산할 수 있는 분모가 확인되지 않았습니다. 기준은 ${expectedDenominator}입니다.`:"연결 매출은 비중 계산의 기준입니다.";
   return `<td>${present?numberMarkup(cell.value,REVENUE_MONEY):revenueRate(null,reason)}</td>
@@ -1500,7 +1508,7 @@ function revenueTrendSeries(rows,periodCount){
     const axes=Object.entries(row.axis_members||{}).sort(([left],[right])=>left.localeCompare(right));
     if(!axes.length)continue;
     const id=JSON.stringify([row.scope??null,axes]);
-    if(!groups.has(id))groups.set(id,{id,scope:row.scope,axes,label:row.label,slots:Array.from({length:periodCount},()=>[]),reasons:Array(periodCount)});
+    if(!groups.has(id))groups.set(id,{id,scope:row.scope,fixedAxisMembers:row.fixed_axis_members,axes,label:row.label,slots:Array.from({length:periodCount},()=>[]),reasons:Array(periodCount)});
     const group=groups.get(id);
     for(const [index,cell] of row.cells.slice(0,periodCount).entries()){
       if(cell.value!=null||cell.reason==="COMPETING_PREPARED_SCOPE")group.slots[index].push({row,cell});
@@ -1511,7 +1519,7 @@ function revenueTrendSeries(rows,periodCount){
     const slots=group.slots.map(items=>items.length===1&&items[0].cell.value!=null?items[0]:null);
     const last=slots.findLastIndex(Boolean);
     const gapReasons=group.slots.map((items,index)=>items.length>1?"COMPETING_PREPARED_SCOPE":items[0]?.cell.reason||group.reasons[index]);
-    return {id:group.id,scope:group.scope,axes:group.axes,slots,gapReasons,label:slots[last]?.row.label||group.label};
+    return {id:group.id,scope:group.scope,fixedAxisMembers:group.fixedAxisMembers,axes:group.axes,slots,gapReasons,label:slots[last]?.row.label||group.label};
   });
 }
 function revenueBoardLines(view){
@@ -1532,7 +1540,7 @@ function revenueBoardPoint(line,index,mode){
   const denominator=cell?.ratios?.share?.denominator;
   const denominatorKey=entry=>{
     const type=entry?.cell.ratios?.share?.denominator;
-    return type==="CONSOLIDATED"?type:type==="SEGMENT_SUBTOTAL"&&line.scope?`${type}:${line.scope}`:null;
+    return type==="FIXED_SCOPE_REPORTED"?`${type}:${JSON.stringify(line.axes)}`:type==="CONSOLIDATED"?type:type==="SEGMENT_SUBTOTAL"&&line.scope?`${type}:${line.scope}`:null;
   };
   const sameDenominator=mode!=="share"||denominatorKey(item)&&denominatorKey(item)===denominatorKey(previous);
   const connected=previous?.row===item?.row&&item?.row.mapping_epoch&&!item.row.mapping_review_required&&sameDenominator;
@@ -1545,11 +1553,11 @@ function revenueBoardPoint(line,index,mode){
   const reason=!cell?missingReasons[gap]||"이 기간에 준비된 자료가 없습니다.":
     mode==="yoy"?"같은 공시에 비교할 수 있는 전년 자료가 확인되지 않았습니다.":
     mode==="share"?"같은 공시의 비중 분모가 확인되지 않았습니다.":"준비된 매출 값이 없습니다.";
-  const basis=denominator==="CONSOLIDATED"?"연결 매출":denominator==="SEGMENT_SUBTOTAL"?`부문 소계 · ${revenueScopeLabel(line.scope)}`:"분모 확인 불가";
+  const basis=denominator==="FIXED_SCOPE_REPORTED"?"같은 공시 범위의 보고 매출":denominator==="CONSOLIDATED"?"연결 매출":denominator==="SEGMENT_SUBTOTAL"?`부문 소계 · ${revenueScopeLabel(line.scope)}`:"분모 확인 불가";
   return {value:cell?.[metric]??null,connect:Boolean(connected),reason,basis};
 }
 function revenueBoardLabel(line){
-  return line.label+(line.scope?` · ${revenueScopeLabel(line.scope)}`:"");
+  return line.label+(line.fixedAxisMembers&&Object.keys(line.fixedAxisMembers).length?` · 공시 범위 ${Object.values(line.fixedAxisMembers).map(revenueScopeLabel).join(" / ")}`:"")+(line.scope?` · ${revenueScopeLabel(line.scope)}`:"");
 }
 function revenueBoardOptions(lines){
   const labels=new Map();

@@ -37,9 +37,17 @@ from sec_xbrl.screening.common import (
 
 SCHEMA_VERSION = "screening-revenue-breakdowns-v1"
 MAX_ASSET_BYTES = 16 * 1024 * 1024
-MAX_COMPANY_BYTES = 512 * 1024
+MAX_COMPANY_BYTES = 1024 * 1024
 SEGMENT_AXIS = "us-gaap:StatementBusinessSegmentsAxis"
 PRODUCT_AXES = {"srt:ProductOrServiceAxis", "us-gaap:ProductOrServiceAxis"}
+GEOGRAPHY_AXIS = "srt:StatementGeographicalAxis"
+# Explicit semantic registration; axis names never auto-enable a view.
+REVENUE_VIEWS = (
+    {"id": "segments", "label": "사업부문", "axes": [SEGMENT_AXIS], "fixed_groups": []},
+    {"id": "products", "label": "제품·서비스", "axes": sorted(PRODUCT_AXES), "fixed_groups": ["segments"]},
+    {"id": "geography", "label": "지역", "axes": [GEOGRAPHY_AXIS],
+     "fixed_groups": ["segments", "products"], "share_basis": "EXACT_FIXED_SCOPE"},
+)
 REVENUE_QNAMES = {
     "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
     "us-gaap:Revenues",
@@ -111,17 +119,13 @@ def prepare_revenue_breakdowns(
             "annual": _prepare_company(annual_config, cutoff, "FY", 4, relationship_cache),
             "quarterly": _prepare_company(quarter_config, cutoff, "QTD_3M", 8, relationship_cache),
         }
-        if len(_json(company)) > MAX_COMPANY_BYTES:
-            raise ValueError("revenue breakdown company exceeds response limit")
         companies[cik] = company
     payload = {
         "schema_version": SCHEMA_VERSION, "dataset_id": dataset["dataset_id"],
         "dataset_publication_id": dataset["publication_id"], "financial_as_of": cutoff,
         "dataset_manifest_sha256": dataset_manifest_sha256, "companies": companies,
     }
-    data = _json(payload)
-    if len(data) > MAX_ASSET_BYTES:
-        raise ValueError("revenue breakdown asset exceeds size limit")
+    data = _bounded_payload(payload)
     with destination.open("xb") as stream:
         stream.write(data)
     return destination
@@ -129,6 +133,19 @@ def prepare_revenue_breakdowns(
 
 def _json(payload: dict) -> bytes:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+
+
+def _bounded_payload(payload: dict) -> bytes:
+    scope_keys = ("schema_version", "dataset_id", "dataset_publication_id", "financial_as_of", "dataset_manifest_sha256")
+    scope = {key: payload[key] for key in scope_keys}
+    for cik, company in payload["companies"].items():
+        size = len(_json(company | scope | {"cik": cik}))
+        if size > MAX_COMPANY_BYTES:
+            raise ValueError(f"revenue breakdown company {company['ticker']} exceeds response limit: {size}")
+    data = _json(payload)
+    if len(data) > MAX_ASSET_BYTES:
+        raise ValueError("revenue breakdown asset exceeds size limit")
+    return data
 
 
 def _prepare_company(
@@ -195,14 +212,14 @@ def project_breakdowns(
     for node_id, cells in by_node.items():
         _project_row(series, nodes[node_id], cells, coordinates, client, context, cik, fallback=True)
     _hold_conflicts(series)
-    groups: dict[str, list] = {"segments": [], "products": []}
+    groups: dict[str, list] = {view["id"]: [] for view in REVENUE_VIEWS}
     for row in series.values():
         cells = [row["cells"].get(key, _gap("PERIOD_NOT_PREPARED")) for key in coordinates]
         if any(cell["value"] is not None or cell["reason"] == "COMPETING_PREPARED_SCOPE" for cell in cells):
             groups[row["group"]].append({**row, "cells": cells})
     totals = _consolidated_totals(overview, coordinates, client, context, cik, period_class)
     _add_revenue_ratios(totals, groups, periods, comparison_periods, ratio_observations)
-    return {"periods": periods, "totals": totals, "groups": groups, "ratio_rule_version": RATIO_RULE_VERSION}
+    return {"periods": periods, "totals": totals, "groups": groups, "ratio_rule_version": RATIO_RULE_VERSION, "views": list(REVENUE_VIEWS)}
 
 
 def _ratio_observations(
@@ -364,6 +381,13 @@ def _add_revenue_ratios(
             if row:
                 subtotal = segments[row["scope"]] if row["scope"] else []
                 parent = (subtotal[0] if len(subtotal) == 1 else {}) if row["scope"] else total
+                if "fixed_axis_members" in row:
+                    fixed = row["fixed_axis_members"]
+                    candidates = [candidate for candidate, candidate_cell in entries
+                                  if candidate["axis_members"] == fixed
+                                  and (candidate_cell["value"] is not None
+                                       or candidate_cell["reason"] == "COMPETING_PREPARED_SCOPE")]
+                    parent = candidates[0]["cells"][index] if len(candidates) == 1 else {} if fixed else total
                 denominator = bound.get(parent.get("cell_id"))
                 if denominator is not None:
                     parent_scope, parent_value = denominator
@@ -373,7 +397,7 @@ def _add_revenue_ratios(
                     ):
                         cell["share"] = str(percentage_result(value, parent_value, subtract_one=False))
                         ratios["share"] = {
-                            "denominator": "SEGMENT_SUBTOTAL" if row["scope"] else "CONSOLIDATED",
+                            "denominator": _share_denominator(row),
                             "numerator_fact_id": fact, "denominator_fact_id": parent["sources"][0]["fact_id"],
                         }
             if duration and value >= 0:
@@ -387,6 +411,12 @@ def _add_revenue_ratios(
                     }
             if ratios:
                 cell["ratios"] = ratios
+
+
+def _share_denominator(row: dict) -> str:
+    if "fixed_axis_members" in row:
+        return "FIXED_SCOPE_REPORTED" if row["fixed_axis_members"] else "CONSOLIDATED"
+    return "SEGMENT_SUBTOTAL" if row["scope"] else "CONSOLIDATED"
 
 
 def _bind_ratio_cell(
@@ -733,10 +763,21 @@ def _periods(overview: dict, cutoff: str, period_class: str, limit: int) -> list
     return periods[max(0, last_completed - limit):last_completed]
 
 
+def _view_for_axes(axes: set[str]) -> dict | None:
+    registry = {view["id"]: view for view in REVENUE_VIEWS}
+    # Later registrations take priority when their primary axis is present.
+    for view in reversed(REVENUE_VIEWS):
+        allowed = set(view["axes"])
+        fixed = [registry[group] for group in view["fixed_groups"]]
+        allowed.update(axis for group in fixed for axis in group["axes"])
+        if (len(axes & set(view["axes"])) == 1 and axes <= allowed
+                and all(len(axes & set(group["axes"])) <= 1 for group in fixed)):
+            return view
+    return None
+
+
 def _supported_axes(axes: set[str]) -> bool:
-    return axes == {SEGMENT_AXIS} or (
-        len(axes & PRODUCT_AXES) == 1 and axes <= PRODUCT_AXES | {SEGMENT_AXIS}
-    )
+    return _view_for_axes(axes) is not None
 
 
 def _axis_identity(dimensions: Any) -> dict[str, str] | None:
@@ -757,14 +798,20 @@ def _project_row(
     axes = _axis_identity(node.get("dimensions"))
     if not axes or node.get("concept") not in REVENUE_QNAMES:
         return
-    group = "segments" if set(axes) == {SEGMENT_AXIS} else "products"
+    view = _view_for_axes(set(axes))
+    assert view is not None
+    group = view["id"]
+    primary_axis, = set(axes) & set(view["axes"])
     row = series.setdefault(node["node_id"], {
         "id": node["node_id"], "label": node["label"], "group": group,
         "scope": axes.get(SEGMENT_AXIS) if group == "products" else None,
-        "member": axes[SEGMENT_AXIS] if group == "segments" else next(axes[axis] for axis in axes if axis in PRODUCT_AXES),
+        "member": axes[primary_axis],
         "axis_members": axes, "mapping_epoch": node["row_id"],
         "mapping_review_required": bool(node.get("mapping_review_required")), "cells": {},
     })
+    if view.get("share_basis") == "EXACT_FIXED_SCOPE":
+        row["fixed_axis_members"] = {axis: member for axis, member in axes.items() if axis != primary_axis}
+        row["raw_dimensions"] = node["dimensions"]
     pending = defaultdict(list)
     for cell in cells:
         if _coordinate(cell) in coordinates and (not fallback or _coordinate(cell) not in row["cells"]):
