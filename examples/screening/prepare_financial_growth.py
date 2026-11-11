@@ -314,7 +314,9 @@ def publish(manifest_path: Path, manifest_sha256: str, compatibility: dict[str, 
         reader = open_screening_dataset(source.parent)
         if not isinstance(reader, ScreeningDatasetV3Reader):
             raise TypeError("financial growth requires a verified combined screening dataset")
-        payload = {**build_artifact(reader, manifest_sha256), "source_compatibility_sha256": compatibility["sha256"]}
+        from examples.screening.financial_comparison_v2 import build_artifact as build_v2
+
+        payload = {**build_v2(reader, manifest_sha256), "source_compatibility_sha256": compatibility["sha256"]}
     if sha256_file(source) != manifest_sha256:
         raise ValueError("financial growth parent manifest changed while preparing")
     if any(len(canonical_json(company).encode()) > MAX_COMPANY_BYTES - 8192 for company in payload["companies"].values()):

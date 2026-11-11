@@ -184,7 +184,7 @@ test("growth sidecar drops stale company replies and reuses verified bytes for t
   const setModel=()=>vm.runInContext(`(()=>{
     renderFinancialProfileBoard=()=>{};
     const model={profile:S.profile,context:{dataset:"current50",publication:"P",financialAsOf:"2026-10-25"},
-      selection:{order:["cfo"]},slots:[{}],key:explorerContextKey()};
+      definitions:new Map([["cfo",{unit_kind:"MONEY"}]]),selection:{order:["cfo"]},slots:[{}],key:explorerContextKey()};
     financialProfileBoard=model;
     requestFinancialGrowth(model);
     return model;
@@ -234,13 +234,13 @@ test("negative expansion summary shows direction and magnitude while evidence re
   const point={status:"영업손실 확대",evidence:{status:"NEGATIVE_MAGNITUDE_EXPANDED",
     negative_magnitude_change:"-941.860465",delta:"-2835000000",current:reference,prior:reference}};
   const summary=evidence(point);
-  assert.match(summary,/영업손실 확대.*확대 규모 .*941\.86.* %/s);
+  assert.match(summary,/영업손실 확대.*확대 규모 .*941\.9.* %/s);
   assert.doesNotMatch(summary,/-941\.86/);
   assert.match(evidence(point,true),/음수 규모 축소율 -941\.860465 %.*전년 절댓값 − 현재 절댓값/);
   point.status="영업현금 순유출 축소";
   point.evidence.status="NEGATIVE_MAGNITUDE_REDUCED";
   point.evidence.negative_magnitude_change="38.06";
-  assert.match(evidence(point),/축소 규모 .*38\.06.* %/s);
+  assert.match(evidence(point),/축소 규모 .*38\.1.* %/s);
 });
 
 test("board axes adapt to displayed sign ranges and columns retain a zero baseline",()=>{
@@ -256,7 +256,7 @@ test("board axes adapt to displayed sign ranges and columns retain a zero baseli
     assert(result.lower<value&&value<result.upper);
     assert(Number.isFinite(result.step));
   }
-  assert.notEqual(tick(0.00001,0.00001,{unit_kind:"PERCENT"}),tick(0.00002,0.00001,{unit_kind:"PERCENT"}));
+  assert.equal(tick(0.00001,0.00001,{unit_kind:"PERCENT"}),tick(0.00002,0.00001,{unit_kind:"PERCENT"}));
   const chart={periods:[{label:"first"},{label:"second"},{label:"third"},{label:"fourth"}],
     series:[{color:0,label:rate.label,points:[{value:"3"},{value:"-2",connect:true},{value:null},{value:"0"}]}],
     definition:{unit_kind:"PERCENT"},label:"전년비"};
@@ -276,7 +276,7 @@ test("board axes adapt to displayed sign ranges and columns retain a zero baseli
 test("comparison validates each metric through existing endpoint and prints actual/fiscal scopes",async()=>{
   const h=harness(url=>{const metric_id=new URLSearchParams(url.split("?")[1]).get("metric_id");return{calendar_year:2026,calendar_quarter:2,metric_id,rows:[{company:{cik:"1",name:"Alpha",ticker:"A"},observation:observation("109417000000")},{company:{cik:"2",name:"Beta",ticker:"B"},observation:observation(null,{availability_status:"UNAVAILABLE"})}]}});
   prepared(h);h.state.metrics=definitions.slice(0,32);h.S.explorerSelected=new Set(["1","2"]);await h.renderComparison();
-  assert.equal(h.calls.length,1);assert.match(h.calls[0],/quarter-comparison/);assert.match(h.get("#comparison-result").innerHTML,/109,417.0/);assert.match(h.get("#comparison-result").innerHTML,/FY2026 Q3/);assert.match(h.get("#comparison-result").innerHTML,/class="missing"/);
+  assert.equal(h.calls.length,1);assert.match(h.calls[0],/quarter-comparison/);assert.match(h.get("#comparison-result").innerHTML,/109,417/);assert.match(h.get("#comparison-result").innerHTML,/FY2026 Q3/);assert.match(h.get("#comparison-result").innerHTML,/class="missing"/);
 });
 
 
@@ -302,7 +302,7 @@ test("fixed comparison shows quarter dates once with explicit exceptions, instan
   assert.equal((heading.match(/분기 2026-03-29 ~ 2026-06-27/g)||[]).length,2);
   assert.doesNotMatch(body,/2026-03-29/);
   assert.equal((body.match(/class="comparison-period-exception"/g)||[]).length,2);
-  assert.match(body,/0\.0[\s\S]*분기 2026-04-01 ~ 2026-06-27/);
+  assert.match(body,/0[\s\S]*분기 2026-04-01 ~ 2026-06-27/);
   assert.match(body,/기말 기준[\s\S]*기준일 2026-06-26/);
   assert.match(body,/aria-label="자료 없음: 준비 자료에서 항목을 확인할 수 없음"/);
 });
@@ -484,4 +484,37 @@ test("source selection folds only after a ready matrix and distinguishes a later
   assert.equal(h.get("#batch-editor").open,true);
   assert.match(h.get("#batch-status").textContent,/기업표를 불러오지 못했습니다/);
   assert.doesNotMatch(h.get("#batch-status").textContent,/유지/);
+});
+
+test("catalog comparison renders prepared percentage points and generic money states without browser arithmetic",()=>{
+  const h=harness(()=>{});
+  const {points,eligible,value,pp,status}=vm.runInContext('({points:financialGrowthPoints,eligible:financialComparisonEligible,value:profileBoardValue,pp:BOARD_PP,status:financialGrowthStatus})',h.context);
+  assert(eligible({unit_kind:"MONEY"}));assert(eligible({unit_kind:"PERCENT"}));assert(!eligible({unit_kind:"RATIO"}));
+  const definition={metric_id:"current_ratio",unit_kind:"PERCENT",definition_version:"v1"};
+  const row={value:"120.125",period_start:null,period_end:"2025-01-01",fiscal_year:2024};
+  const model={context:{basis:"ANNUAL"},slots:[{key:"2024"}],growth:{data:{rule_version:"catalog-prepared-financial-comparison-v2",
+    definitions:{current_ratio:{basis:"FY",definition_version:"v1",comparison_kind:"PERCENTAGE_POINT"}},
+    series:{current_ratio:{2024:{status:"CHANGE_AVAILABLE",current:{...row,observation_id:"x"},change_pp:"-0.00001",yoy:null}}}}}};
+  const result=points(model,definition,[{value:row.value,row}]);
+  assert.equal(result[0].value,"-0.00001");
+  assert.match(value(result[0].value,pp),/aria-label="&gt;-0.1 %p"/);
+  assert.match(value(result[0].value,pp),/title="-0.00001 %p"/);
+  assert.equal(status("cash","NEGATIVE_TURN"),"음수 전환");
+  assert.equal(status("cash","NEGATIVE_MAGNITUDE_EXPANDED"),"음수 규모 확대");
+  assert.equal(points(model,definition,[{value:"120",row}])[0].value,null);
+});
+
+test("ledger preserves all metrics and missing reasons while plots share compact period labels and rounded ticks",()=>{
+  const h=harness(()=>{}),{ledger,plot}=vm.runInContext('({ledger:profileMetricLedger,plot:profileBoardPlot})',h.context);
+  const markup=ledger([{label:"안정성",metrics:[{definition:{metric_id:"cash",label:"현금",unit_kind:"MONEY"},observation:{value:"123456789"}},
+    {definition:{metric_id:"fcf",label:"표준화 FCF",unit_kind:"MONEY"},observation:{value:null,reason_labels:["자료 부족"]}}]}]);
+  assert.equal((markup.match(/class="profile-ledger-row"/g)||[]).length,2);
+  assert.match(markup,/현금/);assert.match(markup,/자료 부족/);assert.doesNotMatch(markup,/profile-card/);
+  const chart={periods:[{label:"FY2023"},{label:"FY2024"}],series:[{color:0,label:"정확값",points:[{value:"0.00001"},{value:"0.00002"}]}],
+    definition:{unit_kind:"PERCENT"},label:"비율"};
+  const full=plot(chart),compact=plot({...chart,showPeriods:false});
+  assert.match(full,/viewBox="0 0 570 154"/);assert.match(compact,/viewBox="0 0 570 134"/);
+  assert.doesNotMatch(compact,/class="board-x"/);assert.match(compact,/<title>정확값 · FY2024 · 0.00002 %/);
+  const labels=[...full.matchAll(/class="board-y"[^>]*>([^<]+)/g)].map(match=>match[1]);
+  assert.equal(labels.length,new Set(labels).size);assert.match(full,/같은 반올림 눈금/);
 });

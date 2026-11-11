@@ -22,17 +22,23 @@ test("display rounds decimal strings half-up without precision loss or unit poli
     ["90071992547409931234567890.995", 2, "90,071,992,547,409,931,234,567,891.00"],
     ["1.235e2", 2, "123.50"], ["-1.005e-1", 2, "-0.10"],
   ]) assert.equal(numeric.formatDecimal(input, places), expected);
-  assert.equal(numeric.displayValue("41305000000", {unit_kind: "MONEY"}), "41,305.0");
+  assert.equal(numeric.displayValue("41305000000", {unit_kind: "MONEY"}), "41,305");
   assert.equal(numeric.displayValue("1.235", {unit_kind: "RATIO"}), "1.24");
-  assert.equal(numeric.displayValue("6.4", {unit_kind: "PERCENT"}), "6.40");
-  assert.equal(numeric.displayValue("0", {unit_kind: "MONEY"}), "0.0");
+  assert.equal(numeric.displayValue("6.4", {unit_kind: "PERCENT"}), "6.4");
+  assert.equal(numeric.displayValue("0", {unit_kind: "MONEY"}), "0");
   assert.equal(numeric.displayValue(null, {unit_kind: "MONEY"}), "—");
-  assert.equal(numeric.displayValue("1e100", {unit_kind: "MONEY"}).replaceAll(",", ""), "1" + "0".repeat(94) + ".0");
+  assert.equal(numeric.displayValue("1e100", {unit_kind: "MONEY"}).replaceAll(",", ""), "1" + "0".repeat(94));
+  for (const [value, kind, expected] of [
+    ["499999", "MONEY", "<1"], ["-499999", "MONEY", ">-1"],
+    ["500000", "MONEY", "1"], ["-500000", "MONEY", "-1"],
+    ["0.049", "PERCENT", "<0.1"], ["-0.049", "PERCENT", ">-0.1"],
+    ["0.05", "PERCENT", "0.1"], ["-0.05", "PERCENT", "-0.1"],
+  ]) assert.equal(numeric.displayValue(value, {unit_kind: kind}), expected);
 });
 
 test("all existing non-presentation functions and financial workflow handlers stay byte-identical", () => {
   // History lifecycle changes only projection reads, owned opens and action availability.
-  const allowed = new Set(["showView", "markDirty", "setCriteriaCompact", "renderLibrary", "revisionContent", "loadScreenRecord", "togglePeriod", "switchFrequency", "setRun", "explorerPeriod", "renderProfile", "loadAnnualExplorer", "openAnnualProfile", "renderAnnualComparison", "bindAnnualExplorer", "newScreen", "api", "refreshScreens", "refreshRuns", "renderTimeline", "saveDecision", "syncResultActions", "openRun", "openSavedScreenRecord", "boot", "formatDecimal", "displayValue", "renderRows", "renderMetricEvidence", "comparePeer", "explorerValue", "renderExplorer", "profileObservationCell", "renderProfileTrend", "explorerMetric", "updateExplorerSort", "loadExplorer", "openProfile", "closeProfile", "renderComparison", "openComparison", "bindExplorer", "updateCompareButton"]);
+  const allowed = new Set(["showView", "markDirty", "setCriteriaCompact", "renderLibrary", "revisionContent", "loadScreenRecord", "togglePeriod", "switchFrequency", "setRun", "explorerPeriod", "renderProfile", "loadAnnualExplorer", "openAnnualProfile", "renderAnnualComparison", "bindAnnualExplorer", "newScreen", "api", "refreshScreens", "refreshRuns", "renderTimeline", "saveDecision", "syncResultActions", "openRun", "openSavedScreenRecord", "boot", "formatDecimal", "unitLabel", "displayValue", "renderRows", "renderMetricEvidence", "comparePeer", "explorerValue", "renderExplorer", "profileObservationCell", "renderProfileTrend", "explorerMetric", "updateExplorerSort", "loadExplorer", "openProfile", "closeProfile", "renderComparison", "openComparison", "bindExplorer", "updateCompareButton"]);
   for (const line of frozen.split("\n")) {
     const name = line.match(/^(?:async )?function (\w+)\(/)?.[1];
     if (name && !allowed.has(name)) assert(source.split("\n").includes(line), `changed protected function ${name}`);
