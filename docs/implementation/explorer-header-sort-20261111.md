@@ -23,12 +23,39 @@ CIK를 바꾸지 않는다. backend·자료·artifact·원본·계산·저장 �
 | 단계 | 상태 |
 | --- | --- |
 | 승인 | 2026-11-11 헤더 정렬 구현 승인 |
-| 구현 | 헤더 정렬과 작성자 검사 완료, 커밋 동결 |
-| 독립 검증 | 대기 |
-| 로컬 인수·운영 | 대기 |
+| 구현 | `cbd3ac31530c64a04b9a50d451cbffb413227682` 동결 |
+| 독립 검증 | 별도 Astra Node 33개·Ruff 통과 |
+| 로컬 인수·운영 | 2026-11-11 리드 실제 화면 인수·18765 적용 PASS |
 | push·PR·CI·main | 미수행 |
 
 작성자 검사: `node --test tests/screening/*.test.cjs` 80개 통과,
 `ruff check .` 통과. 추가한 4개 검사는 상태·접근성 마크업, 분기/TTM
 정밀 정렬·누락값·snapshot 재사용, 연간 API 인자, 활성 헤더만 포커스 복원이다.
 키보드 실제 동작과 운영 화면은 별도 리드 브라우저 검증 대상이다.
+
+## 실제 화면 인수 — 2026-11-11
+
+운영 구현은 `cbd3ac31530c64a04b9a50d451cbffb413227682`이며 이후 완료 문서
+커밋과 구분한다. 작성자 전체 Node 80개와 별도로 독립 Astra의 집중 Node
+33개 및 Ruff가 통과했다. 리드는 preview와 실제 18765 화면에서 연간·분기·
+TTM 헤더 토글, 숫자 순서·null 후순위, Enter/Space와 포커스 유지,
+드롭다운 동기화 및 선택한 AAPL 유지에 PASS를 기록했다. 1464·1024·390px의
+화면과 screenshot에서 문서 가로 넘침이 없었다.
+
+첫 브라우저 스크립트는 접힌 표시·정렬 안의 드롭다운을 직접 조작하다
+시간 초과했다. 사용자처럼 해당 details를 연 뒤 검사하도록 고쳐 모두 통과했다.
+이는 제품 결함이나 제품 수정의 근거로 취급하지 않는다.
+
+당시 frontend PID 52008로 적용했고 backend 19070, bridge, 고정 v2 artifact는
+유지했다. Apple·Alphabet·Amazon 매출 계층과 50개 회사의 정확한 v2 응답,
+잘못된 범위의 400/409도 통과했다. 변경 전 API History와 최종 응답이 정확히
+같았으며 SQLite는 전후 byte-identical이었다. SHA-256:
+`3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`.
+
+선택적 실행 증거는 현재 세션 visualization의 `explorer-header-sort-20261111/`
+안에 있다. `live-sort-report.json`, `hierarchy-live.json`,
+`live-endpoint-report.json`, `history-final.json`, `journal-after.json`이 실제
+검사와 보존을 기록한다. `bundle-hashes.json`으로 자산을 확인하고,
+`bridge-growth.json`의 전체 인자를 사용해 기존 고정 bundle을 재시작한다.
+`prior.json`은 이전 상태의 기록이다. 리드 로컬 인수와 실제 적용은 완료했으며
+원격 push·PR·CI·main 병합은 이 기록 시점에 수행하지 않았다.
