@@ -37,9 +37,9 @@ cell 안에 있고 금액을 침범하지 않음, 동일한 조건 직렬화, �
 | 단계 | 상태 |
 | --- | --- |
 | 승인 | 2026-11-12 표시 구현 승인 |
-| 구현 | 표시 구현·작성자 검사 완료, 커밋 동결 |
-| 독립 검증 | 대기 |
-| 로컬 인수·운영 | 대기 |
+| 구현 | `8f1e466ffebe8e41396f207cbefeb2f8bb4e77bc` 동결 |
+| 독립 검증 | 별도 읽기 전용 검증 Node 93개·Ruff·diff PASS |
+| 로컬 인수·운영 | LOCALLY_ACCEPTED 2026-11-12 · 리드 18765 실제 적용 PASS |
 | push·PR·CI·main | 미수행 |
 
 작성자 검사는 전체 `node --test tests/screening/*.test.cjs` 93개 및
@@ -48,3 +48,33 @@ cell 안에 있고 금액을 침범하지 않음, 동일한 조건 직렬화, �
 latest→fixed·숨은 기업 열의 역할 분류, 전체 이름·원값·단위·실제 날짜·누락
 사유 escaping, 판정 필터·선택을 다룬다. 실제 폭·입력 정렬·텍스트 containment와
 서비스 결과/기록 동일성은 리드 브라우저에서 별도 검증한다.
+
+## 실제 운영 인수 — 2026-11-12
+
+검증·운영 구현은 `8f1e466ffebe8e41396f207cbefeb2f8bb4e77bc`이며 이후
+완료 문서 커밋과 구분한다. 별도 독립 검증은 이 소스에서 Node 93개·Ruff·
+diff에 PASS를 기록했다. 리드는 별도로 실제 브라우저를 검증하고 로컬 인수했다.
+
+운영 스크리닝 7개 검사 그룹은 변경 전후 최신 연간/FY2025/분기 응답의
+정확한 동등성, 금액·비율 혼합 3개 조건, 2560·1920·1464·1024·390px의 문서
+넘침 없음과 실제 기간 Range의 셀 내부 포함·개별 날짜 토큰 보존을 통과했다.
+기업 범위·판정 필터·선택·근거·편집 후 경고·새 조건·삭제 및 모바일의 선택적
+컨트롤도 통과했다. 재무 워크벤치 10개 그룹과 연간/분기/TTM 정렬, 50개 회사
+endpoint의 정확한 응답도 유지했다. 1920px의 지표 선택 폭은 약 957→636px,
+기준값은 479→176px, 입력 위쪽 오차는 22→0px로 줄었다.
+
+frontend 18765는 당시 PID 44572로 적용했고 backend 19070을 유지했다.
+표시 JS SHA-256은 `3ad13c36bc46a047bd767e9f8d2ecd5f0efb98078c63a65458be1b6828f2fb9f`,
+CSS는 `18a3ccabd73a1ed30bfbf0337757fbd423ece20eec4906f1a06b7d90377a17df`다.
+부모 자료·계산·artifact·기록 경로는 유지했다. History API는 baseline과
+deep-equal이고 SQLite는 전후 byte-identical이다. SHA-256:
+`3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`.
+소유한 preview PID 3100은 중지했다.
+
+선택적 실행 증거 폴더는
+`/mnt/c/Users/plusbdw/.codex/visualizations/2026/11/08/01a1bb67-6275-70d2-989e-208966314006/screening-workbench-20261112/`다.
+`live-screening-report.json`, `live-workbench-report.json`, `live-sort-report.json`,
+`history-final.json`이 실제 검사와 보존을 기록한다. `source-pin.json`은 구현/
+자산 고정 기록이고 `bridge-growth.json`은 현재 bundle의 전체 재시작 인자다.
+리드의 완료 인수 기록은 같은 폴더의 `local-acceptance.json`이다.
+이 작업의 원격 push·PR·CI·main 병합은 수행하지 않았다.
