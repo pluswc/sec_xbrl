@@ -59,3 +59,18 @@ TTM 헤더 토글, 숫자 순서·null 후순위, Enter/Space와 포커스 유�
 `bridge-growth.json`의 전체 인자를 사용해 기존 고정 bundle을 재시작한다.
 `prior.json`은 이전 상태의 기록이다. 리드 로컬 인수와 실제 적용은 완료했으며
 원격 push·PR·CI·main 병합은 이 기록 시점에 수행하지 않았다.
+
+## 원격 전달 — 2026-11-11
+
+사용자가 push와 PR을 승인했다. 원격 `codex/financial-summary-readability`에
+결합 전달 HEAD `42a5785473649a8e33a1d8054ffd2c9cc7d0086e`를 push하고
+[PR #86](https://github.com/pluswc/sec_xbrl/pull/86)을 열었다. 최종 구현 소스는
+`cbd3ac31530c64a04b9a50d451cbffb413227682`이며 나머지 후속 커밋은 완료
+문서다. 전달 당시 원격 main은 기준 `b1b783d418`에서 변하지 않았고
+PR은 OPEN·mergeable이었다. main 병합은 수행하지 않았다.
+
+[CI run 43030529258](https://github.com/pluswc/sec_xbrl/actions/runs/43030529258)은
+이 기록 시점에 실행 중이다. 통과를 주장하지 않으며 이후의 최종 결과는
+[PR checks](https://github.com/pluswc/sec_xbrl/pull/86/checks)와 PR 본문을 확인한다.
+앞선 로컬 전용 상태는 당시의 역사적 기록이며, 원격 전달 상태만 이 항목으로
+갱신한다. 실제 운영·자료·기록 보존 인수 결과는 그대로다.
