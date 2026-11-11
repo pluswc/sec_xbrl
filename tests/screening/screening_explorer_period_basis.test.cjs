@@ -639,10 +639,10 @@ test("nearby context escapes labels, explains missing and revenue denominator or
 test("chart interaction links hover and keyboard periods, pins until Escape and rejects stale context",()=>{
   const h=harness(()=>{});vm.runInContext('window={addEventListener(){}}',h.context);
   const bind=vm.runInContext('bindProfileBoardPeriod',h.context),events={},attributes=new Map();
-  let active=0,key="company1",valid=true,prevented=0,stopped=0;
+  let active=0,key="company1",valid=true,prevented=0,stopped=0,canvasFocus=0;
   const context={hidden:true,innerHTML:""},classes=new Set();
   const item={dataset:{boardItem:"item"},classList:{toggle(name,on){on?classes.add(name):classes.delete(name)},remove(name){classes.delete(name)}}};
-  const canvas={parentElement:{querySelector(){return context}},closest(selector){return selector===".board-plot-canvas"?this:selector==="[data-financial-card]"?{dataset:{financialCard:"item"}}:null}};
+  const canvas={focus(){canvasFocus++},parentElement:{querySelector(){return context}},closest(selector){return selector===".board-plot-canvas"?this:selector==="[data-financial-card]"?{dataset:{financialCard:"item"}}:null}};
   const target=index=>({closest(selector){
     if(selector==="[data-board-period]")return{dataset:{boardPeriod:String(index)}};
     if(selector==="[data-board-item]")return item;
@@ -654,7 +654,7 @@ test("chart interaction links hover and keyboard periods, pins until Escape and 
     querySelectorAll(selector){return selector===".board-context"?[context]:selector==="[data-board-item]"||selector===".board-item-active"?[item]:[]},contains(){return false}};
   bind(host,index=>{active=index},()=>active,{key:()=>key,valid:()=>valid,count:()=>4,describe:(id,index)=>`${id} period${index}`});
   events.pointerover({target:target(2),pointerType:"mouse"});assert.equal(active,2);assert.equal(context.hidden,false);assert(classes.has("board-item-active"));
-  events.click({target:target(2)});assert.equal(attributes.get("data-board-pinned"),"true");
+  events.click({target:target(2)});assert.equal(attributes.get("data-board-pinned"),"true");assert.equal(canvasFocus,1);
   events.pointerover({target:target(1),pointerType:"mouse"});assert.equal(active,2);assert.match(context.innerHTML,/period2/);
   const escape=()=>events.keydown({key:"Escape",target:canvas,preventDefault(){prevented++},stopPropagation(){stopped++}});
   escape();assert.equal(context.hidden,true);assert.equal(prevented,1);assert.equal(stopped,1);escape();assert.equal(stopped,1);
@@ -662,4 +662,53 @@ test("chart interaction links hover and keyboard periods, pins until Escape and 
   events.keydown({key:" ",target:canvas,preventDefault(){}});assert.equal(attributes.get("data-board-pinned"),"true");
   key="company2";events.pointerover({target:target(1),pointerType:"mouse"});assert.equal(active,1);
   valid=false;events.pointerover({target:target(0),pointerType:"mouse"});assert.equal(context.hidden,true);assert.equal(active,1);
+});
+
+test("pinned context and active legend or canvas survive DOM replacement with refreshed data",()=>{
+  for(const kind of ["legend","canvas","close"]){
+    const h=harness(()=>{});vm.runInContext('window={addEventListener(){}}',h.context);
+    const bind=vm.runInContext('bindProfileBoardPeriod',h.context),document=vm.runInContext('document',h.context),events={};
+    let active=1,scope="company1",order="item",version=1,dom;
+    const attributes=new Map(),root={contains:node=>[dom.legend,dom.canvas,dom.close].includes(node)};
+    function makeDOM(){
+      const context={hidden:true,innerHTML:""},classes={toggle(){},remove(){}};
+      const panel={dataset:{boardMode:"amount"},closest(){return null},querySelector(selector){return selector===".board-context"?context:selector===".board-plot-canvas"?canvas:selector==="[data-board-clear]"?close:null},querySelectorAll(){return[legend]}};
+      const closest=(self,selector)=>selector==="[data-board-mode]"?panel:selector==="button[data-board-item]"&&self===legend?legend:
+        selector==="[data-board-item]"&&self===legend?legend:selector===".board-plot-canvas"&&self===canvas?canvas:
+        selector==="[data-board-clear]"&&self===close?close:selector===".financial-board-card,.revenue-board-plot"?panel:
+        selector==="[data-board-period],.board-plot-canvas,[data-board-item]"&&self!==close?self:null;
+      const legend={dataset:{boardItem:"item"},classList:classes,closest(selector){return closest(this,selector)},focus(){document.activeElement=this}};
+      const canvas={parentElement:panel,closest(selector){return closest(this,selector)},focus(){document.activeElement=this}};
+      const close={closest(selector){return closest(this,selector)},focus(){document.activeElement=this}};
+      return{context,panel,legend,canvas,close};
+    }
+    dom=makeDOM();
+    const host={addEventListener(name,fn){events[name]=fn},removeAttribute(key){attributes.delete(key)},setAttribute(key,value){attributes.set(key,value)},
+      querySelectorAll(selector){return selector===".board-context"?[dom.context]:selector==="[data-board-mode]"?[dom.panel]:selector==="[data-board-item]"||selector===".board-item-active"?[dom.legend]:[]},querySelector(){return dom.context},contains:root.contains};
+    bind(host,index=>{active=index},()=>active,{valid:()=>true,key:()=>scope,order:()=>order,items:()=>order?order.split(","):[],count:()=>4,defaultMode:"amount",describe:(item,index,mode)=>`${item}:${index}:${mode}:version${version}`});
+    events.click({target:dom.legend});document.activeElement=dom[kind];
+    assert.equal(dom.context.hidden,false);const saved=host.profileBoardInteraction.beforeRender(root);
+    dom=makeDOM();document.activeElement={};version=2;
+    host.profileBoardInteraction.afterRender(saved);
+    assert.equal(dom.context.hidden,false);assert.match(dom.context.innerHTML,/item:1:amount:version2/);
+    assert.equal(document.activeElement,dom[kind]);assert.equal(attributes.get("data-board-pinned"),"true");
+    events.pointerover({target:dom.canvas,pointerType:"mouse"});assert.match(dom.context.innerHTML,/version2/);
+    // A newly loaded company or changed selection cannot reuse the previous pin.
+    const next=host.profileBoardInteraction.beforeRender(root);scope="company2";order="";dom=makeDOM();
+    host.profileBoardInteraction.afterRender(next);assert.equal(dom.context.hidden,true);assert.equal(attributes.has("data-board-pinned"),false);
+  }
+});
+
+test("all revenue comparison contexts and financial growth include their prepared actual dates",()=>{
+  const h=harness(()=>{}),{revenue,financial}=vm.runInContext('({revenue:revenueBoardContext,financial:financialBoardContext})',h.context);
+  const period={period_start:"2024-01-01",period_end:"2025-01-01",end_convention:"EXCLUSIVE",fiscal_year:2024};
+  h.context.testRevenue={periods:[{label:"FY2024"}],view:{periods:[period]},visible:[{id:"x",label:"Item",points:{
+    amount:[{value:"100"}],yoy:[{value:"2"}],share:[{value:"3",basis:"연결 매출"}]}}]};
+  vm.runInContext('revenueBreakdowns.board=testRevenue',h.context);
+  for(const mode of ["amount","yoy","share"])assert.match(revenue("x",0,mode),/2024-01-01/);
+  const definition={metric_id:"cfo",unit_kind:"MONEY",definition_version:"v1"},row={...period,value:"100",metric_observation_id:"id"};
+  h.context.testFinancial={definitions:new Map([["cfo",definition]]),context:{basis:"ANNUAL"},slots:[{key:2024,label:"FY2024"}],series:new Map([["cfo",{rows:[row]}]]),
+    growth:{data:{definitions:{cfo:{basis:"FY",definition_version:"v1"}},series:{cfo:{2024:{current:{...period,value:"100",observation_id:"id"},prior:{...period,value:"50"},status:"RATE_AVAILABLE",yoy:"100",delta:"50"}}}}}};
+  vm.runInContext('financialProfileBoard=testFinancial',h.context);
+  assert.match(financial("cfo",0,"growth"),/2024-01-01/);
 });

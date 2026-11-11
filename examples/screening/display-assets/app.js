@@ -874,52 +874,90 @@ function profileBoardContextLine(label,period,value,definition,reason,detail="")
   return `<strong>${esc(label)}</strong><span>${esc(period)} · ${profileBoardValue(value,definition,reason)} ${esc(profileBoardUnit(definition))}</span>${value==null?`<small>${esc(reason)}</small>`:""}${detail?`<small>${esc(detail)}</small>`:""}`;
 }
 function bindProfileBoardPeriod(host,selectPeriod,activePeriod,interaction={}){
-  let pinned=false,item=null,context=null,key=null;
+  let pinned=false,item=null,context=null,key=null,order=null,anchor=null,suppressFocus=false;
   const clear=()=>{
-    pinned=false;item=null;context=null;
+    pinned=false;item=null;context=null;anchor=null;
     host.removeAttribute?.("data-board-pinned");
     host.querySelectorAll(".board-context").forEach(node=>{node.hidden=true;node.innerHTML=""});
     host.querySelectorAll(".board-item-active").forEach(node=>node.classList.remove("board-item-active"));
   };
-  host.profileBoardInteraction={clear};
+  const synchronize=()=>{
+    const current=interaction.key?.(),selection=interaction.order?.();
+    if(current!==key||selection!==order){clear();key=current;order=selection}
+    if(interaction.valid&&!interaction.valid()){clear();return false}
+    return true;
+  };
+  const containerFor=location=>[...host.querySelectorAll("[data-board-mode]")].find(node=>{
+    if(node.dataset.boardMode!==location.mode||node.closest?.("[hidden]"))return false;
+    const card=node.closest?.("[data-financial-card]");
+    return !card||card.dataset.financialCard===location.item;
+  });
+  const present=(location,target)=>{
+    const container=target||containerFor(location);
+    context=container?.querySelector(".board-context");
+    const markup=interaction.describe?.(location.item,location.index,location.mode);
+    host.querySelectorAll(".board-context").forEach(node=>{node.hidden=node!==context});
+    host.querySelectorAll("[data-board-item]").forEach(node=>node.classList.toggle("board-item-active",Boolean(location.item)&&node.dataset.boardItem===location.item));
+    if(!context||!markup)return false;
+    const html=markup+'<small class="board-context-hint">클릭 또는 Enter/Space로 고정 · Esc 해제</small><button type="button" class="quiet board-context-clear" data-board-clear>설명 닫기 · Esc</button>';
+    if(context.innerHTML!==html)context.innerHTML=html;
+    context.hidden=false;return true;
+  };
+  host.profileBoardInteraction={clear,
+    beforeRender(root){
+      synchronize();
+      const active=document.activeElement;
+      if(!active||!root.contains?.(active))return null;
+      const canvas=active.closest?.(".board-plot-canvas"),legend=active.closest?.("button[data-board-item]"),close=active.closest?.("[data-board-clear]");
+      if(!canvas&&!legend&&!close)return null;
+      return {focus:{kind:legend?"legend":close?"close":"canvas",item:legend?.dataset.boardItem||active.closest?.("[data-financial-card]")?.dataset.financialCard||anchor?.item||null,
+        mode:active.closest?.("[data-board-mode]")?.dataset.boardMode||anchor?.mode}};
+    },
+    afterRender(snapshot){
+      if(!synchronize())return;
+      if(pinned&&anchor){
+        if(anchor.index<0||anchor.index>=(interaction.count?.()||0)||interaction.items&&!interaction.items().includes(anchor.item)&&anchor.item!==null){clear()}
+        else {selectPeriod(anchor.index,true);if(!present(anchor))clear()}
+      }else {context=null;item=null;host.querySelectorAll(".board-context").forEach(node=>{node.hidden=true})}
+      const focus=snapshot?.focus,container=focus&&containerFor(focus);
+      const target=focus?.kind==="legend"?[...container?.querySelectorAll("button[data-board-item]")||[]].find(node=>node.dataset.boardItem===focus.item):
+        focus?.kind==="close"?container?.querySelector("[data-board-clear]"):container?.querySelector(".board-plot-canvas");
+      target?.focus({preventScroll:true});
+    },
+  };
   const choose=(event,force=false)=>{
-    const current=interaction.key?.();
-    if(current!==key){clear();key=current}
-    if(interaction.valid&&!interaction.valid()){clear();return}
-    if(pinned&&!force)return;
+    if(!synchronize()||pinned&&!force)return;
     const period=event.target.closest?.("[data-board-period]"),canvas=event.target.closest?.(".board-plot-canvas");
     const identity=event.target.closest?.("[data-board-item]");
     if(!period&&!canvas&&!identity)return;
-    const index=period?Number(period.dataset.boardPeriod):activePeriod();
-    if(index==null)return;
+    const index=period?Number(period.dataset.boardPeriod):activePeriod();if(index==null)return;
     item=identity?.dataset.boardItem||event.target.closest?.("[data-financial-card]")?.dataset.financialCard||null;
-    selectPeriod(index);
-    host.querySelectorAll("[data-board-item]").forEach(node=>node.classList.toggle("board-item-active",Boolean(item)&&node.dataset.boardItem===item));
-    context=canvas?.parentElement?.querySelector(".board-context")||event.target.closest?.(".financial-board-card,.revenue-board-plot")?.querySelector(".board-context");
-    if(!context&&identity)context=host.querySelector(".board-context");
-    const mode=event.target.closest?.("[data-board-mode]")?.dataset.boardMode;
-    const markup=interaction.describe?.(item,index,mode);
-    host.querySelectorAll(".board-context").forEach(node=>{node.hidden=node!==context});
-    if(context&&markup){
-      const html=markup+'<small class="board-context-hint">클릭 또는 Enter/Space로 고정 · Esc 해제</small><button type="button" class="quiet board-context-clear" data-board-clear>설명 닫기 · Esc</button>';
-      if(context.innerHTML!==html)context.innerHTML=html;
-      context.hidden=false;
-    }
+    const mode=event.target.closest?.("[data-board-mode]")?.dataset.boardMode||interaction.defaultMode;
+    anchor={item,index,mode};selectPeriod(index);
+    const container=canvas?.parentElement||event.target.closest?.(".financial-board-card,.revenue-board-plot");
+    present(anchor,container||{querySelector:selector=>host.querySelector(selector)});
     return true;
   };
   host.addEventListener("pointerover",event=>{if(event.pointerType!=="touch")choose(event)});
   host.addEventListener("pointerleave",()=>{if(!pinned)clear()});
-  host.addEventListener("focusin",event=>choose(event));
+  host.addEventListener("focusin",event=>{if(!suppressFocus)choose(event)});
   host.addEventListener("focusout",event=>{if(!pinned&&!host.contains?.(event.relatedTarget))clear()});
   host.addEventListener("click",event=>{
-    if(event.target.closest?.("[data-board-clear]")){clear();return}
+    if(event.target.closest?.("[data-board-clear]")){
+      const canvas=event.target.closest?.("[data-board-mode]")?.querySelector(".board-plot-canvas");
+      clear();suppressFocus=true;canvas?.focus?.({preventScroll:true});suppressFocus=false;return;
+    }
     if(!event.target.closest?.("[data-board-period],.board-plot-canvas,[data-board-item]"))return;
-    if(choose(event,true)){pinned=true;host.setAttribute("data-board-pinned","true")}
+    if(choose(event,true)){
+      pinned=true;host.setAttribute("data-board-pinned","true");
+      event.target.closest?.(".board-plot-canvas")?.focus?.({preventScroll:true});
+    }
   });
   host.addEventListener("keydown",event=>{
     if(event.key==="Escape"){
       if(pinned||item||context&&!context.hidden){event.preventDefault();event.stopPropagation()}
-      clear();return;
+      const canvas=event.target.closest?.(".board-context")?event.target.closest?.("[data-board-mode]")?.querySelector(".board-plot-canvas"):null;
+      clear();suppressFocus=true;canvas?.focus?.({preventScroll:true});suppressFocus=false;return;
     }
     const canvas=event.target.closest?.(".board-plot-canvas");if(!canvas)return;
     if(["ArrowLeft","ArrowRight","Home","End"].includes(event.key)){
@@ -1166,7 +1204,7 @@ function mountFinancialProfileBoard(overview){
   $("#financial-board-period").onchange=event=>updateFinancialBoardPeriod(financialProfileBoard,Number(event.target.value));
   bindProfileBoardPeriod(section,(index,force)=>updateFinancialBoardPeriod(financialProfileBoard,index,force),()=>financialProfileBoard?.active,{
     valid:()=>ownsFinancialProfileBoard(financialProfileBoard),key:()=>financialProfileBoard?`${financialProfileBoard.profile.company.cik}:${financialProfileBoard.key}:${financialProfileBoard.group}:${financialProfileBoard.selection.order.join(",")}`:null,
-    count:()=>financialProfileBoard?.slots.length||0,describe:financialBoardContext,
+    count:()=>financialProfileBoard?.slots.length||0,describe:financialBoardContext,defaultMode:"level",items:()=>financialProfileBoard?.selection.order||[],
   });
 }
 function financialBoardContext(id,index,mode){
@@ -1174,7 +1212,9 @@ function financialBoardContext(id,index,mode){
   const levels=financialProfilePoints(model,definition),level=levels[index],published=financialProfileGrowth(id,model.definitions);
   const growth=published||financialComparisonMetric(definition),rate=published?financialProfilePoints(model,published)[index]:financialGrowthPoints(model,definition,levels)[index];
   const point=mode==="growth"?rate:level,metric=mode==="growth"?growth:definition;
-  const detail=mode==="growth"?growth.unit==="pp"?"공표된 현재 비율 − 전년 비율 · %p":"발행된 전년 비교 · 비교 불가 상태와 실제 기간은 근거 표를 확인하세요.":level.row?actualPeriod(level.row):"";
+  const reference=point.evidence?.current||point.row||level.row;
+  const rationale=mode==="growth"?growth.unit==="pp"?"공표된 현재 비율 − 전년 비율 · %p":"발행된 전년 비교 · 비교 불가 상태는 근거 표를 확인하세요.":"";
+  const detail=[reference?actualPeriod(reference):"",rationale].filter(Boolean).join(" · ");
   return profileBoardContextLine(definition.label,model.slots[index].label,point.value,metric,point.reason,detail)+(mode==="growth"?financialGrowthEvidence(rate):"");
 }
 function financialProfileGrowth(id,definitions){
@@ -1247,6 +1287,7 @@ function financialProfilePoints(model,definition){
 }
 function renderFinancialProfileBoard(model){
   const host=financialProfileBoardHost.querySelector(".financial-board-panels");
+  const restore=financialProfileBoardHost.profileBoardInteraction?.beforeRender(host);
   // Keep each open evidence disclosure through late arrivals and order changes.
   const expanded=new Set([...host.querySelectorAll("details[open]")].map(node=>node.dataset.financialDetails));
   const active=document.activeElement,card=active?.closest?.("[data-financial-card]");
@@ -1277,12 +1318,13 @@ function renderFinancialProfileBoard(model){
           }).join("")}</tbody></table></div>
       </details></article>`;
   }).join("")||'<p class="board-empty">비교할 재무 지표를 선택해 주세요.</p>';
-  if(focused){
+  if(focused&&!restore?.focus){
     const current=[...host.querySelectorAll("[data-financial-card]")].find(node=>node.dataset.financialCard===focused);
     const target=plotIndex<0?current?.querySelector("summary"):current?.querySelectorAll(".board-plot-canvas")[plotIndex];
     target?.focus({preventScroll:true});
   }
   updateFinancialBoardPeriod(model,model.active,true);
+  financialProfileBoardHost.profileBoardInteraction?.afterRender(restore);
 }
 function updateFinancialBoardPeriod(model,index,force=false){
   if(!model?.slots[index]||!force&&index===model.active)return;
@@ -1690,7 +1732,8 @@ function mountRevenueBoardControls(){
   bindProfileBoardPeriod($("#profile-revenue-breakdowns"),updateRevenueBoardPeriod,()=>revenueBreakdowns.board?.active,{
     valid:()=>Boolean(revenueBreakdowns.board)&&!$("#profile-revenue-breakdowns").hidden,
     key:()=>revenueBreakdowns.board,
-    count:()=>revenueBreakdowns.board?.periods.length||0,describe:revenueBoardContext,
+    count:()=>revenueBreakdowns.board?.periods.length||0,describe:revenueBoardContext,defaultMode:"amount",
+    order:()=>revenueBreakdowns.board?.selection.order.join(","),items:()=>revenueBreakdowns.board?.selection.order||[],
   });
   observeProfileBoardWidth($(".revenue-board-panels"),renderRevenueBreakdownTrend,()=>Boolean(revenueBreakdowns.board)&&!$("#profile-revenue-breakdowns").hidden);
 }
@@ -1727,14 +1770,16 @@ function revenueBoardContext(id,index,mode="amount"){
   const definition=mode==="amount"?REVENUE_MONEY:REVENUE_PERCENT;
   return lines.map(line=>{
     const point=line.points[mode]?.[index];if(!point)return "";
-    const detail=mode==="share"?`비중 분모: ${point.basis} · 합계가 아닌 개별 비중`:
-      mode==="yoy"?"같은 공시의 전년 비교값 · 추이의 전년 금액과 다를 수 있습니다.":actualPeriod(model.view.periods[index]);
+    const rationale=mode==="share"?`비중 분모: ${point.basis} · 합계가 아닌 개별 비중`:
+      mode==="yoy"?"같은 공시의 전년 비교값 · 추이의 전년 금액과 다를 수 있습니다.":"";
+    const detail=[actualPeriod(model.view.periods[index]),rationale].filter(Boolean).join(" · ");
     return `<div>${profileBoardContextLine(line.label,model.periods[index].label,point.value,definition,point.reason,detail)}${revenueSourceLinks(point.sources||[],revenueBreakdowns.data?.cik)}</div>`;
   }).join("");
 }
 function renderRevenueBreakdownTrend(){
   const model=revenueBreakdowns.board;
   if(!model)return;
+  const host=$("#profile-revenue-breakdowns"),restore=host.profileBoardInteraction?.beforeRender($(".revenue-board-panels"));
   const {selection,view,periods,lines,options,active}=model;
   const labels=new Map(options.map(item=>[item.id,item.label]));
   const visible=selection.order.map(id=>lines.find(line=>line.id===id)).filter(Boolean);
@@ -1769,6 +1814,7 @@ function renderRevenueBreakdownTrend(){
     }).join("")}</tbody>`).join("")}</table>`:"";
   $("#revenue-board-evidence").hidden=!visible.length;
   updateRevenueBoardPeriod(active,true);
+  host.profileBoardInteraction?.afterRender(restore);
 }
 function updateRevenueBoardPeriod(index,force=false){
   const model=revenueBreakdowns.board;
