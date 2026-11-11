@@ -1,5 +1,9 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-11 [데스크톱 재무 워크벤치](../implementation/desktop-financial-workbench-20261111.md)는
+표와 값의 근접 폭, 적응형 작은 차트 쌍, 카탈로그 그룹별 선택 기억과
+근접 범례·기간 설명을 다룬다. 구현 승인, 검증·인수·운영은 대기다.
+
 2026-11-11 상태 갱신: [PR #86](https://github.com/pluswc/sec_xbrl/pull/86)은
 main `d58e90ec87e2d51fbabc9b9ca49e983bcef0d80f`에 병합됐다. 아래의 PR86 OPEN/CI 대기
 문구는 전달 당시 snapshot이다. 지역 매출 [PR #87](https://github.com/pluswc/sec_xbrl/pull/87)은

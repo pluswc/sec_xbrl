@@ -68,7 +68,7 @@ test("profile frequency uses its own full window and trend gaps are not connecte
     return get("#revenue-breakdown-chart").innerHTML;
   };
   const chart=render([row]);
-  assert.equal((chart.match(/<circle/g)||[]).length,2);
+  assert.equal((chart.match(/<circle class="board-point"/g)||[]).length,2);
   assert.doesNotMatch(chart,/<line class="board-line"/);
   assert.match(get("#revenue-board-values").innerHTML,/이 기간에 준비된 자료가 없습니다/);
   const member={label:"Search",scope:"services",axis_members:{product:"search",segment:"services"}};
@@ -81,7 +81,7 @@ test("profile frequency uses its own full window and trend gaps are not connecte
   assert.equal(combined.length,2);
   assert.deepEqual(Array.from(combined[0].slots,item=>item?.cell.value),["1000000","2000000","3000000"]);
   const epochs=render([first,second,foreign],[combined[0].id]);
-  assert.equal((epochs.match(/<circle/g)||[]).length,3);
+  assert.equal((epochs.match(/<circle class="board-point"/g)||[]).length,3);
   assert.equal((epochs.match(/<line class="board-line"/g)||[]).length,1);
   assert.doesNotMatch(epochs,/9000000 USD/);
   second.mapping_review_required=true;
@@ -121,7 +121,7 @@ test("revenue boards keep ordered scoped series, zero, published ratios and deno
     periods:periods.map(period=>({label:`FY2026 Q${period.fiscal_quarter}`})),active:1};
   app.renderRevenueBreakdownTrend();
   const amount=get("#revenue-breakdown-chart").innerHTML;
-  assert.equal((amount.match(/<circle/g)||[]).length,5);
+  assert.equal((amount.match(/<circle class="board-point"/g)||[]).length,5);
   assert.match(amount,/0 USD/);
   const growth=get("#revenue-breakdown-growth").innerHTML;
   const share=get("#revenue-breakdown-share").innerHTML;
