@@ -1,7 +1,8 @@
 # 공시 매출의 지역 보기와 명시적 보기 등록 — 2026-11-11
 
 최신 상태(2026-11-11): INDEPENDENTLY_VERIFIED / LOCALLY_ACCEPTED / LIVE.
-대상 코드 `92876be5b93511c7f96541ecbf82da5a2c049d54`, main은 NOT_MERGED다.
+대상 코드 `92876be5b93511c7f96541ecbf82da5a2c049d54`. 운영 인수 당시 main은 미병합이었다.
+이후 사용자가 main 반영을 명시 승인했으며 실제 반영 상태는 Git main 포함 관계와 PR로 확인한다.
 아래 단계별 대기 기록은 당시 상태이며 마지막 운영 인수 기록이 이를 갱신한다.
 본 계약은 기존 50사 준비 데이터의 선택형 매출 보조 발행과 해당 화면만 다룬다.
 신규 수집, Raw/Analytical 재생성, Nasdaq 수집 작업은 범위 밖이다.
@@ -226,5 +227,15 @@ history-worker, 원본 journal 경로 및 다른 프로세스 인자도 실제 �
   `/mnt/c/Users/plusbdw/.codex/visualizations/2026/10/07/01a118cd-05d7-7842-b035-32b40d7c2817/revenue-geography-20261111/`
   아래 `frontend-switch.json`, `live-report.json`, `live-desktop.png`, `live-768.png`.
 
-최종 상태는 **INDEPENDENTLY_VERIFIED + LOCALLY_ACCEPTED + LIVE / MAIN_NOT_MERGED**다.
-main·원격 반영은 별도 승인/전달 단계이며 이 운영 인수로 추정하지 않는다.
+위 운영 인수 시점의 snapshot은 **INDEPENDENTLY_VERIFIED + LOCALLY_ACCEPTED + LIVE / MAIN_NOT_MERGED**다.
+이는 당시 기록이며 이후 main·원격 상태를 고정하는 주장이 아니다.
+
+
+## 사용자 main 반영 승인 — 2026-11-11
+
+사용자는 현재 기능의 main 반영을 명시 승인했다. 범위는 수락된 지역 매출 보기와
+고정 scope 정책·보조 발행 연결, 실제 운영 UI 보존을 위해 포함한 기존 42a578
+헤더 정렬·재무 요약/growth-v2 변경 및 관련 계약·테스트다. Nasdaq 수집 소스는
+포함하지 않는다. 이 준비는 문서만 바꾸며 수락된 실행 코드는 92876be5와 같다.
+리드는 branch push 후 PR·CI·main 병합을 진행한다. 이 기록 자체는 MERGED
+선언이 아니며 실제 병합은 main의 commit 포함 관계와 해당 PR/검사 결과로 판단한다.

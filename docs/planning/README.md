@@ -5,8 +5,9 @@
 18765(PID 41344)에 운영 반영했다. 기존 backend19070, 헤더 정렬·재무 요약/growth-v2,
 원본 journal 10테이블·22행과 DB bytes를 보존했다. 실제 지역 보기·헤더 정렬 및
 1440/768px 검증은 PASS다. 기존 50사 필드 동등성과 3사×2빈도 근거를 재사용했다.
-상태는 INDEPENDENTLY_VERIFIED / LOCALLY_ACCEPTED / LIVE이며 **main NOT_MERGED**다.
-원격 push·PR·CI는 이번 전달에서 미수행이다.
+운영 인수 당시 상태는 INDEPENDENTLY_VERIFIED / LOCALLY_ACCEPTED / LIVE / main 미병합이었다.
+이후 사용자가 현재 범위의 main 반영을 명시 승인했고 리드가 branch push·PR/CI 전달을
+진행한다. 실제 병합 상태는 Git main의 포함 관계와 PR로 확인하며 과거 snapshot으로 고정하지 않는다.
 
 2026-11-11 [기업 탐색 헤더 정렬](../implementation/explorer-header-sort-20261111.md)은
 기존 정렬 경로를 사용하는 기업명·숫자 헤더 버튼을 기록한다. 구현
