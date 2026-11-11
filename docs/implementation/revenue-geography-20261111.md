@@ -144,3 +144,45 @@ Focused CSS 검사는 새 breakpoint 범위·선택자·단일 열 선언 및 �
 기본 선언을 확인하고, 추가 3줄을 제거하면 이전 CSS와 바이트가 같음을 확인했다.
 JavaScript·Python·50사 artifact는 변경 없으므로 이전 검사·자료 근거를 재사용한다.
 리드의 compact 재촬영과 최종 live 인수는 별도다.
+
+## 실제 운영 UI 보존 통합 — 2026-11-11
+
+리드의 운영 전환 전 guard가 기존 receipt와 실제 18765 프로세스의 차이를 발견해
+변경 전에 중지했다. 실제 listener는 PID 52008이며
+`explorer-header-sort-20261111/bridge-growth.json` receipt의 모든 기존 인자를
+보존해야 한다. 기존 backend는 19070이고 현재 financial-growth artifact는
+SHA-256 `a9df827eba4c4570bcfc8ef70d32635535479d0227ed4b0b20dc74c2eef62938`다.
+이전 receipt의 프로세스나 growth artifact로 되돌리는 것은 이 작업의 인수 조건이 아니다.
+
+리드는 기존 운영 UI를 보존하는 통합을 승인했다. 자체 revenue branch에 정확한
+`codex/financial-summary-readability`의 `42a5785473649a8e33a1d8054ffd2c9cc7d0086e`를
+merge하여 이미 인수된 헤더 정렬, 재무 지표 ledger, 표시 자리수, 준비된 전체
+MONEY/PERCENT 전년비/%p 비교의 소스·producer·검증기·계약·테스트를 함께 유지한다.
+다른 branch/worktree나 main은 수정하지 않았다. 계획 등록부의 동시 추가 충돌만
+두 항목을 모두 보존하여 해결했으며 JS/CSS/bridge와 매출 테스트는 자동 병합됐다.
+새 재무 계산·수집·backend 변경을 구현하지 않는다.
+
+보존 검사는 base `b1b783d418f99201c73d9eaf388266d8d6c01282`에서 revenue 후보
+`150656e20f9b5dea19502a64b6101ec7eb4900dc`까지의 차이만 임시 사본에서 역적용했다.
+그 결과 JS/CSS/bridge/매출 테스트 네 파일 전체가 incoming 42a578과 바이트가
+같다. 따라서 incoming의 개별 함수/변경 hunk를 수정하거나 누락하지 않았음을
+파일 전체로 검증했다. Incoming JS/CSS/bridge는 실제 운영 bundle과도 같다.
+
+| 파일 | incoming/live SHA-256 | 통합 SHA-256 |
+| --- | --- | --- |
+| app.js | `f72c694332026eb5c27620ed0df2b310d75e90b778f3c5095cdc1cf557e2e3fc` | `543da1e3135caf1aed9b57cdebcd3ebc55cbe54b6cad60c90a7c09de3fb62767` |
+| app.css | `dd585102ffefa1761f3a86d437acc86ae929a4324a48c10636e5a56c9d76218b` | `1428c4e963a163b5d8aab5244bf072dcb1d0909e83119b2372b9da4bbc0632b3` |
+| windows-loopback-bridge.cjs | `d7d28b41445458519a67f3aa604076847bb14145d3aafed717dcafa3b22f5339` | `64302e4b8e234c8d43b389d5e3feae9308b453d5431e66ba7c0a4bdf24d7baea` |
+
+로컬 `work/revenue-geography-20261111/live-ui-preservation-check.json`에 역적용
+대조를 보존한다. 통합 자체 Node 검사는 매출 9, 기간/헤더 33, growth 3,
+display 5, 추이 10으로 합계 **60 PASS**다. Display의 loopback 테스트는 최초
+sandbox `EPERM` 후 해당 임시 listener의 제한된 escalation으로 재실행해 통과했다.
+JavaScript syntax도 통과했다. 통합 bridge가 기존 a9 growth-v2 50사와 신규 지역
+artifact 50사를 함께 읽었고, 매출 최대 응답은 기존 확인한 815,217 bytes다.
+신규 지역 산출물과 준비기는 변경 없으므로 50사 projection·기존 Python 검사를
+반복하지 않았다. Incoming producer 검증은 해당 기존 인수 증거를 유지한다.
+
+92f2079의 이전 독립 소스 PASS/리드 수락 및 이전 실제 UI 검증과 이번 통합의
+독립 검증·실제 preview·운영 전환은 구분한다. 이번 통합 commit의 새 검증과
+실제 PID/인자에 기초한 운영 전환은 리드가 수행하며 아직 본 기록의 완료가 아니다.

@@ -23,11 +23,21 @@ function formatDecimal(v,places=1){
   return(negative&&scaled!==0n?"-":"")+integer.replace(/\B(?=(\d{3})+(?!\d))/g,",")+(places?"."+digits.slice(-places):"");
 }
 function shiftDecimal(v,p){const c=String(v).trim().replace(/,/g,""),m=c.match(/^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/);if(!m||(m[2]+m[3]).length===0)throw new Error("숫자 형식을 확인해 주세요.");const s=m[1]==="-"?"-":"",w=m[2]||"",f=m[3]||"",raw=w+f;if(/^0+$/.test(raw))return"0";const leading=(raw.match(/^0*/)||[""])[0].length,d=raw.slice(leading),q=w.length+Number(m[4]||0)+p-leading;let o=q<=0?"0."+"0".repeat(-q)+d:q>=d.length?d+"0".repeat(q-d.length):d.slice(0,q)+"."+d.slice(q);o=o.replace(/^0+(?=\d)/,"");if(o.includes("."))o=o.replace(/0+$/,"").replace(/\.$/,"");o=o||"0";return o==="0"?o:s+o}
-function displayValue(v,m){return v===null||v===undefined?"—":m.unit_kind==="MONEY"?formatDecimal(shiftDecimal(v,-6),1):formatDecimal(v,2)}
+function displayValue(v,m){
+  if(v===null||v===undefined)return "—";
+  const value=shiftDecimal(v,m.unit_kind==="MONEY"?-6:0);
+  const places=m.unit_kind==="MONEY"?0:m.unit_kind==="PERCENT"?1:2;
+  const text=formatDecimal(value,places);
+  if(value!=="0"&&/^0(?:\.0+)?$/u.test(text)){
+    const quantum=places?"0."+"0".repeat(places-1)+"1":"1";
+    return value.startsWith("-")?">-"+quantum:"<"+quantum;
+  }
+  return text;
+}
 function numberMarkup(v,m){const text=displayValue(v,m);return`<span class="display-number explorer-value" title="${esc(v)} ${esc(m.unit||unitLabel(m))}" aria-label="${esc(text)} ${esc(unitLabel(m))}"><span class="number-text">${esc(text)}</span><span class="number-clipped" aria-hidden="true">…</span></span>`}
 function thresholdToApi(v,m){return shiftDecimal(v,m.unit_kind==="MONEY"?6:0)}
 function thresholdFromApi(v,m){return shiftDecimal(v,m.unit_kind==="MONEY"?-6:0)}
-function unitLabel(m){return m.unit_kind==="MONEY"?"백만 달러":"%"}
+function unitLabel(m){return m.unit_kind==="MONEY"?"백만 달러":m.unit_kind==="RATIO"?"배":"%"}
 function businessReason(c){return ({MULTIPLE_CANDIDATES:"같은 기간의 값이 여러 개입니다.",PERIOD_NOT_PREPARED:"선택한 기간의 자료가 없습니다.",MISSING_INPUT:"계산에 필요한 공시 항목이 없습니다.",QUALITY_BLOCKED:"자료 품질 확인이 필요합니다.",MAPPING_REVIEW_REQUIRED:"공시 항목 확인이 필요합니다.",NON_POSITIVE_DENOMINATOR:"비율 계산 기준값을 사용할 수 없습니다.",NEGATIVE_EQUITY:"자본이 음수여서 비율을 제공하지 않습니다.",CAPEX_SIGN_UNCERTAIN:"투자지출 표시 방향을 확인해야 합니다.",UNSUPPORTED_FISCAL_QUARTER_DURATION:"일반적인 3개월 분기보다 기간이 길어 비교에서 보류했습니다.",INPUTS_NOT_COMPATIBLE:"연속 분기의 계산 기준이 달라 값을 제공하지 않습니다.",NO_FILING_AS_OF_CUTOFF:"기준일까지 해당 분기 공시가 없습니다."})[c]||"공시자료 확인이 필요합니다."}
 function filteredCatalog(){const c=$("#metric-category").value,n=$("#metric-search").value.trim().toLowerCase();return S.catalog.filter(x=>(!c||x.category===c)&&(!n||x.label.toLowerCase().includes(n)||x.metric_id.toLowerCase().includes(n)))}
 function metricOptions(selected){let rows=filteredCatalog();const keep=metricById(selected);if(selected&&!rows.some(x=>x.metric_id===selected))rows=[keep,...rows];return ["GROWTH","PROFITABILITY","CASH_FLOW","FINANCIAL_STABILITY","OTHER_REPORTED"].map(c=>{const a=rows.filter(x=>x.category===c);return a.length?`<optgroup label="${categoryLabel(c)}">${a.map(x=>{const v=x.coverage||{},coverage=v.companies_total?` · ${v.companies_available}/${v.companies_total}개 기업`:"",disabled=x.business_availability==="UNAVAILABLE"&&x.metric_id!==selected;return`<option value="${esc(x.metric_id)}" ${x.metric_id===selected?'selected':''} ${disabled?'disabled':''}>${esc(x.label)} · ${unitLabel(x)}${coverage}${disabled?' · 현재 사용 불가':''}</option>`}).join("")}</optgroup>`:""}).join("")}
@@ -350,7 +360,7 @@ function companyPeriodCaption(period){
 function explorerPeriod(row){const p=row.actual_period;if(!p)return"선택 연도 자료 없음";const end=inclusiveEnd(p.context_end_date||p.period_end);return p.period_start?`${p.period_start} ~ ${end}`:`기준일 ${end}`}
 function explorerValue(o,m){if(!o||o.value===null||o.value===undefined){const reason=(o?.reason_labels||[])[0]||"선택 연도 자료 없음";return`<span class="missing" title="${esc(reason)}" aria-label="자료 없음: ${esc(reason)}">—</span>`}return numberMarkup(o.value,m)}
 function annualUpdateExplorerSort(){const current=$("#explorer-sort").value,ids=EXPLORER_PRESETS[$("#explorer-preset").value]||EXPLORER_PRESETS.CORE;$("#explorer-sort").innerHTML='<option value="company">기업명</option>'+ids.map(id=>`<option value="${id}">${esc(explorerMetric(id).label)}</option>`).join("");if([...$("#explorer-sort").options].some(x=>x.value===current))$("#explorer-sort").value=current}
-function renderAnnualExplorer(){const r=S.explorer,ids=EXPLORER_PRESETS[$("#explorer-preset").value]||EXPLORER_PRESETS.CORE;if(!r)return;registerExplorerCompanies(r.rows.map(row=>row.company));updateExplorerSort();$("#explorer-count").textContent=`${r.rows.length}개 기업 · ${r.period_scope==="LATEST_COMPANY"?"회사별 최신":`FY${r.selected_fiscal_year}`}`;$("#explorer-year-note").textContent=r.period_scope==="LATEST_COMPANY"?"회사별로 다른 실제 재무기간을 표시합니다.":`선택 연도 자료 ${r.selected_year_company_count}/${r.company_count} · 없는 기업도 목록에 유지합니다.`;$("#explorer-head").innerHTML=`<tr><th><span class="sr-only">비교 선택</span></th><th>기업</th><th>공시 재무기간</th>${ids.map(id=>{const m=explorerMetric(id);return`<th title="${esc(m.label)}">${esc(CORE_SHORT_LABELS[id]||m.label)}<small>${esc(unitLabel(m))}</small></th>`}).join("")}</tr>`;$("#explorer-body").innerHTML=r.rows.length?r.rows.map((row,index)=>{const c=row.company;return`<tr><td><input type="checkbox" data-explorer-select="${index}" data-explorer-cik="${esc(c.cik)}" aria-label="${esc(c.ticker)} 비교 선택" ${S.explorerSelected.has(c.cik)?"checked":""}></td><td><button class="company" data-explorer-open="${index}" data-profile-cik="${esc(c.cik)}" aria-controls="company-profile"><strong>${esc(c.name||c.ticker)}</strong><span class="company-meta" title="${esc(c.ticker)} · ${esc(c.industry||"업종 정보 없음")}"><small>${esc(c.ticker)}</small><small class="industry">${esc(c.industry||"업종 정보 없음")}</small></span></button></td><td class="actual-period">${esc(r.period_scope==="LATEST_COMPANY"?companyPeriodCaption(row.resolved_period):explorerPeriod(row))}</td>${ids.map(id=>`<td>${explorerValue(row.metrics[id],explorerMetric(id))}</td>`).join("")}</tr>`}).join(""):`<tr><td colspan="${3+ids.length}" class="empty">검색 결과가 없습니다.</td></tr>`;$$('[data-explorer-select]').forEach(x=>x.onchange=()=>{const c=r.rows[Number(x.dataset.explorerSelect)].company;transitionExplorerSelection("toggle",c.cik,x.checked,c,x)});$$('[data-explorer-open]').forEach(x=>x.onclick=()=>openProfile(r.rows[Number(x.dataset.explorerOpen)].company.cik,x).catch(fail));updateCompareButton()}
+function renderAnnualExplorer(){const r=S.explorer,ids=EXPLORER_PRESETS[$("#explorer-preset").value]||EXPLORER_PRESETS.CORE;if(!r)return;registerExplorerCompanies(r.rows.map(row=>row.company));updateExplorerSort();$("#explorer-count").textContent=`${r.rows.length}개 기업 · ${r.period_scope==="LATEST_COMPANY"?"회사별 최신":`FY${r.selected_fiscal_year}`}`;$("#explorer-year-note").textContent=r.period_scope==="LATEST_COMPANY"?"회사별로 다른 실제 재무기간을 표시합니다.":`선택 연도 자료 ${r.selected_year_company_count}/${r.company_count} · 없는 기업도 목록에 유지합니다.`;renderExplorerHeaders(ids,"공시 재무기간",true);$("#explorer-body").innerHTML=r.rows.length?r.rows.map((row,index)=>{const c=row.company;return`<tr><td><input type="checkbox" data-explorer-select="${index}" data-explorer-cik="${esc(c.cik)}" aria-label="${esc(c.ticker)} 비교 선택" ${S.explorerSelected.has(c.cik)?"checked":""}></td><td><button class="company" data-explorer-open="${index}" data-profile-cik="${esc(c.cik)}" aria-controls="company-profile"><strong>${esc(c.name||c.ticker)}</strong><span class="company-meta" title="${esc(c.ticker)} · ${esc(c.industry||"업종 정보 없음")}"><small>${esc(c.ticker)}</small><small class="industry">${esc(c.industry||"업종 정보 없음")}</small></span></button></td><td class="actual-period">${esc(r.period_scope==="LATEST_COMPANY"?companyPeriodCaption(row.resolved_period):explorerPeriod(row))}</td>${ids.map(id=>`<td>${explorerValue(row.metrics[id],explorerMetric(id))}</td>`).join("")}</tr>`}).join(""):`<tr><td colspan="${3+ids.length}" class="empty">검색 결과가 없습니다.</td></tr>`;$$('[data-explorer-select]').forEach(x=>x.onchange=()=>{const c=r.rows[Number(x.dataset.explorerSelect)].company;transitionExplorerSelection("toggle",c.cik,x.checked,c,x)});$$('[data-explorer-open]').forEach(x=>x.onclick=()=>openProfile(r.rows[Number(x.dataset.explorerOpen)].company.cik,x).catch(fail));updateCompareButton()}
 function updateCompareButton(){const n=S.explorerSelected.size,b=$("#compare-selected");b.disabled=n<2||n>4||explorerBasis.readyKey!==explorerContextKey();b.textContent=n?`선택 기업 비교 (${n})`:"선택 기업 비교";syncExplorerSelectionUI();syncProfileTrigger()}
 
 async function loadExplorerCatalog(d){const key=`${d.dataset_id}:${S.explorerYear}`;if(S.explorerCatalogKey===key&&S.explorerCatalog)return S.explorerCatalog;const token=++S.explorerCatalogToken,r=await api(`/api/metric-library?dataset_id=${encodeURIComponent(d.dataset_id)}&fiscal_year=${S.explorerYear}`);if(token!==S.explorerCatalogToken)return null;const current=S.explorerDataset||S.defaultDataset;if(current?.dataset_id!==d.dataset_id||Number(r.selected_fiscal_year)!==Number(S.explorerYear))return null;if(d.definition_count&&r.metrics.length!==d.definition_count)throw new Error("전체 탐색 지표 정의를 불러오지 못했습니다.");S.explorerCatalog=r;S.explorerCatalogKey=key;return r}
@@ -365,7 +375,17 @@ async function addGuideMetric(id){clearResult();const m=(S.library?.metrics||[])
 function profileObservationCell(o,m){if(o?.value===null||o?.value===undefined){const reason=(o?.reason_labels||[])[0]||"자료 없음";return`<span class="missing" title="${esc(reason)}" aria-label="자료 없음: ${esc(reason)}">—</span>`}const period=o.period_start?`${o.period_start} ~ ${inclusiveEnd(o.period_end)}`:`기준일 ${inclusiveEnd(o.period_end)}`,detail=`${m.source_label||""} · ${period}`;return`<strong title="${esc(detail)}">${numberMarkup(o.value,m)}</strong>`}
 function renderProfileTrendData(){const p=S.profile,id=$("#profile-metric").value,item=p.groups.flatMap(x=>x.metrics).find(x=>x.definition.metric_id===id),m=item.definition,series=p.series[id]||[];S.profileMetric=id;const available=series.filter(x=>x.value!==null&&x.value!==undefined),values=available.map(x=>Number(x.value)),min=Math.min(...values),max=Math.max(...values),span=max-min||1,points=series.map((x,i)=>x.value===null||x.value===undefined?null:{x:38+i*(284/Math.max(series.length-1,1)),y:102-((Number(x.value)-min)/span)*62}),lines=points.slice(1).map((p2,i)=>p2&&points[i]?`<line class="line" x1="${points[i].x}" y1="${points[i].y}" x2="${p2.x}" y2="${p2.y}"/>`:"").join(""),marks=points.map((p2,i)=>p2?`<g><circle class="point" cx="${p2.x}" cy="${p2.y}" r="4"><title>${profileSeriesLabel(series[i])} ${esc(displayValue(series[i].value,m))}</title></circle>${explorerBasis.profileBasis==="ANNUAL"||i===points.findIndex(Boolean)||i===points.findLastIndex(Boolean)?`<text class="value-label" x="${p2.x}" y="${Math.max(p2.y-9,28)}">${esc(displayValue(series[i].value,m))}</text>`:""}</g>`:"").join(""),years=series.map((x,i)=>explorerBasis.profileBasis==="ANNUAL"?`<text class="year-label ${points[i]?"":"missing-year"}" x="${38+i*(284/Math.max(series.length-1,1))}" y="142">${profileSeriesLabel(x)}${points[i]?"":" · 없음"}</text>`:interimAxisCaption(x,38+i*(284/Math.max(series.length-1,1)),!points[i])).join("");$("#profile-chart").innerHTML=available.length?`<svg viewBox="0 0 360 158" role="img" aria-label="${esc(m.label)} ${explorerBasis.profileBasis==="ANNUAL"?"4개 회계연도":"8개 종료 분기"} 흐름. 단위 ${esc(unitLabel(m))}. 누락 연도는 연결하지 않습니다."><text class="chart-label" x="12" y="18">${esc(m.label)} · ${esc(unitLabel(m))}</text><line class="axis" x1="24" y1="116" x2="340" y2="116"/>${lines}${marks}${years}</svg>`:'<p class="empty">표시할 값이 없습니다.</p>';$("#profile-series").innerHTML=`<table class="series-table"><thead><tr><th>${explorerBasis.profileBasis==="ANNUAL"?"회계연도":"종료 분기 · 회사 회계표시"}</th><th>공시 재무기간</th><th>${esc(m.label)} (${esc(unitLabel(m))})</th></tr></thead><tbody>${series.map(x=>`<tr><td>${profileSeriesLabel(x)}${explorerBasis.profileBasis!=="ANNUAL"?`<small>${esc(fiscalLabel(x))}</small>`:""}</td><td>${esc(x.period_start?`${x.period_start} ~ ${inclusiveEnd(x.period_end)}`:`기준일 ${inclusiveEnd(x.period_end)}`)}</td><td>${x.value===null||x.value===undefined?`<span class="missing" title="${esc((x.reason_labels||[])[0]||"자료 없음")}">—</span>`:numberMarkup(x.value,m)}</td></tr>`).join("")}</tbody></table>`}
 function renderCompanyDescription(d){const box=$("#profile-description"),copy=box.querySelector(".description-copy"),meta=box.querySelector(".description-meta");box.querySelectorAll("a").forEach(x=>x.remove());if(!d||d.status!=="AVAILABLE"||!d.text){box.hidden=true;copy.textContent="";meta.textContent="";return}box.hidden=false;copy.textContent=d.text;const checked=(d.checked_at||"").slice(0,10),fixture=d.content_fixture_kind==="SYNTHETIC_DESCRIPTION_FIXTURE"?" · 합성 소개 예시":"";meta.textContent=`현재 회사 정보 · ${d.provider_name||"출처 확인"}${checked?` · ${checked} 확인`:""}${fixture}`;if(d.profile_url){try{const u=new URL(d.profile_url);if(u.protocol==="https:"){const a=document.createElement("a");a.href=u.href;a.target="_blank";a.rel="noopener noreferrer";a.textContent="원문 출처 열기";meta.append(" · ",a)}}catch(_){}}}
-function renderProfile(){resetRevenueBreakdowns();const p=S.profile,definitions=p.groups.flatMap(x=>x.metrics.map(y=>y.definition));$("#profile-title").textContent=`${p.company.name||p.company.ticker} 재무 프로필`;$("#profile-intro").innerHTML=`<p><strong>${esc(p.company.ticker)}</strong> · ${esc(p.company.industry||"업종 정보 없음")}</p><p class="muted">재무 기준일 ${esc(p.financial_as_of)} · FY${p.selected_fiscal_year} · ${esc(p.resolved_period?companyPeriodCaption(p.resolved_period):explorerPeriod({actual_period:p.actual_period}))}</p><p class="muted">금액은 백만 USD, 비율은 %로 표시합니다.</p>`;renderCompanyDescription(p.company_description);$("#profile-summary").innerHTML=p.summary.map(x=>`<div class="profile-card"><span>${esc(x.definition.label)} · ${esc(unitLabel(x.definition))}</span>${profileObservationCell(x.observation,x.definition)}</div>`).join("");$("#profile-metric").innerHTML=definitions.map(x=>`<option value="${x.metric_id}">${esc(x.label)}</option>`).join("");$("#profile-metric").value=definitions.some(x=>x.metric_id===S.profileMetric)?S.profileMetric:"revenue";$("#profile-all-metrics").innerHTML=p.groups.map(g=>`<section><h3>${esc(g.label)}</h3><div class="profile-metrics">${g.metrics.map(x=>`<div class="profile-metric"><span>${esc(x.definition.label)} · ${esc(unitLabel(x.definition))}</span>${profileObservationCell(x.observation,x.definition)}</div>`).join("")}</div></section>`).join("");const legacy=$("#profile-single-trend");if(legacy)legacy.open=false;else renderProfileTrend()}
+function profileMetricLedger(groups){
+  return groups.map((group,index)=>`<section class="profile-group" aria-labelledby="profile-group-${index}">
+    <h3 id="profile-group-${index}">${esc(group.label)}</h3>
+    <dl class="profile-ledger">${group.metrics.map(({definition,observation})=>{
+      const reason=observation?.value==null?(observation?.reason_labels?.[0]||"자료 없음"):"";
+      return `<div class="profile-ledger-row"><dt>${esc(definition.label)}${reason?`<small class="profile-ledger-reason">${esc(reason)}</small>`:""}</dt>
+        <dd class="profile-ledger-value">${profileObservationCell(observation,definition)}</dd>
+        <dd class="profile-ledger-unit">${esc(unitLabel(definition))}</dd></div>`;
+    }).join("")}</dl></section>`).join("");
+}
+function renderProfile(){resetRevenueBreakdowns();const p=S.profile,definitions=p.groups.flatMap(x=>x.metrics.map(y=>y.definition));$("#profile-title").textContent=`${p.company.name||p.company.ticker} 재무 프로필`;$("#profile-intro").innerHTML=`<p><strong>${esc(p.company.ticker)}</strong> · ${esc(p.company.industry||"업종 정보 없음")}</p><p class="muted">재무 기준일 ${esc(p.financial_as_of)} · FY${p.selected_fiscal_year} · ${esc(p.resolved_period?companyPeriodCaption(p.resolved_period):explorerPeriod({actual_period:p.actual_period}))}</p><p class="muted">금액은 백만 USD, 비율은 %로 표시합니다.</p>`;renderCompanyDescription(p.company_description);$("#profile-summary").innerHTML=p.summary.map(x=>`<div class="profile-card"><span>${esc(x.definition.label)} · ${esc(unitLabel(x.definition))}</span>${profileObservationCell(x.observation,x.definition)}</div>`).join("");$("#profile-metric").innerHTML=definitions.map(x=>`<option value="${x.metric_id}">${esc(x.label)}</option>`).join("");$("#profile-metric").value=definitions.some(x=>x.metric_id===S.profileMetric)?S.profileMetric:"revenue";$("#profile-all-metrics").innerHTML=profileMetricLedger(p.groups);const legacy=$("#profile-single-trend");if(legacy)legacy.open=false;else renderProfileTrend()}
 
 async function openAnnualProfile(cik,button){const token=++explorerBasis.profileToken,key=explorerContextKey();S.lastFocus=button;const d=S.explorerDataset||S.defaultDataset;const profile=await api(`/api/company-profile?dataset_id=${encodeURIComponent(d.dataset_id)}&cik=${encodeURIComponent(cik)}&${explorerBasis.latestAnnual?"latest=true":`fiscal_year=${S.explorerYear}`}`);if(token!==explorerBasis.profileToken||key!==explorerContextKey())return;explorerBasis.profileBasis="ANNUAL";S.profile=profile;S.profileMetric=explorerBasis.profileMetrics.ANNUAL;profileTrendCaption(false);renderProfile();showCompanyProfile()}
 function syncProfileTrigger(){
@@ -570,6 +590,33 @@ function updateExplorerSort(){
   const current=$("#explorer-sort").value;$("#explorer-sort").innerHTML='<option value="company">기업명</option>'+interimMetricIds().map(id=>`<option value="${id}">${esc(explorerMetric(id).label)}</option>`).join("");
   if([...$("#explorer-sort").options].some(option=>option.value===current))$("#explorer-sort").value=current;
 }
+function explorerHeaderSortDirection(key){
+  return $("#explorer-sort").value===key?($("#explorer-direction").value==="asc"?"desc":"asc"):key==="company"?"asc":"desc";
+}
+function explorerSortHeader(key,label,caption=label,unit=""){
+  const selected=$("#explorer-sort").value===key,direction=$("#explorer-direction").value;
+  const order=selected?(direction==="desc"?"descending":"ascending"):"none";
+  const next=explorerHeaderSortDirection(key)==="asc"?"오름차순":"내림차순";
+  return `<th scope="col" aria-sort="${order}" title="${esc(label)}"><button type="button" class="explorer-header-sort" data-explorer-sort="${esc(key)}" aria-label="${esc(label)}: ${next} 정렬">
+    <span>${esc(caption)}</span><span class="explorer-sort-arrow" aria-hidden="true">${selected?(direction==="desc"?"↓":"↑"):"↕"}</span>${unit?`<small>${esc(unit)}</small>`:""}</button></th>`;
+}
+function renderExplorerHeaders(ids,periodCaption,annual){
+  const focused=document.activeElement?.dataset?.explorerSort;
+  $("#explorer-head").innerHTML=`<tr><th scope="col"><span class="sr-only">비교 선택</span></th>${explorerSortHeader("company","기업명","기업")}<th scope="col">${esc(periodCaption)}</th>${ids.map(id=>{
+    const metric=explorerMetric(id),caption=annual?CORE_SHORT_LABELS[id]||metric.label:explorerMetricCaption(metric);
+    return explorerSortHeader(id,metric.label,caption,unitLabel(metric));
+  }).join("")}</tr>`;
+  const buttons=$$('[data-explorer-sort]');
+  buttons.forEach(button=>button.onclick=()=>sortExplorerByHeader(button.dataset.explorerSort));
+  if(focused)buttons.find(button=>button.dataset.explorerSort===focused)?.focus({preventScroll:true});
+}
+async function sortExplorerByHeader(key){
+  if(![...$("#explorer-sort").options].some(option=>option.value===key))return;
+  const direction=explorerHeaderSortDirection(key);
+  $("#explorer-sort").value=key;$("#explorer-direction").value=direction;
+  explorerBasis.views[explorerBasis.basis]=explorerViewState();
+  await loadExplorer();
+}
 function preparedExplorerObservation(observation){
   if(observation&&observation.availability_status==="AVAILABLE"&&observation.value!==null&&observation.value!==undefined&&!observation.quality_blocking&&observation.quality_status!=="BLOCK")return observation;
   const reason=["PERIOD_CONFLICT","PERIOD_MISMATCH"].includes(observation?.reason)?"실제 기간 확인 필요":observation?.quality_blocking||observation?.quality_status==="BLOCK"?"품질 검토가 필요한 자료입니다.":businessReason(observation?.reason||"자료가 준비되지 않았습니다.");
@@ -623,7 +670,7 @@ function renderExplorer(){
   const ids=interimMetricIds(),rows=filterSortExplorerRows(snapshot.rows,$("#explorer-query").value,$("#explorer-sort").value,$("#explorer-direction").value);explorerBasis.visibleRows=rows;
   $("#explorer-count").textContent=`${rows.length}개 기업 · ${latestExplorerPeriod()?"회사별 최신":explorerBasis.periods[explorerBasis.basis]} ${explorerBasisLabel()}`;
   $("#explorer-year-note").textContent=`${explorerBasis.metrics.length}개 지표 · 실제 기간과 회사 회계표시는 기업·지표마다 다릅니다. 미제공은 —입니다.`;$("#explorer-asof").textContent=snapshot.financial_as_of;
-  $("#explorer-head").innerHTML=`<tr><th><span class="sr-only">비교 선택</span></th><th>기업</th><th>실제 기간 · 회사 회계표시</th>${ids.map(id=>{const metric=explorerMetric(id);return`<th title="${esc(metric.label)}">${esc(explorerMetricCaption(metric))}<small>${esc(unitLabel(metric))}</small></th>`}).join("")}</tr>`;
+  renderExplorerHeaders(ids,"실제 기간 · 회사 회계표시",false);
   $("#explorer-body").innerHTML=rows.length?rows.map((row,index)=>`<tr><td><input type="checkbox" data-explorer-select="${index}" data-explorer-cik="${esc(row.company.cik)}" aria-label="${esc(row.company.ticker)} 비교 선택" ${S.explorerSelected.has(row.company.cik)?"checked":""}></td><td><button class="company" data-explorer-open="${index}" data-profile-cik="${esc(row.company.cik)}" aria-controls="company-profile"><strong>${esc(row.company.name||row.company.ticker)}</strong><span class="company-meta" title="${esc(row.company.ticker)} · ${esc(row.company.sic_description||row.company.industry||"업종 정보 없음")}"><small>${esc(row.company.ticker)}</small><small class="industry">${esc(row.company.sic_description||row.company.industry||"업종 정보 없음")}</small></span></button></td><td class="actual-period">${esc(latestExplorerPeriod()?companyPeriodCaption(row.period):interimPeriodCaption(interimPrimaryObservation(row)))}</td>${ids.map(id=>`<td>${explorerValue(preparedExplorerObservation(row.metrics[id]),explorerMetric(id))}</td>`).join("")}</tr>`).join(""):`<tr><td colspan="${ids.length+3}" class="empty">검색 결과가 없습니다.</td></tr>`;
   $$('[data-explorer-select]').forEach(node=>node.onchange=()=>{const cik=rows[Number(node.dataset.explorerSelect)].company.cik;transitionExplorerSelection("toggle",cik,node.checked,rows[Number(node.dataset.explorerSelect)].company,node)});
   $$('[data-explorer-open]').forEach(node=>node.onclick=()=>openProfile(rows[Number(node.dataset.explorerOpen)].company.cik,node).catch(error=>explorerNotice(error.message,true)));updateCompareButton();
@@ -745,13 +792,13 @@ const PROFILE_BOARD_SELECTION=`<details class="profile-board-picker"><summary>�
 
 function profileBoardExact(value,definition){
   return definition.unit_kind==="MONEY"?`${shiftDecimal(value,0)} USD`:
-    `${shiftDecimal(value,0)}${definition.unit_kind==="PERCENT"?" %":definition.unit_kind==="RATIO"?" 배":""}`;
+    `${shiftDecimal(value,0)}${definition.unit_kind==="PERCENT"?(definition.unit==="pp"?" %p":" %"):definition.unit_kind==="RATIO"?" 배":""}`;
 }
-function profileBoardUnit(definition){return definition.unit_kind==="RATIO"?"배":unitLabel(definition)}
+function profileBoardUnit(definition){if(definition.unit==="pp")return "%p";return definition.unit_kind==="RATIO"?"배":unitLabel(definition)}
 function profileBoardValue(value,definition,reason="준비된 값이 없습니다.",exact=false){
   if(value==null)return `<span class="missing" title="${esc(reason)}" aria-label="${esc(reason)}">—</span>`;
   const raw=esc(profileBoardExact(value,definition));
-  const text=definition.unit_kind==="RATIO"?esc(displayValue(value,definition)):null;
+  const text=definition.unit_kind==="RATIO"||definition.unit==="pp"?esc(displayValue(value,definition)):null;
   const number=text===null?numberMarkup(value,definition):
     `<span class="display-number" aria-label="${text} ${profileBoardUnit(definition)}">${text}</span>`;
   return `<span title="${raw}">${number}</span>${exact?`<small>공표값 ${raw}</small>`:""}`;
@@ -770,20 +817,21 @@ function profileBoardDomain(data,includeZero,unitKind){
   const ticks=Array.from({length:last-first+1},(_,index)=>(first+index)*step);
   return {lower:ticks[0],upper:ticks.at(-1),ticks,step};
 }
-function profileBoardTick(value,step,definition){
-  const scale=definition.unit_kind==="MONEY"?1000000:1;
-  const shown=value/scale,interval=step/scale;
-  if(shown!==0&&(interval<1e-7||Math.abs(shown)>=1e10))return shown.toExponential(2);
-  const places=Math.min(8,Math.max(0,1-Math.floor(Math.log10(interval))));
-  return new Intl.NumberFormat("en-US",{maximumFractionDigits:places}).format(shown);
+function profileBoardTick(value,_step,definition){
+  return displayValue(String(value),definition);
 }
-function profileBoardPlot({periods,series,definition,label,active=null,interactive=false,includeZero=false,type="LINE"}){
+function profileBoardPlot({periods,series,definition,label,active=null,interactive=false,includeZero=false,type="LINE",showPeriods=true}){
   const data=series.flatMap(line=>line.points.map(point=>point?.value==null?NaN:Number(point.value))).filter(Number.isFinite);
   if(!data.length)return '<p class="board-empty">이 범위에 표시할 값이 없습니다.</p>';
   const columns=type==="COLUMN",domain=profileBoardDomain(data,columns||includeZero,definition.unit_kind);
   const x=index=>profileBoardPeriodX(index,periods.length);
   const y=value=>126-(value-domain.lower)*110/(domain.upper-domain.lower);
-  const grid=domain.ticks.map(value=>`<line class="board-grid${value===0?" board-zero":""}" x1="88" x2="552" y1="${y(value)}" y2="${y(value)}"/><text class="board-y" x="82" y="${y(value)+4}">${esc(profileBoardTick(value,domain.step,definition))}</text>`).join("");
+  const tickLabels=new Set();
+  const grid=domain.ticks.map(value=>{
+    const label=profileBoardTick(value,domain.step,definition),visible=!tickLabels.has(label);
+    tickLabels.add(label);
+    return `<line class="board-grid${value===0?" board-zero":""}" x1="88" x2="552" y1="${y(value)}" y2="${y(value)}"/>${visible?`<text class="board-y" x="82" y="${y(value)+4}">${esc(label)}</text>`:""}`;
+  }).join("");
   const paths=series.map(line=>{
     const [color,dash]=PROFILE_BOARD_STYLES[line.color];
     const points=line.points.map((point,index)=>point?.value!=null&&Number.isFinite(Number(point.value))?
@@ -809,10 +857,11 @@ function profileBoardPlot({periods,series,definition,label,active=null,interacti
     const width=periods.length===1?448:448/(periods.length-1);
     return `<rect class="board-period-hit" data-board-period="${index}" x="${Math.max(88,x(index)-width/2)}" y="0" width="${Math.min(552,x(index)+width/2)-Math.max(88,x(index)-width/2)}" height="154"/>`;
   }).join(""):"";
+  const precisionNote=tickLabels.size<domain.ticks.length?'<p class="board-axis-note">같은 반올림 눈금은 한 번 표시합니다. 정확한 값은 근거 표에서 확인하세요.</p>':"";
   const axisNote=columns?'<p class="board-axis-note">0 기준</p>':
     domain.lower>0||domain.upper<0?'<p class="board-axis-note">자동 범위 · 0 생략</p>':"";
   const chartType=columns?"세로 막대":type==="DOT"?"점":"선";
-  return `${axisNote}<div class="board-plot-canvas" tabindex="0" role="region" aria-label="${esc(label)} ${chartType} 차트"><svg viewBox="0 0 570 154" role="img" aria-label="${esc(label)} · ${chartType} · ${esc(profileBoardUnit(definition))}">${grid}${marker}${hits}${paths}${labels}</svg></div>`;
+  return `${axisNote}${precisionNote}<div class="board-plot-canvas" tabindex="0" role="region" aria-label="${esc(label)} ${chartType} 차트"><svg viewBox="0 0 570 ${showPeriods?154:134}" role="img" aria-label="${esc(label)} · ${chartType} · ${esc(profileBoardUnit(definition))}">${grid}${marker}${hits}${paths}${showPeriods?labels:""}</svg></div>`;
 }
 
 function bindProfileBoardPeriod(host,selectPeriod,activePeriod){
@@ -854,11 +903,14 @@ const FINANCIAL_GROWTH_BASE=new Map(
 const financialGrowthCache=new Map();
 let financialGrowthCapability;
 const BOARD_RATE={label:"전년비",unit_kind:"PERCENT",unit:"%"};
+const BOARD_PP={label:"전년 대비 변화",unit_kind:"PERCENT",unit:"pp"};
 const BOARD_USD={unit_kind:"MONEY",unit:"USD"};
 const BOARD_AXIS_OPTIONS='<option value="AUTO">자동 범위</option><option value="ZERO">0 포함</option>';
 
+function financialComparisonEligible(definition){return ["MONEY","PERCENT"].includes(definition?.unit_kind)}
+function financialComparisonMetric(definition){return definition.unit_kind==="PERCENT"?BOARD_PP:BOARD_RATE}
 function requestFinancialGrowth(model){
-  if(model.growth||!model.slots.length||!model.selection.order.some(id=>FINANCIAL_GROWTH_BASE.has(id)))return;
+  if(model.growth||!model.slots.length||!model.selection.order.some(id=>financialComparisonEligible(model.definitions.get(id))))return;
   const scope={dataset_id:model.context.dataset,dataset_publication_id:model.context.publication,
     financial_as_of:model.context.financialAsOf,cik:model.profile.company.cik};
   if(Object.values(scope).some(value=>typeof value!=="string"||!value)){
@@ -880,7 +932,7 @@ function requestFinancialGrowth(model){
     let pending=financialGrowthCache.get(query);
     if(!pending){
       pending=api(`/api/financial-growth?${query}`).then(data=>{
-        if(data.schema_version!=="screening-financial-growth-v1"||data.rule_version!==FINANCIAL_GROWTH_RULE||data.period_end_convention!=="EXCLUSIVE"||
+        if(!((data.schema_version==="screening-financial-growth-v1"&&data.rule_version===FINANCIAL_GROWTH_RULE)||(data.schema_version==="screening-financial-growth-v2"&&data.rule_version==="catalog-prepared-financial-comparison-v2"))||data.period_end_convention!=="EXCLUSIVE"||
             Object.keys(scope).some(key=>scope[key]!==data[key])||data.dataset_manifest_sha256!==capability.dataset_manifest_sha256||
             !data.definitions||!data.series){
           throw new Error("전년 비교 발행물의 범위가 선택과 다릅니다.");
@@ -902,7 +954,8 @@ function requestFinancialGrowth(model){
 }
 function financialGrowthReason(reason){
   return ({
-    CURRENT_UNAVAILABLE:"이 기간의 금액을 비교할 수 없습니다.",
+    CURRENT_UNAVAILABLE:"이 기간의 값을 비교할 수 없습니다.",
+    SUPPORTED_LINEAGE_NOT_PREPARED:"공표값은 있으나 비교에 필요한 준비된 입력 계보가 없습니다.",
     PRIOR_NOT_PREPARED:"전년 비교 기간이 준비되지 않았습니다.",
     PRIOR_UNAVAILABLE:"전년 비교값을 사용할 수 없습니다.",
     AMBIGUOUS_FISCAL_PERIOD:"회계기간의 관측값을 하나로 확인할 수 없습니다.",
@@ -914,10 +967,10 @@ function financialGrowthReason(reason){
 }
 function financialGrowthStatus(id,status){
   const metric=FINANCIAL_GROWTH_BASE.get(id);
-  const negative={operating_income:"영업손실",cfo:"영업현금 순유출",standardized_fcf:"음수 FCF 규모"}[metric];
+  const negative={operating_income:"영업손실",cfo:"영업현금 순유출",standardized_fcf:"음수 FCF 규모"}[metric]||"음수 규모";
   return ({
-    POSITIVE_TURN:{operating_income:"흑자전환",cfo:"영업현금 순유입 전환",standardized_fcf:"FCF 양수 전환"}[metric],
-    NEGATIVE_TURN:{operating_income:"적자전환",cfo:"영업현금 순유출 전환",standardized_fcf:"FCF 음수 전환"}[metric],
+    POSITIVE_TURN:{operating_income:"흑자전환",cfo:"영업현금 순유입 전환",standardized_fcf:"FCF 양수 전환"}[metric]||"양수 전환",
+    NEGATIVE_TURN:{operating_income:"적자전환",cfo:"영업현금 순유출 전환",standardized_fcf:"FCF 음수 전환"}[metric]||"음수 전환",
     NEGATIVE_MAGNITUDE_REDUCED:`${negative} 축소`,
     NEGATIVE_MAGNITUDE_EXPANDED:`${negative} 확대`,
     NEGATIVE_MAGNITUDE_UNCHANGED:`${negative} 유지`,
@@ -940,7 +993,7 @@ function financialGrowthPoints(model,definition,levels){
       return {value:null,reason:"전년 비교의 현재 관측, 금액 또는 실제 기간이 준비된 수준과 다릅니다."};
     }
     const status=financialGrowthStatus(definition.metric_id,row.status);
-    return {value:row.yoy,reason:status||reason,connect:level.connect,evidence:row,status};
+    return {value:declared.comparison_kind==="PERCENTAGE_POINT"?row.change_pp:row.yoy,reason:status||reason,connect:level.connect,evidence:row,status,definition,rule:data.rule_version,formula:declared.formulas?.change_pp?.expression};
   });
 }
 function financialGrowthEvidence(point,exact=false){
@@ -954,14 +1007,16 @@ function financialGrowthEvidence(point,exact=false){
   const magnitude=publishedMagnitude==null?"":exact?
     `<small>음수 규모 축소율 ${amount(publishedMagnitude,BOARD_RATE,"%")} · (전년 절댓값 − 현재 절댓값) ÷ 전년 절댓값 × 100</small>`:
     `<small>${direction} ${amount(expanded?publishedMagnitude.replace(/^-/u,""):publishedMagnitude,BOARD_RATE,"%")}</small>`;
-  const delta=`<small>금액 증감 ${amount(record.delta,BOARD_USD,"백만 USD")}</small>`;
-  if(!exact)return status+magnitude+delta;
-  const evidence=(label,input)=>`<small>${label} ${esc(profileBoardExact(input.value,BOARD_USD))} · ${esc(actualPeriod(input))}<br>관측 ${esc(input.observation_id)}</small>`;
+  const percent=point.definition?.unit_kind==="PERCENT";
+  const delta=percent?"":`<small>금액 증감 ${amount(record.delta,BOARD_USD,"백만 USD")}</small>`;
+  if(!exact)return status+magnitude+delta+(record.basis_assurance==="ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"?'<small>산술 비교 · 재작성 비교성 미검증</small>':"");
+  const evidence=(label,input)=>`<small>${label} ${esc(profileBoardExact(input.value,point.definition||BOARD_USD))} · ${esc(actualPeriod(input))}<br>관측 ${esc(input.observation_id)}</small>`;
   const assurance=record.basis_assurance==="ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"?
     "산술 비교 · 재작성 기준 검증 없음":`선언 기준 ${record.basis_assurance?.replace(/^DECLARED_BASIS:/u,"")||"—"}`;
   const legs=record.ttm_input_ids?`<small>현재 분기 관측 ${esc(record.ttm_input_ids.current.join(", "))}<br>전년 분기 관측 ${esc(record.ttm_input_ids.prior.join(", "))}</small>`:"";
-  return status+magnitude+delta+evidence("현재",record.current)+evidence("전년",record.prior)+legs+
-    `<small>${esc(assurance)} · 규칙 ${FINANCIAL_GROWTH_RULE}</small>`;
+  const formula=percent?`<small>변화 공식: 현재 비율 − 전년 비율${point.formula?` · ${esc(point.formula)}`:""}</small>`:"";
+  return status+magnitude+delta+formula+evidence("현재",record.current)+evidence("전년",record.prior)+legs+
+    `<small>${esc(assurance)} · 규칙 ${esc(point.rule||FINANCIAL_GROWTH_RULE)}</small>`;
 }
 
 function financialGrowthPeriodStatuses(rates,slots,active){
@@ -981,7 +1036,7 @@ let financialProfileBoardHost,financialProfileBoard=null;
 function mountFinancialProfileBoard(overview){
   const section=document.createElement("section");
   section.className="financial-profile-board";
-  section.innerHTML=`<h3>재무 비교 보드</h3><p class="muted">지표별 수준과 발행된 전년비를 기간별로 비교합니다. 각 지표의 세로축은 독립적입니다.</p>
+  section.innerHTML=`<h3>재무 비교 보드</h3><p class="muted">금액은 수준과 전년비, 백분율은 수준과 전년 대비 %p 변화를 비교합니다. 각 지표의 세로축은 독립적입니다.</p>
     ${PROFILE_BOARD_SELECTION}
     <div class="financial-board-controls">
       <label>같이 볼 기간<select id="financial-board-period"></select></label>
@@ -1090,23 +1145,23 @@ function renderFinancialProfileBoard(model){
   const plotIndex=card?[...card.querySelectorAll(".board-plot-canvas")].indexOf(active):-1;
   host.innerHTML=model.selection.order.map(id=>{
     const definition=model.definitions.get(id),published=financialProfileGrowth(id,model.definitions),color=model.selection.colors.get(id);
-    const adjunct=FINANCIAL_GROWTH_BASE.has(id),growth=published||(adjunct?BOARD_RATE:null);
+    const adjunct=financialComparisonEligible(definition)&&!published,growth=published||(adjunct?financialComparisonMetric(definition):null);
     const levels=financialProfilePoints(model,definition);
     const rates=published?financialProfilePoints(model,published):adjunct?financialGrowthPoints(model,definition,levels):null;
     const chart=(metric,points,label,type,record=model.series.get(metric.metric_id))=>{
       const content=record?.loading?'<p class="board-empty" role="status">자료를 불러오는 중입니다…</p>':
         record?.error?`<p class="board-empty explorer-error">${esc(record.error)}</p>`:
-        profileBoardPlot({periods:model.slots,series:[{label:metric.label,color,points}],definition:metric,label,type,active:model.active,interactive:true,includeZero:model.includeZero});
+        profileBoardPlot({periods:model.slots,series:[{label:metric.label,color,points}],definition:metric,label,type,active:model.active,interactive:true,includeZero:model.includeZero,showPeriods:label!=="수준"||!growth});
       return `<div class="financial-board-plot"><h5>${label} · ${esc(profileBoardUnit(metric))}</h5>${content}</div>`;
     };
     return `<article class="financial-board-card" data-financial-card="${esc(id)}"><h4>${esc(definition.label)}</h4>
       ${chart(definition,levels,"수준",model.chartType||"DOT")}
-      ${growth?chart(growth,rates,"전년비","COLUMN",adjunct?model.growth:undefined):`<p class="board-empty">${definition.unit_kind==="MONEY"?"이 지표에 대응하는 전년비가 발행되지 않았습니다.":"이 지표는 수준으로 표시합니다. 대응하는 전년비가 발행되지 않았습니다."}</p>`}
+      ${growth?chart(growth,rates,growth.unit==="pp"?"전년 대비 변화":"전년비","COLUMN",adjunct?model.growth:undefined):`<p class="board-empty">${definition.unit_kind==="MONEY"?"이 지표에 대응하는 전년비가 발행되지 않았습니다.":"이 지표는 수준으로 표시합니다. 대응하는 전년비가 발행되지 않았습니다."}</p>`}
       ${adjunct?financialGrowthPeriodStatuses(rates,model.slots,model.active):""}
       <p class="financial-board-readout" data-financial-readout="${esc(id)}"></p>
       <details data-financial-details="${esc(id)}" ${expanded.has(id)?"open":""}><summary>기간별 값과 실제 기간</summary>
         <div class="table-wrap" tabindex="0" role="region" aria-label="${esc(definition.label)} 기간별 값">
-          <table class="series-table"><thead><tr><th scope="col">기간</th><th scope="col">수준 · ${esc(profileBoardUnit(definition))}</th>${growth?'<th scope="col">전년비 (%)</th>':""}</tr></thead>
+          <table class="series-table"><thead><tr><th scope="col">기간</th><th scope="col">수준 · ${esc(profileBoardUnit(definition))}</th>${growth?`<th scope="col">${growth.unit==="pp"?"전년 대비 변화 (%p)":"전년비 (%)"}</th>`:""}</tr></thead>
           <tbody>${model.slots.map((slot,index)=>{
             const level=levels[index],rate=rates?.[index],caption=point=>point?.row?`<small>${esc(actualPeriod(point.row))}${point.row.fiscal_quarter?` · ${esc(fiscalLabel(point.row))}`:""}</small>`:"";
             return `<tr><th scope="row">${esc(slot.label)}</th><td>${profileBoardValue(level.value,definition,level.reason,true)}${caption(level)}</td>${growth?`<td>${profileBoardValue(rate.value,growth,rate.reason,true)}${caption(rate)}${adjunct?financialGrowthEvidence(rate,true):""}</td>`:""}</tr>`;
@@ -1130,12 +1185,12 @@ function updateFinancialBoardPeriod(model,index,force=false){
   }
   for(const target of financialProfileBoardHost.querySelectorAll("[data-financial-readout]")){
     const id=target.dataset.financialReadout,definition=model.definitions.get(id),published=financialProfileGrowth(id,model.definitions);
-    const levels=financialProfilePoints(model,definition),level=levels[index],adjunct=FINANCIAL_GROWTH_BASE.has(id);
+    const levels=financialProfilePoints(model,definition),level=levels[index],adjunct=financialComparisonEligible(definition)&&!published;
     const rate=published?financialProfilePoints(model,published)[index]:adjunct?financialGrowthPoints(model,definition,levels)[index]:null;
-    const growth=published||BOARD_RATE;
+    const growth=published||financialComparisonMetric(definition);
     target.innerHTML=`<strong>${esc(model.slots[index].label)}</strong>
       · 수준 ${profileBoardValue(level.value,definition,level.reason)} ${esc(profileBoardUnit(definition))}
-      ${rate?` · 전년비 ${profileBoardValue(rate.value,growth,rate.reason)} %${adjunct?financialGrowthEvidence(rate):""}`:""}
+      ${rate?` · ${growth.unit==="pp"?"전년 대비 변화":"전년비"} ${profileBoardValue(rate.value,growth,rate.reason)} ${esc(profileBoardUnit(growth))}${adjunct?financialGrowthEvidence(rate):""}`:""}
       ${level.row?`<small>${esc(actualPeriod(level.row))}</small>`:""}`;
   }
 }
@@ -1765,7 +1820,12 @@ function renderCompanyTrendPlot(){
     const geometry=companyTrendGeometry(model,width);
     if(!geometry){chart.innerHTML='<p class="empty">선택한 기간에 표시할 수 있는 공표 값이 없습니다. 미제공은 0이 아닙니다.</p>';return}
     const {height,left,right,top,bottom,x,y}=geometry;
-    const grid=geometry.ticks.map(value=>`<g><line class="company-trend-grid" x1="${left}" y1="${y(value)}" x2="${width-right}" y2="${y(value)}"/><text class="company-trend-y" x="${left-8}" y="${geometry.labelPositions.get(value)}">${esc(formatDecimal(String(value),model.effectiveScale==="INDEX100"?2:1))}</text></g>`).join("");
+    const seenTicks=new Set();
+    const grid=geometry.ticks.map(value=>{
+      const label=model.effectiveScale==="INDEX100"?formatDecimal(String(value),2):displayValue(shiftDecimal(String(value),6),model.context.definition);
+      const visible=!seenTicks.has(label);seenTicks.add(label);
+      return `<g><line class="company-trend-grid" x1="${left}" y1="${y(value)}" x2="${width-right}" y2="${y(value)}"/>${visible?`<text class="company-trend-y" x="${left-8}" y="${geometry.labelPositions.get(value)}">${esc(label)}</text>`:""}</g>`;
+    }).join("");
     const axis=model.slots.map(slot=>`<text class="company-trend-x" x="${x(slot.ordinal)}" y="${height-bottom+21}">${model.context.basis==="ANNUAL"?esc(slot.label):`<tspan x="${x(slot.ordinal)}">${slot.year}</tspan><tspan x="${x(slot.ordinal)}" dy="13">Q${slot.quarter}</tspan>`}</text>`).join("");
     const lines=model.series.map(series=>{
       const points=series.points.map(point=>companyTrendPlotValue(point)===null||companyTrendPlotValue(point)===undefined?null:{...point,x:x(point.slot.ordinal),y:y(companyTrendPlotNumber(point,model))});

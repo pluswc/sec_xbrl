@@ -223,7 +223,7 @@ function loadProfileAsset(file, digest, label, schema, validate, maxCompanyBytes
     fs.closeSync(descriptor);
   }
   const { schema_version, dataset_id, dataset_publication_id, financial_as_of, dataset_manifest_sha256, companies } = payload;
-  if (schema_version !== schema ||
+  if (!(Array.isArray(schema) ? schema.includes(schema_version) : schema_version === schema) ||
       ![dataset_id, dataset_publication_id].every(value => typeof value === "string" && /^[A-Za-z0-9_.-]{1,128}$/u.test(value)) ||
       !/^\d{4}-\d{2}-\d{2}$/u.test(financial_as_of) || !/^[0-9a-f]{64}$/u.test(dataset_manifest_sha256) ||
       !companies || typeof companies !== "object" || Array.isArray(companies)) {
@@ -259,13 +259,14 @@ function loadFinancialGrowth(file, digest) {
   const reference = row => row === null || isRecord(row) && typeof row.observation_id === "string" && row.end_convention === "EXCLUSIVE" &&
     nullableDecimal(row.value) && ["period_start", "period_end"].every(key => row[key] === null || /^\d{4}-\d{2}-\d{2}$/u.test(row[key]));
   const statuses = new Set(["UNAVAILABLE", "RATE_AVAILABLE", "ZERO_REACHED", "ZERO_BASE", "ZERO_UNCHANGED",
-    "POSITIVE_TURN", "NEGATIVE_TURN", "NEGATIVE_MAGNITUDE_REDUCED", "NEGATIVE_MAGNITUDE_EXPANDED", "NEGATIVE_MAGNITUDE_UNCHANGED"]);
+    "POSITIVE_TURN", "NEGATIVE_TURN", "NEGATIVE_MAGNITUDE_REDUCED", "NEGATIVE_MAGNITUDE_EXPANDED", "NEGATIVE_MAGNITUDE_UNCHANGED", "CHANGE_AVAILABLE"]);
   const rowValid = row => isRecord(row) && statuses.has(row.status) && reference(row.current) && reference(row.prior) &&
     ["yoy", "delta", "negative_magnitude_change"].every(key => nullableDecimal(row[key])) &&
     (row.status === "UNAVAILABLE" ? row.yoy === null && row.delta === null && row.negative_magnitude_change === null :
       row.current?.value != null && row.prior?.value != null && row.delta !== null &&
       typeof row.basis_assurance === "string" && row.basis_assurance.length > 0);
-  return loadProfileAsset(file, digest, "financial growth", "screening-financial-growth-v1", payload => {
+  return loadProfileAsset(file, digest, "financial growth", ["screening-financial-growth-v1", "screening-financial-growth-v2"], payload => {
+    if (payload.schema_version === "screening-financial-growth-v2") return validateFinancialComparisonV2(payload, rowValid, isRecord);
     const { definitions, rule_version, source_compatibility_sha256, period_end_convention } = payload;
     const metrics = ["operating_income", "cfo", "standardized_fcf"];
     const expected = Object.fromEntries(Object.entries({FY: "", QTD_3M: "quarter_", TTM: "ttm_"}).flatMap(
@@ -283,12 +284,44 @@ function loadFinancialGrowth(file, digest) {
     }
     return company => {
       if (Object.entries(company).some(([id, periods]) => !Object.hasOwn(expected, id) || !isRecord(periods) ||
-          Object.entries(periods).some(([slot, row]) => !(expected[id] === "FY" ? /^\d{4}$/u : /^\d{4}Q[1-4]$/u).test(slot) || !rowValid(row)))) {
+          Object.entries(periods).some(([slot, row]) => !(expected[id] === "FY" ? /^\d{4}$/u : /^\d{4}Q[1-4]$/u).test(slot) || (!rowValid(row)||row.status === "CHANGE_AVAILABLE")))) {
         throw new Error("invalid financial growth company series");
       }
       return { definitions, rule_version, source_compatibility_sha256, period_end_convention, series: company };
     };
   });
+}
+
+function validateFinancialComparisonV2(payload, legacyRowValid, isRecord) {
+  const {definitions, rule_version, source_compatibility_sha256, period_end_convention}=payload;
+  if(rule_version!=="catalog-prepared-financial-comparison-v2" || period_end_convention!=="EXCLUSIVE" ||
+      !/^[0-9a-f]{64}$/u.test(source_compatibility_sha256) || !isRecord(definitions) ||
+      !Object.keys(definitions).length || Object.keys(definitions).length>256) throw new Error("invalid comparison definitions");
+  const decimal=value=>value===null||typeof value==="string"&&/^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/iu.test(value);
+  for(const [id,definition] of Object.entries(definitions)){
+    if(!/^[a-z][a-z0-9_]{0,127}$/u.test(id) || !["FY","QTD_3M","TTM"].includes(definition.basis) ||
+        !["FY","QTD_3M","TTM","INSTANT"].includes(definition.period_class) ||
+        typeof definition.definition_version!=="string" || !definition.definition_version ||
+        !["MONEY","PERCENT"].includes(definition.unit_kind) ||
+        definition.comparison_kind!==(definition.unit_kind==="MONEY"?"YOY":"PERCENTAGE_POINT")) throw new Error("invalid comparison definition");
+    const kinds=definition.unit_kind==="MONEY"?["ordinary_yoy","negative_magnitude_change","delta"]:["change_pp"];
+    if(kinds.some(key=>!isRecord(definition.formulas?.[key])||typeof definition.formulas[key].expression!=="string"||
+        typeof definition.formulas[key].eligibility!=="string"||definition.formulas[key].unit!==
+        (key==="change_pp"?"PERCENTAGE_POINT":key==="delta"?"USD":"PERCENT"))) throw new Error("invalid comparison formula");
+  }
+  return company=>{
+    for(const [id,periods] of Object.entries(company)){
+      const definition=definitions[id];
+      if(!definition||!isRecord(periods))throw new Error("invalid comparison metric");
+      for(const [slot,row] of Object.entries(periods)){
+        if(!(definition.basis==="FY"?/^\d{4}$/u:/^\d{4}Q[1-4]$/u).test(slot)||!legacyRowValid(row)||
+            (definition.unit_kind==="PERCENT" ? !decimal(row.change_pp)||row.yoy!==null||row.negative_magnitude_change!==null||
+              (row.status==="UNAVAILABLE"?row.change_pp!==null:row.status!=="CHANGE_AVAILABLE"||row.change_pp===null||row.delta!==row.change_pp) :
+              row.status==="CHANGE_AVAILABLE"||row.change_pp!=null))throw new Error("invalid comparison series");
+      }
+    }
+    return {definitions,rule_version,source_compatibility_sha256,period_end_convention,series:company};
+  };
 }
 
 function serveRevenueBreakdowns(bundle, request, response) {

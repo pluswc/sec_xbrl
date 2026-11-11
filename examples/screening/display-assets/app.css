@@ -457,3 +457,50 @@ body>header{position:static}
 .financial-growth-periods { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; padding: 0; list-style: none; }
 .financial-growth-periods button { font-size: 12px; }
 .financial-growth-periods [aria-pressed="true"] { background: var(--blue-soft); border-color: var(--blue); }
+
+/* Full-width ledger rows use one value track across every financial category. */
+.explorer-v2 #profile-all-metrics { margin-top: 20px; }
+.explorer-v2 #profile-all-metrics .profile-group { margin: 0; padding: 16px 0; border-top: 1px solid var(--line); }
+.explorer-v2 #profile-all-metrics h3 { margin: 0 0 8px; font-size: 16px; }
+.profile-ledger { margin: 0; }
+.profile-ledger-row {
+  display: grid; grid-template-columns: minmax(0,1fr) minmax(104px,160px) 84px;
+  align-items: baseline; gap: 8px 12px; padding: 8px 0; border-bottom: 1px solid var(--line);
+}
+.profile-ledger-row:last-child { border-bottom: 0; }
+.profile-ledger-row dt { min-width: 0; overflow-wrap: anywhere; }
+.profile-ledger-row dd { margin: 0; }
+.profile-ledger-value { text-align: right; font-variant-numeric: tabular-nums; }
+.profile-ledger-unit { color: var(--slate); font-size: 12px; }
+.profile-ledger-reason { display: block; margin-top: 4px; color: var(--slate); font-size: 12px; }
+.explorer-v2 #profile-summary { gap: 0; border-block: 1px solid var(--line); }
+.explorer-v2 #profile-summary .profile-card {
+  background: transparent; border: 0; border-radius: 0; padding: 12px;
+  border-right: 1px solid var(--line);
+}
+.explorer-v2 #profile-summary .profile-card > span { line-height: 1.5; }
+.explorer-v2 .financial-board-readout { border: 0; background: var(--inset); }
+@media (max-width:760px) {
+  .profile-ledger-row { grid-template-columns: minmax(0,1fr) 92px 56px; gap: 8px; }
+  .profile-ledger-unit { font-size: 11px; }
+  .explorer-v2 #profile-summary { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
+
+@media (min-width: 1200px) {
+  .explorer-v2 .profile-ledger { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); column-gap: 28px; }
+}
+/* Pair levels and growth as one comparison, sharing the lower time axis. */
+.explorer-v2 .financial-board-plot { margin: 0; padding: 4px 0; border-radius: 0; background: transparent; }
+.explorer-v2 .financial-board-plot + .financial-board-plot { border-top: 1px solid var(--line); }
+.explorer-v2 .financial-board-card .board-plot-canvas { max-width: 570px; margin-inline: auto; }
+.explorer-v2 .explorer-header-sort {
+  display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center;
+  gap: 2px 6px; width: 100%; padding: 2px 0; border: 0; border-radius: 0;
+  background: transparent; color: inherit; font: inherit; font-weight: inherit; text-align: inherit;
+}
+.explorer-v2 .explorer-header-sort small { grid-column: 1; }
+.explorer-v2 .explorer-sort-arrow { color: var(--slate); font-size: 14px; }
+.explorer-v2 th[aria-sort="ascending"] .explorer-sort-arrow,
+.explorer-v2 th[aria-sort="descending"] .explorer-sort-arrow { color: var(--blue); }
+.explorer-v2 .explorer-header-sort:hover { color: var(--blue); }
+.explorer-v2 .explorer-header-sort:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
