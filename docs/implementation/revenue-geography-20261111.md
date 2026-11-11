@@ -1,6 +1,8 @@
 # 공시 매출의 지역 보기와 명시적 보기 등록 — 2026-11-11
 
-상태: IMPLEMENTED / 자체 검사 통과. 독립 검증·로컬 인수·main 병합·운영 전환은 대기다.
+최신 상태(2026-11-11): INDEPENDENTLY_VERIFIED / LOCALLY_ACCEPTED / LIVE.
+대상 코드 `92876be5b93511c7f96541ecbf82da5a2c049d54`, main은 NOT_MERGED다.
+아래 단계별 대기 기록은 당시 상태이며 마지막 운영 인수 기록이 이를 갱신한다.
 본 계약은 기존 50사 준비 데이터의 선택형 매출 보조 발행과 해당 화면만 다룬다.
 신규 수집, Raw/Analytical 재생성, Nasdaq 수집 작업은 범위 밖이다.
 
@@ -186,3 +188,43 @@ artifact 50사를 함께 읽었고, 매출 최대 응답은 기존 확인한 815
 92f2079의 이전 독립 소스 PASS/리드 수락 및 이전 실제 UI 검증과 이번 통합의
 독립 검증·실제 preview·운영 전환은 구분한다. 이번 통합 commit의 새 검증과
 실제 PID/인자에 기초한 운영 전환은 리드가 수행하며 아직 본 기록의 완료가 아니다.
+
+
+## 최종 독립 검증·로컬 인수·실제 운영 — 2026-11-11
+
+리드는 통합 코드 `92876be5b93511c7f96541ecbf82da5a2c049d54`의 별도 읽기 전용
+독립 검증 **PASS**를 수락하고 **LOCALLY_ACCEPTED**로 판단했다. 실제 운영
+`http://127.0.0.1:18765/`에 해당 코드의 bundle을 적용했으며 새 Windows bridge는
+PID **41344**, 기존 backend **19070**은 유지했다. 소스는 main에 병합하지 않았고
+원격 push·PR·CI도 이번 전달에서 수행하지 않았다. 이 문서 후속 commit은 상태
+기록만 바꾸며 실제 배포 코드는 위 92876be5로 고정한다.
+
+이미 인수된 `42a5785473649a8e33a1d8054ffd2c9cc7d0086e`의 헤더 정렬·재무 요약
+ledger·표시 자리수·growth-v2 기능을 보존했다. Financial-growth는 기존 a9df827e
+artifact, 새 매출 artifact는 위 187fb9b2 해시를 그대로 사용한다. 기존
+history-worker, 원본 journal 경로 및 다른 프로세스 인자도 실제 직전 receipt를
+기준으로 유지했다. 오래된 PID 44504 receipt는 전환에 사용하지 않았다.
+
+최종 GET-only 실제 브라우저 검사는 한 회사의 지역 보기·헤더 클릭 정렬,
+1440px 두 열과 768px 한 열 배치에서 PASS했다. 768px의 Y축 여섯 눈금
+`0 / 50,000 / 100,000 / 150,000 / 200,000 / 250,000`이 모두 완전히 보였고
+가로 페이지 overflow·브라우저 오류가 없었다. 기존 AMZN/MSFT/GOOGL × 연간/분기
+6개 실제 검증과 전체 50사 기존 필드 동등성은 변경 없는 데이터 근거로 재사용했다.
+
+원본 journal은 기존 **10개 테이블·22개 행**의 모든 row digest와 DB bytes를
+보존했다. SHA-256은
+`3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`다.
+실제 검사 과정에서 사용자 기록을 추가하지 않았다.
+
+이 tracked 계약의 승인 범위·수락 판단·코드 SHA·산출물 pin·운영 사실이 인계의
+기준이다. 아래 로컬 receipt/이미지는 선택적 세부 증거이며 새 checkout 이해의
+전제 조건이 아니다.
+
+- 통합 소스 독립 PASS/로컬 인수: `work/revenue-geography-20261111/local-acceptance-integrated.json`
+- Journal 보존: `work/revenue-geography-20261111/journal-after-check.json`
+- 운영 전환·최종 GET-only 검사·화면:
+  `/mnt/c/Users/plusbdw/.codex/visualizations/2026/10/07/01a118cd-05d7-7842-b035-32b40d7c2817/revenue-geography-20261111/`
+  아래 `frontend-switch.json`, `live-report.json`, `live-desktop.png`, `live-768.png`.
+
+최종 상태는 **INDEPENDENTLY_VERIFIED + LOCALLY_ACCEPTED + LIVE / MAIN_NOT_MERGED**다.
+main·원격 반영은 별도 승인/전달 단계이며 이 운영 인수로 추정하지 않는다.
