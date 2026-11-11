@@ -109,3 +109,23 @@ GOOGL 등의 일부 기간 비중 보류는 동일 공시·개념의 분모 조�
 load에서 50사와 최대 응답 815,217 bytes를 확인했다. 원본 자료 및 서비스에는
 쓰기하지 않았다. 별도 브라우저의 실제 화면 검증과 독립 검증·리드 인수·main
 병합·live 전환은 이 소스 자체 검사의 범위가 아니다.
+
+## 독립 FAIL 반환과 고정 scope 분모 보완 — 2026-11-11
+
+후보 `ca09c3f5f92d46e7c3763e768adf8819ba1ff87b`는 독립 검증에서 P1 FAIL을 받았다.
+동일 고정 scope의 부모 후보를 ratio-bind 성공 여부로 먼저 걸러서, 명시적으로
+`COMPETING_PREPARED_SCOPE`인 부모가 사라진 뒤 다른 정상 부모만 선택될 수 있었다.
+지역의 고정 scope 부모는 해당 기간에 보고 값이 있거나 명시적인 충돌 상태인
+모든 후보를 먼저 세고, 단 하나인 경우에만 기존 ratio-bind를 적용하도록 고쳤다.
+기존 제품·사업부문 분모 선택은 변경하지 않았다.
+
+새 회귀 검사는 충돌 부모와 정상 부모가 함께 있을 때 지역 보고 금액과 검증된
+동일 공시 전년비를 유지하면서 비중만 보류함을 확인한다. 보완 후 focused Python
+17 PASS, 변경 Python lint와 diff whitespace PASS다. 이전 Node 9 PASS는 변경 없는
+화면/bridge 근거로 유지한다. 새 소스의 독립 검증과 인수는 별도 대기다.
+
+기존 current50 payload의 고정 scope 보고 503셀과 공표 비중 374셀만 대상으로
+부모 후보를 재검사했다. 명시적 충돌 부모 0셀, 복수 활성 부모 0셀, 영향받는
+기존 공표 비중 0셀이다. `work/revenue-geography-20261111/fixed-parent-conflict-check.json`에
+결과를 보존한다. 이 보완은 실제 artifact 값을 바꾸지 않으므로 deep rebuild나
+기존 전체 감사는 반복하지 않았고 위 artifact bytes와 SHA-256을 그대로 유지한다.

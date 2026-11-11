@@ -385,7 +385,8 @@ def _add_revenue_ratios(
                     fixed = row["fixed_axis_members"]
                     candidates = [candidate for candidate, candidate_cell in entries
                                   if candidate["axis_members"] == fixed
-                                  and candidate_cell.get("cell_id") in bound]
+                                  and (candidate_cell["value"] is not None
+                                       or candidate_cell["reason"] == "COMPETING_PREPARED_SCOPE")]
                     parent = candidates[0]["cells"][index] if len(candidates) == 1 else {} if fixed else total
                 denominator = bound.get(parent.get("cell_id"))
                 if denominator is not None:

@@ -472,3 +472,36 @@ def test_payload_bound_counts_entire_response_scope_without_dropping_records(mon
     monkeypatch.setattr(module, "MAX_COMPANY_BYTES", exact - 1)
     with pytest.raises(ValueError, match="company TEST exceeds response limit"):
         module._bounded_payload(payload)
+
+
+
+def test_geography_conflicting_fixed_parent_holds_share_but_keeps_amount_and_yoy():
+    from examples.screening.prepare_revenue_breakdowns import GEOGRAPHY_AXIS, _gap
+
+    def cell(row):
+        return {"status": "REPORTED", "reason": None, "cell_id": row["source_fact_id"],
+                "value": row["value_numeric"], "sources": [{"fact_id": row["source_fact_id"],
+                "snapshot_id": row["source_snapshot_id"], "accession": row["accession"],
+                "filed_date": row["filed_date"], "qname": row["raw_concept_qname"]}],
+                "share": None, "yoy": None}
+
+    total = _reported("total", "200", [])
+    parent = _reported("parent", "100", SEGMENT_DIMS)
+    dims = [*SEGMENT_DIMS, _dimension("raw-geography", "raw-europe")]
+    current = _reported("geography", "40", dims)
+    prior = _reported("prior-geography", "20", dims, prior=True)
+    geographic = {"group": "geography", "scope": None,
+                  "axis_members": {GEOGRAPHY_AXIS: "europe", SEGMENT_AXIS: "services"},
+                  "fixed_axis_members": {SEGMENT_AXIS: "services"}, "cells": [cell(current)]}
+    valid_parent = {"group": "segments", "scope": None, "member": "services",
+                    "axis_members": {SEGMENT_AXIS: "services"}, "cells": [cell(parent)]}
+    conflict = {**valid_parent, "cells": [_gap("COMPETING_PREPARED_SCOPE")]}
+    groups = {"geography": [geographic], "segments": [conflict, valid_parent]}
+    _add_revenue_ratios([cell(total)], groups, [CURRENT_PERIOD], [PRIOR_PERIOD, CURRENT_PERIOD],
+                        [total, parent, current, prior])
+    result = geographic["cells"][0]
+    assert result["value"] == "40"
+    assert result["share"] is None
+    assert "share" not in result["ratios"]
+    assert result["yoy"] == "100"
+    assert result["ratios"]["yoy"]["prior_fact_ids"] == ["prior-geography"]
