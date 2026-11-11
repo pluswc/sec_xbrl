@@ -488,7 +488,7 @@ test("source selection folds only after a ready matrix and distinguishes a later
 
 test("catalog comparison renders prepared percentage points and generic money states without browser arithmetic",()=>{
   const h=harness(()=>{});
-  const {points,eligible,value,pp,status}=vm.runInContext('({points:financialGrowthPoints,eligible:financialComparisonEligible,value:profileBoardValue,pp:BOARD_PP,status:financialGrowthStatus})',h.context);
+  const {points,eligible,value,pp,status,evidence}=vm.runInContext('({points:financialGrowthPoints,eligible:financialComparisonEligible,value:profileBoardValue,pp:BOARD_PP,status:financialGrowthStatus,evidence:financialGrowthEvidence})',h.context);
   assert(eligible({unit_kind:"MONEY"}));assert(eligible({unit_kind:"PERCENT"}));assert(!eligible({unit_kind:"RATIO"}));
   const definition={metric_id:"current_ratio",unit_kind:"PERCENT",definition_version:"v1"};
   const row={value:"120.125",period_start:null,period_end:"2025-01-01",fiscal_year:2024};
@@ -497,6 +497,10 @@ test("catalog comparison renders prepared percentage points and generic money st
     series:{current_ratio:{2024:{status:"CHANGE_AVAILABLE",current:{...row,observation_id:"x"},change_pp:"-0.00001",yoy:null}}}}}};
   const result=points(model,definition,[{value:row.value,row}]);
   assert.equal(result[0].value,"-0.00001");
+  result[0].evidence.prior={...row,value:"120.12501",observation_id:"prior"};
+  result[0].formula="current - prior";
+  assert.match(evidence(result[0],true),/현재 비율 − 전년 비율 · current - prior/);
+  assert.doesNotMatch(evidence(result[0]),/변화 공식/);
   assert.match(value(result[0].value,pp),/aria-label="&gt;-0.1 %p"/);
   assert.match(value(result[0].value,pp),/title="-0.00001 %p"/);
   assert.equal(status("cash","NEGATIVE_TURN"),"음수 전환");

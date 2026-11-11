@@ -966,7 +966,7 @@ function financialGrowthPoints(model,definition,levels){
       return {value:null,reason:"전년 비교의 현재 관측, 금액 또는 실제 기간이 준비된 수준과 다릅니다."};
     }
     const status=financialGrowthStatus(definition.metric_id,row.status);
-    return {value:declared.comparison_kind==="PERCENTAGE_POINT"?row.change_pp:row.yoy,reason:status||reason,connect:level.connect,evidence:row,status,definition,rule:data.rule_version};
+    return {value:declared.comparison_kind==="PERCENTAGE_POINT"?row.change_pp:row.yoy,reason:status||reason,connect:level.connect,evidence:row,status,definition,rule:data.rule_version,formula:declared.formulas?.change_pp?.expression};
   });
 }
 function financialGrowthEvidence(point,exact=false){
@@ -987,7 +987,8 @@ function financialGrowthEvidence(point,exact=false){
   const assurance=record.basis_assurance==="ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"?
     "산술 비교 · 재작성 기준 검증 없음":`선언 기준 ${record.basis_assurance?.replace(/^DECLARED_BASIS:/u,"")||"—"}`;
   const legs=record.ttm_input_ids?`<small>현재 분기 관측 ${esc(record.ttm_input_ids.current.join(", "))}<br>전년 분기 관측 ${esc(record.ttm_input_ids.prior.join(", "))}</small>`:"";
-  return status+magnitude+delta+evidence("현재",record.current)+evidence("전년",record.prior)+legs+
+  const formula=percent?`<small>변화 공식: 현재 비율 − 전년 비율${point.formula?` · ${esc(point.formula)}`:""}</small>`:"";
+  return status+magnitude+delta+formula+evidence("현재",record.current)+evidence("전년",record.prior)+legs+
     `<small>${esc(assurance)} · 규칙 ${esc(point.rule||FINANCIAL_GROWTH_RULE)}</small>`;
 }
 
@@ -1585,7 +1586,7 @@ function renderRevenueBreakdownTrend(){
   }));
   for(const [mode,selector,label] of charts){
     const series=model.visible.map(line=>({...line,points:line.points[mode]}));
-    $(selector).innerHTML=profileBoardPlot({periods,series,definition:definitions[mode],label,active,interactive:true,includeZero:model.includeZero,showPeriods:label!=="수준"||!growth});
+    $(selector).innerHTML=profileBoardPlot({periods,series,definition:definitions[mode],label,active,interactive:true,includeZero:model.includeZero});
   }
   $("#revenue-share-panel").hidden=!model.share;
   const values=$("#revenue-board-values");
