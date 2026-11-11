@@ -522,3 +522,69 @@ test("ledger preserves all metrics and missing reasons while plots share compact
   const labels=[...full.matchAll(/class="board-y"[^>]*>([^<]+)/g)].map(match=>match[1]);
   assert.equal(labels.length,new Set(labels).size);assert.match(full,/같은 반올림 눈금/);
 });
+
+test("sortable headers are native buttons with current order and explicit next action",()=>{
+  const h=harness(()=>{}),header=vm.runInContext('explorerSortHeader',h.context);
+  assert.match(header("company","기업명","기업"),/scope="col" aria-sort="ascending"/);
+  assert.match(header("company","기업명","기업"),/type="button"[^>]*data-explorer-sort="company"[^>]*aria-label="기업명: 내림차순 정렬"/);
+  assert.match(header("quarter_revenue","매출","매출","백만 달러"),/aria-sort="none".*내림차순 정렬/s);
+  h.get("#explorer-sort").value="quarter_revenue";h.get("#explorer-direction").value="desc";
+  assert.match(header("quarter_revenue","매출"),/aria-sort="descending".*오름차순 정렬/s);
+  assert.match(header("company","기업명"),/aria-sort="none".*오름차순 정렬/s);
+  assert.match(header("quarter_revenue","매출"),/aria-hidden="true">↓/);
+});
+
+test("header sorting synchronizes interim dropdowns and retains exact missing-last rules and scope",async()=>{
+  const data=snapshot();data.rows.push(row("3",null,"Missing"));
+  const h=harness(()=>data);prepared(h);
+  h.get("#explorer-sort").options=["company","quarter_revenue","ttm_revenue"].map(value=>({value}));
+  const sort=vm.runInContext('sortExplorerByHeader',h.context);
+  h.S.explorerSelected.add("1");await h.loadExplorer();
+  await sort("quarter_revenue");
+  assert.equal(h.get("#explorer-direction").value,"desc");
+  assert.equal(h.get("#explorer-sort").value,"quarter_revenue");
+  assert.equal(h.state.visibleRows.map(r=>r.company.cik).join(),"1,2,3");
+  assert.match(h.get("#explorer-head").innerHTML,/aria-sort="descending"[^>]*title="quarter_revenue"/);
+  await sort("quarter_revenue");
+  assert.equal(h.get("#explorer-direction").value,"asc");
+  assert.equal(h.state.visibleRows.map(r=>r.company.cik).join(),"2,1,3");
+  await sort("company");assert.equal(h.get("#explorer-direction").value,"asc");
+  await sort("company");assert.equal(h.get("#explorer-direction").value,"desc");
+  assert.equal(h.state.views.QUARTERLY.sort,"company");assert.equal(h.state.views.QUARTERLY.direction,"desc");
+  assert.equal(h.S.explorerSelected.has("1"),true);assert.equal(h.state.periods.QUARTERLY,"2026Q2");
+  h.state.basis="TTM";await sort("ttm_revenue");
+  assert.equal(h.get("#explorer-direction").value,"desc");
+  assert.equal(h.state.views.TTM.sort,"ttm_revenue");assert.equal(h.calls.length,1);
+  await sort("period");assert.equal(h.get("#explorer-sort").value,"ttm_revenue");
+});
+
+test("annual header sort uses the existing API and preserves query latest year and selected companies",async()=>{
+  const h=harness(()=>({rows:[],fiscal_years:[{fiscal_year:2024,companies_prepared:2}],selected_fiscal_year:2024,default_fiscal_year:2024,
+    company_count:2,selected_year_company_count:2,financial_as_of:"2026-10-25"}));
+  h.S.explorerCatalog={metrics:core.map(metric_id=>({metric_id,label:metric_id,unit_kind:"MONEY"}))};h.S.explorerCatalogKey="current50:2024";
+  h.get("#explorer-sort").options=["company",...core].map(value=>({value}));h.get("#explorer-query").value="Alpha";
+  h.S.explorerSelected.add("1");h.state.latestAnnual=true;
+  const sort=vm.runInContext('sortExplorerByHeader',h.context);
+  await sort("net_income");await sort("net_income");
+  const params=h.calls.map(url=>new URLSearchParams(url.split("?")[1]));
+  assert.equal(params[0].get("sort"),"net_income");assert.equal(params[0].get("direction"),"desc");
+  assert.equal(params[1].get("direction"),"asc");
+  for(const query of params){assert.equal(query.get("latest"),"true");assert.equal(query.get("query"),"Alpha")}
+  assert.equal(h.S.explorerSelected.has("1"),true);assert.equal(h.S.explorerYear,2024);
+  assert.match(h.get("#explorer-head").innerHTML,/aria-sort="ascending"[^>]*title="net_income"/);
+  assert.doesNotMatch(h.get("#explorer-head").innerHTML,/data-explorer-sort="(?:period|selection)"/);
+});
+
+test("header rerender binds click and restores only an already focused header",async()=>{
+  const h=harness(()=>{});prepared(h);h.state.metrics=definitions;
+  const render=vm.runInContext('renderExplorerHeaders',h.context);
+  const document=vm.runInContext('document',h.context);let focused=0;
+  const button={dataset:{explorerSort:"quarter_revenue"},focus(options){focused++;assert.equal(options.preventScroll,true)}};
+  document.querySelectorAll=selector=>selector==='[data-explorer-sort]'?[button]:[];
+  document.activeElement={dataset:{explorerSort:"quarter_revenue"}};
+  render(["quarter_revenue"],"실제 기간",false);
+  assert.equal(focused,1);assert.equal(typeof button.onclick,"function");
+  document.activeElement=h.get("#explorer-sort");render(["quarter_revenue"],"기간",false);assert.equal(focused,1);
+  // A native button supplies Enter/Space activation; no custom key listener can double-toggle it.
+  assert.match(h.get("#explorer-head").innerHTML,/<button type="button" class="explorer-header-sort"/);
+});

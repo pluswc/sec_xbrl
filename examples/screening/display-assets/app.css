@@ -490,3 +490,14 @@ body>header{position:static}
 .explorer-v2 .financial-board-plot { margin: 0; padding: 4px 0; border-radius: 0; background: transparent; }
 .explorer-v2 .financial-board-plot + .financial-board-plot { border-top: 1px solid var(--line); }
 .explorer-v2 .financial-board-card .board-plot-canvas { max-width: 570px; margin-inline: auto; }
+.explorer-v2 .explorer-header-sort {
+  display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center;
+  gap: 2px 6px; width: 100%; padding: 2px 0; border: 0; border-radius: 0;
+  background: transparent; color: inherit; font: inherit; font-weight: inherit; text-align: inherit;
+}
+.explorer-v2 .explorer-header-sort small { grid-column: 1; }
+.explorer-v2 .explorer-sort-arrow { color: var(--slate); font-size: 14px; }
+.explorer-v2 th[aria-sort="ascending"] .explorer-sort-arrow,
+.explorer-v2 th[aria-sort="descending"] .explorer-sort-arrow { color: var(--blue); }
+.explorer-v2 .explorer-header-sort:hover { color: var(--blue); }
+.explorer-v2 .explorer-header-sort:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
