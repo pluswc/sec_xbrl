@@ -1,11 +1,18 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-10 [저장 공간 정리 인수 기록](../implementation/storage-retention-cleanup-20261110.md)은
+승인된 MRK 감사 DB와 압축 해제 디렉터리 1,109개의 정리 완료, 보존·복원
+근거 및 Git 생성물 제외 범위를 기록한다. 이 문서·제외 규칙의 PR·CI·main
+반영은 대기다.
+
 2026-11-09 [스크리닝 조회용 관측값과 상세 근거 분리](../implementation/screening-core-detail-20261109.md)는
 원본 V3 식별자와 저장 기록을 유지하는 선택형 조회 발행을 기록한다.
 동결 소스 `254ce37ca6`는 독립 검증과 로컬 인수를 통과했고 18765에서
 백엔드 19070으로 전환했다. 실제 조회·저장 공간·갱신 쓰기 측정 범위는
-계약에 기록했다. 2026-11-10 PR #82를 포함한 main 위로 통합했으며, 통합
-후보의 독립 검증과 원격 PR·CI는 별도 단계다.
+계약에 기록했다. 구현은 [PR #83](https://github.com/pluswc/sec_xbrl/pull/83)으로
+main `c03d053897`에 병합됐고,
+[CI 42806391960](https://github.com/pluswc/sec_xbrl/actions/runs/42806391960)이
+통과했다. 운영 인수 소스의 Python 구현과 통합 소스는 바이트가 일치한다.
 
 2026-11-09 [재무 비교 보드 전년 대비 변화 계약](../implementation/financial-growth-insights-20261109.md)은
 차트 전용 파생 발행, 부호별 표시, 실제 기간 근거와 세로축 제어를 정의한다.
