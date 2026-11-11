@@ -8,6 +8,7 @@ from typing import Any
 
 from sec_xbrl.screening.common import canonical_json, require_cik, require_string
 from sec_xbrl.screening.dataset_v2 import ScreeningDatasetV2Reader
+from sec_xbrl.screening.runtime_projection import ScreeningRuntimeProjection, observation_rows
 
 CORE_METRIC_IDS = (
     "revenue",
@@ -105,9 +106,8 @@ def latest_company_period(reader: Any, cik: str, *, quarterly: bool) -> dict[str
         return max(periods, key=lambda row: (row["calendar_year"], row["calendar_quarter"]))
 
     by_year: dict[int, list[dict[str, Any]]] = {}
-    for row in reader.observations:
-        if row["cik"] == cik:
-            by_year.setdefault(row["fiscal_year"], []).append(row)
+    for row in observation_rows(reader, cik=cik):
+        by_year.setdefault(row["fiscal_year"], []).append(row)
     if not by_year:
         return None
     fiscal_ends = {
@@ -188,26 +188,20 @@ def latest_period_observation(
 class ScreeningExplorer:
     """Indexed, display-only projections from one verified v2 publication."""
 
-    def __init__(self, reader: ScreeningDatasetV2Reader) -> None:
+    def __init__(self, reader: ScreeningDatasetV2Reader | ScreeningRuntimeProjection) -> None:
         self.reader = reader
         self.definitions = {
             row["metric_id"]: row for row in reader.metric_definitions
         }
         self.companies = {row["cik"]: row for row in reader.companies}
-        self.observations = {
-            (row["cik"], row["metric_id"], row["fiscal_year"]): row
-            for row in reader.observations
-        }
-        self.company_years = {
-            cik: sorted(
-                {
-                    row["fiscal_year"]
-                    for row in reader.observations
-                    if row["cik"] == cik
-                }
-            )
-            for cik in self.companies
-        }
+        self.observations = {}
+        company_years = {cik: set() for cik in self.companies}
+        for row in observation_rows(reader):
+            cik, year = row["cik"], row["fiscal_year"]
+            self.observations[(cik, row["metric_id"], year)] = row
+            if cik in company_years:
+                company_years[cik].add(year)
+        self.company_years = {cik: sorted(years) for cik, years in company_years.items()}
         years = sorted({year for values in self.company_years.values() for year in values})
         self.year_options = [
             {

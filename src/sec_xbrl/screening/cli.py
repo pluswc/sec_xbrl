@@ -25,6 +25,10 @@ from sec_xbrl.screening.dataset_v2 import (
 )
 from sec_xbrl.screening.dataset_v3 import publish_screening_dataset_v3
 from sec_xbrl.screening.metric_identity import publish_generic_metric_identity
+from sec_xbrl.screening.runtime_projection import (
+    ScreeningRuntimeProjection,
+    publish_runtime_projection,
+)
 from sec_xbrl.screening.server import serve
 from sec_xbrl.screening.service import ScreeningService
 from sec_xbrl.screening.store import STORE_VERSION, ScreeningStore, backup_store, restore_store
@@ -60,6 +64,11 @@ def _parser() -> argparse.ArgumentParser:
     prepare_v3 = commands.add_parser("prepare-v3", help="publish an annual + quarterly dataset v3")
     prepare_v3.add_argument("--config", type=Path, required=True)
     prepare_v3.add_argument("--destination", type=Path, required=True)
+    project = commands.add_parser("project-runtime", help="project a verified v3 dataset for lazy runtime reads")
+    project.add_argument("--dataset", type=Path, required=True)
+    project.add_argument("--destination", type=Path, required=True)
+    project.add_argument("--blob-store", type=Path, required=True)
+    project.add_argument("--source-compatibility", nargs=2, metavar=("PATH", "SHA256"))
     descriptions = commands.add_parser(
         "descriptions-prepare", help="publish governed Korean company-description text"
     )
@@ -78,6 +87,7 @@ def _parser() -> argparse.ArgumentParser:
     server = commands.add_parser("serve", help="start the loopback dashboard")
     server.add_argument("--catalog", type=Path, required=True)
     server.add_argument("--source-compatibility", nargs=2, metavar=("PATH", "SHA256"))
+    server.add_argument("--runtime-projection", action="append", nargs=3, metavar=("DATASET_ID", "PATH", "SHA256"))
     server.add_argument("--batch-availability", nargs=2, metavar=("PATH", "SHA256"))
     server.add_argument("--store", type=Path, required=True)
     server.add_argument("--exports", type=Path, required=True)
@@ -118,6 +128,12 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "prepare-v3":
         root = publish_screening_dataset_v3(args.config, args.destination)
         _print({"publication_id": open_screening_dataset(root).publication_id, "root": str(root)})
+    elif args.command == "project-runtime":
+        from sec_xbrl.financial_source_compatibility import use_source_compatibility
+
+        with use_source_compatibility(_optional_pin(args.source_compatibility)):
+            manifest = publish_runtime_projection(args.dataset, args.destination, args.blob_store)
+        _print({"manifest": str(manifest), "manifest_sha256": sha256_file(manifest)})
     elif args.command == "descriptions-prepare":
         if args.dry_run:
             result = review_company_description_plan(args.plan, args.dataset)
@@ -144,6 +160,9 @@ def main(argv: list[str] | None = None) -> int:
         compatibility = _optional_pin(args.source_compatibility)
         batch_pin = _optional_pin(args.batch_availability)
         options: dict[str, Any] = {}
+        projections = _runtime_pins(args.runtime_projection, catalog)
+        if projections:
+            options["runtime_projections"] = projections
         if batch_pin is not None:
             data = Path(batch_pin["path"]).read_bytes()
             if hashlib.sha256(data).hexdigest() != batch_pin["sha256"]:
@@ -152,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
         if compatibility is not None:
             options["source_compatibility"] = compatibility
         with use_source_compatibility(compatibility):
-            descriptions = _serve_descriptions(args, catalog)
+            descriptions = _serve_descriptions(args, catalog, projections)
         if args.require_existing_store:
             _validate_existing_store(args.store)
         service = ScreeningService(
@@ -188,6 +207,15 @@ def _optional_pin(value: list[str] | None) -> dict[str, str] | None:
 
     path, sha256 = value
     return _pin({"path": path, "sha256": sha256})
+
+
+def _runtime_pins(values: list[list[str]] | None, catalog: dict[str, Path]) -> dict[str, dict[str, str]]:
+    projections = {}
+    for dataset_id, path, sha256 in values or []:
+        if dataset_id not in catalog or dataset_id in projections:
+            raise ValueError("runtime projection dataset ID is unknown or duplicated")
+        projections[dataset_id] = {"path": str(Path(path).absolute()), "sha256": sha256}
+    return projections
 
 
 def _catalog(path: Path) -> dict[str, Path]:
@@ -243,7 +271,7 @@ def _validate_existing_store(path: Path) -> None:
 
 
 def _serve_descriptions(
-    args: argparse.Namespace, catalog: dict[str, Path]
+    args: argparse.Namespace, catalog: dict[str, Path], projections: dict[str, dict[str, str]],
 ) -> CompanyDescriptionReader | None:
     if (args.descriptions is None) != (args.descriptions_manifest_sha256 is None):
         raise ValueError("serve requires both description publication and manifest SHA-256")
@@ -256,7 +284,8 @@ def _serve_descriptions(
     dataset_id = manifest.get("dataset_id")
     if dataset_id not in catalog:
         raise ValueError("company-description dataset is absent from the screening catalog")
-    dataset = open_screening_dataset(catalog[dataset_id])
+    dataset = (ScreeningRuntimeProjection(catalog[dataset_id], projections[dataset_id])
+               if dataset_id in projections else open_screening_dataset(catalog[dataset_id]))
     return CompanyDescriptionReader(
         args.descriptions,
         args.descriptions_manifest_sha256,

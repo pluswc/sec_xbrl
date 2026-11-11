@@ -1,5 +1,10 @@
 const S={screenAvailability:null,screens:[],runs:[],decisions:[],catalog:[],companies:[],companySelection:new Set(),defaultDataset:null,contextToken:0,revision:null,run:null,resultContent:null,preview:null,busy:false,selected:new Set(),activeFilter:"ALL",dirty:false,lastFocus:null,evidenceRow:null,admin:new URLSearchParams(location.search).get("mode")==="admin",explorerDataset:null,explorerYear:null,explorer:null,library:null,explorerCatalog:null,explorerCatalogKey:null,explorerCatalogToken:0,explorerSelected:new Set(),profile:null,profileMetric:"revenue",view:"explorer",explorerToken:0,libraryToken:0,frequencyDrafts:{},quarterSpine:[],frequency:"ANNUAL"};const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
-async function api(path,options={}){const r=await fetch(path,{headers:{"Content-Type":"application/json"},...options}),b=await r.json().catch(()=>({error:`요청 오류 ${r.status}`}));if(!r.ok)throw Object.assign(new Error(b.error||"요청에 실패했습니다."),{status:r.status});if(options.method==="POST"&&/^\/api\/(?:screens|results|runs|decisions|history)(?:\/|$)/.test(path))invalidateHistoryRead();return b}
+async function api(path,options={}){
+  if(options.method==="POST"&&(path==="/api/preview"||(path==="/api/results"&&S.preview?.include_evidence===false))){
+    const body=JSON.parse(options.body);
+    if(path==="/api/preview"||body.preview_hash===S.preview.preview_hash)options={...options,body:JSON.stringify({...body,include_evidence:false})};
+  }
+  const r=await fetch(path,{headers:{"Content-Type":"application/json"},...options}),b=await r.json().catch(()=>({error:`요청 오류 ${r.status}`}));if(!r.ok)throw Object.assign(new Error(b.error||"요청에 실패했습니다."),{status:r.status});if(options.method==="POST"&&/^\/api\/(?:screens|results|runs|decisions|history)(?:\/|$)/.test(path))invalidateHistoryRead();return b}
 function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function toast(m){const e=$("#toast");e.textContent=m;e.classList.add("visible");setTimeout(()=>e.classList.remove("visible"),1800)}
 function fail(e){const m=e.message||String(e);$("#criteria-error").hidden=false;$("#criteria-error").textContent=m.startsWith("metric is unavailable for execution:")?"현재 자료에서 실행할 수 없는 지표가 포함돼 있습니다. 사용 가능한 지표를 선택해 주세요.":m}
@@ -589,7 +594,7 @@ function filterSortExplorerRows(rows,query,sort,direction){
 function cachedExplorerSnapshot(dataset,period){
   const key=`${dataset}:${period}`;if(explorerBasis.snapshots.has(key))return explorerBasis.snapshots.get(key);
   const latest=period==="LATEST",coordinate=period.match(/^(\d{4})Q([1-4])$/);if(!latest&&!coordinate)throw new Error("종료 분기를 선택해 주세요.");
-  const pending=api(`/api/quarter-explorer?dataset_id=${encodeURIComponent(dataset)}&${latest?"latest=true":`calendar_year=${coordinate[1]}&calendar_quarter=${coordinate[2]}`}`).then(value=>{
+  const pending=api(`/api/quarter-explorer?dataset_id=${encodeURIComponent(dataset)}&include_evidence=false&${latest?"latest=true":`calendar_year=${coordinate[1]}&calendar_quarter=${coordinate[2]}`}`).then(value=>{
     if((latest?value.period_scope!=="LATEST_COMPANY":periodCoordinate(value)!==period)||!Array.isArray(value.rows)||!Array.isArray(value.metrics))throw new Error("분기 응답의 기간이 선택과 다릅니다.");return value;
   }).catch(error=>{if(explorerBasis.snapshots.get(key)===pending)explorerBasis.snapshots.delete(key);throw error});
   explorerBasis.snapshots.set(key,pending);while(explorerBasis.snapshots.size>2)explorerBasis.snapshots.delete(explorerBasis.snapshots.keys().next().value);return pending;
