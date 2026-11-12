@@ -192,3 +192,14 @@ workbench 39), JavaScript syntax·Ruff·diff PASS다. Analytics·preparer 및 Py
 현재는 통합 source 후보의 독립 확인과 최신 PID/인자를 기준으로 한 preview/live
 전환이 대기다. 이 작업에서 main·runtime·Nasdaq queue·사용자 journal을 수정하거나
 push하지 않았다. PR89의 기존 완료 상태와 새 매출 기능의 main/live 상태를 구분한다.
+
+## Compact 출처 셀 중복 설명 정리 — 2026-11-12
+
+통합 e35aa92f의 독립 integration PASS와 4회사/768px 실제 preview 후, compact
+화면에서 동일 산술 assurance가 모든 좁은 출처 셀에 반복돼 Q4 행 높이가 과도함을
+확인했다. 승인된 UI 보완은 행마다 `계산값 · 연간−9개월`과 두 공시 링크를 유지하고,
+산술·재작성 비교성·reported-only 비율 정책은 새 파생값이 실제 표시되는 표에서만
+native `계산값 안내` details 하나로 제공한다. 해당 표에 한해 출처 열을 180px,
+전체 폭을 850px로 두고 기존 가로 스크롤을 유지한다. 다른 표·font·축·계산·데이터는
+변경하지 않는다. Node revenue 11 PASS와 syntax/diff PASS이며, 기존 54 Node/Python/
+데이터 근거는 재사용한다. 최종 compact 재촬영/live는 리드의 별도 단계다.

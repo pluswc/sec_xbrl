@@ -307,9 +307,18 @@ test("empty revenue tables retain differentiated scoped reasons and derived amou
     value:"-1000000",status:"DERIVED",reason:null,share:null,yoy:null,derivation_rule_version:"confirmed-dimensional-revenue-fy-ytd9-q4-v1",
     ratio_hold_reason:"DERIVED_RATIO_NOT_QUALIFIED",sources:[{accession:"0000000042-26-000001",filed_date:"2026-02-01"},{accession:"0000000042-25-000003",filed_date:"2025-10-01"}]}]}];
   app.renderRevenueBreakdownTable();table=get("#revenue-breakdown-table").innerHTML;
-  assert.match(table,/계산값 · FY−9개월/);assert.match(table,/공시 범위 · Operating Segments/);
+  assert.match(table,/계산값 · 연간−9개월/);assert.match(table,/공시 범위 · Operating Segments/);
   assert.match(table,/비중·전년비는 직접 공시값만 계산 대상으로 사용합니다/);assert.match(table,/tabindex="0"/);
   assert.equal((table.match(/target="_blank"/g)||[]).length,2);
+  assert.doesNotMatch(table,/산술 차감 · 재작성 비교성 미검증/);
+  view.groups.segments.push({...view.groups.segments[0],id:"second-derived",label:"Other"});
+  app.renderRevenueBreakdownTable();table=get("#revenue-breakdown-table").innerHTML;
+  assert.equal((table.match(/<summary>계산값 안내<\/summary>/g)||[]).length,1);
+  assert.equal((table.match(/<td data-revenue-derived>/g)||[]).length,2);
+  assert.equal((table.match(/target="_blank"/g)||[]).length,4);
+  view.groups.segments=[];
+  app.renderRevenueBreakdownTable();
+  assert.doesNotMatch(get("#revenue-breakdown-table").innerHTML,/<summary>계산값 안내/);
 });
 
 test("company revenue API preserves compact governed publication pins",t=>{
