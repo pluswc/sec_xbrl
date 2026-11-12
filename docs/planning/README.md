@@ -1,5 +1,19 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-12 [스크리닝 근접 워크시트](../implementation/screening-workbench-20261112.md)는
+정확한 조건 편집의 제한된 폭과 의미 그룹, 최신 결과의 실제 기간 열 분류 및
+근접 결과 표를 다룬다. 구현 `8f1e466ffe`는 독립 Node 93개·Ruff·diff와
+리드의 실제 브라우저 검증을 통과해 LOCALLY_ACCEPTED(2026-11-12),
+18765 적용을 완료했다. 조건/응답·기존 보드·정렬·기록을 보존했다.
+이 작업의 원격 push·PR·CI·main 병합은 미수행이다.
+
+2026-11-11 [데스크톱 재무 워크벤치](../implementation/desktop-financial-workbench-20261111.md)는
+표와 값의 근접 폭, 적응형 작은 차트 쌍, 카탈로그 그룹별 선택 기억과
+근접 범례·기간 설명을 다룬다. 구현 `bde192d512`는 독립 Node 89개·Ruff
+검사와 리드 실제 브라우저 인수를 통과했고 18765에 적용했다. 기존 자료·
+artifact·기록을 보존했다. main `f46460086e`는 그대로이며 push·PR·CI·병합은
+미수행이다.
+
 2026-11-11 [공통 SEC durhour와 continuation 실패 진단](../implementation/sec-duration-hour-20261111.md)은
 소스 `82cc02eddfd6f05997c5e1e7d2a5c78ab2f4dd08`의 독립 PASS·리드 소스 인수 뒤,
 정상 공개 CLI에서 실패 연간 **5건만 v7 INGESTED**, 기존 **18건 v6 REUSED**로
