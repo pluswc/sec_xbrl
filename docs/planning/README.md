@@ -1,5 +1,10 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-12 [매출 범위·누락 사유와 보수적 Q4](../implementation/revenue-completeness-20261112.md)는
+정확한 사업부문 qualifier, scoped 사유 및 별도 governed Q4 companion을 제공하는 승인 범위다.
+기존 50사 4,702 non-null 셀·계보·비율/계층을 유지하며 762 reported scoped 셀과
+224 derived Q4 셀(각 30사)을 추가했다. 자체 구현/발행 후보이며 독립 검증·인수·live/main은 대기다.
+
 2026-11-11 [공통 SEC durhour와 continuation 실패 진단](../implementation/sec-duration-hour-20261111.md)은
 소스 `82cc02eddfd6f05997c5e1e7d2a5c78ab2f4dd08`의 독립 PASS·리드 소스 인수 뒤,
 정상 공개 CLI에서 실패 연간 **5건만 v7 INGESTED**, 기존 **18건 v6 REUSED**로

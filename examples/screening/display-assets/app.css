@@ -504,3 +504,5 @@ body>header{position:static}
 .explorer-v2 th[aria-sort="descending"] .explorer-sort-arrow { color: var(--blue); }
 .explorer-v2 .explorer-header-sort:hover { color: var(--blue); }
 .explorer-v2 .explorer-header-sort:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+
+.profile-revenue-breakdowns .missing[tabindex]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
