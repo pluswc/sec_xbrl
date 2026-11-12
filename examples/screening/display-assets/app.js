@@ -310,10 +310,47 @@ function syncScreeningPresentation(changed=false){
   const note=$("#results-draft-note");
   if(note&&(!S.run||changed))note.hidden=!S.run;
 }
+function mountScreeningWorkbench(){
+  const form=$("#criteria-form");if(form.dataset.workbenchMounted)return;
+  form.dataset.workbenchMounted="true";
+  const identity=form.querySelector(".condition-identity"),name=$("#screen-name").closest("label");
+  const saved=document.createElement("details");saved.className="screening-saved-controls";
+  saved.innerHTML='<summary>저장 조건 불러오기</summary><div class="screening-saved-fields"></div>';
+  saved.querySelector(".screening-saved-fields").append($("#saved-screen").closest("label"),$("#open-screen"));
+  const period=document.createElement("fieldset");period.className="screening-period-fields";
+  period.innerHTML='<legend>분석 기간</legend>';
+  period.append(...["#frequency","#period-mode","#fiscal-year","#calendar-quarter","#period-offset"].map(id=>$(id).closest("label")));
+  const inputContext=document.createElement("div");inputContext.className="screening-input-context";
+  inputContext.append(period,form.querySelector(".company-scope"));
+  identity.replaceChildren(name,saved);identity.after(inputContext);
+  const workspace=$("#results-title").closest(".workspace"),toolbar=document.createElement("div");
+  toolbar.className="screening-result-toolbar";
+  toolbar.append(workspace.querySelector(".filters"),workspace.querySelector(".pass-only"));
+  workspace.querySelector(".section-head").after(toolbar);
+}
+function screeningResultMetricCell(predicate,metric){
+  const observation=predicate.observation||{},missing=observation.value===null||observation.value===undefined;
+  const reason=missing?businessReason(predicate.reason):"",period=actualPeriod(observation);
+  const value=missing?reason:`${displayValue(observation.value,metric)} ${unitLabel(metric)}`;
+  const tooltip=`${metric.label} · ${value} · 실제 기간 ${period}${missing?"":` · 공표값 ${observation.value} ${metric.unit||unitLabel(metric)}`}`;
+  const content=missing?`<span class="missing" aria-label="${esc(tooltip)}">—</span><small>자료 확인 필요</small>`:
+    `<span class="display-number explorer-value" title="${esc(tooltip)}" aria-label="${esc(tooltip)}"><span class="number-text">${esc(displayValue(observation.value,metric))}</span><span class="number-clipped" aria-hidden="true">…</span></span>`;
+  return `<td class="metric-cell" title="${esc(tooltip)}">${content}</td>`;
+}
+function displayTableColumnRoles(role,headings){
+  return headings.map((cell,index)=>{
+    if(cell.hidden)return "hidden";
+    if(role==="explorer")return ["select","company","period"][index]||"number";
+    if(role==="results")return index===0?"select":index===1?"company":index===2||index===headings.length-1?"status":cell.dataset?.displayRole==="period"?"period":"number";
+    if(role==="comparison")return index===0?"label":"number";
+    return index===(role==="peer"?3:2)?"number":index===(role==="peer"?2:1)?"period":"context";
+  });
+}
 function mountScreeningPresentation(){
+  mountScreeningWorkbench();
   $(".criteria .section-head p").textContent="조건과 실행 결과는 따로 저장할 수 있습니다.";
   const note=document.createElement("p");
-  note.id="results-draft-note";note.hidden=true;
+  note.id="results-draft-note";note.hidden=true;note.setAttribute("role","status");
   note.textContent="마지막 실행 결과입니다. 편집한 조건을 보려면 다시 시험 실행하세요.";
   $("#counts").after(note);
   syncScreeningPresentation();
@@ -324,7 +361,7 @@ function clearResult(){S.run=null;S.preview=null;S.resultContent=null;S.selected
 function setRun(r,content){S.run=r;const note=$("#results-draft-note");if(note)note.hidden=true;S.resultContent=content||S.revision?.content;S.selected.clear();$("#period-context").textContent=latestScreenPolicy(r.period_policy)?`회사별 최신 · ${availabilityCaption(r.period_policy.availability)}`:r.period_policy.mode==="FIXED_FISCAL_YEAR"?`FY${r.period_policy.fiscal_year}`:r.period_policy.mode==="FIXED_CALENDAR_QUARTER_END"?quarterLabel(r.period_policy):`최근 완료 연도${r.period_policy.offset?` -${r.period_policy.offset}`:""}`;$("#asof").textContent=r.financial_as_of;$("#counts").textContent=`${r.run_id?"저장된 결과":"시험 결과 · 저장 전"} · 대상 ${r.counts.target} · 충족 ${r.counts.pass} · 미충족 ${r.counts.fail} · 확인 필요 ${r.counts.undetermined}`;renderRows();syncResultActions();setCriteriaCompact(true)}
 function selectedMetrics(){return(S.resultContent?.predicates||[]).map(x=>metricById(x.metric_id))}
 function decisionFor(cik){const e=S.decisions.filter(x=>x.cik===cik);return e.length?`<span class="badge review">${decisionLabel(e.at(-1).state)}</span>`:'<span class="muted">기록 없음</span>'}
-function renderRows(){if(!S.run)return;const ms=selectedMetrics(),latest=latestScreenPolicy(S.run.period_policy),showCompany=!S.admin||columnEnabled(S.resultContent.columns,"company");$("#result-head").innerHTML=`<tr><th><span class="sr-only">선택</span></th><th ${showCompany?'':'hidden'}>기업</th><th>결과</th>${latest?"<th>선택 재무기간</th>":""}${ms.map(m=>`<th>${esc(m.label)}<br><small>${unitLabel(m)}</small></th>`).join("")}<th>관심상태</th></tr>`;const rows=S.run.rows.filter(r=>S.activeFilter==="ALL"||r.aggregate===S.activeFilter).filter(r=>$("#show-all").checked||r.aggregate==="PASS");$("#result-body").innerHTML=rows.length?rows.map(row=>`<tr data-cik="${row.cik}" class="${S.selected.has(row.cik)?'selected':''}"><td><input type="checkbox" aria-label="${esc(row.ticker)} 선택" ${S.selected.has(row.cik)?'checked':''}></td><td ${showCompany?'':'hidden'}><button class="company" data-open="${row.cik}"><strong>${esc(row.name||row.ticker)}</strong><small>${esc(row.ticker)}</small></button></td><td><span class="badge ${row.aggregate.toLowerCase()}">${aggregateLabel(row.aggregate)}</span></td>${latest?`<td>${esc(companyPeriodCaption(row.resolved_period))}</td>`:""}${row.predicates.map(p=>{const m=metricById(p.metric_id),o=p.observation||{},missing=o.value===null||o.value===undefined;return`<td class="metric-cell" title="${missing?esc(businessReason(p.reason)):esc(m.label+' · '+(o.period_end||o.context_end_date||''))}">${missing?'—':numberMarkup(o.value,m)}${missing?'<small>자료 확인 필요</small>':''}</td>`}).join("")}<td>${decisionFor(row.cik)}</td></tr>`).join(""):`<tr><td colspan="${4+ms.length+(latest?1:0)}" class="empty">해당하는 기업이 없습니다.</td></tr>`;$$('[data-cik] input').forEach(x=>x.onchange=()=>{const c=x.closest("tr").dataset.cik;x.checked?S.selected.add(c):S.selected.delete(c);renderRows()});$$('[data-open]').forEach(x=>x.onclick=()=>withBusy(()=>openEvidence(x.dataset.open,x)).catch(fail))}
+function renderRows(){if(!S.run)return;const ms=selectedMetrics(),latest=latestScreenPolicy(S.run.period_policy),showCompany=!S.admin||columnEnabled(S.resultContent.columns,"company");$("#result-head").innerHTML=`<tr><th><span class="sr-only">선택</span></th><th ${showCompany?'':'hidden'}>기업</th><th>결과</th>${latest?'<th data-display-role="period">선택 재무기간</th>':""}${ms.map(m=>`<th title="${esc(m.label)} · ${esc(unitLabel(m))}">${esc(explorerMetricCaption(m))}<br><small>${esc(unitLabel(m))}</small></th>`).join("")}<th>관심상태</th></tr>`;const rows=S.run.rows.filter(r=>S.activeFilter==="ALL"||r.aggregate===S.activeFilter).filter(r=>$("#show-all").checked||r.aggregate==="PASS");$("#result-body").innerHTML=rows.length?rows.map(row=>`<tr data-cik="${row.cik}" class="${S.selected.has(row.cik)?'selected':''}"><td><input type="checkbox" aria-label="${esc(row.ticker)} 선택" ${S.selected.has(row.cik)?'checked':''}></td><td ${showCompany?'':'hidden'}><button class="company" data-open="${row.cik}" title="${esc(row.name||row.ticker)} · ${esc(row.ticker)}" aria-label="${esc(row.name||row.ticker)} 재무 상세 열기"><strong>${esc(row.name||row.ticker)}</strong><small>${esc(row.ticker)}</small></button></td><td><span class="badge ${row.aggregate.toLowerCase()}">${aggregateLabel(row.aggregate)}</span></td>${latest?`<td>${esc(companyPeriodCaption(row.resolved_period).replace(" · 공시일 ","\n공시일 "))}</td>`:""}${row.predicates.map(predicate=>screeningResultMetricCell(predicate,metricById(predicate.metric_id))).join("")}<td>${decisionFor(row.cik)}</td></tr>`).join(""):`<tr><td colspan="${4+ms.length+(latest?1:0)}" class="empty">해당하는 기업이 없습니다.</td></tr>`;$$('[data-cik] input').forEach(x=>x.onchange=()=>{const c=x.closest("tr").dataset.cik;x.checked?S.selected.add(c):S.selected.delete(c);renderRows()});$$('[data-open]').forEach(x=>x.onclick=()=>withBusy(()=>openEvidence(x.dataset.open,x)).catch(fail))}
 
 async function openEvidence(cik,b){S.lastFocus=b;S.evidenceRow=S.run.rows.find(x=>x.cik===cik);const r=S.evidenceRow;$("#evidence-title").textContent=`${r.name||r.ticker} 재무 상세`;$("#evidence-metric").innerHTML=r.predicates.map(x=>`<option value="${x.metric_id}">${esc(metricById(x.metric_id).label)}</option>`).join("");const p=await api(`/api/peers?dataset_id=${encodeURIComponent(S.run.dataset_id)}&dataset_publication_id=${encodeURIComponent(S.run.dataset_publication_id)}&cik=${cik}`);$("#peer-company").innerHTML='<option value="">기업 선택</option>'+p.peers.filter(x=>x.financial_prepared).map(x=>`<option value="${x.cik}">${esc((x.tickers||[])[0]||x.name)}</option>`).join("");$("#peer-comparison").textContent="같은 업종의 넓은 후보군이며 재무항목이 같다는 뜻은 아닙니다.";$("#evidence").dataset.cik=cik;$("#evidence").hidden=false;await renderMetricEvidence();$("#evidence").focus()}
 function metricHelp(m){return m.description||({revenue_yoy:"올해 매출과 직전 회계연도 매출을 비교한 성장률입니다.",gross_margin:"매출총이익을 매출로 나눈 비율입니다.",operating_margin:"영업이익을 매출로 나눈 비율입니다.",net_margin:"순이익을 매출로 나눈 비율입니다.",standardized_fcf:"영업활동 현금흐름에서 유형자산 취득 지출을 뺀 표준화 지표입니다. 회사가 별도로 제시하는 FCF와 같다는 뜻은 아닙니다.",fcf_margin:"표준화 FCF를 매출로 나눈 비율입니다.",current_ratio:"유동자산을 유동부채로 나눈 기말 비율입니다.",liabilities_to_equity:"부채총계를 자본으로 나눈 비율입니다. 부채총계는 차입금과 다릅니다.",liabilities_to_assets:"부채총계를 자산으로 나눈 비율입니다.",net_debt:"직접 보고된 결합 차입금에서 현금 및 현금성자산을 뺀 금액입니다."})[m.metric_id]||"회사가 보고한 공시 항목입니다."}
@@ -787,8 +824,8 @@ function renderProfileBoardSelection(host,board,options,onChange){
   list.querySelectorAll("[data-board-choice]").forEach(node=>node.onchange=()=>apply(node.dataset.boardChoice,node.checked?"add":"remove",true));
   order.querySelectorAll("[data-board-action]").forEach(node=>node.onclick=()=>apply(node.dataset.boardId,node.dataset.boardAction,false));
 }
-const PROFILE_BOARD_SELECTION=`<details class="profile-board-picker"><summary>항목 선택 <span class="profile-board-count"></span></summary>
-  <div class="profile-board-choices"></div></details><ol class="profile-board-order" aria-label="선택 항목과 표시 순서"></ol>`;
+const PROFILE_BOARD_SELECTION=`<details class="profile-board-picker"><summary>항목 선택·순서 <span class="profile-board-count"></span></summary>
+  <div class="profile-board-choices"></div><ol class="profile-board-order" aria-label="선택 항목과 표시 순서"></ol></details>`;
 
 function profileBoardExact(value,definition){
   return definition.unit_kind==="MONEY"?`${shiftDecimal(value,0)} USD`:
@@ -803,7 +840,10 @@ function profileBoardValue(value,definition,reason="준비된 값이 없습니�
     `<span class="display-number" aria-label="${text} ${profileBoardUnit(definition)}">${text}</span>`;
   return `<span title="${raw}">${number}</span>${exact?`<small>공표값 ${raw}</small>`:""}`;
 }
-function profileBoardPeriodX(index,count){return 94+(count===1?224:448*index/(count-1))}
+function profileBoardPeriodX(index,count,width=570){
+  const left=width===570?94:80,span=width===570?448:width-left-30;
+  return left+(count===1?span/2:span*index/(count-1));
+}
 function profileBoardDomain(data,includeZero,unitKind){
   let lower=Math.min(...data),upper=Math.max(...data);
   if(includeZero){lower=Math.min(0,lower);upper=Math.max(0,upper)}
@@ -820,17 +860,18 @@ function profileBoardDomain(data,includeZero,unitKind){
 function profileBoardTick(value,_step,definition){
   return displayValue(String(value),definition);
 }
-function profileBoardPlot({periods,series,definition,label,active=null,interactive=false,includeZero=false,type="LINE",showPeriods=true}){
+function profileBoardPlot({periods,series,definition,label,active=null,interactive=false,includeZero=false,type="LINE",showPeriods=true,width=570,height=null}){
   const data=series.flatMap(line=>line.points.map(point=>point?.value==null?NaN:Number(point.value))).filter(Number.isFinite);
-  if(!data.length)return '<p class="board-empty">이 범위에 표시할 값이 없습니다.</p>';
+  if(!data.length)return '<div class="board-context" role="status" tabindex="0" hidden></div><p class="board-empty">이 범위에 표시할 값이 없습니다.</p>';
   const columns=type==="COLUMN",domain=profileBoardDomain(data,columns||includeZero,definition.unit_kind);
-  const x=index=>profileBoardPeriodX(index,periods.length);
-  const y=value=>126-(value-domain.lower)*110/(domain.upper-domain.lower);
+  const plotHeight=height??(showPeriods?154:134),bottom=plotHeight-(showPeriods?(width<500?32:28):8),left=width===570?88:74,right=width-18;
+  const x=index=>profileBoardPeriodX(index,periods.length,width);
+  const y=value=>bottom-(value-domain.lower)*(bottom-16)/(domain.upper-domain.lower);
   const tickLabels=new Set();
   const grid=domain.ticks.map(value=>{
     const label=profileBoardTick(value,domain.step,definition),visible=!tickLabels.has(label);
     tickLabels.add(label);
-    return `<line class="board-grid${value===0?" board-zero":""}" x1="88" x2="552" y1="${y(value)}" y2="${y(value)}"/>${visible?`<text class="board-y" x="82" y="${y(value)+4}">${esc(label)}</text>`:""}`;
+    return `<line class="board-grid${value===0?" board-zero":""}" x1="${left}" x2="${right}" y1="${y(value)}" y2="${y(value)}"/>${visible?`<text class="board-y" x="${left-6}" y="${y(value)+4}">${esc(label)}</text>`:""}`;
   }).join("");
   const paths=series.map(line=>{
     const [color,dash]=PROFILE_BOARD_STYLES[line.color];
@@ -843,50 +884,142 @@ function profileBoardPlot({periods,series,definition,label,active=null,interacti
     const marks=points.map((point,index)=>{
       if(!point)return "";
       const hit=interactive?`data-board-period="${index}"`:"";
-      const title=`<title>${esc(line.label)} · ${esc(periods[index].label)} · ${esc(profileBoardExact(point.value,definition))}</title>`;
+      const title=`<title>${esc(line.label)} · ${esc(periods[index].label)} · ${esc(profileBoardExact(point.value,definition))}${point.basis?` · 분모 ${esc(point.basis)}`:""}</title>`;
       if(!columns)return `<circle class="board-point" ${hit} cx="${point.x}" cy="${point.y}" r="4">${title}</circle>`;
       const zero=y(0),width=22;
       if(point.y===zero)return `<line class="board-column-zero" ${hit} x1="${point.x-width/2}" x2="${point.x+width/2}" y1="${zero}" y2="${zero}">${title}</line>`;
       return `<rect class="board-column ${point.y<zero?"board-column-positive":"board-column-negative"}" ${hit} x="${point.x-width/2}" y="${Math.min(point.y,zero)}" width="${width}" height="${Math.abs(point.y-zero)}">${title}</rect>`;
     }).join("");
-    return `<g stroke="${color}" stroke-dasharray="${dash}">${segments}${marks}</g>`;
+    return `<g data-board-item="${esc(line.id||line.label)}" stroke="${color}" stroke-dasharray="${dash}">${segments}${marks}</g>`;
   }).join("");
-  const labels=periods.map((period,index)=>`<text class="board-x" x="${x(index)}" y="146">${esc(period.short||period.label)}</text>`).join("");
-  const marker=active==null?"":`<line class="board-active-period" x1="${x(active)}" x2="${x(active)}" y1="12" y2="127"/>`;
+  const labels=periods.map((period,index)=>{
+    const label=period.short||period.label,quarter=width<500&&label.match(/^(?:20)?(\d{2})Q([1-4])$/u);
+    return `<text class="board-x" x="${x(index)}" y="${plotHeight-(quarter?16:8)}">${quarter?`<tspan x="${x(index)}">${quarter[1]}</tspan><tspan x="${x(index)}" dy="11">Q${quarter[2]}</tspan>`:esc(label)}</text>`;
+  }).join("");
+  const marker=active==null?"":`<line class="board-active-period" x1="${x(active)}" x2="${x(active)}" y1="12" y2="${bottom+1}"/>`;
   const hits=interactive?periods.map((_,index)=>{
-    const width=periods.length===1?448:448/(periods.length-1);
-    return `<rect class="board-period-hit" data-board-period="${index}" x="${Math.max(88,x(index)-width/2)}" y="0" width="${Math.min(552,x(index)+width/2)-Math.max(88,x(index)-width/2)}" height="154"/>`;
+    const hitWidth=periods.length===1?right-left:(right-left)/(periods.length-1);
+    return `<rect class="board-period-hit" data-board-period="${index}" x="${Math.max(left,x(index)-hitWidth/2)}" y="0" width="${Math.min(right,x(index)+hitWidth/2)-Math.max(left,x(index)-hitWidth/2)}" height="${plotHeight}"/>`;
   }).join(""):"";
   const precisionNote=tickLabels.size<domain.ticks.length?'<p class="board-axis-note">같은 반올림 눈금은 한 번 표시합니다. 정확한 값은 근거 표에서 확인하세요.</p>':"";
-  const axisNote=columns?'<p class="board-axis-note">0 기준</p>':
-    domain.lower>0||domain.upper<0?'<p class="board-axis-note">자동 범위 · 0 생략</p>':"";
+  const axisNote=`<p class="board-axis-note">${columns?"0 기준":domain.lower>0||domain.upper<0?"자동 범위 · 0 생략":"0 포함"}</p>`;
   const chartType=columns?"세로 막대":type==="DOT"?"점":"선";
-  return `${axisNote}${precisionNote}<div class="board-plot-canvas" tabindex="0" role="region" aria-label="${esc(label)} ${chartType} 차트"><svg viewBox="0 0 570 ${showPeriods?154:134}" role="img" aria-label="${esc(label)} · ${chartType} · ${esc(profileBoardUnit(definition))}">${grid}${marker}${hits}${paths}${showPeriods?labels:""}</svg></div>`;
+  return `${axisNote}${precisionNote}<div class="board-context" role="status" tabindex="0" hidden></div><div class="board-plot-canvas" tabindex="0" role="region" aria-label="${esc(label)} ${chartType} 차트 · 좌우 키로 기간 선택, Enter 또는 Space 고정, Esc 해제"><svg class="${width===570&&height===null?"":"board-adaptive"}" viewBox="0 0 ${width} ${plotHeight}" role="img" aria-label="${esc(label)} · ${chartType} · ${esc(profileBoardUnit(definition))}">${grid}${marker}${hits}${paths}${showPeriods?labels:""}</svg></div>`;
 }
 
-function bindProfileBoardPeriod(host,selectPeriod,activePeriod){
-  const choose=event=>{
-    const target=event.target.closest?.("[data-board-period]");
-    if(target)selectPeriod(Number(target.dataset.boardPeriod));
+function profileBoardContextLine(label,period,value,definition,reason,detail=""){
+  return `<strong>${esc(label)}</strong><span>${esc(period)} · ${profileBoardValue(value,definition,reason)} ${esc(profileBoardUnit(definition))}</span>${value==null?`<small>${esc(reason)}</small>`:""}${detail?`<small>${esc(detail)}</small>`:""}`;
+}
+function bindProfileBoardPeriod(host,selectPeriod,activePeriod,interaction={}){
+  let pinned=false,item=null,context=null,key=null,order=null,anchor=null,suppressFocus=false;
+  const clear=()=>{
+    pinned=false;item=null;context=null;anchor=null;
+    host.removeAttribute?.("data-board-pinned");
+    host.querySelectorAll(".board-context").forEach(node=>{node.hidden=true;node.innerHTML=""});
+    host.querySelectorAll(".board-item-active").forEach(node=>node.classList.remove("board-item-active"));
+  };
+  const synchronize=()=>{
+    const current=interaction.key?.(),selection=interaction.order?.();
+    if(current!==key||selection!==order){clear();key=current;order=selection}
+    if(interaction.valid&&!interaction.valid()){clear();return false}
+    return true;
+  };
+  const containerFor=location=>[...host.querySelectorAll("[data-board-mode]")].find(node=>{
+    if(node.dataset.boardMode!==location.mode||node.closest?.("[hidden]"))return false;
+    const card=node.closest?.("[data-financial-card]");
+    return !card||card.dataset.financialCard===location.item;
+  });
+  const present=(location,target)=>{
+    const container=target||containerFor(location);
+    context=container?.querySelector(".board-context");
+    const markup=interaction.describe?.(location.item,location.index,location.mode);
+    host.querySelectorAll(".board-context").forEach(node=>{node.hidden=node!==context});
+    host.querySelectorAll("[data-board-item]").forEach(node=>node.classList.toggle("board-item-active",Boolean(location.item)&&node.dataset.boardItem===location.item));
+    if(!context||!markup)return false;
+    const html=markup+'<small class="board-context-hint">클릭 또는 Enter/Space로 고정 · Esc 해제</small><button type="button" class="quiet board-context-clear" data-board-clear>설명 닫기 · Esc</button>';
+    if(context.innerHTML!==html)context.innerHTML=html;
+    context.hidden=false;return true;
+  };
+  host.profileBoardInteraction={clear,
+    beforeRender(root){
+      synchronize();
+      const active=document.activeElement;
+      if(!active||!root.contains?.(active))return null;
+      const canvas=active.closest?.(".board-plot-canvas"),legend=active.closest?.("button[data-board-item]"),close=active.closest?.("[data-board-clear]");
+      if(!canvas&&!legend&&!close)return null;
+      return {focus:{kind:legend?"legend":close?"close":"canvas",item:legend?.dataset.boardItem||active.closest?.("[data-financial-card]")?.dataset.financialCard||anchor?.item||null,
+        mode:active.closest?.("[data-board-mode]")?.dataset.boardMode||anchor?.mode}};
+    },
+    afterRender(snapshot){
+      if(!synchronize())return;
+      if(pinned&&anchor){
+        if(anchor.index<0||anchor.index>=(interaction.count?.()||0)||interaction.items&&!interaction.items().includes(anchor.item)&&anchor.item!==null){clear()}
+        else {selectPeriod(anchor.index,true);if(!present(anchor))clear()}
+      }else {context=null;item=null;host.querySelectorAll(".board-context").forEach(node=>{node.hidden=true})}
+      const focus=snapshot?.focus,container=focus&&containerFor(focus);
+      const target=focus?.kind==="legend"?[...container?.querySelectorAll("button[data-board-item]")||[]].find(node=>node.dataset.boardItem===focus.item):
+        focus?.kind==="close"?container?.querySelector("[data-board-clear]"):container?.querySelector(".board-plot-canvas");
+      target?.focus({preventScroll:true});
+    },
+  };
+  const choose=(event,force=false)=>{
+    if(!synchronize()||pinned&&!force)return;
+    const period=event.target.closest?.("[data-board-period]"),canvas=event.target.closest?.(".board-plot-canvas");
+    const identity=event.target.closest?.("[data-board-item]");
+    if(!period&&!canvas&&!identity)return;
+    const index=period?Number(period.dataset.boardPeriod):activePeriod();if(index==null)return;
+    item=identity?.dataset.boardItem||event.target.closest?.("[data-financial-card]")?.dataset.financialCard||null;
+    const mode=event.target.closest?.("[data-board-mode]")?.dataset.boardMode||interaction.defaultMode;
+    anchor={item,index,mode};selectPeriod(index);
+    const container=canvas?.parentElement||event.target.closest?.(".financial-board-card,.revenue-board-plot");
+    present(anchor,container||{querySelector:selector=>host.querySelector(selector)});
+    return true;
   };
   host.addEventListener("pointerover",event=>{if(event.pointerType!=="touch")choose(event)});
-  host.addEventListener("click",choose);
+  host.addEventListener("pointerleave",()=>{if(!pinned)clear()});
+  host.addEventListener("focusin",event=>{if(!suppressFocus)choose(event)});
+  host.addEventListener("focusout",event=>{if(!pinned&&!host.contains?.(event.relatedTarget))clear()});
+  host.addEventListener("click",event=>{
+    if(event.target.closest?.("[data-board-clear]")){
+      const canvas=event.target.closest?.("[data-board-mode]")?.querySelector(".board-plot-canvas");
+      clear();suppressFocus=true;canvas?.focus?.({preventScroll:true});suppressFocus=false;return;
+    }
+    if(!event.target.closest?.("[data-board-period],.board-plot-canvas,[data-board-item]"))return;
+    if(choose(event,true)){
+      pinned=true;host.setAttribute("data-board-pinned","true");
+      event.target.closest?.(".board-plot-canvas")?.focus?.({preventScroll:true});
+    }
+  });
+  host.addEventListener("keydown",event=>{
+    if(event.key==="Escape"){
+      if(pinned||item||context&&!context.hidden){event.preventDefault();event.stopPropagation()}
+      const canvas=event.target.closest?.(".board-context")?event.target.closest?.("[data-board-mode]")?.querySelector(".board-plot-canvas"):null;
+      clear();suppressFocus=true;canvas?.focus?.({preventScroll:true});suppressFocus=false;return;
+    }
+    const canvas=event.target.closest?.(".board-plot-canvas");if(!canvas)return;
+    if(["ArrowLeft","ArrowRight","Home","End"].includes(event.key)){
+      event.preventDefault();
+      const count=interaction.count?.()||0,index=event.key==="Home"?0:event.key==="End"?count-1:Math.max(0,Math.min(count-1,activePeriod()+(event.key==="ArrowRight"?1:-1)));
+      if(index>=0){selectPeriod(index,true);choose(event,true)}
+    }else if(event.key==="Enter"||event.key===" "){
+      event.preventDefault();if(choose(event,true)){pinned=true;host.setAttribute("data-board-pinned","true")}
+    }
+  });
   host.addEventListener("scroll",event=>{
-    const canvas=event.target;
-    if(!canvas.matches?.(".board-plot-canvas"))return;
+    const canvas=event.target;if(!canvas.matches?.(".board-plot-canvas"))return;
     const offset=canvas.scrollLeft;
     for(const sibling of host.querySelectorAll(".board-plot-canvas")){
       if(sibling!==canvas&&sibling.clientWidth&&Math.abs(sibling.scrollLeft-offset)>1)sibling.scrollLeft=offset;
     }
   },true);
   window.addEventListener("resize",()=>{
-    const index=activePeriod();
-    if(index!=null&&!host.closest("[hidden]"))selectPeriod(index,true);
+    const index=activePeriod();if(index!=null&&!host.closest("[hidden]"))selectPeriod(index,true);
   });
 }
+
 function markProfileBoardPeriod(host,index,count){
-  const x=profileBoardPeriodX(index,count);
   host.querySelectorAll(".board-active-period").forEach(marker=>{
+    const x=profileBoardPeriodX(index,count,marker.ownerSVGElement.viewBox.baseVal.width);
     marker.setAttribute("x1",x);marker.setAttribute("x2",x);
     const canvas=marker.closest(".board-plot-canvas");
     const svg=marker.ownerSVGElement,position=x/svg.viewBox.baseVal.width*svg.clientWidth;
@@ -1032,6 +1165,41 @@ const PROFILE_BOARD_DEFAULTS={
   QUARTERLY:["quarter_revenue","quarter_operating_income","quarter_cfo","quarter_standardized_fcf"],
   TTM:["ttm_revenue","ttm_operating_income","ttm_cfo","ttm_standardized_fcf"],
 };
+function financialBoardGroups(definitions,defaults){
+  const options=[...definitions].map(([id,definition])=>({id,label:definition.label}));
+  const core=defaults.filter(id=>definitions.has(id));
+  const groups=new Map([["CORE",{label:"핵심",options:options.filter(item=>core.includes(item.id)),selection:createProfileBoard(core)}]]);
+  for(const category of ["GROWTH","PROFITABILITY","CASH_FLOW","FINANCIAL_STABILITY","OTHER_REPORTED"]){
+    const members=options.filter(item=>definitions.get(item.id).category===category);
+    groups.set(category,{label:categoryLabel(category),options:members,selection:createProfileBoard(members.slice(0,PROFILE_BOARD_LIMIT).map(item=>item.id))});
+  }
+  groups.set("CUSTOM",{label:"사용자 선택",options,selection:createProfileBoard(core)});
+  return groups;
+}
+function activateFinancialBoardGroup(model,key){
+  const group=model.groups.get(key);if(!group)return;
+  model.group=key;model.selection=group.selection;
+  $("#financial-board-group").value=key;
+  $("#financial-board-group-label").textContent=`현재 그룹: ${group.label}`;
+  renderProfileBoardSelection(financialProfileBoardHost,group.selection,group.options,()=>updateFinancialProfileBoard(model));
+  updateFinancialProfileBoard(model);
+}
+function observeProfileBoardWidth(host,render,current){
+  if(typeof ResizeObserver==="undefined")return;
+  host.profileBoardObserver?.disconnect();
+  let width=null,frame=0;
+  host.profileBoardObserver=new ResizeObserver(entries=>{
+    const next=Math.round(entries[0].contentRect.width);
+    if(next===width||next<1)return;width=next;
+    if(frame)cancelAnimationFrame(frame);
+    frame=requestAnimationFrame(()=>{frame=0;if(current())render()});
+  });
+  host.profileBoardObserver.observe(host);
+}
+function financialBoardPlotWidth(host){
+  const available=host.clientWidth||760,columns=Math.min(4,Math.max(1,Math.floor((available+12)/372)));
+  return Math.max(320,Math.floor((available-12*(columns-1))/columns)-26);
+}
 let financialProfileBoardHost,financialProfileBoard=null;
 function mountFinancialProfileBoard(overview){
   const section=document.createElement("section");
@@ -1039,6 +1207,7 @@ function mountFinancialProfileBoard(overview){
   section.innerHTML=`<h3>재무 비교 보드</h3><p class="muted">금액은 수준과 전년비, 백분율은 수준과 전년 대비 %p 변화를 비교합니다. 각 지표의 세로축은 독립적입니다.</p>
     ${PROFILE_BOARD_SELECTION}
     <div class="financial-board-controls">
+      <label>지표 그룹<select id="financial-board-group"></select></label><span id="financial-board-group-label" class="sr-only"></span>
       <label>같이 볼 기간<select id="financial-board-period"></select></label>
       <label>수준 차트<select id="financial-board-chart-type"><option value="DOT">점</option><option value="LINE">선</option></select></label>
       <label>수준 세로축<select id="financial-board-y-scale">${BOARD_AXIS_OPTIONS}</select></label>
@@ -1053,6 +1222,10 @@ function mountFinancialProfileBoard(overview){
   trend.before(single);single.append(trend);
   single.addEventListener("toggle",()=>{if(single.open&&S.profile&&!$("#company-profile").hidden)renderProfileTrend()});
   financialProfileBoardHost=section;
+  $("#financial-board-group").onchange=event=>{
+    if(ownsFinancialProfileBoard(financialProfileBoard))activateFinancialBoardGroup(financialProfileBoard,event.target.value);
+  };
+  observeProfileBoardWidth(section.querySelector(".financial-board-panels"),()=>renderFinancialProfileBoard(financialProfileBoard),()=>ownsFinancialProfileBoard(financialProfileBoard));
   $("#financial-board-chart-type").onchange=event=>{
     if(ownsFinancialProfileBoard(financialProfileBoard)){
       financialProfileBoard.chartType=event.target.value;
@@ -1066,7 +1239,20 @@ function mountFinancialProfileBoard(overview){
     }
   };
   $("#financial-board-period").onchange=event=>updateFinancialBoardPeriod(financialProfileBoard,Number(event.target.value));
-  bindProfileBoardPeriod(section,(index,force)=>updateFinancialBoardPeriod(financialProfileBoard,index,force),()=>financialProfileBoard?.active);
+  bindProfileBoardPeriod(section,(index,force)=>updateFinancialBoardPeriod(financialProfileBoard,index,force),()=>financialProfileBoard?.active,{
+    valid:()=>ownsFinancialProfileBoard(financialProfileBoard),key:()=>financialProfileBoard?`${financialProfileBoard.profile.company.cik}:${financialProfileBoard.key}:${financialProfileBoard.group}:${financialProfileBoard.selection.order.join(",")}`:null,
+    count:()=>financialProfileBoard?.slots.length||0,describe:financialBoardContext,defaultMode:"level",items:()=>financialProfileBoard?.selection.order||[],
+  });
+}
+function financialBoardContext(id,index,mode){
+  const model=financialProfileBoard,definition=model?.definitions.get(id);if(!definition||!model.slots[index])return "";
+  const levels=financialProfilePoints(model,definition),level=levels[index],published=financialProfileGrowth(id,model.definitions);
+  const growth=published||financialComparisonMetric(definition),rate=published?financialProfilePoints(model,published)[index]:financialGrowthPoints(model,definition,levels)[index];
+  const point=mode==="growth"?rate:level,metric=mode==="growth"?growth:definition;
+  const reference=point.evidence?.current||point.row||level.row;
+  const rationale=mode==="growth"?growth.unit==="pp"?"공표된 현재 비율 − 전년 비율 · %p":"발행된 전년 비교 · 비교 불가 상태는 근거 표를 확인하세요.":"";
+  const detail=[reference?actualPeriod(reference):"",rationale].filter(Boolean).join(" · ");
+  return profileBoardContextLine(definition.label,model.slots[index].label,point.value,metric,point.reason,detail)+(mode==="growth"?financialGrowthEvidence(rate):"");
 }
 function financialProfileGrowth(id,definitions){
   const level=definitions.get(id),definition=definitions.get(PROFILE_GROWTH[id]);
@@ -1087,16 +1273,16 @@ function beginFinancialProfileBoard(){
     spine:explorerBasis.inventory?.spine||[],annualYears:profile.prepared_years||[],companies:[profile.company]};
   const slots=end==null?[]:companyTrendSlots(context,annual?[{preparedYears:profile.prepared_years||[]}]:[])
     .map(slot=>({...slot,short:annual?slot.label:slot.label.slice(2)}));
-  const model={profile,selection,definitions,context,slots,series:new Map(),active:Math.max(0,slots.length-1),key:explorerContextKey()};
+  const model={profile,selection,groups:financialBoardGroups(definitions,defaults),group:"CORE",definitions,context,slots,series:new Map(),active:Math.max(0,slots.length-1),key:explorerContextKey()};
   financialProfileBoard=model;
   $("#financial-board-y-scale").value="AUTO";
   $("#financial-board-chart-type").value="DOT";
   const select=$("#financial-board-period");
   select.innerHTML=slots.map((slot,index)=>`<option value="${index}">${esc(slot.label)}</option>`).join("");
   select.disabled=!slots.length;
-  const options=[...definitions].map(([id,definition])=>({id,label:definition.label}));
-  renderProfileBoardSelection(financialProfileBoardHost,selection,options,()=>updateFinancialProfileBoard(model));
-  updateFinancialProfileBoard(model);
+  const groups=$("#financial-board-group");
+  groups.innerHTML=[...model.groups].map(([key,group])=>`<option value="${key}" ${group.options.length?"":"disabled"}>${esc(group.label)}</option>`).join("");
+  activateFinancialBoardGroup(model,model.groups.get("CORE").options.length?"CORE":"CUSTOM");
 }
 function ownsFinancialProfileBoard(model){
   return model&&financialProfileBoard===model&&model.profile===S.profile&&
@@ -1138,6 +1324,7 @@ function financialProfilePoints(model,definition){
 }
 function renderFinancialProfileBoard(model){
   const host=financialProfileBoardHost.querySelector(".financial-board-panels");
+  const restore=financialProfileBoardHost.profileBoardInteraction?.beforeRender(host);
   // Keep each open evidence disclosure through late arrivals and order changes.
   const expanded=new Set([...host.querySelectorAll("details[open]")].map(node=>node.dataset.financialDetails));
   const active=document.activeElement,card=active?.closest?.("[data-financial-card]");
@@ -1151,10 +1338,10 @@ function renderFinancialProfileBoard(model){
     const chart=(metric,points,label,type,record=model.series.get(metric.metric_id))=>{
       const content=record?.loading?'<p class="board-empty" role="status">자료를 불러오는 중입니다…</p>':
         record?.error?`<p class="board-empty explorer-error">${esc(record.error)}</p>`:
-        profileBoardPlot({periods:model.slots,series:[{label:metric.label,color,points}],definition:metric,label,type,active:model.active,interactive:true,includeZero:model.includeZero,showPeriods:label!=="수준"||!growth});
-      return `<div class="financial-board-plot"><h5>${label} · ${esc(profileBoardUnit(metric))}</h5>${content}</div>`;
+        profileBoardPlot({periods:model.slots,series:[{id,label:metric.label,color,points}],definition:metric,label,type,active:model.active,interactive:true,includeZero:model.includeZero,showPeriods:label!=="수준"||!growth,width:financialBoardPlotWidth(host),height:label==="수준"?142:108});
+      return `<div class="financial-board-plot" data-board-mode="${label==="수준"?"level":"growth"}"><h5>${label} · ${esc(profileBoardUnit(metric))}</h5>${content}</div>`;
     };
-    return `<article class="financial-board-card" data-financial-card="${esc(id)}"><h4>${esc(definition.label)}</h4>
+    return `<article class="financial-board-card" data-financial-card="${esc(id)}"><h4 data-board-item="${esc(id)}">${esc(definition.label)}</h4>
       ${chart(definition,levels,"수준",model.chartType||"DOT")}
       ${growth?chart(growth,rates,growth.unit==="pp"?"전년 대비 변화":"전년비","COLUMN",adjunct?model.growth:undefined):`<p class="board-empty">${definition.unit_kind==="MONEY"?"이 지표에 대응하는 전년비가 발행되지 않았습니다.":"이 지표는 수준으로 표시합니다. 대응하는 전년비가 발행되지 않았습니다."}</p>`}
       ${adjunct?financialGrowthPeriodStatuses(rates,model.slots,model.active):""}
@@ -1168,12 +1355,13 @@ function renderFinancialProfileBoard(model){
           }).join("")}</tbody></table></div>
       </details></article>`;
   }).join("")||'<p class="board-empty">비교할 재무 지표를 선택해 주세요.</p>';
-  if(focused){
+  if(focused&&!restore?.focus){
     const current=[...host.querySelectorAll("[data-financial-card]")].find(node=>node.dataset.financialCard===focused);
     const target=plotIndex<0?current?.querySelector("summary"):current?.querySelectorAll(".board-plot-canvas")[plotIndex];
     target?.focus({preventScroll:true});
   }
   updateFinancialBoardPeriod(model,model.active,true);
+  financialProfileBoardHost.profileBoardInteraction?.afterRender(restore);
 }
 function updateFinancialBoardPeriod(model,index,force=false){
   if(!model?.slots[index]||!force&&index===model.active)return;
@@ -1191,6 +1379,8 @@ function updateFinancialBoardPeriod(model,index,force=false){
     target.innerHTML=`<strong>${esc(model.slots[index].label)}</strong>
       · 수준 ${profileBoardValue(level.value,definition,level.reason)} ${esc(profileBoardUnit(definition))}
       ${rate?` · ${growth.unit==="pp"?"전년 대비 변화":"전년비"} ${profileBoardValue(rate.value,growth,rate.reason)} ${esc(profileBoardUnit(growth))}${adjunct?financialGrowthEvidence(rate):""}`:""}
+      ${level.value==null?`<small>${esc(level.reason)}</small>`:""}
+      ${rate?.value==null&&!rate?.status?`<small>${esc(rate.reason)}</small>`:""}
       ${level.row?`<small>${esc(actualPeriod(level.row))}</small>`:""}`;
   }
 }
@@ -1316,6 +1506,7 @@ function mountRevenueBreakdowns(){
   $("#revenue-breakdown-kind").onchange=()=>renderRevenueBreakdowns(true);
   $("#revenue-breakdown-period").onchange=()=>renderRevenueBreakdownTable();
   mountRevenueBoardControls();
+  $(".revenue-board-panels").after($("#revenue-board-readout"));
 }
 function resetRevenueBreakdowns(){
   const panel=$("#profile-revenue-breakdowns");
@@ -1568,7 +1759,7 @@ function revenueBoardPoint(line,index,mode){
     mode==="yoy"?"같은 공시에 비교할 수 있는 전년 자료가 확인되지 않았습니다.":
     mode==="share"?"같은 공시의 비중 분모가 확인되지 않았습니다.":"준비된 매출 값이 없습니다.";
   const basis=denominator==="FIXED_SCOPE_REPORTED"?"같은 공시 범위의 보고 매출":denominator==="CONSOLIDATED"?"연결 매출":denominator==="SEGMENT_SUBTOTAL"?`부문 소계 · ${revenueScopeLabel(line.scope)}`:"분모 확인 불가";
-  return {value:cell?.[metric]??null,connect:Boolean(connected),reason,basis};
+  return {value:cell?.[metric]??null,connect:Boolean(connected),reason,basis,sources:cell?.sources||[]};
 }
 function revenueBoardLabel(line){
   return line.label+(line.fixedAxisMembers&&Object.keys(line.fixedAxisMembers).length?` · 공시 범위 ${Object.values(line.fixedAxisMembers).map(revenueScopeLabel).join(" / ")}`:"")+(line.scope?` · ${revenueScopeLabel(line.scope)}`:"");
@@ -1589,7 +1780,13 @@ function mountRevenueBoardControls(){
   $("#revenue-board-y-scale").onchange=()=>renderRevenueBreakdownTrend();
   $("#revenue-board-share-toggle").onchange=()=>renderRevenueBreakdownTrend();
   $("#revenue-board-period").onchange=event=>updateRevenueBoardPeriod(Number(event.target.value));
-  bindProfileBoardPeriod($("#profile-revenue-breakdowns"),updateRevenueBoardPeriod,()=>revenueBreakdowns.board?.active);
+  bindProfileBoardPeriod($("#profile-revenue-breakdowns"),updateRevenueBoardPeriod,()=>revenueBreakdowns.board?.active,{
+    valid:()=>Boolean(revenueBreakdowns.board)&&!$("#profile-revenue-breakdowns").hidden,
+    key:()=>revenueBreakdowns.board,
+    count:()=>revenueBreakdowns.board?.periods.length||0,describe:revenueBoardContext,defaultMode:"amount",
+    order:()=>revenueBreakdowns.board?.selection.order.join(","),items:()=>revenueBreakdowns.board?.selection.order||[],
+  });
+  observeProfileBoardWidth($(".revenue-board-panels"),renderRevenueBreakdownTrend,()=>Boolean(revenueBreakdowns.board)&&!$("#profile-revenue-breakdowns").hidden);
 }
 function configureRevenueBoard(view){
   const lines=revenueBoardLines(view);
@@ -1615,9 +1812,25 @@ function configureRevenueBoard(view){
   $("#revenue-board-y-scale").value=model.includeZero?"ZERO":"AUTO";
   renderProfileBoardSelection($(".revenue-breakdown-trend"),model.selection,model.options,renderRevenueBreakdownTrend);
 }
+function profileBoardLegend(lines){
+  return lines.length?`<ul class="board-near-legend" aria-label="차트 항목">${lines.map(line=>`<li><button type="button" data-board-item="${esc(line.id)}" title="${esc(line.label)}" aria-label="${esc(line.label)}: 선택 기간 설명 고정">${profileBoardSwatch(line.color)}<span>${esc(line.label)}</span></button></li>`).join("")}</ul>`:"";
+}
+function revenueBoardContext(id,index,mode="amount"){
+  const model=revenueBreakdowns.board;if(!model?.periods[index])return "";
+  const lines=id?model.visible.filter(line=>line.id===id):model.visible;
+  const definition=mode==="amount"?REVENUE_MONEY:REVENUE_PERCENT;
+  return lines.map(line=>{
+    const point=line.points[mode]?.[index];if(!point)return "";
+    const rationale=mode==="share"?`비중 분모: ${point.basis} · 합계가 아닌 개별 비중`:
+      mode==="yoy"?"같은 공시의 전년 비교값 · 추이의 전년 금액과 다를 수 있습니다.":"";
+    const detail=[actualPeriod(model.view.periods[index]),rationale].filter(Boolean).join(" · ");
+    return `<div>${profileBoardContextLine(line.label,model.periods[index].label,point.value,definition,point.reason,detail)}${revenueSourceLinks(point.sources||[],revenueBreakdowns.data?.cik)}</div>`;
+  }).join("");
+}
 function renderRevenueBreakdownTrend(){
   const model=revenueBreakdowns.board;
   if(!model)return;
+  const host=$("#profile-revenue-breakdowns"),restore=host.profileBoardInteraction?.beforeRender($(".revenue-board-panels"));
   const {selection,view,periods,lines,options,active}=model;
   const labels=new Map(options.map(item=>[item.id,item.label]));
   const visible=selection.order.map(id=>lines.find(line=>line.id===id)).filter(Boolean);
@@ -1635,7 +1848,11 @@ function renderRevenueBreakdownTrend(){
   }));
   for(const [mode,selector,label] of charts){
     const series=model.visible.map(line=>({...line,points:line.points[mode]}));
-    $(selector).innerHTML=profileBoardPlot({periods,series,definition:definitions[mode],label,active,interactive:true,includeZero:model.includeZero});
+    const target=$(selector);target.parentElement?.setAttribute("data-board-mode",mode);
+    const hasValues=series.some(line=>line.points.some(point=>point.value!=null));
+    target.innerHTML=profileBoardLegend(model.visible)+(mode==="share"&&!hasValues?
+      '<div class="board-context" role="status" tabindex="0" hidden></div><p class="board-empty">선택 항목의 비중이 준비되지 않았습니다. 분모와 누락 사유는 아래 기간별 값에서 확인하세요.</p>':
+      profileBoardPlot({periods,series,definition:definitions[mode],label,active,interactive:true,includeZero:model.includeZero,width:Math.max(360,Math.floor(target.clientWidth||570)),height:176}));
   }
   $("#revenue-share-panel").hidden=!model.share;
   const values=$("#revenue-board-values");
@@ -1648,6 +1865,7 @@ function renderRevenueBreakdownTrend(){
     }).join("")}</tbody>`).join("")}</table>`:"";
   $("#revenue-board-evidence").hidden=!visible.length;
   updateRevenueBoardPeriod(active,true);
+  host.profileBoardInteraction?.afterRender(restore);
 }
 function updateRevenueBoardPeriod(index,force=false){
   const model=revenueBreakdowns.board;
@@ -2101,13 +2319,7 @@ function prepareDisplayTable(table){
     table.before(wrap);wrap.append(table);
   }
   const headings=[...table.tHead?.rows[0]?.cells||[]],style=getComputedStyle(table),width=name=>parseFloat(style.getPropertyValue(name));
-  const roles=headings.map((cell,index)=>{
-    if(cell.hidden)return"hidden";
-    if(role==="explorer")return["select","company","period"][index]||"number";
-    if(role==="results")return index===0?"select":index===1?"company":index===2||index===headings.length-1?"status":"number";
-    if(role==="comparison")return index===0?"label":"number";
-    return index===(role==="peer"?3:2)?"number":index===(role==="peer"?2:1)?"period":"context";
-  });
+  const roles=displayTableColumnRoles(role,headings);
   const widths=roles.map(kind=>kind==="hidden"?0:kind==="status"?width("--status-column"):kind==="context"?(role==="series"?92:112):kind==="number"&&role==="comparison"?188:width({select:"--select-column",company:"--company-column",period:"--period-column",number:"--number-column",label:"--label-column"}[kind]));
   let group=table.querySelector(":scope > colgroup");
   if(!group){group=document.createElement("colgroup");table.prepend(group)}

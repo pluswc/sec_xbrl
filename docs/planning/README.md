@@ -3,7 +3,24 @@
 2026-11-12 [매출 범위·누락 사유와 보수적 Q4](../implementation/revenue-completeness-20261112.md)는
 정확한 사업부문 qualifier, scoped 사유 및 별도 governed Q4 companion을 제공하는 승인 범위다.
 기존 50사 4,702 non-null 셀·계보·비율/계층을 유지하며 762 reported scoped 셀과
-224 derived Q4 셀(각 30사)을 추가했다. 자체 구현/발행 후보이며 독립 검증·인수·live/main은 대기다.
+224 derived Q4 셀(각 30사)을 추가했다. 소스 57a90f8b의 독립 PASS·실제 preview 후
+최신 운영 PR89/main e64e1182를 보존하는 feature 통합을 완료했다. 통합 Node54 PASS이며
+새 독립 확인·live/main 반영은 별도 대기다. 아래 PR89 미병합 문구는 당시 snapshot이며
+PR89는 main e64e1182에 병합됐다.
+
+2026-11-12 [스크리닝 근접 워크시트](../implementation/screening-workbench-20261112.md)는
+정확한 조건 편집의 제한된 폭과 의미 그룹, 최신 결과의 실제 기간 열 분류 및
+근접 결과 표를 다룬다. 구현 `8f1e466ffe`는 독립 Node 93개·Ruff·diff와
+리드의 실제 브라우저 검증을 통과해 LOCALLY_ACCEPTED(2026-11-12),
+18765 적용을 완료했다. 조건/응답·기존 보드·정렬·기록을 보존했다.
+이 작업의 원격 push·PR·CI·main 병합은 미수행이다.
+
+2026-11-11 [데스크톱 재무 워크벤치](../implementation/desktop-financial-workbench-20261111.md)는
+표와 값의 근접 폭, 적응형 작은 차트 쌍, 카탈로그 그룹별 선택 기억과
+근접 범례·기간 설명을 다룬다. 구현 `bde192d512`는 독립 Node 89개·Ruff
+검사와 리드 실제 브라우저 인수를 통과했고 18765에 적용했다. 기존 자료·
+artifact·기록을 보존했다. main `f46460086e`는 그대로이며 push·PR·CI·병합은
+미수행이다.
 
 2026-11-11 [공통 SEC durhour와 continuation 실패 진단](../implementation/sec-duration-hour-20261111.md)은
 소스 `82cc02eddfd6f05997c5e1e7d2a5c78ab2f4dd08`의 독립 PASS·리드 소스 인수 뒤,

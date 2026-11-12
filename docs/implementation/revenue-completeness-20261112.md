@@ -1,6 +1,7 @@
 # 공시 매출 범위·누락 사유와 보수적 Q4 — 2026-11-12
 
-상태: APPROVED / IMPLEMENTED 후보. 독립 검증·리드 인수·live·main은 대기다.
+상태(2026-11-12): 매출 소스 57a90f8b의 독립 PASS 및 실제 preview 근거를 유지한다.
+최신 main/운영 PR89를 보존한 통합 후보의 독립 확인·live·main 반영은 별도 대기다.
 기준 main: `90652de1c07ee42b1c185d3269ad6be464cc2604`.
 
 ## 승인과 경계
@@ -157,3 +158,37 @@ PYTHONPATH=src .venv/bin/python -m examples.screening.prepare_revenue_breakdowns
 이는 준비된 입력의 새 발행이며 SEC 다운로드·parser·History 감사 명령이 아니다.
 현재 최종 v3는 같은 producer finalizer로 두 번째 projection을 재사용해 증거 pin,
 세분화된 사유와 이미 인수된 보고 비율/계층을 연결한 불변 산출물이다.
+
+
+## 최신 운영 PR89 보존 통합 — 2026-11-12
+
+매출 소스 `57a90f8b45ed3ead4b6b2b27d68ec2fbcff2e86e`는 독립 검증의 Python
+42개·Node 11개 PASS와 리드의 실제 값/사유/API pin 및 1440/768px preview 검증을
+통과했다. 운영 전환 guard가 실제 18765 listener PID 44572의 최신 워크벤치
+bundle을 확인하여 **기존 프로세스를 종료하기 전에** 멈췄다. 이전 receipt의
+PID 41344로 추정해 최신 기능을 덮어쓰지 않았다.
+
+리드는 이 기능을 보존하는 통합을 승인했다. 이 feature branch에 정확한 main
+`e64e11826fd2989718cf2e27c8f6d275a4d9f03e`(PR89)를 merge하여 desktop 재무
+workbench, screening/result 열·정렬·zoom·상호작용과 새 테스트를 유지했다.
+충돌은 계획 등록부와 CSS의 동시 append뿐이며 양쪽을 보존했다. Incoming CSS
+전체를 그대로 두고 매출 사유의 기존 focus rule만 추가했다. JS와 매출 테스트는
+자동 병합됐다. 역적용 검사에서 자신의 90652→57 매출 delta만 빼면 JS/매출
+테스트 전체가 incoming e64와 바이트가 같다. 따라서 incoming 함수/hunk를
+변경하거나 누락하지 않았음을 파일 전체로 확인했다.
+
+통합 자체 검사는 Node **54 PASS**(workbench 4, revenue 11, period/sort/financial
+workbench 39), JavaScript syntax·Ruff·diff PASS다. Analytics·preparer 및 Python
+테스트는 수락된 57과 바이트가 같아서 Python 검사·실제 50사 재발행·감사를
+반복하지 않았다. v3 asset `db71131a…d53b231`과 companion `c8e3d9c5…789a8d1`은
+위 exact hash/bytes 그대로다. 세부 union 증거는 선택적 로컬
+`work/revenue-completeness-20261112/pr89-integration-preservation.json`이다.
+
+| 통합 asset | SHA-256 |
+| --- | --- |
+| app.js | `778b891dfb37c216569d8abd6f36c61af2aa63095e88788390fb01227fc36a8d` |
+| app.css | `a4ad73515cf7df814f7c937c0e1d9ee60f2597813d371e8961d20faf0e802001` |
+
+현재는 통합 source 후보의 독립 확인과 최신 PID/인자를 기준으로 한 preview/live
+전환이 대기다. 이 작업에서 main·runtime·Nasdaq queue·사용자 journal을 수정하거나
+push하지 않았다. PR89의 기존 완료 상태와 새 매출 기능의 main/live 상태를 구분한다.
