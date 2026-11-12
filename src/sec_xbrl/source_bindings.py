@@ -43,16 +43,28 @@ KNOWN_PARSER_PROFILES: dict[str, dict[str, str]] = {
         "parser_source_commit": "4077e87097c294ed779186b613157839f215a63e",
         "transform_rule_version": "sec-duration-conformance-v1",
     },
+    "m2-layer1-v7": {
+        "profile": "sec-inline-duration-hour-approved-lexical-and-metadata-v1",
+        "parser_source_commit": "82cc02eddfd6f05997c5e1e7d2a5c78ab2f4dd08",
+        "transform_rule_version": "sec-duration-hour-conformance-v1",
+    },
 }
 SEC_TRANSFORM_NAMESPACE = "http://www.sec.gov/inlineXBRL/transformation/2015-08-31"
 
 _DURATION_TRANSFORMS = frozenset({"durday", "durmonth", "duryear", "durweek"})
+
 _SAFE_TICKER = re.compile(r"^[A-Z0-9][A-Z0-9.^-]{0,31}$")
 _SAFE_CIK = re.compile(r"^[0-9]{10}$")
 _SAFE_ACCESSION = re.compile(r"^[0-9]{10}-[0-9]{2}-[0-9]{6}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _XMLNS = re.compile(r"xmlns:([^\s=]+)\s*=\s*([\"'])(.*?)\2")
+
+
+def _duration_transforms_for_parser(parser_version: str) -> frozenset[str]:
+    if parser_version not in KNOWN_PARSER_PROFILES:
+        raise ValueError(f"unknown governed duration parser profile: {parser_version}")
+    return _DURATION_TRANSFORMS | {"durhour"} if parser_version == "m2-layer1-v7" else _DURATION_TRANSFORMS
 
 
 @dataclass(frozen=True, slots=True)
@@ -390,7 +402,10 @@ def write_source_indexes_v2(
             "context_id",
             "Raw Context",
         )
-        source_rows = _extract_source_rows(primary, filing)
+        duration_transforms = _duration_transforms_for_parser(parser_version)
+        for transform in duration_transforms:
+            format_counts.setdefault(transform, 0)
+        source_rows = _extract_source_rows(primary, filing, duration_transforms=duration_transforms)
         documents.append(
             {
                 "ticker": filing.ticker,
@@ -403,7 +418,7 @@ def write_source_indexes_v2(
             }
         )
         for source in source_rows.values():
-            if source["transform"] not in _DURATION_TRANSFORMS and not _is_supported_correction_source(source):
+            if source["transform"] not in duration_transforms and not _is_supported_correction_source(source):
                 continue
             fact_id = _source_fact_id(source, filing=filing, facts=facts)
             fact = _unique_index(facts, "fact_id", "Raw Fact")[fact_id]
@@ -423,7 +438,7 @@ def write_source_indexes_v2(
                 "concept_qname": source["concept_qname"],
                 "fact_id": fact_id,
             }
-            if source["transform"] in _DURATION_TRANSFORMS:
+            if source["transform"] in duration_transforms:
                 duration_facts.append(
                     {
                         **common,
@@ -539,9 +554,10 @@ def publish_source_bindings_v2(
         fact_index = _unique_index(facts, "fact_id", "Raw Fact")
         concept_index = _unique_index(concepts, "raw_concept_id", "Raw Concept")
         context_index = _unique_index(contexts, "context_id", "Raw Context")
-        source_rows = _extract_source_rows(primary, filing)
+        duration_transforms = _duration_transforms_for_parser(parser_version)
+        source_rows = _extract_source_rows(primary, filing, duration_transforms=duration_transforms)
         duration_rows = {
-            key: row for key, row in source_rows.items() if row["transform"] in _DURATION_TRANSFORMS
+            key: row for key, row in source_rows.items() if row["transform"] in duration_transforms
         }
         correction_rows = {
             key: row for key, row in source_rows.items() if _is_supported_correction_source(row)
@@ -1102,6 +1118,11 @@ class SourceBindingsV2Reader:
             if document is None or tables is None:
                 raise ValueError("source-binding v2 record is outside collection scope")
             kind = str(binding["binding_kind"])
+            if kind == "DURATION" and (
+                binding.get("format_namespace") != SEC_TRANSFORM_NAMESPACE
+                or binding.get("transform") not in _duration_transforms_for_parser(str(document["parser_version"]))
+            ):
+                raise ValueError("duration evidence is not admitted by the exact parser profile")
             source_identity = (*key, kind, str(binding.get("source_id")))
             fact_identity = (*key, str(binding.get("fact_id")))
             if source_identity in source_ids or fact_identity in fact_ids:
@@ -1235,10 +1256,11 @@ def verify_source_bindings_v2_producer_completeness(
             or document.get("primary_sha256") != _sha256_bytes(primary)
         ):
             raise ValueError("source-binding v2 producer completeness source changed")
-        source_rows = _extract_source_rows(primary, filing)
+        duration_transforms = _duration_transforms_for_parser(str(document["parser_version"]))
+        source_rows = _extract_source_rows(primary, filing, duration_transforms=duration_transforms)
         for source_key, source in source_rows.items():
             kinds = (
-                (["DURATION"] if source["transform"] in _DURATION_TRANSFORMS else [])
+                (["DURATION"] if source["transform"] in duration_transforms else [])
                 + (
                     ["APPROVED_TRANSFORM_CORRECTION"]
                     if _is_supported_correction_source(source)
@@ -1590,7 +1612,7 @@ def _load_correction_claims(
 
 
 def _extract_source_rows(
-    primary: bytes, filing: _FilingScope
+    primary: bytes, filing: _FilingScope, *, duration_transforms: frozenset[str] = _DURATION_TRANSFORMS,
 ) -> dict[tuple[str, str, str, str], dict[str, Any]]:
     text = primary.decode("utf-8", errors="replace")
     namespaces = {match.group(1): match.group(3) for match in _XMLNS.finditer(text)}
@@ -1610,10 +1632,16 @@ def _extract_source_rows(
         # Optional IDs on unrelated SEC metadata transforms do not belong to
         # this narrow financial conformance scope. In-scope sources retain every
         # strict locator/Concept/context check below.
-        if transform not in _DURATION_TRANSFORMS and not _is_supported_correction_source(
+        if transform not in duration_transforms and not _is_supported_correction_source(
             {"transform": transform, "source_lexical": lexical}
         ):
             continue
+        if transform == "durhour" and (
+            element.get("continuedat") is not None
+            or any(str(child.tag).rsplit("}", 1)[-1].rsplit(":", 1)[-1].lower() == "exclude"
+                   for child in element.iterdescendants())
+        ):
+            raise ValueError("durhour source evidence requires a complete direct lexical; continuation/exclude is not qualified")
         source_id = element.get("id")
         concept_qname = element.get("name")
         context_ref = element.get("contextref")

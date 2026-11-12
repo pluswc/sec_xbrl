@@ -65,6 +65,7 @@ def register_sec_inline_transforms() -> None:
     from arelle import FunctionIxt
 
     registry: dict[str, Callable[[str], str]] = {
+        "durhour": _hour_duration,
         "durday": lambda value: _decimal_duration(value, "D"),
         "durweek": _week_duration,
         "durmonth": lambda value: _decimal_duration(value, "M"),
@@ -79,6 +80,15 @@ def register_sec_inline_transforms() -> None:
         "boolballotbox": _bool_ballot_box,
     }
     FunctionIxt.ixtNamespaceFunctions.setdefault(SEC_TRANSFORM_NAMESPACE, {}).update(registry)
+
+
+def _hour_duration(value: str) -> str:
+    """Truncate SEC decimal hours; do not infer minutes or other components."""
+    number, precision = _sec_duration_number(value, "hour")
+    with localcontext() as context:
+        context.prec = precision
+        hours = int(abs(number))
+    return _duration_value(None, None, None, hours, _duration_sign(number))
 
 
 def _week_duration(value: str) -> str:

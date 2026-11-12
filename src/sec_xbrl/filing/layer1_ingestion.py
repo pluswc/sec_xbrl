@@ -339,6 +339,7 @@ class Layer1Ingestor:
         if fatal:
             raise Layer1IngestionError(
                 "Arelle model has unresolved taxonomy or Inline transform errors: " + "; ".join(fatal)
+                + _failure_fact_details(model, continuation_error=any("continuation" in code.lower() for code in fatal))
             )
         try:
             corpus = select_fact_corpus(model)
@@ -360,23 +361,27 @@ class Layer1Ingestor:
         # inspect both the errors it emitted and the per-Fact validity state.
         values: list[Any] = []
         value_failures: list[str] = []
+        failed_ordinals: set[int] = set()
         for index, fact in enumerate(corpus.facts):
             try:
                 values.append(getattr(fact, "value", None))
             except Exception as exc:  # noqa: BLE001 - transform plugins raise provider-specific errors.
                 values.append(None)
                 value_failures.append(f"{index}:{type(exc).__name__}")
+                failed_ordinals.add(index)
 
         errors = tuple(str(error) for error in (getattr(model, "errors", None) or ()))
         fatal = tuple(error for error in errors if _is_resolution_or_transform_error(error))
         if fatal:
             raise Layer1IngestionError(
                 "Arelle model has unresolved taxonomy or Inline transform errors: " + "; ".join(fatal)
+                + _failure_fact_details(model, facts=corpus.facts, continuation_error=any("continuation" in code.lower() for code in fatal))
             )
         if value_failures:
             raise Layer1IngestionError(
                 "Inline transform Fact value evaluation failed "
                 f"(first ordinals and errors: {value_failures[:5]})"
+                + _failure_fact_details(model, facts=corpus.facts, ordinals=failed_ordinals)
             )
 
         invalid = [
@@ -394,7 +399,55 @@ class Layer1Ingestor:
                 "Fact corpus contains invalid Inline transform/schema values "
                 f"(invalid xValid ordinals: {invalid[:5]}, "
                 f"transform-error sentinel ordinals: {sentinels[:5]})"
+                + _failure_fact_details(model, facts=corpus.facts, ordinals=set(invalid) | set(sentinels))
             )
+
+
+# Diagnostics are appended only on failure, never persisted for every valid Fact.
+_MAX_DIAGNOSTIC_FACTS = 5
+_MAX_DIAGNOSTIC_TEXT = 512
+
+
+def _failure_fact_details(
+    model: Any, *, facts: tuple[Any, ...] | None = None,
+    ordinals: set[int] | None = None, continuation_error: bool = False,
+) -> str:
+    """Report bounded Arelle effective lexicals without reimplementing Inline text."""
+    if facts is None:
+        try:
+            facts = select_fact_corpus(model).facts
+        except Layer1ExtractionError:
+            # An early fatal model error remains authoritative even when the
+            # corpus cannot yet be selected unambiguously for diagnostics.
+            return ""
+    details = []
+    for ordinal, fact in enumerate(facts):
+        selected = ordinal in ordinals if ordinals is not None else getattr(fact, "xValid", None) == INVALID
+        if continuation_error:
+            selected = selected or bool(getattr(fact, "get", lambda _: None)("continuedAt"))
+        if not selected:
+            continue
+        entry: dict[str, Any] = {"ordinal": ordinal}
+        for label, attribute in (("fact_id", "id"), ("qname", "qname"),
+                                 ("context", "contextID"), ("format", "format"),
+                                 ("lexical", "rawValue")):
+            if label == "lexical" and continuation_error:
+                entry["lexical"] = None
+                entry["lexical_unavailable"] = "INVALID_CONTINUATION_CHAIN"
+                continue
+            try:
+                value = getattr(fact, attribute, None)
+                # Clark notation preserves the namespace even when prefixes differ.
+                text = str(getattr(value, "clarkNotation", value)) if value is not None else None
+                entry[label] = text[:_MAX_DIAGNOSTIC_TEXT] if text is not None else None
+                if text is not None and len(text) > _MAX_DIAGNOSTIC_TEXT:
+                    entry[f"{label}_truncated"] = True
+            except Exception as exc:  # noqa: BLE001 - diagnostics cannot mask the original gate failure.
+                entry[f"{label}_error"] = type(exc).__name__
+        details.append(entry)
+        if len(details) == _MAX_DIAGNOSTIC_FACTS:
+            break
+    return "; fact_diagnostics=" + json.dumps(details, ensure_ascii=False, separators=(",", ":")) if details else ""
 
 
 def _merge_relationship_concepts(
@@ -426,6 +479,10 @@ def _is_resolution_or_transform_error(error: str) -> bool:
         "xmlschema:valueerror",
         "taxonomy",
         "schemaref",
+        "continuationmissing",
+        "continuationcycle",
+        "continuationtarget",
+        "continuationchainnested",
     )
     return any(marker in normalized for marker in markers)
 

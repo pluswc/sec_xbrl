@@ -47,6 +47,9 @@ def _fixture(
     cik: str = "0000000123",
     accession: str = "0000000123-26-000001",
     parser_version: str = "m2-layer1-v5",
+    duration_transform: str = "duryear",
+    duration_lexical: str = "1.5",
+    duration_raw: str = "P1Y6M",
 ) -> dict[str, Path]:
     primary_document = "test.htm"
     config = _write(
@@ -112,6 +115,9 @@ def _fixture(
   <ix:nonNumeric id=\"exchange-source\" name=\"dei:SecurityExchangeName\" contextRef=\"exchange-context\" format=\"ixt-sec:exchnameen\">Nasdaq</ix:nonNumeric>
  </body>
 </html>"""
+    primary = primary.replace(b"ixt-sec:duryear", f"ixt-sec:{duration_transform}".encode()).replace(
+        b">1.5</ix:nonNumeric>", f">{duration_lexical}</ix:nonNumeric>".encode()
+    )
     package = (
         tmp_path
         / "packages"
@@ -170,12 +176,12 @@ def _fixture(
             "raw_concept_id": [duration_concept, exchange_concept],
             "context_id": [duration_context, exchange_context],
             "value_numeric": [None, None],
-            "value_text": ["P1Y6M", "NASDAQ"],
+            "value_text": [duration_raw, "NASDAQ"],
             "is_nil": [False, False],
             "source_document": [primary_document, primary_document],
             "source_locator": [duration_locator, exchange_locator],
             "reported_or_derived": ["REPORTED", "REPORTED"],
-            "raw_value": ["P1Y6M", "NASDAQ"],
+            "raw_value": [duration_raw, "NASDAQ"],
         }
     ).write_parquet(snapshot / "fact.parquet")
     pl.DataFrame(
@@ -237,14 +243,14 @@ def _fixture(
                     "cik": cik,
                     "accession": accession,
                     "primary_document": primary_document,
-                    "format": "duryear",
-                    "format_qname": "ixt-sec:duryear",
+                    "format": duration_transform,
+                    "format_qname": f"ixt-sec:{duration_transform}",
                     "namespace": SEC_TRANSFORM_NAMESPACE,
                     "format_namespace": SEC_TRANSFORM_NAMESPACE,
                     "source_id": "duration-source",
                     "concept_qname": "test:ExpectedLife",
                     "context_ref": "duration-context",
-                    "source_lexical": "1.5",
+                    "source_lexical": duration_lexical,
                     "fact_id": duration_fact,
                 }
             ],
@@ -371,20 +377,25 @@ def test_reader_rejects_changed_package_or_raw_table(tmp_path: Path) -> None:
         SourceBindingsReader(publication.root).verify_all()
 
 
-def _mixed_v2_fixture(tmp_path: Path) -> dict[str, object]:
+def _mixed_v2_fixture(
+    tmp_path: Path, *, parser_versions: tuple[str, str] = ("m2-layer1-v5", "m2-layer1-v6"),
+) -> dict[str, object]:
     first = _fixture(
         tmp_path / "first",
         ticker="FIVE",
         cik="0000000123",
         accession="0000000123-26-000001",
-        parser_version="m2-layer1-v5",
+        parser_version=parser_versions[0],
     )
     second = _fixture(
         tmp_path / "second",
         ticker="SIX",
         cik="0000000456",
         accession="0000000456-26-000002",
-        parser_version="m2-layer1-v6",
+        parser_version=parser_versions[1],
+        duration_transform="durhour" if parser_versions[1] == "m2-layer1-v7" else "duryear",
+        duration_lexical="20.9" if parser_versions[1] == "m2-layer1-v7" else "1.5",
+        duration_raw="PT20H" if parser_versions[1] == "m2-layer1-v7" else "P1Y6M",
     )
     config = _write(
         tmp_path / "mixed-config.json",
@@ -1035,3 +1046,133 @@ def test_generic_quality_rejects_raw_normalization_mismatch_without_publication(
             producer_revision="f" * 40,
         )
     assert not (tmp_path / "mismatch-quality").exists()
+
+
+@pytest.mark.parametrize("mixed_legacy", (False, True))
+def test_normal_default_v7_and_mixed_v6_v7_binding_quality_chain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mixed_legacy: bool,
+) -> None:
+    from sec_xbrl.facts.layer1 import Layer1Extractor
+
+    default_version = Layer1Extractor.parser_version
+    assert default_version == "m2-layer1-v7"
+    paths = _mixed_v2_fixture(tmp_path, parser_versions=("m2-layer1-v6" if mixed_legacy else default_version, default_version))
+    histories = _build_ready_histories(paths, tmp_path, monkeypatch)
+    companies = ({"ticker": "FIVE", "cik": "0000000123"}, {"ticker": "SIX", "cik": "0000000456"})
+    config = _quality_config(paths, histories, tmp_path / "quality-config.json", companies=companies)
+    before = {str(path): path.read_bytes() for source in (paths["first"], paths["second"])
+              for path in Path(source["snapshot"]).iterdir()}
+    publication = prepare_generic_metric_quality(
+        config_path=config, collection_manifest=Path(paths["collection"]), package_root=Path(paths["packages"]),
+        history_manifests=histories, source_index_destination=tmp_path / "indexes",
+        source_binding_destination=tmp_path / "bindings", destination=tmp_path / "quality",
+        producer_revision="e" * 40,
+    )
+    reader = GenericMetricQualityReader(publication.root)
+    assert reader.verify_sources(
+        collection_manifest=Path(paths["collection"]), history_manifest_sha256s={ticker: _sha256(path) for ticker, path in histories.items()},
+        financial_as_of="2026-10-08", expected_companies=companies,
+    )["state"] == "PASS"
+    profile = next(row for row in reader.manifest["parser_profiles"] if row["parser_version"] == default_version)
+    assert profile == {"parser_version": default_version,
+                       "profile": "sec-inline-duration-hour-approved-lexical-and-metadata-v1",
+                       "parser_source_commit": "82cc02eddfd6f05997c5e1e7d2a5c78ab2f4dd08",
+                       "transform_rule_version": "sec-duration-hour-conformance-v1"}
+    bindings = SourceBindingsV2Reader(tmp_path / "bindings")
+    hour, = [row for row in bindings.duration_bindings() if row["transform"] == "durhour"]
+    assert hour["source_lexical"] == "20.9"
+    assert hour["actual_raw_value"] == hour["actual_value_text"] == "PT20H"
+    assert json.loads((tmp_path / "indexes/duration_source_index.json").read_text())["format_counts"]["durhour"] == 1
+    assert {path: Path(path).read_bytes() for path in before} == before
+
+
+def test_exact_old_profiles_and_hour_profile_admission_remain_distinct() -> None:
+    from sec_xbrl.metric_quality import _duration_expected
+
+    assert source_binding_module.KNOWN_PARSER_PROFILES["m2-layer1-v5"] == {
+        "profile": "sec-inline-duration-and-approved-lexical-v1",
+        "parser_source_commit": "c1fdc21a267545c3c67ad4bdce8c74137ee340e1",
+        "transform_rule_version": "sec-duration-conformance-v1"}
+    assert source_binding_module.KNOWN_PARSER_PROFILES["m2-layer1-v6"] == {
+        "profile": "sec-inline-duration-approved-lexical-and-metadata-v1",
+        "parser_source_commit": "4077e87097c294ed779186b613157839f215a63e",
+        "transform_rule_version": "sec-duration-conformance-v1"}
+    for parser in ("m2-layer1-v5", "m2-layer1-v6"):
+        with pytest.raises(ValueError, match="unsupported governed duration"):
+            _duration_expected("durhour", "20", parser_version=parser)
+    with pytest.raises(ValueError, match="unknown governed duration parser"):
+        _duration_expected("durhour", "20", parser_version="m2-layer1-v8")
+    assert _duration_expected("durhour", "-20.9", parser_version="m2-layer1-v7") == "-PT20H"
+
+
+@pytest.mark.parametrize("markup", ('continuedAt="later"', 'exclude'))
+def test_hour_source_evidence_rejects_partial_continuation_or_excluded_lexical(tmp_path: Path, markup: str) -> None:
+    paths = _fixture(tmp_path, parser_version="m2-layer1-v7", duration_transform="durhour", duration_lexical="20", duration_raw="PT20H")
+    with zipfile.ZipFile(paths["package"]) as archive:
+        primary = archive.read("test.htm")
+    if markup == "exclude":
+        primary = primary.replace(b">20</ix:nonNumeric>", b">20<ix:exclude>0</ix:exclude></ix:nonNumeric>")
+    else:
+        primary = primary.replace(b'id="duration-source"', b'id="duration-source" continuedAt="later"')
+        primary = primary.replace(b"</body>", b'<ix:continuation id="later">0</ix:continuation></body>')
+    filing = source_binding_module._FilingScope("TEST", "0000000123", "0000000123-26-000001", "test.htm", paths["snapshot"], paths["snapshot"] / "layer1_manifest.json")
+    with pytest.raises(ValueError, match="complete direct lexical"):
+        source_binding_module._extract_source_rows(primary, filing, duration_transforms=source_binding_module._duration_transforms_for_parser("m2-layer1-v7"))
+
+
+@pytest.mark.parametrize("field", ("profile", "parser_source_commit", "transform_rule_version"))
+def test_v7_reader_rejects_self_rehashed_tampered_canonical_profile(tmp_path: Path, field: str) -> None:
+    paths = _fixture(tmp_path, parser_version="m2-layer1-v7", duration_transform="durhour", duration_lexical="20", duration_raw="PT20H")
+    indexes = write_source_indexes_v2(collection_manifest=paths["collection"], package_root=paths["packages"], destination=tmp_path / "indexes")
+    publication = publish_source_bindings_v2(
+        collection_manifest=paths["collection"], package_root=paths["packages"],
+        duration_source_index=indexes.duration_path, correction_source_index=indexes.correction_path,
+        destination=tmp_path / "bindings", producer_revision="b" * 40,
+    )
+    manifest = json.loads(publication.manifest_path.read_text())
+    manifest["parser_profiles"][0][field] = "b" * 40 if field == "parser_source_commit" else "unapproved"
+    identity = {key: value for key, value in manifest.items() if key != "publication_id"}
+    manifest["publication_id"] = "source-bindings-v2-" + hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, indent=2, sort_keys=True).encode()
+    ).hexdigest()[:24]
+    _write(publication.manifest_path, manifest)
+    with pytest.raises(ValueError, match="parser profile declaration"):
+        SourceBindingsV2Reader(publication.root)
+
+
+def test_v7_hour_quality_rejects_misnormalized_raw_in_normal_preparation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    paths = _mixed_v2_fixture(tmp_path, parser_versions=("m2-layer1-v6", "m2-layer1-v7"))
+    fact_path = Path(paths["second"]["snapshot"]) / "fact.parquet"
+    pl.read_parquet(fact_path).with_columns(
+        pl.when(pl.col("raw_value") == "PT20H").then(pl.lit("PT21H")).otherwise(pl.col("raw_value")).alias("raw_value"),
+        pl.when(pl.col("value_text") == "PT20H").then(pl.lit("PT21H")).otherwise(pl.col("value_text")).alias("value_text"),
+    ).write_parquet(fact_path)
+    histories = _build_ready_histories(paths, tmp_path, monkeypatch)
+    companies = ({"ticker": "FIVE", "cik": "0000000123"}, {"ticker": "SIX", "cik": "0000000456"})
+    config = _quality_config(paths, histories, tmp_path / "quality-config.json", companies=companies)
+    with pytest.raises(ValueError, match="Raw transform conformance did not pass"):
+        prepare_generic_metric_quality(
+            config_path=config, collection_manifest=Path(paths["collection"]), package_root=Path(paths["packages"]),
+            history_manifests=histories, source_index_destination=tmp_path / "indexes",
+            source_binding_destination=tmp_path / "bindings", destination=tmp_path / "quality", producer_revision="e" * 40,
+        )
+    assert not (tmp_path / "quality").exists()
+
+
+def test_legacy_v1_publisher_and_reader_cannot_admit_v7_raw_or_profile(tmp_path: Path) -> None:
+    v7 = _fixture(tmp_path / "new", parser_version="m2-layer1-v7", duration_transform="durhour", duration_lexical="20", duration_raw="PT20H")
+    with pytest.raises(ValueError, match="v5 snapshot/package identity"):
+        _publish(v7, tmp_path / "rejected-v1")
+    assert not (tmp_path / "rejected-v1").exists()
+
+    legacy = _fixture(tmp_path / "legacy")
+    publication = _publish(legacy, tmp_path / "legacy-v1")
+    manifest = json.loads(publication.manifest_path.read_text())
+    manifest["parser_version"] = "m2-layer1-v7"
+    identity = {key: value for key, value in manifest.items() if key != "publication_id"}
+    manifest["publication_id"] = "source-bindings-" + hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, indent=2, sort_keys=True).encode()
+    ).hexdigest()[:24]
+    _write(publication.manifest_path, manifest)
+    with pytest.raises(ValueError, match="request scope differs"):
+        SourceBindingsReader(publication.root).verify_all()
