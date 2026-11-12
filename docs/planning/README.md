@@ -1,5 +1,9 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-12 [재무기간의 간결한 날짜 표시](../implementation/compact-financial-dates-20261112.md)는
+일반 날짜를 YY.MM.DD로 줄이고 전체 ISO 근거와 회계기간 의미를 보존한다.
+표시 구현 승인, 독립 검증·인수·운영은 대기다.
+
 2026-11-12 [스크리닝 근접 워크시트](../implementation/screening-workbench-20261112.md)는
 정확한 조건 편집의 제한된 폭과 의미 그룹, 최신 결과의 실제 기간 열 분류 및
 근접 결과 표를 다룬다. 구현 `8f1e466ffe`는 독립 Node 93개·Ruff·diff와

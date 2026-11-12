@@ -299,7 +299,7 @@ test("fixed comparison shows quarter dates once with explicit exceptions, instan
   await h.renderComparison();
   const [heading,body]=h.get("#comparison-result").innerHTML.split("<tbody>");
   assert.match(heading,/Alpha · A/);
-  assert.equal((heading.match(/분기 2026-03-29 ~ 2026-06-27/g)||[]).length,2);
+  assert.equal((heading.match(/title="분기 2026-03-29 ~ 2026-06-27/g)||[]).length,2);
   assert.doesNotMatch(body,/2026-03-29/);
   assert.equal((body.match(/class="comparison-period-exception"/g)||[]).length,2);
   assert.match(body,/0[\s\S]*분기 2026-04-01 ~ 2026-06-27/);
@@ -322,7 +322,7 @@ test("latest TTM comparison uses TTM spans, anchor-only dates and no conflicted 
   assert.match(h.calls[0],/latest=true/);
   assert.match(heading,/TTM 2025-07-01 ~ 2026-06-30/);
   assert.match(heading,/기준 종료일 2026-06-30/);
-  assert.match(heading,/Gamma<small[^>]+>실제 기간 확인 불가/);
+  assert.match(heading,/Gamma<small[^>]+>[\s\S]*?실제 기간 확인 불가/);
   assert.doesNotMatch(heading,/2026-03-29|2026-06-19/);
   assert.doesNotMatch(body,/comparison-period-exception/);
   assert.match(body,/aria-label="자료 없음: 분기 합계 조건을 충족하지 않음"/);
@@ -340,7 +340,7 @@ test("annual comparison honors legacy context-end conventions and displays a dif
   h.S.explorerSelected=new Set(["1","2","3"]);h.get("#comparison-metrics").selectedOptions=[{value:id}];
   await h.renderComparison();
   const [heading,body]=h.get("#comparison-result").innerHTML.split("<tbody>");
-  assert.equal((heading.match(/연간 2024-01-01 ~ 2024-12-31/g)||[]).length,3);
+  assert.equal((heading.match(/title="연간 2024-01-01 ~ 2024-12-31/g)||[]).length,3);
   assert.equal((body.match(/class="comparison-period-exception"/g)||[]).length,1);
   assert.match(body,/기준일 2024-12-28/);
 });
@@ -677,9 +677,9 @@ test("pinned context and active legend or canvas survive DOM replacement with re
         selector==="[data-board-item]"&&self===legend?legend:selector===".board-plot-canvas"&&self===canvas?canvas:
         selector==="[data-board-clear]"&&self===close?close:selector===".financial-board-card,.revenue-board-plot"?panel:
         selector==="[data-board-period],.board-plot-canvas,[data-board-item]"&&self!==close?self:null;
-      const legend={dataset:{boardItem:"item"},classList:classes,closest(selector){return closest(this,selector)},focus(){document.activeElement=this}};
-      const canvas={parentElement:panel,closest(selector){return closest(this,selector)},focus(){document.activeElement=this}};
-      const close={closest(selector){return closest(this,selector)},focus(){document.activeElement=this}};
+      const legend={dataset:{boardItem:"item"},classList:classes,closest(selector){return closest(this,selector)},focus(){document.activeElement=this;events.focusin?.({target:this})}};
+      const canvas={parentElement:panel,closest(selector){return closest(this,selector)},focus(){document.activeElement=this;events.focusin?.({target:this})}};
+      const close={closest(selector){return closest(this,selector)},focus(){document.activeElement=this;events.focusin?.({target:this})}};
       return{context,panel,legend,canvas,close};
     }
     dom=makeDOM();
@@ -693,6 +693,14 @@ test("pinned context and active legend or canvas survive DOM replacement with re
     assert.equal(dom.context.hidden,false);assert.match(dom.context.innerHTML,/item:1:amount:version2/);
     assert.equal(document.activeElement,dom[kind]);assert.equal(attributes.get("data-board-pinned"),"true");
     events.pointerover({target:dom.canvas,pointerType:"mouse"});assert.match(dom.context.innerHTML,/version2/);
+    // Programmatic focus after Escape and another render is not a new request for explanation.
+    events.keydown({key:"Escape",target:dom.canvas,preventDefault(){},stopPropagation(){}});
+    assert.equal(dom.context.hidden,true);
+    const cleared=host.profileBoardInteraction.beforeRender(root);dom=makeDOM();document.activeElement={};
+    host.profileBoardInteraction.afterRender(cleared);
+    assert.equal(dom.context.hidden,true);assert.equal(attributes.has("data-board-pinned"),false);
+    assert.equal(document.activeElement,dom[kind]);
+    events.click({target:dom.legend});document.activeElement=dom[kind];
     // A newly loaded company or changed selection cannot reuse the previous pin.
     const next=host.profileBoardInteraction.beforeRender(root);scope="company2";order="";dom=makeDOM();
     host.profileBoardInteraction.afterRender(next);assert.equal(dom.context.hidden,true);assert.equal(attributes.has("data-board-pinned"),false);
