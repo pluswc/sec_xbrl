@@ -207,6 +207,20 @@ custom concept declared as `xbrli:timeItemType` with untransformed month-name
 text remains a strict validation failure. A later policy decision about that
 source issue cannot be inferred from metadata transform support.
 
+### SEC hour-duration coverage and bounded failure diagnostics — 2026-11-11
+
+[durhour 전달 계약](sec-duration-hour-20261111.md)은 정확한 SEC 2015 `durhour`를
+공통 등록하고 신규 Raw parser를 `m2-layer1-v7`로 구분한다. 정수 시간만 출력하고
+소수 시간은 절삭하며 절삭된 0의 부호는 없앤다. 기존 v5/v6는 불변이고 정상
+history same-schema 재열기는 정확히 v5/v6/v7만 허용한다. Downstream public
+mixed-v5/v6 source-binding proof 정책은 자동 확장하지 않는다.
+
+실패 parse-state의 기존 message에만 최대 5 Fact/문자열당 512자의 진단을
+추가한다. Arelle effective rawValue가 continuation/exclude를 반영하며 별도
+itertext 검사를 하지 않는다. Missing/cycle/target/nested continuation 오류는
+거부하고 위험한 chain의 rawValue 대신 명시적 unavailable 사유를 남긴다.
+`durwordsen`의 bare `one`을 허용하는 예외나 Raw 수정은 없다.
+
 ## Validation procedure
 
 Unit tests create an Inline-like model where `model.facts` has two reported

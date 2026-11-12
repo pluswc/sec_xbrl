@@ -78,3 +78,11 @@ deep-equal이고 SQLite는 전후 byte-identical이다. SHA-256:
 자산 고정 기록이고 `bridge-growth.json`은 현재 bundle의 전체 재시작 인자다.
 리드의 완료 인수 기록은 같은 폴더의 `local-acceptance.json`이다.
 이 작업의 원격 push·PR·CI·main 병합은 수행하지 않았다.
+
+## 원격 전달 승인과 main 통합 — 2026-11-12
+
+사용자는 이 작업의 push와 PR을 승인했다. 전달 브랜치에 조회한 origin/main
+`90652de1c07ee42b1c185d3269ad6be464cc2604`를 merge로 통합했다. 계획 등록부의
+동시 추가 항목은 양쪽 기록을 보존했다. 인수된 UI 자산과 실행 환경·자료·기록은
+변경하지 않는다. PR 생성과 원격 CI는 대기이며 main 병합은 수행하지 않았다.
+앞선 원격 미수행 문구는 당시 완료 기록이고, 현재 전달 상태는 이 항목을 따른다.

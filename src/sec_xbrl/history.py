@@ -44,7 +44,7 @@ from sec_xbrl.longitudinal.materialization import Layer2RuleVersions
 
 HISTORY_VERSION = "company-history-v1"
 _SUPPORTED_HISTORY_SOURCE_PARSER_VERSIONS = frozenset(
-    {"m2-layer1-v5", "m2-layer1-v6"}
+    {"m2-layer1-v5", "m2-layer1-v6", "m2-layer1-v7"}
 )
 _RECORD_WRITE_BATCH_SIZE = 32
 _RECORD_WRITE_BATCH_BYTES = 8 * 1024 * 1024

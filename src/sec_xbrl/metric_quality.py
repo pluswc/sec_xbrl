@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from sec_xbrl.collection_operations import read_universe_status
-from sec_xbrl.filing.sec_inline_transforms import _decimal_duration, _week_duration
+from sec_xbrl.filing.sec_inline_transforms import _decimal_duration, _hour_duration, _week_duration
 from sec_xbrl.history import HISTORY_VERSION
 from sec_xbrl.history_selection import (
     HistorySelections,
@@ -31,6 +31,7 @@ from sec_xbrl.source_bindings import (
     DOCUMENTS_NAME,
     KNOWN_PARSER_PROFILES,
     SourceBindingsV2Reader,
+    _duration_transforms_for_parser,
     publish_source_bindings_v2,
     verify_source_bindings_v2_producer_completeness,
     write_source_indexes_v2,
@@ -758,10 +759,15 @@ def _conformance_report(reader: SourceBindingsV2Reader) -> dict[str, Any]:
     duration_by_filing: dict[tuple[str, str, str], int] = {}
     correction_by_filing: dict[tuple[str, str, str], int] = {}
     mismatches: list[dict[str, str]] = []
+    parser_by_filing = {
+        (str(row["ticker"]), str(row["cik"]), str(row["accession"])): str(row["parser_version"])
+        for row in reader.documents
+    }
     for binding in reader.duration_bindings():
         key = (str(binding["ticker"]), str(binding["cik"]), str(binding["accession"]))
         duration_by_filing[key] = duration_by_filing.get(key, 0) + 1
-        expected = _duration_expected(str(binding["transform"]), str(binding["source_lexical"]))
+        expected = _duration_expected(str(binding["transform"]), str(binding["source_lexical"]),
+                                      parser_version=parser_by_filing[key])
         if not _text_raw_matches(binding, expected):
             mismatches.append({"kind": "DURATION", "identity": ":".join((*key, str(binding["source_id"])))})
     for binding in reader.approved_transform_corrections():
@@ -807,7 +813,11 @@ def _conformance_report(reader: SourceBindingsV2Reader) -> dict[str, Any]:
     }
 
 
-def _duration_expected(transform: str, lexical: str) -> str:
+def _duration_expected(transform: str, lexical: str, *, parser_version: str = "m2-layer1-v5") -> str:
+    if transform not in _duration_transforms_for_parser(parser_version):
+        raise ValueError(f"unsupported governed duration transform for {parser_version}: {transform}")
+    if transform == "durhour":
+        return _hour_duration(lexical)
     if transform == "durweek":
         return _week_duration(lexical)
     units = {"durday": "D", "durmonth": "M", "duryear": "Y"}
