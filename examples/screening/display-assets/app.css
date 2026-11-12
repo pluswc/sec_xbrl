@@ -626,3 +626,12 @@ g.board-item-active .board-line { stroke-width: 4; }
 .financial-date-token { white-space: nowrap; overflow-wrap: normal; word-break: keep-all; }
 .display-table .period-cell:has([data-financial-date]) { white-space: normal; }
 .display-table .period-caption:has([data-financial-date]) { white-space: normal; }
+
+
+.profile-revenue-breakdowns .missing[tabindex]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* Keep the two filing links readable without repeating shared arithmetic notes. */
+.explorer-v2 #revenue-breakdown-table:has(td[data-revenue-derived]) table { width: 850px; min-width: 850px; max-width: 850px; }
+.explorer-v2 #revenue-breakdown-table:has(td[data-revenue-derived]) thead th:last-child { width: 180px; }
+.profile-revenue-breakdowns [data-revenue-derived] > .revenue-source-kind,
+.profile-revenue-breakdowns [data-revenue-derived] > a { display: block; white-space: nowrap; }
