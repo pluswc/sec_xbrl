@@ -31,9 +31,9 @@ native input/option 값은 바꾸지 않는다. 공시 재무기간 헤더는 �
 | 단계 | 상태 |
 | --- | --- |
 | 승인 | 2026-11-12 표시 구현 승인 |
-| 구현 | 표시 구현과 작성자 검사 완료, 커밋 동결 |
-| 독립 검증 | 대기 |
-| 로컬 인수·운영 | 대기 |
+| 구현 | 통합 `a19661910d310a6fa3c67d4eca77cc7470722a20` 동결 |
+| 독립 검증 | 통합 소스 별도 Node 100개·Python 42개·Ruff PASS |
+| 로컬 인수·운영 | LOCALLY_ACCEPTED 2026-11-12 · 리드 18765 적용 PASS |
 | push·PR·CI·main | 미수행 |
 
 표시 회귀 검사 중 기존 운영본과 날짜 후보 양쪽에서 mouse pin의 Escape 직후
@@ -66,3 +66,37 @@ full title/접근성 이름·escaping, 반복 표 준비의 DOM 보존, SEC 원�
 않는다. 리드가 이 고정 경로를 보존해 재검증·적용을 판단한다. 충돌은 양쪽
 계획 추가와 CSS 추가, 매출표의 compact caption/계산 안내 병합뿐이며 양쪽
 동작을 보존한다. 날짜 기능의 운영 인수와 원격/main 전달은 아직 별도 단계다.
+
+## 최종 통합 운영 인수 — 2026-11-12
+
+검증·운영 소스는 `a19661910d310a6fa3c67d4eca77cc7470722a20`이다.
+이후 완료 문서 커밋과 구분한다. incoming `0fbc19e346`의 생산기·analytics·
+검사·매출 계약 7개 파일은 정확히 같고 날짜/포커스 표시와 계획의 텍스트만
+통합했다. 작성자의 통합 Node 100개·Ruff와 별도로 독립 검증도 Node 100개·
+Python 42개·Ruff를 통과했다. 앞선 98개는 날짜 단독 후보의 검사 수다.
+
+리드의 integrated-final-preview 및 integrated-live 매출 4개 경우가 통과했다.
+첫 MSFT 검사는 검사 코드의 기업 전환 완료 대기가 빠져 시간 초과했으며,
+`S.profile.company.cik` 완료를 기다리도록 검사만 보완한 뒤 모두 통과했다.
+이로 인한 제품 소스 수정은 없다. 날짜 24개 context/6개 그룹은 축약 표시와
+full ISO title/접근성 이름, 토큰·범위와 반복 렌더 보존을 확인했다. 재무
+워크벤치 10개 그룹(다섯 화면 폭의 4/3/2/1열과 고정 설명·포커스), 스크리닝
+7개 그룹의 정확한 응답/상태, 연간·분기·TTM 정렬도 통과했다. Endpoint는
+50개 회사 정확한 결과와 잘못된 범위의 409/400을 통과했다.
+
+18765는 당시 새 PID 10580으로 전환했고 backend 19070과 incoming 매출
+artifact `db71131a490b479278e49a4708a9518a321212df0efa3a09cffbf9cdbd53b231`의
+기존 고정 경로를 유지했다. History API는 변경 전과 같으며 SQLite는 전후
+byte-identical이다. SHA-256:
+`3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`.
+날짜 표시 때문에 자료·기록·artifact를 재계산하거나 수정하지 않았다.
+
+선택적 실행 증거는
+`/mnt/c/Users/plusbdw/.codex/visualizations/2026/11/08/01a1bb67-6275-70d2-989e-208966314006/compact-financial-dates-20261112/`다.
+`integrated-final-preview-report.json`, `integrated-live-report.json`,
+`live-dates-report.json`, `live-workbench-report.json`,
+`postmerge-live-screening-report.json`, `live-sort-report.json`,
+`live-endpoint-report.json`, `history-final.json`이 리드 실제 검사를 기록한다.
+`source-pin.json`·`bundle-hashes.json`은 소스/자산 pin이며 `bridge-growth.json`은
+현재 bundle의 전체 재시작 인자다. 원격 push·PR·CI·main 병합은 이 작업에서
+수행하지 않았다. 앞선 대기 문구는 해당 단계 당시의 기록이다.

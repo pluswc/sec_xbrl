@@ -2,7 +2,10 @@
 
 2026-11-12 [재무기간의 간결한 날짜 표시](../implementation/compact-financial-dates-20261112.md)는
 일반 날짜를 YY.MM.DD로 줄이고 전체 ISO 근거와 회계기간 의미를 보존한다.
-표시 구현 승인, 독립 검증·인수·운영은 대기다.
+통합 소스 `a19661910d`는 기존 매출 완전성 기능을 보존하고 독립 Node 100개·
+Python 42개·Ruff 및 리드 실제 날짜/매출/보드/스크리닝 검사를 통과했다.
+LOCALLY_ACCEPTED(2026-11-12), 18765(PID10580)에 적용했고 backend19070과
+기존 incoming artifact·기록을 유지했다. 이 작업의 push·PR·CI·main 병합은 미수행이다.
 
 2026-11-12 [매출 범위·누락 사유와 보수적 Q4](../implementation/revenue-completeness-20261112.md)는
 소스 `3c80c529be646fddfbbdf9137cc19db1513a4514`의 독립 확인·리드 로컬 인수 후
