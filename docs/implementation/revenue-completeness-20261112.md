@@ -1,7 +1,9 @@
 # 공시 매출 범위·누락 사유와 보수적 Q4 — 2026-11-12
 
-상태(2026-11-12): 매출 소스 57a90f8b의 독립 PASS 및 실제 preview 근거를 유지한다.
-최신 main/운영 PR89를 보존한 통합 후보의 독립 확인·live·main 반영은 별도 대기다.
+최신 상태(2026-11-12): INDEPENDENTLY_VERIFIED / LOCALLY_ACCEPTED / LIVE.
+배포 소스는 `3c80c529be646fddfbbdf9137cc19db1513a4514`이며 운영 인수 당시 main은
+`e64e11826fd2989718cf2e27c8f6d275a4d9f03e`, 새 매출 기능은 MAIN_NOT_MERGED다.
+아래 단계별 대기 문구는 당시 기록이고 마지막 운영 인수 기록이 이를 갱신한다.
 기준 main: `90652de1c07ee42b1c185d3269ad6be464cc2604`.
 
 ## 승인과 경계
@@ -203,3 +205,47 @@ native `계산값 안내` details 하나로 제공한다. 해당 표에 한해 �
 전체 폭을 850px로 두고 기존 가로 스크롤을 유지한다. 다른 표·font·축·계산·데이터는
 변경하지 않는다. Node revenue 11 PASS와 syntax/diff PASS이며, 기존 54 Node/Python/
 데이터 근거는 재사용한다. 최종 compact 재촬영/live는 리드의 별도 단계다.
+
+
+## 최종 독립 검증·실제 운영 인수 — 2026-11-12
+
+리드는 component `57a90f8b45ed3ead4b6b2b27d68ec2fbcff2e86e`의 독립 Python
+42/Node11 PASS, integration `e35aa92f79c69ae18038670b20a1c44e3c62c338`의 별도
+15 Node 및 incoming preservation PASS, 마지막 `3c80c529be646fddfbbdf9137cc19db1513a4514`의
+UI diff PASS와 기존 검사 재사용을 대조해 소스·실제 결과를 **LOCALLY_ACCEPTED**로
+판단했다. 새 소스로 18765의 실제 PID **44572 → 44272**를 전환했다.
+기존 Node cache binary, backend **19070**, history worker, financial-growth a9df827e
+발행, catalog **6개 dataset** 및 기존 **50사 membership**을 유지했다.
+
+첫 guard는 오래된 PID 41344 receipt와 실제 listener가 다름을 확인해 **프로세스를
+종료하기 전에 중지**했다. 실제 44572의 PR89 workbench UI를 확인하고 main e64를
+feature branch에 통합한 뒤 전환했으므로 기존 desktop financial/screening/result
+열·zoom·sort 기능을 보존했다. Main 자체를 수정하지 않았고 이번 기능의 원격
+push·PR·CI·main 병합은 수행하지 않았다. 문서 후속 commit은 실행 코드를 바꾸지
+않으며 실제 배포 버전은 위 3c80으로 고정한다.
+
+최종 GET-only smoke는 NFLX/AAPL/AMZN의 값과 회사 API companion pins,
+UI asset SHA 및 catalog 보존에서 PASS했다. 실제 Netflix Q4/Apple 화면도 PASS다.
+앞서 완료한 NFLX/AAPL/AMZN/MSFT의 1440/768px preview를 재사용했으며 마지막
+768px 검사에서는 공통 계산 안내가 한 번만 보이고 출처 열 실측 **180px**,
+page overflow 없음으로 PASS했다. 표 내부의 native horizontal scroll은 유지한다.
+
+위 asset/companion pins와 **762개 추가 보고 셀 / 224개 Q4 셀(각 30사)**,
+4,702개 기존 non-null 셀·계보·비율/계층의 차이 0건을 유지한다. 미확인 Netflix
+Streaming 연결, AMZN 분기 geography 입력/연결, 새 파생값의 reported-only 비율
+보류는 남은 한계이며 추정값으로 채우지 않았다. 기존 Raw·완료된 회사 감사·50사
+projection을 반복하거나 Nasdaq 운영 자료/queue를 전환하지 않았다.
+
+사용자 journal **10테이블·22행**과 모든 DB bytes는 그대로이며 SHA-256은
+`3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`다.
+기존 dataset manifest `afb910c0…acf730fc4`, 원래 매출 asset `187fb9b2…37203bb`와
+catalog SHA-256 `3fc09999c106c6c061411ab3ff668d76cf212aaff772fc9c0bb6627db5deea59`도
+유지했다. 검증 과정에서 사용자 기록을 추가하지 않았다.
+
+이 tracked 계약의 범위·정책·pins·수락 사실이 인계 기준이다. 선택적 로컬 receipt는
+`work/revenue-completeness-20261112/local-acceptance.json`
+(`LIVE_LOCALLY_ACCEPTED_NOT_MAIN_MERGED`)이다. 실제 증거/이미지는 기존 visualization
+root의 `revenue-completeness-20261112/` 아래 `live-smoke-report.json`, `live-report.json`,
+`final-compact-report.json`, `live-AAPL.png`, `live-NFLX.png`다. 별도 work 디렉터리가
+새 checkout의 계획 이해 전제는 아니다. 운영 인수 당시 main 미병합 snapshot과
+이후 Git/PR에 의해 확인할 실제 main 상태를 혼동하지 않는다.
