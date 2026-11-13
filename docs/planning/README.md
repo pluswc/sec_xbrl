@@ -65,6 +65,11 @@ INDEPENDENTLY_VERIFIED / LOCALLY_ACCEPTED / LIVE이며 운영 인수 당시 main
 **NOT_MERGED**(e64e1182)다. 이후 원격/main 상태는 Git·PR로 확인한다. 아래 PR89의
 과거 미병합 문구는 당시 snapshot이며 PR89 자체는 main e64에 병합됐다.
 
+2026-11-13 [Nasdaq native 연속성 자료 통합](../implementation/nasdaq100-native-continuity-20261112.md)은
+정확한 401 부모·보고서와 새 소스를 묶는 명시적 전이 및 선택 회사군 status 후보다.
+신규 20개 포함 focused 26 PASS·Ruff 통과, 독립 검증·리드 수락은 대기다.
+실자료 통합 재개·115개사 union·운영 완료를 뜻하지 않으며 기존 source/data/기록은 보존한다.
+
 2026-11-12 [스크리닝 근접 워크시트](../implementation/screening-workbench-20261112.md)는
 정확한 조건 편집의 제한된 폭과 의미 그룹, 최신 결과의 실제 기간 열 분류 및
 근접 결과 표를 다룬다. 구현 `8f1e466ffe`는 독립 Node 93개·Ruff·diff와

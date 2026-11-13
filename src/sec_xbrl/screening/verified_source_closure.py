@@ -589,6 +589,15 @@ def _v3_snapshot(
 ) -> _Snapshot:
     collector = _Collector(captured)
     collector.file(config_path, "V3_CONFIG", control=True)
+    if "native_source" in config:
+        from sec_xbrl.financial_native_source import native_controls
+        controls, source_roots = native_controls()
+        if not controls:
+            raise ValueError("native closure requires its validated explicit context")
+        for name, pin in controls.items():
+            _add_declaration_file(collector, pin, f"NATIVE_SOURCE:{name}")
+        for index, root in enumerate(source_roots):
+            collector.pattern_inventory(root, f"NATIVE_SOURCE_INVENTORY:{index}", ("**/*.py",))
     annual_root = _absolute_directory(annual_root)
     quarter_root = _absolute_directory(quarter_root)
     annual_manifest_path = annual_root / "screening_dataset_manifest.json"
