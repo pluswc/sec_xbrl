@@ -1,5 +1,12 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 [Nasdaq92 운영 패치 통합](../implementation/nasdaq92-operating-integration-20261114.md)은
+main `cdb8f64`와 수락 운영 소스 `6ea4203b8d`의 제품 차이만 별도 branch에 통합한다.
+구현 승인·검증 대기이며 이번 runtime/자료 변경과 push·PR·main 병합은 미수행이다.
+[기존 운영 계약](../implementation/nasdaq74-operating-20261113.md)의 로컬 운영 인수는
+이 PR 통합 검증과 별개다. Phase2 PR92는 main `cdb8f64`에 병합됐다.
+아래 PR92 OPEN/미병합 문구는 전달 당시 기록이다.
+
 2026-11-13 2차 원격 전달: 사용자 승인 후 head `5b814b944d`의 별도 독립
 Node 116/Ruff/diff PASS·인수 코드 동일성과 origin/main `0a89d5cf` 추가 변경 없음이
 확인됐다. push 후 [PR #92](https://github.com/pluswc/sec_xbrl/pull/92)를 열었으며

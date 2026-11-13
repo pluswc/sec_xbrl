@@ -38,7 +38,7 @@ function numberMarkup(v,m){const text=displayValue(v,m);return`<span class="disp
 function thresholdToApi(v,m){return shiftDecimal(v,m.unit_kind==="MONEY"?6:0)}
 function thresholdFromApi(v,m){return shiftDecimal(v,m.unit_kind==="MONEY"?-6:0)}
 function unitLabel(m){return m.unit_kind==="MONEY"?"백만 달러":m.unit_kind==="RATIO"?"배":"%"}
-function businessReason(c){return ({MULTIPLE_CANDIDATES:"같은 기간의 값이 여러 개입니다.",PERIOD_NOT_PREPARED:"선택한 기간의 자료가 없습니다.",MISSING_INPUT:"계산에 필요한 공시 항목이 없습니다.",QUALITY_BLOCKED:"자료 품질 확인이 필요합니다.",MAPPING_REVIEW_REQUIRED:"공시 항목 확인이 필요합니다.",NON_POSITIVE_DENOMINATOR:"비율 계산 기준값을 사용할 수 없습니다.",NEGATIVE_EQUITY:"자본이 음수여서 비율을 제공하지 않습니다.",CAPEX_SIGN_UNCERTAIN:"투자지출 표시 방향을 확인해야 합니다.",UNSUPPORTED_FISCAL_QUARTER_DURATION:"일반적인 3개월 분기보다 기간이 길어 비교에서 보류했습니다.",INPUTS_NOT_COMPATIBLE:"연속 분기의 계산 기준이 달라 값을 제공하지 않습니다.",NO_FILING_AS_OF_CUTOFF:"기준일까지 해당 분기 공시가 없습니다."})[c]||"공시자료 확인이 필요합니다."}
+function businessReason(c){return ({LATEST_SOURCE_PERIOD_NOT_PUBLISHED:"최신 분기 조회 자료 미준비",MULTIPLE_CANDIDATES:"같은 기간의 값이 여러 개입니다.",PERIOD_NOT_PREPARED:"선택한 기간의 자료가 없습니다.",MISSING_INPUT:"계산에 필요한 공시 항목이 없습니다.",QUALITY_BLOCKED:"자료 품질 확인이 필요합니다.",MAPPING_REVIEW_REQUIRED:"공시 항목 확인이 필요합니다.",NON_POSITIVE_DENOMINATOR:"비율 계산 기준값을 사용할 수 없습니다.",NEGATIVE_EQUITY:"자본이 음수여서 비율을 제공하지 않습니다.",CAPEX_SIGN_UNCERTAIN:"투자지출 표시 방향을 확인해야 합니다.",UNSUPPORTED_FISCAL_QUARTER_DURATION:"일반적인 3개월 분기보다 기간이 길어 비교에서 보류했습니다.",INPUTS_NOT_COMPATIBLE:"연속 분기의 계산 기준이 달라 값을 제공하지 않습니다.",NO_FILING_AS_OF_CUTOFF:"기준일까지 해당 분기 공시가 없습니다."})[c]||"공시자료 확인이 필요합니다."}
 function filteredCatalog(){const c=$("#metric-category").value,n=$("#metric-search").value.trim().toLowerCase();return S.catalog.filter(x=>(!c||x.category===c)&&(!n||x.label.toLowerCase().includes(n)||x.metric_id.toLowerCase().includes(n)))}
 function metricOptions(selected){let rows=filteredCatalog();const keep=metricById(selected);if(selected&&!rows.some(x=>x.metric_id===selected))rows=[keep,...rows];return ["GROWTH","PROFITABILITY","CASH_FLOW","FINANCIAL_STABILITY","OTHER_REPORTED"].map(c=>{const a=rows.filter(x=>x.category===c);return a.length?`<optgroup label="${categoryLabel(c)}">${a.map(x=>{const v=x.coverage||{},coverage=v.companies_total?` · ${v.companies_available}/${v.companies_total}개 기업`:"",disabled=x.business_availability==="UNAVAILABLE"&&x.metric_id!==selected;return`<option value="${esc(x.metric_id)}" ${x.metric_id===selected?'selected':''} ${disabled?'disabled':''}>${esc(x.label)} · ${unitLabel(x)}${coverage}${disabled?' · 현재 사용 불가':''}</option>`}).join("")}</optgroup>`:""}).join("")}
 function predicateRow(v){const m=metricById(v?.metric_id||filteredCatalog()[0]?.metric_id||S.catalog[0]?.metric_id||"revenue"),r=document.createElement("div");r.className="predicate";r.innerHTML=`<label>지표<select class="metric">${metricOptions(m.metric_id)}</select><span class="metric-hint"></span></label><label>조건<select class="operator"><option value="GTE">이상</option><option value="GT">초과</option><option value="LTE">이하</option><option value="LT">미만</option><option value="EQ">같음</option></select></label><label><span class="field-caption">기준값 (<span class="threshold-unit"></span>)</span><input class="threshold" inputmode="decimal" required></label><button type="button" class="quiet remove">삭제</button>`;r.querySelector(".operator").value=v?.operator||"GTE";r.querySelector(".threshold").value=v?thresholdFromApi(v.threshold,m):"0";updatePredicateHint(r);r.querySelector(".metric").onchange=()=>{updatePredicateHint(r);markDirty()};r.querySelector(".remove").onclick=()=>{if($$(".predicate").length>1){r.remove();markDirty()}};$("#predicates").append(r)}
@@ -419,6 +419,7 @@ function inclusiveEnd(value){if(!/^\d{4}-\d{2}-\d{2}$/.test(value||""))return va
 function companyPeriodCaption(period){
   if(!period)return "준비된 기간 없음";
   if(period.bucket_status==="PERIOD_CONFLICT")return "실제 기간 확인 필요";
+  if(period.bucket_status==="LATEST_SOURCE_PERIOD_NOT_PUBLISHED")return "최신 분기 조회 자료 미준비";
   const actual=period.period_end?actualPeriod(period):"실제 기간 미확인";
   const fiscal=period.fiscal_year?`FY${period.fiscal_year}${period.fiscal_quarter?" "+period.fiscal_quarter:""}`:"";
   const filed=period.filed_date?[period.filed_date]:period.source_filed_dates||[];
@@ -1259,6 +1260,26 @@ const BOARD_AXIS_OPTIONS='<option value="AUTO">자동 범위</option><option val
 
 function financialComparisonEligible(definition){return ["MONEY","PERCENT"].includes(definition?.unit_kind)}
 function financialComparisonMetric(definition){return definition.unit_kind==="PERCENT"?BOARD_PP:BOARD_RATE}
+function auxiliaryOwnerPayload(response,requested,dataset,expectedSource=null){
+  if(response?.schema_version!=="screening-auxiliary-owner-response-v1"){
+    if(dataset?.auxiliary_manifest_sha256||response?.auxiliary_owner)throw new Error("통합 자료의 공시 출처 증거를 확인할 수 없습니다.");
+    return response;
+  }
+  const {request_scope:query,source_scope:source,owner_proof:proof,data}=response;
+  const keys=["dataset_id","dataset_publication_id","financial_as_of","dataset_manifest_sha256"];
+  if(!/^[0-9a-f]{64}$/u.test(dataset?.auxiliary_manifest_sha256||"")||!query||!source||!proof||!data||
+      Object.keys(requested).some(key=>query[key]!==requested[key])||
+      query.dataset_manifest_sha256!==dataset.auxiliary_manifest_sha256||
+      proof.union_manifest_sha256!==dataset.auxiliary_manifest_sha256||proof.cik!==requested.cik||
+      !/^[0-9a-f]{64}$/u.test(source.dataset_manifest_sha256||"")||
+      proof.source_manifest_sha256!==source.dataset_manifest_sha256||source.financial_as_of!==requested.financial_as_of||
+      data.cik!==requested.cik||keys.some(key=>data[key]!==source[key])||
+      expectedSource&&keys.some(key=>source[key]!==expectedSource[key])){
+    throw new Error("통합 자료와 원본 공시 발행물의 범위가 다릅니다.");
+  }
+  return {...data,auxiliary_owner:{request_scope:query,source_scope:source,owner_proof:proof}};
+}
+
 function requestFinancialGrowth(model){
   if(model.growth||!model.slots.length||!model.selection.order.some(id=>financialComparisonEligible(model.definitions.get(id))))return;
   const scope={dataset_id:model.context.dataset,dataset_publication_id:model.context.publication,
@@ -1275,15 +1296,23 @@ function requestFinancialGrowth(model){
   financialGrowthCapability.then(capability=>{
     if(!ownsFinancialProfileBoard(model))return;
     const {cik,...dataset}=scope;
-    if(!capability.configured||Object.keys(dataset).some(key=>dataset[key]!==capability[key])){
-      throw new Error("선택한 발행물의 전년 비교 자료가 준비되지 않았습니다.");
+    const selected=explorerDataset();
+    const ownerContext=(capability.owner_contexts||[]).find(context=>
+      Object.keys(dataset).every(key=>dataset[key]===context.request_scope?.[key])&&
+      context.request_scope.dataset_manifest_sha256===selected?.auxiliary_manifest_sha256&&
+      context.available_ciks?.includes(cik));
+    if(!capability.configured||(!ownerContext&&Object.keys(dataset).some(key=>dataset[key]!==capability[key]))){
+      throw new Error("이 기업 발행물의 전년 비교 자료가 준비되지 않았습니다. 수준 값은 그대로 조회할 수 있습니다.");
     }
+    const sourceContext=ownerContext?.source_scope||capability;
     const query=new URLSearchParams(scope).toString();
     let pending=financialGrowthCache.get(query);
     if(!pending){
-      pending=api(`/api/financial-growth?${query}`).then(data=>{
+      pending=api(`/api/financial-growth?${query}`).then(response=>{
+        const data=auxiliaryOwnerPayload(response,scope,selected,ownerContext?.source_scope||null);
+        const expectedScope=data.auxiliary_owner?{...data.auxiliary_owner.source_scope,cik}:scope;
         if(!((data.schema_version==="screening-financial-growth-v1"&&data.rule_version===FINANCIAL_GROWTH_RULE)||(data.schema_version==="screening-financial-growth-v2"&&data.rule_version==="catalog-prepared-financial-comparison-v2"))||data.period_end_convention!=="EXCLUSIVE"||
-            Object.keys(scope).some(key=>scope[key]!==data[key])||data.dataset_manifest_sha256!==capability.dataset_manifest_sha256||
+            Object.keys(scope).some(key=>expectedScope[key]!==data[key])||data.dataset_manifest_sha256!==sourceContext.dataset_manifest_sha256||
             !data.definitions||!data.series){
           throw new Error("전년 비교 발행물의 범위가 선택과 다릅니다.");
         }
@@ -1761,9 +1790,10 @@ async function loadRevenueBreakdowns(){
   const current=()=>context.token===revenueBreakdowns.token&&context.profile===S.profile&&context.key===explorerContextKey()&&!panel.hidden;
   status.textContent="매출 구성 자료를 불러오는 중입니다…";
   try{
-    const data=await api(`/api/revenue-breakdowns?${new URLSearchParams(scope)}`);
+    const data=auxiliaryOwnerPayload(await api(`/api/revenue-breakdowns?${new URLSearchParams(scope)}`),scope,dataset);
     if(!current())return;
-    if(Object.keys(scope).some(key=>scope[key]!==data[key])||data.schema_version!=="screening-revenue-breakdowns-v1"){
+    const expectedScope=data.auxiliary_owner?{...data.auxiliary_owner.source_scope,cik}:scope;
+    if(Object.keys(scope).some(key=>expectedScope[key]!==data[key])||data.schema_version!=="screening-revenue-breakdowns-v1"){
       throw new Error("선택한 발행물과 매출 구성 자료가 다릅니다.");
     }
     revenueBreakdowns.data=data;
