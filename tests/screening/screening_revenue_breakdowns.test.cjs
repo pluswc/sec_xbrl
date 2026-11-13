@@ -291,3 +291,45 @@ test("revenue response accepts a complete company above the old bound and reject
   assert.ok(load(600000).byCik.get(cik).length>512*1024);
   assert.throws(()=>load(1024*1024),/company exceeds response limit/);
 });
+
+test("empty revenue tables retain differentiated scoped reasons and derived amounts keep both filing links",()=>{
+  const {get,app}=profileHarness();
+  const periods=[{fiscal_year:2025,fiscal_quarter:4,period_start:"2025-10-01",period_end:"2026-01-01"}];
+  const view={periods,totals:[],groups:{segments:[]},availability:{segments:[{available_count:0,gap_counts:{Q4_MISSING_YTD9_INPUT:2,MAPPING_EPOCH_NOT_ACTIVE:1,UNSUPPORTED_DIMENSION_SCOPE:1}}]}};
+  app.revenueBreakdowns.data={cik,quarterly:view};
+  get("#revenue-breakdown-frequency").value="quarterly";get("#revenue-breakdown-kind").value="segments";get("#revenue-breakdown-period").value="0";
+  app.renderRevenueBreakdownTable();
+  let table=get("#revenue-breakdown-table").innerHTML;
+  assert.match(table,/Q4 9개월 입력 없음/);assert.match(table,/다른 공시 분류 기간/);assert.match(table,/추가 분류 확인 필요/);
+  assert.match(table,/<details class="muted"><summary>/);
+  assert.match(table,/공시 전체의 부재를 뜻하지 않습니다/);
+  view.groups.segments=[{id:"derived",label:"Cloud",axis_members:{segment:"cloud"},fixed_axis_members:{axis:"us-gaap:OperatingSegmentsMember"},cells:[{
+    value:"-1000000",status:"DERIVED",reason:null,share:null,yoy:null,derivation_rule_version:"confirmed-dimensional-revenue-fy-ytd9-q4-v1",
+    ratio_hold_reason:"DERIVED_RATIO_NOT_QUALIFIED",sources:[{accession:"0000000042-26-000001",filed_date:"2026-02-01"},{accession:"0000000042-25-000003",filed_date:"2025-10-01"}]}]}];
+  app.renderRevenueBreakdownTable();table=get("#revenue-breakdown-table").innerHTML;
+  assert.match(table,/계산값 · 연간−9개월/);assert.match(table,/공시 범위 · Operating Segments/);
+  assert.match(table,/비중·전년비는 직접 공시값만 계산 대상으로 사용합니다/);assert.match(table,/tabindex="0"/);
+  assert.equal((table.match(/target="_blank"/g)||[]).length,2);
+  assert.doesNotMatch(table,/산술 차감 · 재작성 비교성 미검증/);
+  view.groups.segments.push({...view.groups.segments[0],id:"second-derived",label:"Other"});
+  app.renderRevenueBreakdownTable();table=get("#revenue-breakdown-table").innerHTML;
+  assert.equal((table.match(/<summary>계산값 안내<\/summary>/g)||[]).length,1);
+  assert.equal((table.match(/<td data-revenue-derived>/g)||[]).length,2);
+  assert.equal((table.match(/target="_blank"/g)||[]).length,4);
+  view.groups.segments=[];
+  app.renderRevenueBreakdownTable();
+  assert.doesNotMatch(get("#revenue-breakdown-table").innerHTML,/<summary>계산값 안내/);
+});
+
+test("company revenue API preserves compact governed publication pins",t=>{
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),"revenue-proof-pin-"));
+  t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+  const file=path.join(directory,"revenue.json"),pin={schema_version:"governed-dimensional-revenue-q4-v1",rule_version:"confirmed-dimensional-revenue-fy-ytd9-q4-v1",sha256:"a".repeat(64)};
+  const view={periods:[],groups:{segments:[],products:[],geography:[]},derived_publication:pin};
+  fs.writeFileSync(file,JSON.stringify({...scope,schema_version:"screening-revenue-breakdowns-v1",dataset_manifest_sha256:"b".repeat(64),companies:{[cik]:{ticker:"TEST",annual:view,quarterly:view}}}));
+  const bundle=loadRevenueBreakdowns(file,crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex"));
+  const response={writeHead(status){this.status=status},end(body){this.body=JSON.parse(body)}};
+  serveRevenueBreakdowns(bundle,{method:"GET",url:"/api/revenue-breakdowns?"+new URLSearchParams({...scope,cik})},response);
+  assert.equal(response.status,200);assert.deepEqual(response.body.quarterly.derived_publication,pin);
+  assert.equal(Object.hasOwn(response.body.quarterly.derived_publication,"path"),false);
+});

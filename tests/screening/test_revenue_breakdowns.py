@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from examples.screening.prepare_revenue_breakdowns import (
     SEGMENT_AXIS,
     _add_revenue_ratios,
@@ -303,7 +305,7 @@ def _hierarchy(amounts, roles, *, total="100", scoped=False, edit=None):
          "cells": [cell(name, value, [*parent_dimensions, _dimension("raw-product-axis", name)])]}
         for name, value in amounts.items()
     ]
-    segments = [{"member": scope, "cells": [parent]}] if scoped else []
+    segments = [{"member": scope, "axis_members": {SEGMENT_AXIS: scope}, "cells": [parent]}] if scoped else []
     result = {"periods": [CURRENT_PERIOD], "totals": [parent], "groups": {"segments": segments, "products": products}}
     if edit:
         edit(result, observations)
@@ -505,3 +507,141 @@ def test_geography_conflicting_fixed_parent_holds_share_but_keeps_amount_and_yoy
     assert "share" not in result["ratios"]
     assert result["yoy"] == "100"
     assert result["ratios"]["yoy"]["prior_fact_ids"] == ["prior-geography"]
+
+
+def test_exact_consolidation_qualifier_preserves_scope_and_does_not_reclassify_other_members():
+    from examples.screening.prepare_revenue_breakdowns import FIXED_DIMENSIONS
+
+    fixture = _Prepared()
+    axis, member = next(iter(FIXED_DIMENSIONS.items()))
+    fixture.nodes.extend([
+        _node("operating-segment", [_dimension(SEGMENT_AXIS, "issuer:CloudMember"), _dimension(axis, member)]),
+        _node("elimination", [_dimension(SEGMENT_AXIS, "issuer:CloudMember"), _dimension(axis, "us-gaap:EliminationsMember")]),
+    ])
+    fixture.cells.extend([fixture.cell("operating-segment", 2, "0"), fixture.cell("elimination", 2, "-1")])
+    result = project_breakdowns(fixture, "TEST", CIK, CUTOFF, "QTD_3M", 8)
+    rows = result["groups"]["segments"]
+    scoped = next(row for row in rows if row["id"] == "operating-segment")
+    assert scoped["fixed_axis_members"] == {axis: member}
+    assert scoped["axis_members"] == {SEGMENT_AXIS: "issuer:CloudMember", axis: member}
+    assert scoped["cells"][1]["value"] == "0"
+    assert all(row["id"] != "elimination" for row in rows)
+
+
+def test_governed_q4_projection_preserves_direct_and_conflicting_cells_and_two_sources():
+    from examples.screening.prepare_revenue_breakdowns import _complete_revenue_view, _gap
+    from sec_xbrl.analytics.revenue_quarters import scope_key
+
+    def observation(kind, value):
+        row = _reported(kind, value, SEGMENT_DIMS)
+        return {**row, "cik": CIK, "fiscal_year": 2025, "period_class": kind,
+                "company_canonical_concept_id": "canonical", "concept_mapping_id": "map", "mapping_review_required": False,
+                "canonical_dimension_signature": SEGMENT_DIMS, "dimension_mapping_ids": [["axis-map", "member-map"]],
+                "source_snapshot_id": f"l1:{CIK}:{ACCESSION.replace('-', '')}:snapshot",
+                "raw_concept_period_type": "duration", "raw_concept_data_type": "xbrli:monetaryItemType",
+                "context_start_date": "2025-01-01", "context_end_date": "2026-01-01" if kind == "FY" else "2025-10-01",
+                "context_duration_days": 365 if kind == "FY" else 273}
+    observations = [observation("FY", "60"), observation("YTD_9M", "70")]
+    canonical = list(scope_key(observations[0]))
+    client = type("EmptyClient", (), {"_records": lambda *_: []})()
+    for existing in (_gap("PERIOD_NOT_PREPARED"), {**_gap("COMPETING_PREPARED_SCOPE")},
+                     {"value": "0", "reason": None, "sources": [], "status": "REPORTED", "share": "0", "yoy": "1"}):
+        row = {"id": "same-scope", "group": "segments", "label": "Cloud", "scope": None,
+               "axis_members": {SEGMENT_AXIS: "issuer:CloudMember"}, "mapping_epoch": "epoch",
+               "canonical_scope": canonical, "mapping_review_required": False, "cells": [existing]}
+        result = {"ratio_evidence": {}, "periods": [{"fiscal_year": 2025, "fiscal_quarter": 4,
+                   "period_start": "2025-10-01", "period_end": "2026-01-01"}],
+                  "groups": {"segments": [row], "products": [], "geography": []}}
+        _complete_revenue_view(result, observations, client, "TEST", CUTOFF, "QTD_3M", annual_view=None, derive_q4=True)
+        cell = row["cells"][0]
+        if existing["reason"] == "PERIOD_NOT_PREPARED":
+            assert cell["value"] == "-10"
+            assert cell["status"] == "DERIVED"
+            assert [source["fact_id"] for source in cell["sources"]] == ["FY", "YTD_9M"]
+            assert cell["share"] is cell["yoy"] is None
+            assert cell["ratio_hold_reason"] == "DERIVED_RATIO_NOT_QUALIFIED"
+        else:
+            assert cell is existing
+
+
+def test_consolidation_scoped_segment_share_holds_without_exact_parent_and_preserves_legacy_ratio():
+    from examples.screening.prepare_revenue_breakdowns import FIXED_DIMENSIONS, _gap
+
+    current = _reported("current", "60", PRODUCT_DIMS)
+    cell, groups = _ratios(current)
+    assert cell["share"] == "60.0"
+    axis, member = next(iter(FIXED_DIMENSIONS.items()))
+    scoped = {**groups["segments"][0], "axis_members": {SEGMENT_AXIS: "services", axis: member},
+              "fixed_axis_members": {axis: member}, "cells": [_gap("PERIOD_NOT_PREPARED")]}
+    # No consolidated fallback can supply the exact independently reported
+    # consolidation-only parent of this business-segment observation.
+    report = _reported("scoped", "40", [*SEGMENT_DIMS, _dimension("raw-consolidation", "raw-operating")])
+    source = {"fact_id": "scoped", "snapshot_id": report["source_snapshot_id"], "accession": report["accession"],
+              "filed_date": report["filed_date"], "qname": report["raw_concept_qname"]}
+    scoped["cells"] = [{"cell_id": "scoped", "status": "REPORTED", "value": "40", "reason": None,
+                         "sources": [source], "share": None, "yoy": None}]
+    total_report = _reported("total", "200", [])
+    total = {"cell_id": "total", "status": "REPORTED", "value": "200", "sources": [{**source, "fact_id": "total"}], "share": None, "yoy": None}
+    _add_revenue_ratios([total], {"segments": [scoped]}, [CURRENT_PERIOD], [CURRENT_PERIOD], [report, total_report])
+    assert scoped["cells"][0]["value"] == "40"
+    assert scoped["cells"][0]["share"] is None
+    # Fixed-axis scopes cannot enter the old unqualified segment denominator list.
+    ordinary_parent = _reported("segment", "100", SEGMENT_DIMS)
+    ordinary_cell = {**total, "cell_id": "segment", "value": "100", "sources": [{**source, "fact_id": "segment"}]}
+    ordinary = {"group": "segments", "member": "services", "scope": None, "axis_members": {SEGMENT_AXIS: "services"}, "cells": [ordinary_cell]}
+    product = {"group": "products", "scope": "services", "axis_members": {SEGMENT_AXIS: "services", PRODUCT: "search"}, "cells": [cell]}
+    _add_revenue_ratios([total], {"segments": [ordinary, scoped], "products": [product]}, [CURRENT_PERIOD], [CURRENT_PERIOD], [current, ordinary_parent, report, total_report])
+    assert cell["share"] == "60.0"
+
+
+def test_pinned_reported_output_reuse_checks_scope_and_source_before_retaining_ratios():
+    from copy import deepcopy
+
+    import pytest
+
+    from examples.screening.prepare_revenue_breakdowns import _reuse_reported_outputs
+
+    view = project_breakdowns(_Prepared(), "TEST", CIK, CUTOFF, "QTD_3M", 8)
+    view["product_hierarchy"] = []
+    cell = view["groups"]["products"][0]["cells"][1]
+    cell["share"] = "10"
+    cell["ratios"] = {"share": {"denominator": "CONSOLIDATED"}}
+    baseline = {"schema_version": "screening-revenue-breakdowns-v1", "dataset_id": "d", "dataset_publication_id": "p",
+                "financial_as_of": CUTOFF, "dataset_manifest_sha256": "a" * 64,
+                "companies": {CIK: {"ticker": "TEST", "annual": deepcopy(view), "quarterly": deepcopy(view)}}}
+    candidate = deepcopy(baseline)
+    candidate["companies"][CIK]["quarterly"]["groups"]["products"][0]["cells"][1]["share"] = "99"
+    _reuse_reported_outputs(candidate, baseline, "b" * 64)
+    assert candidate["companies"][CIK]["quarterly"]["groups"]["products"][0]["cells"][1]["share"] == "10"
+    assert candidate["reported_baseline_sha256"] == "b" * 64
+    for field in ("value", "cell_id", "sources"):
+        bad = deepcopy(baseline)
+        changed = bad["companies"][CIK]["quarterly"]["groups"]["products"][0]["cells"][1]
+        changed[field] = [] if field == "sources" else "changed"
+        with pytest.raises(ValueError, match="Fact/value lineage"):
+            _reuse_reported_outputs(bad, baseline, "b" * 64)
+    bad = deepcopy(baseline)
+    bad["companies"][CIK]["quarterly"]["groups"]["products"][0]["mapping_epoch"] = "different"
+    with pytest.raises(ValueError, match="mapping scope"):
+        _reuse_reported_outputs(bad, baseline, "b" * 64)
+    with pytest.raises(ValueError, match="dataset context"):
+        _reuse_reported_outputs({**candidate, "dataset_publication_id": "other"}, baseline, "b" * 64)
+
+
+def test_q4_gap_refinement_reports_known_review_without_financial_epoch_join():
+    from examples.screening.prepare_revenue_breakdowns import _gap, _refine_q4_gap_evidence
+
+    dims = [["canonical-axis", "review-member", None, "EXPLICIT", "false"]]
+    canonical = [CIK, "revenue", json.dumps(dims, separators=(",", ":"))]
+    disclosed = {"geo": "issuer:RegionMember", "product": "issuer:StreamingMember"}
+    current = {"axis_members": disclosed, "canonical_scope": [CIK, "revenue", "different-epoch"],
+               "cells": [_gap("Q4_INPUTS_OR_MAPPING_NOT_PREPARED")]}
+    view = {"periods": [{"fiscal_year": 2025, "fiscal_quarter": 4}], "groups": {"geography": [current]},
+            "availability": {"geography": [{"gap_counts": {"Q4_INPUTS_OR_MAPPING_NOT_PREPARED": 1}}]}}
+    annual = {"groups": {"geography": [{"axis_members": disclosed, "canonical_scope": canonical}]}}
+    exclusions = [{"cik": CIK, "company_canonical_concept_id": "revenue", "canonical_dimension_signature": dims,
+                   "fiscal_year": 2025, "reason": "Q4_MAPPING_REVIEW_REQUIRED", "source_fact_ids": ["annual-source"]}]
+    _refine_q4_gap_evidence(view, annual, exclusions)
+    assert current["cells"][0]["value"] is None
+    assert current["cells"][0]["reason"] == "Q4_MAPPING_REVIEW_REQUIRED"
+    assert current["canonical_scope"][-1] == "different-epoch"

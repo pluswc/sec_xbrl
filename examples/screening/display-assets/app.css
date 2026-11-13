@@ -620,3 +620,11 @@ g.board-item-active .board-line { stroke-width: 4; }
 }
 @media (max-width:760px) { .explorer-v2 .criteria .view-settings > div { grid-template-columns: minmax(0,1fr); padding-inline: 0; } }
 .explorer-v2 .criteria .screening-period-fields > #screen-batch-status { order: 1; flex: 1 0 100%; margin: 4px 0 0; font-size: 12px; line-height: 1.5; }
+
+.profile-revenue-breakdowns .missing[tabindex]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* Keep the two filing links readable without repeating shared arithmetic notes. */
+.explorer-v2 #revenue-breakdown-table:has(td[data-revenue-derived]) table { width: 850px; min-width: 850px; max-width: 850px; }
+.explorer-v2 #revenue-breakdown-table:has(td[data-revenue-derived]) thead th:last-child { width: 180px; }
+.profile-revenue-breakdowns [data-revenue-derived] > .revenue-source-kind,
+.profile-revenue-breakdowns [data-revenue-derived] > a { display: block; white-space: nowrap; }

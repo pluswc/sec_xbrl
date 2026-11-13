@@ -1,5 +1,15 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-12 [매출 범위·누락 사유와 보수적 Q4](../implementation/revenue-completeness-20261112.md)는
+소스 `3c80c529be646fddfbbdf9137cc19db1513a4514`의 독립 확인·리드 로컬 인수 후
+18765(PID44272)에 운영 반영했다. 기존 PR89/main e64 workbench와 backend19070,
+catalog6개/기존50사 및 journal10테이블·22행/bytes를 유지했다. 원래 4,702개 값·
+계보·비율/계층은 그대로이고 762 reported scoped 셀과224 derived Q4 셀(각30사)을
+추가했다. 최종 GET-only/실제 화면·768px검증 PASS다. 상태는
+INDEPENDENTLY_VERIFIED / LOCALLY_ACCEPTED / LIVE이며 운영 인수 당시 main은
+**NOT_MERGED**(e64e1182)다. 이후 원격/main 상태는 Git·PR로 확인한다. 아래 PR89의
+과거 미병합 문구는 당시 snapshot이며 PR89 자체는 main e64에 병합됐다.
+
 2026-11-12 [스크리닝 근접 워크시트](../implementation/screening-workbench-20261112.md)는
 정확한 조건 편집의 제한된 폭과 의미 그룹, 최신 결과의 실제 기간 열 분류 및
 근접 결과 표를 다룬다. 구현 `8f1e466ffe`는 독립 Node 93개·Ruff·diff와
