@@ -1,5 +1,17 @@
 # Nasdaq92 운영 패치의 main 통합
 
+## 동시 main 반영에 따른 PR94 범위 정정 (2026-11-14)
+
+PR93이 원격 main `3cfe1b79fcdfe62c03cd432e509bcb4f361dfbce`에 병합되어
+운영 consumer15파일 및 별도 producer/collection/native/operator 변경이 먼저
+포함됐다. 이 branch는 origin/main을 일반 merge하고 모든 새 제품·테스트를
+보존했다. Nasdaq 운영 계약은 main 버전을 그대로 유지하고 계획 등록부의
+양측 기록을 함께 보존했다. 따라서 현재 PR94의 main 대비 차이는 이 통합의
+독립 검증·실자료/History 보존·기존 실패 한계를 기록하는 문서뿐이다.
+아래 원격 CI 성공/로컬 인수는 merge 전 대상의 기록이며, 최신 merge head의
+독립 검토·PR94 최신 head checks는 별도 확인한다. 새 계산·자료 발행·운영
+전환이나 producer 삭제는 하지 않았다.
+
 2026-11-14 원격 전달: 리드가 head `809735272f`를 push하여
 [PR #94](https://github.com/pluswc/sec_xbrl/pull/94)를 열었다. PR은 OPEN·main 미병합이며
 기록 시점 CI는 대기/진행 중이다([run 43453379537](https://github.com/pluswc/sec_xbrl/actions/runs/43453379537)).

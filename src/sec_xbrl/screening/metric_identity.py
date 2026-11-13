@@ -231,7 +231,9 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
         if prospective is None:
             raise ValueError("identity storage proof belongs to an unrelated collection")
         status_storage = None
-    status = read_universe_status(manifest_path=collection_path, validation_mode="financial_sources", storage_reuse=status_storage, _verified_storage_reuse=storage if status_storage else None)
+    from sec_xbrl.financial_native_source import native_assessed_ciks
+    status = read_universe_status(manifest_path=collection_path, validation_mode="financial_sources", storage_reuse=status_storage, _verified_storage_reuse=storage if status_storage else None,
+                                 assessed_ciks=native_assessed_ciks(collection_manifest=collection_path, scope_companies=config["companies"]))
     expected = tuple((row["ticker"], row["cik"]) for row in config["companies"])
     actual = tuple(
         sorted(((row.ticker, row.cik) for row in status.companies), key=lambda item: item[1])

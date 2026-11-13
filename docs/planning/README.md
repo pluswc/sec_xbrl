@@ -1,5 +1,12 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 동시 main 통합: [PR93](https://github.com/pluswc/sec_xbrl/pull/93)이
+main `3cfe1b79fcdfe62c03cd432e509bcb4f361dfbce`에 병합되어 운영 consumer와
+추가 producer/operator 코드가 이미 포함됐다. PR94 branch는 최신 main을 일반
+merge하여 이를 그대로 보존하며, main 대비 변경은 별도 독립 검증·운영 보존·
+기존 History 한계의 문서 근거로 축소한다. 아래 이전 통합/미병합/CI 상태는
+각 전달 당시 기록이다. 이번 merge의 별도 검토와 PR94 최신 CI는 후속 확인한다.
+
 2026-11-14 원격 전달: 리드가 head `809735272f`를 push하여
 [PR #94](https://github.com/pluswc/sec_xbrl/pull/94)를 열었다. PR은 OPEN·main 미병합이며
 기록 시점 CI는 대기/진행 중이다([run 43453379537](https://github.com/pluswc/sec_xbrl/actions/runs/43453379537)).
@@ -17,6 +24,22 @@ PASS 후 리드 LOCALLY_ACCEPTED·push/PR GO다. 전체 pytest는2983통과/38sk
 이 PR 통합 검증과 별개다. Phase2 PR92는 main `cdb8f64`에 병합됐다.
 [CI 43449405710](https://github.com/pluswc/sec_xbrl/actions/runs/43449405710)도 통과했다.
 아래 PR92 OPEN/미병합 문구는 전달 당시 기록이다.
+
+2026-11-14 main 전달 후보: 92개사 운영 소스에 main `cdb8f64b83`와 실제 사용한
+401 상류 operator·6064 native 경계를 일반 merge했다. 원래 수락 소스 이력과
+실제 UI bytes를 보존하고, 새 operator의 분기 FY 범위만 명시적으로 정정했다.
+현재 main inventory의 native 승인 범위는 넓히지 않는다. 통합 검토·PR/CI·병합은
+별도이며 실제 runtime/data는 유지한다. [통합 범위](../implementation/nasdaq74-operating-20261113.md).
+
+2026-11-14(KST) [Nasdaq 지원 기업 운영 연결](../implementation/nasdaq74-operating-20261113.md)은
+기존50+신규42의 **92개사로 로컬 인수·운영 적용**했다. UI `e0c72852f0`는 동시
+적용된 Phase2를 보존하고 backend `0634eb50fa`와 함께 18765(PID48788)→19072로
+연결했다. 재무 기준일2026-10-25, 실제 준비 확인2026-11-13T14:49:22.469771Z다.
+39개 분기 범위 정정·3개 재사용과 연간72개 파일 동일성, 독립 검증·private 저장/
+재열기/CSV 및 실제 조회를 확인했다. WDC의 발행 범위 밖 최신 분기/TTM은 명시적
+미준비이며 고정 분기는 유지한다. 기존 여섯 catalog·개인 기록·rollback19070을
+보존했다. 나머지23개 대상은 미포함/보류이며 전체115 완료가 아니다. 이 확장의
+main 병합은 **NOT_MERGED**다. 아래 후보·이전 보류 문구는 당시 기록이다.
 
 2026-11-13 2차 원격 전달: 사용자 승인 후 head `5b814b944d`의 별도 독립
 Node 116/Ruff/diff PASS·인수 코드 동일성과 origin/main `0a89d5cf` 추가 변경 없음이
@@ -72,6 +95,11 @@ catalog6개/기존50사 및 journal10테이블·22행/bytes를 유지했다. 원
 INDEPENDENTLY_VERIFIED / LOCALLY_ACCEPTED / LIVE이며 운영 인수 당시 main은
 **NOT_MERGED**(e64e1182)다. 이후 원격/main 상태는 Git·PR로 확인한다. 아래 PR89의
 과거 미병합 문구는 당시 snapshot이며 PR89 자체는 main e64에 병합됐다.
+
+2026-11-13 [Nasdaq native 연속성 자료 통합](../implementation/nasdaq100-native-continuity-20261112.md)은
+정확한 401 부모·보고서와 새 소스를 묶는 명시적 전이 및 선택 회사군 status 후보다.
+신규 20개 포함 focused 26 PASS·Ruff 통과, 독립 검증·리드 수락은 대기다.
+실자료 통합 재개·115개사 union·운영 완료를 뜻하지 않으며 기존 source/data/기록은 보존한다.
 
 2026-11-12 [스크리닝 근접 워크시트](../implementation/screening-workbench-20261112.md)는
 정확한 조건 편집의 제한된 폭과 의미 그룹, 최신 결과의 실제 기간 열 분류 및
@@ -131,6 +159,10 @@ push·PR·CI·main 병합은 미수행이다.
 선택 지표의 준비된 전년비/%p 비교를 기록한다. 구현 `6b70244d70`과 실제
 50개 회사·73개 정의 artifact는 독립 검증 및 리드 로컬 인수를 통과했고
 18765에 적용했다. 원격 push·PR·CI·main 병합은 미수행이다.
+
+2026-11-11 [Nasdaq100 후보 확장 계약](../implementation/nasdaq100-expansion-20261111.md)은
+관찰 목록과 SEC 공시 지원 확인, 기존 자료 재사용 및 자원 한도가 있는
+순차 준비를 정의한다. 실제 지원·보류, 발행과 운영 인수는 별도로 기록한다.
 
 2026-11-10 [저장 공간 정리 인수 기록](../implementation/storage-retention-cleanup-20261110.md)은
 승인된 MRK 감사 DB와 압축 해제 디렉터리 1,109개의 정리 완료, 보존·복원

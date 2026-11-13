@@ -1272,6 +1272,7 @@ def _company_status(
     plan: dict[str, Any] | None,
     validation_mode: str = "routine",
     storage_reuse: Any = None,
+    assessed: bool = True,
 ) -> CompanyStatus:
     ticker = company["ticker"]
     company_root = run_root / "companies" / ticker
@@ -1289,7 +1290,7 @@ def _company_status(
     build_path = company_root / "build_manifest.json"
     build: dict[str, Any] | None = None
     build_attestation_error: str | None = None
-    if build_path.exists() and plan is not None:
+    if assessed and build_path.exists() and plan is not None:
         try:
             if not build_path.is_file() or build_path.is_symlink():
                 raise ValueError("build attestation is unsafe")
@@ -1337,6 +1338,8 @@ def _company_status(
         state, action, error = "RAW_PARTIAL", "COLLECT", None
     else:
         state, action, error = "PREPARED", "COLLECT", None
+    if not assessed:
+        state, action = "NOT_ASSESSED_OUTSIDE_SCOPE", "NONE"
     if succeeded and succeeded == reused:
         source_stage = "REUSED"
     elif succeeded:
@@ -1371,7 +1374,7 @@ def _company_status(
 
 def read_universe_status(
     *, manifest_path: Path, validation_mode: str = "routine", storage_reuse: dict | None = None,
-    _verified_storage_reuse: Any = None,
+    _verified_storage_reuse: Any = None, assessed_ciks: tuple[str, ...] | None = None,
 ) -> UniverseStatus:
     """Read deterministic status without discovery, SEC, parser, or selection work."""
     if validation_mode not in {"routine", "financial_sources"}:
@@ -1379,6 +1382,16 @@ def read_universe_status(
     if _verified_storage_reuse is not None and storage_reuse is None:
         raise ValueError("verified storage proof requires an explicit financial declaration")
     attested = _attest_run(manifest_path)
+    if assessed_ciks is not None:
+        known = {row.get("cik") for row in attested.manifest["companies"]}
+        if (not isinstance(assessed_ciks, tuple) or not assessed_ciks
+                or len(set(assessed_ciks)) != len(assessed_ciks)
+                or any(type(cik) is not str or re.fullmatch(r"[0-9]{10}", cik) is None for cik in assessed_ciks)
+                or not set(assessed_ciks) <= known):
+            raise ValueError("assessed CIK subset must be explicit, unique and within the collection")
+    from sec_xbrl.financial_native_source import require_native_assessment
+    require_native_assessment(assessed_ciks, collection_manifest=manifest_path,
+                              validation_mode=validation_mode, storage_reuse=storage_reuse)
     proof = None
     if storage_reuse is not None:
         if validation_mode != "financial_sources":
@@ -1396,6 +1409,7 @@ def read_universe_status(
             run_root=manifest_path.parent,
             plan=attested.plans.get(company["ticker"]),
             validation_mode=validation_mode, storage_reuse=proof,
+            assessed=assessed_ciks is None or company.get("cik") in assessed_ciks,
         )
         for company in attested.manifest["companies"]
     )
