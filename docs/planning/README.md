@@ -1,9 +1,13 @@
 # 계획 등록부 — 단일 진입점
 
-2026-11-14 [매출 성장률·최신 실제 분기 교정](../implementation/governed-latest-revenue-delta-20261114.md)은
-기존92 projection을 공유하는 별도 governed delta 구현 승인 단계다. 같은 공시의
-정확한 전년 비교/typed primary 근거와 최신 실제 분기만 다루며 옛 정의·발행물·
-호환 게이트·기록은 보존한다. 실제 발행·운영은 독립 검증 후 별도 수락한다.
+2026-11-14(KST) [매출 성장률·최신 실제 분기 교정](../implementation/governed-latest-revenue-delta-20261114.md)은
+**독립 검증·로컬 인수·LIVE 완료, main 미병합**이다. Backend `fdacea1ea0`와
+UI bridge `74e25fa3d5`를 분리해 기존92 projection/기록을 보존했다. GOOGL FY2025
+성장률15.1%와 WDC 실제2026 Q4 최신 분기/TTM을 제공하며 FY2022는 차원 차이로
+보류한다. 18765(PID47380)→19074(PID1378071), 재무 기준일2026-10-25,
+준비 확인2026-11-13T16:44:03.333134Z다. 남은23 중8개 financial 준비17실행은
+완료했지만 native qualification과 다른15개 보류를 해결한 것은 아니다.
+아래 이전 확장/후보 상태는 당시 기록이며, 이전92 main 병합은 PR #93에 해당한다.
 
 2026-11-14 main 전달 후보: 92개사 운영 소스에 main `cdb8f64b83`와 실제 사용한
 401 상류 operator·6064 native 경계를 일반 merge했다. 원래 수락 소스 이력과

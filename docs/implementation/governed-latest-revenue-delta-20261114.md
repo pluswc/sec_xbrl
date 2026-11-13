@@ -25,9 +25,14 @@ Producer가 계산/증거를 확정해 불변 artifact를 만들고 reader는 ro
 
 ## 전달 상태
 
-격리 branch `codex/governed-latest-revenue-delta`, 기준 main `3cfe1b79fc`에서 구현 중이다.
-합성 focused 검사·소스 동결·독립 검증 뒤 리드가 실제 후보 발행/운영을 수행한다.
-기존 회사 감사·Raw/History 재생성·network·개인 journal 쓰기·운영 전환은 수행하지 않는다.
+2026-11-14(KST) **LIVE · main 미병합**. 기준 main은 `3cfe1b79fc`이며,
+아래 최초 제안·실행 경계는 당시 기록이다. 구현·독립 검증·로컬 인수·운영 적용은
+완료했지만 이번 교정의 main 병합은 별도다. 이전92 확장은 PR #93에서 병합됐다.
+
+실행 소스는 backend `fdacea1ea0f9f1fbce2633e918a1512ef697f25b`의 별도 불변
+checkout과 UI bridge `74e25fa3d582d4ada008e71c6e31874cd569183b`로 분리했다.
+선택 Raw fact와 전체 계보 결속, 연간 표준 단일 반올림 계산, 부모92 보조자료
+조회 보존을 focused 검사와 독립 검증으로 확인했다. 이 인수 기록 커밋은 문서만 변경한다.
 
 ## 병행하는 보류 대상의 실행 경계
 
@@ -80,3 +85,33 @@ proof metadata를 사용하며 UI 재계산·기존 보조자료 fallback은 하
 실행을 완료했다. 근거는 `work/nasdaq100-expansion-20261114/remaining23/` 아래
 `completed-first-financial-output-inventory.json`, `financial-followup2-full-v2-summary.json`이다.
 native882/B20ec qualification은 제안 단계이며 운영92를 확대한 것은 아니다.
+
+
+## 2026-11-14 운영 인수
+
+승인된 발행물은 `data/processed/governed_deltas_20261114/revenue_latest_v2`,
+publication `screening-governed-delta-85b2c4b4c98a9585fc2bd26e`, manifest SHA256
+`e09ca31727286a17fb22b63dcdcb32bfaf2c001d6fe7ddad2979d639f0095352`다.
+재무 기준일은 2026-10-25, 실제 조회 준비 확인은
+`2026-11-13T16:44:03.333134+00:00`(2026-11-14 01:44:03.333134 KST)다.
+
+지원 설정은 FY2022를 제외했다. GOOGL FY2025 매출 성장률은
+`15.09008108154437771771737453502391`이며 실제 화면은 15.1%다.
+FY2022의 무차원 주석 fact와 주요 손익계산서의
+`IncomeStatementLocationAxis=SalesMember`는 동등하다고 가정하지 않아 보류했다.
+WDC FY2027 Q1의 실제 보고 종료일2026-10-02(달력2026 Q4) 매출은
+4,381,000,000 USD, TTM 매출은 14,482,000,000 USD다. 기존 고정8분기는 보존했다.
+
+Private 복제본 API·새 분기 조건/결과 저장·재열기·CSV와 실제 Chrome 성장률 board,
+WDC/MSFT 최신 차트2026 Q4, 원래92 보조자료 범위/동일 payload가 PASS했다.
+JS 오류가 없었으며 실제 journal은 쓰지 않았다. 현재 18765(Node PID47380)는
+19074(backend PID1378071)로 연결된다. History API hash와 옛50 GOOGL profile
+bytes가 같고 journal SHA256은
+`3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`로 보존됐다.
+Rollback backend19070/19072는 유지했다.
+
+남은23개 중 partial7+ISRG의 첫5단계 financial 준비는 신규 실행17개,
+96.535초·최대572 MiB로 완료했다. native882/B20ec qualification은 여전히 보류다.
+나머지15개에는 원래 DEI와 표지 FY가 달라 Raw를 충실히 보존한 CRWD 및 의존하는
+9개 peer, APP/TER·AEP·PLTR/RKLB의 기존 경계가 포함된다. 이번 인수에서 native/
+source validator·Raw/History를 변경하거나 완료 감사를 반복하지 않았다.
