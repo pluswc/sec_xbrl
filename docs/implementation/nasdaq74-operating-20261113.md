@@ -108,3 +108,27 @@ projection을 발행한다. 기존 연간 분석·Raw·History·완료 감사/qu
 `quarter-coverage-readonly-20261113.json`,
 `operating92-77ead1e1f9/private-uat-acceptance.json`,
 `operating-source-root-acceptance.json`, `operator-latest-checkpoint.json`이다.
+
+## 2026-11-13 분기 범위 정정 승인
+
+사용자는 기존 API의 명시적 FY 범위로39개사 분기 분석을 새로 준비하고 관련
+identity·연간 metric 재결속·분기/native/projection을 새로 발행하는 안을 승인했다.
+Raw·History·quality·연간 분석과 ADP/LITE/PANW 분기 분석은 재사용한다. 연간 수치와
+원본 출처 동일성을 확인하고,39개사의 최신 분기 coverage 통과 후 새 발행물의 실제
+조회 성공 시각을 등록한다. 기존 후보·실패 기록·journal은 보존한다.
+
+`tools/nasdaq100_quarter_window.py`는 pin된 단일 회사 입력의 AVAILABLE QTD
+header에서 최근5개 FY 범위를 확인하고 동결401의 공개 `prepare_analysis`에 명시적
+범위를 전달하는 worker다. 기존 분기 기본 profile·공시 근거 옵션은 유지한다.
+자원 제한·heavy lock·재개·진행 표시는 기존 운영 driver를 재사용한다. 도구 동결과
+독립 검증·리드 GO 이전에는 실제39개사 실행을 시작하지 않는다. 운영 연결은
+후속 coverage/연간 동일성/private 검증 및 리드 GO를 별도로 요구한다.
+
+도구 CLI는 `python /ABS/operating-source/tools/nasdaq100_quarter_window.py --plan
+/ABS/plan.json --plan-sha256 SHA --ticker TICKER --result /ABS/new-result.json`이다.
+실행 환경의 `PYTHONPATH`는 동결401의 `src`와 root를 사용한다. 계획은
+`nasdaq100-quarter-window-v1` 및 정확한401 commit/source root, 회사별 History·연간·
+분기 manifest pin, 새 destination과 명시적 FY bounds를 담는다. worker는 기존
+출력에 덮어쓰지 않으므로 재개 여부는 기존 driver의 완료 receipt 검증으로 결정한다.
+합성 focused3개(현재 FY 선택·pin 변조·공개 API 인자/중복 실행 거부), 해당 Ruff·diff
+검사를 통과했다. 실제39개사 준비와 독립 검증은 아직 수행하지 않았다.
