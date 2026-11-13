@@ -80,3 +80,31 @@ Focused 검사는 Python 6개(단위/union/service/Node wrapper), Node owner 4�
 검사만 한다. 기존 backend19070과 되돌릴 catalog·assets를 유지한 채 별도 포트에서
 검증한 뒤 리드 GO로 전환한다. 실제 배치 등록은 서비스 조회 성공을 확인한 현재
 시각에 수행하며 기존 등록 이력은 보존한다. 실제 운영 수락은 별도 후속 기록이다.
+
+## 2026-11-13 private 후보 수락과 운영 보류
+
+소스 `77ead1e1f9`는 독립 검증·리드 수락을 통과했다. 2026-10-25 기준 92개사
+union 후보와 private19071/preview18881에서 기존 여섯 catalog·보조자료 보존,
+조회 및 복제 journal의 저장·재열기·CSV·기존 휴지통 복원을 확인했다. 실제 journal은
+불변이다. 이는 private 수락이며 운영92 수락이 아니다. 기존 운영 frontend27800·
+backend19070은 유지하고19072 시작과18765 전환은 보류했다.
+
+읽기 전용 조사에서 신규42개사 중39개사의 분기 분석이 현재 FY 중간 분기를
+제외했음을 확인했다(ADP/LITE/PANW는 재사용 가능). 기본 `fiscal_years=5`가
+완료 연간 FY로 범위를 추론한 결과다. ABNB의 수집 계획에는 2026Q1/Q2 공시가
+있지만 분석은 2025Q4까지다. 여기서 `NO_FILING_AS_OF_CUTOFF`는 Raw 공시 부재를
+뜻하지 않는다.
+
+**제안·미구현**: 기존 공개 API의 명시적 분기 FY 범위로39개사 새 분기 분석과
+이에 결속된 identity·연간 metric 부모 재결속·분기 metrics·native combined·
+projection을 발행한다. 기존 연간 분석·Raw·History·완료 감사/quality는 재실행하지
+않고 연간 수치 동일성을 확인한다. 일부 과거 분기 materialization은 겹친다.
+반복을 없애는 별도 incremental carry 계약은 더 큰 대안이다. 사용자 답변 대기 중이며
+수정·재생성·운영 전환은 시작하지 않았다. private 후보는 종료하고 등록을
+`CANDIDATE_ONLY_NOT_ACTIVE`로 취급한다. 수정 발행물은 향후 성공 확인 시각을
+새로 등록해야 하며 이번 후보의13:16 UTC 관측 시각을 재사용하지 않는다.
+
+근거는 `work/nasdaq100-expansion-20261111/` 아래
+`quarter-coverage-readonly-20261113.json`,
+`operating92-77ead1e1f9/private-uat-acceptance.json`,
+`operating-source-root-acceptance.json`, `operator-latest-checkpoint.json`이다.
