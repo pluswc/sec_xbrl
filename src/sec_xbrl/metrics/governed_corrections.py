@@ -85,7 +85,8 @@ def prepare_revenue_bridge(*, current: dict, prior: dict, original: dict, raw: d
     document = read_primary_document(entry=entry, filing=filing, package_root=package_root)
     prepared = prepare_filing(snapshot=snapshot, document=document, as_of=financial_as_of)
     result = _bridge_from_prepared(current=current, prior=prior, original=original,
-                                   prepared=prepared, financial_as_of=financial_as_of)
+                                   prepared=prepared, financial_as_of=financial_as_of,
+                                   source_snapshot_id=snapshot.input.snapshot_id)
     result["continuity_proof"]["raw"] = copy.deepcopy(raw)
     result["continuity_proof"]["snapshot_id"] = snapshot.input.snapshot_id
     result["trace"] = {"rule_version": BRIDGE_RULE, "continuity_proof": copy.deepcopy(result["continuity_proof"])}
@@ -94,7 +95,7 @@ def prepare_revenue_bridge(*, current: dict, prior: dict, original: dict, raw: d
 
 
 def _bridge_from_prepared(*, current: dict, prior: dict, original: dict,
-                          prepared: dict, financial_as_of: str) -> dict:
+                          prepared: dict, financial_as_of: str, source_snapshot_id: str) -> dict:
     """A changed QName is admitted only through the current filing's exact comparative."""
     filing, = prepared["filings"]
     cutoff = date.fromisoformat(financial_as_of)
@@ -136,8 +137,27 @@ def _bridge_from_prepared(*, current: dict, prior: dict, original: dict,
     current_evidence = _primary_revenue(prepared, filing, current, current["raw_concept_qname"])
     prior_evidence = _primary_revenue(prepared, filing, prior, current["raw_concept_qname"])
     current_ids = {identity for item in current_evidence for identity in item["equivalent_fact_ids"]}
-    if not set(current["source_fact_ids"]) <= current_ids:
+    fact_ids = current.get("source_fact_ids")
+    if (not isinstance(fact_ids, list) or not fact_ids
+            or any(not isinstance(identity, str) or not identity for identity in fact_ids)
+            or len(set(fact_ids)) != len(fact_ids) or not set(fact_ids) <= current_ids):
         raise ValueError("revenue bridge current fact is not the exact typed primary occurrence")
+    lineage = (current.get("trace") or {}).get("value_lineage") or {}
+    selected_id = lineage.get("selected_source_fact_id")
+    selected = [fact for fact in prepared["statement_facts"] if fact["fact_id"] == selected_id]
+    if not isinstance(source_snapshot_id, str) or not source_snapshot_id or selected_id not in fact_ids or len(selected) != 1:
+        raise ValueError("revenue bridge selected Raw fact identity is missing or ambiguous")
+    fact = selected[0]
+    expected_lineage = {
+        "selected_source_fact_id": fact["fact_id"], "raw_concept_id": fact["raw_concept_id"],
+        "raw_concept_namespace_uri": fact["concept"]["namespace_uri"],
+        "raw_concept_qname": fact["concept"]["qname"], "context_id": fact["context_id"],
+        "source_snapshot_id": source_snapshot_id, "accession": filing["accession"],
+        "source_filing_id": filing["filing_id"],
+    }
+    if any(not isinstance(lineage.get(key), str) or not lineage[key] or lineage[key] != value
+           for key, value in expected_lineage.items()):
+        raise ValueError("revenue bridge selected Raw lineage differs from the pinned occurrence")
     concept_ids = {item["raw_concept_id"] for item in (*current_evidence, *prior_evidence)}
     if len(concept_ids) != 1:
         raise ValueError("revenue bridge comparative concept differs")

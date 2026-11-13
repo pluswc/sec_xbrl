@@ -31,6 +31,11 @@ def bridge_case():
         "financial_as_of": "2026-10-25", "fiscal_year": 2025, "period_start": "2025-01-01", "period_end": "2026-01-01",
         "value": "402836000000", "source_fact_ids": ["current"],
         "trace": {"value_lineage": {"filed_date": "2026-02-05"}}}
+    current["trace"]["value_lineage"].update(
+        selected_source_fact_id=fact["fact_id"], raw_concept_id=fact["raw_concept_id"],
+        raw_concept_namespace_uri=fact["concept"]["namespace_uri"], raw_concept_qname=fact["concept"]["qname"],
+        context_id=fact["context_id"], source_snapshot_id="raw-snapshot", accession=filing["accession"],
+        source_filing_id=filing["filing_id"])
     prior = {**deepcopy(current), "metric_observation_id": "original-prior", "raw_concept_qname": LEGACY_REVENUE,
         "fiscal_year": 2024, "period_start": "2024-01-01", "period_end": "2025-01-01", "value": "350018000000",
         "source_filings": ["original-prior-filing"], "source_fact_ids": ["original-prior-fact"],
@@ -39,7 +44,7 @@ def bridge_case():
         "metric_definition_version": "old-yoy", "metric_observation_id": "old-growth", "availability_status": "UNAVAILABLE",
         "diagnostic_reasons": ["SEMANTIC_IDENTITY_MISMATCH"], "source_fact_ids": ["current", "original-prior-fact"],
         "input_observation_ids": [current["metric_observation_id"], prior["metric_observation_id"]], "value": None}
-    return {"current": current, "prior": prior, "original": original, "prepared": prepared, "financial_as_of": "2026-10-25"}
+    return {"current": current, "prior": prior, "original": original, "prepared": prepared, "financial_as_of": "2026-10-25", "source_snapshot_id": "raw-snapshot"}
 
 
 def test_same_filing_primary_bridge_keeps_original_identities_and_exact_arithmetic():
@@ -144,3 +149,32 @@ def test_public_imports_work_in_fresh_process(module, name):
     root = Path(__file__).parents[2]
     env = {**os.environ, "PYTHONPATH": str(root / "src") + os.pathsep + str(root)}
     subprocess.run([sys.executable, "-c", f"from {module} import {name}"], env=env, cwd=root, check=True)
+
+
+@pytest.mark.parametrize("field", ["selected_source_fact_id", "raw_concept_id", "raw_concept_namespace_uri",
+                                   "raw_concept_qname", "context_id", "source_snapshot_id", "accession", "source_filing_id"])
+@pytest.mark.parametrize("defect", ["missing", "foreign"])
+def test_bridge_rejects_unbound_selected_raw_lineage(field, defect):
+    case = bridge_case()
+    lineage = case["current"]["trace"]["value_lineage"]
+    if defect == "missing":
+        del lineage[field]
+    else:
+        lineage[field] = "foreign"
+    with pytest.raises(ValueError, match="Raw"):
+        _bridge_from_prepared(**case)
+
+
+@pytest.mark.parametrize("identities", [[], ["current", "current"], [None], [""], "current"])
+def test_bridge_requires_nonempty_unique_string_fact_ids(identities):
+    case = bridge_case()
+    case["current"]["source_fact_ids"] = identities
+    with pytest.raises(ValueError, match="current fact"):
+        _bridge_from_prepared(**case)
+
+
+def test_bridge_rejects_raw_snapshot_different_from_pinned_input():
+    case = bridge_case()
+    case["source_snapshot_id"] = "another-pinned-snapshot"
+    with pytest.raises(ValueError, match="pinned occurrence"):
+        _bridge_from_prepared(**case)
