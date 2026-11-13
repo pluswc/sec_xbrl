@@ -80,6 +80,20 @@ test("governed delta preserves exact parent ownership and rejects relabelled own
   const served=growth(f.bundle,owner,{dataset_id:"delta",dataset_publication_id:"delta-publication",financial_as_of:source.financial_as_of,cik});
   assert.equal(served.status,200);assert.deepEqual(served.body.data,f.data);
   assert.equal(served.body.owner_proof.union_manifest_sha256,digest);
+  const parentRequest={dataset_id:f.manifest.dataset_id,dataset_publication_id:f.manifest.publication_id,
+    financial_as_of:source.financial_as_of,cik};
+  const parentServed=growth(f.bundle,owner,parentRequest);
+  assert.equal(parentServed.status,200);assert.deepEqual(parentServed.body.data,f.data);
+  assert.deepEqual(parentServed.body.request_scope,{...parentRequest,dataset_manifest_sha256:f.digest});
+  assert.equal(parentServed.body.owner_proof.union_manifest_sha256,f.digest);
+  assert.deepEqual(parentServed.body.source_scope,source);
+  const contexts=growth(f.bundle,owner).body.owner_contexts;
+  assert.equal(contexts.length,2);
+  assert.equal(contexts[0].request_scope.dataset_manifest_sha256,digest);
+  assert.equal(contexts[1].request_scope.dataset_manifest_sha256,f.digest);
+  assert.deepEqual(contexts[1].available_ciks,[cik]);
+  assert.equal(growth(f.bundle,owner,{...parentRequest,dataset_publication_id:"unknown"}).status,409);
+  assert.equal(growth(f.bundle,owner,{...parentRequest,cik:newCik}).status,409);
   const bad=structuredClone(manifest);bad.auxiliary_owners[cik].dataset_publication_id="wrong";
   assert.throws(()=>bridge.loadAuxiliaryUnion(file,write(bad),{path:f.file,sha256:f.digest}),/ownership/);
   const tampered=structuredClone(manifest);tampered.parent.sha256="0".repeat(64);

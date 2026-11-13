@@ -358,6 +358,7 @@ function loadAuxiliaryUnion(file, digest, hostParent = null) {
     financial_as_of:manifest.financial_as_of, dataset_manifest_sha256:digest};
   const owners = manifest.auxiliary_owners;
   const delta = manifest.schema_version === "screening-governed-delta-v1";
+  const scopes = [scope];
   if (delta) {
     if (!hostParent || hostParent.sha256 !== manifest.parent?.sha256) {
       throw new Error("governed delta requires an explicit byte-identical host parent pin");
@@ -369,6 +370,10 @@ function loadAuxiliaryUnion(file, digest, hostParent = null) {
         JSON.stringify(parent.auxiliary_owners) !== JSON.stringify(owners)) {
       throw new Error("governed delta auxiliary ownership differs from exact parent");
     }
+    const parentScope = {dataset_id:parent.dataset_id, dataset_publication_id:parent.publication_id,
+      financial_as_of:parent.financial_as_of, dataset_manifest_sha256:hostParent.sha256};
+    if (!validScope(parentScope)) throw new Error("invalid auxiliary parent scope");
+    scopes.push(parentScope);
   }
   if (!delta && hostParent) throw new Error("host parent pin is only valid for a governed delta");
   if ((!delta && (manifest.schema_version !== "screening-cohort-union-v1" || manifest.config?.expose_auxiliary_owners !== true)) ||
@@ -379,7 +384,7 @@ function loadAuxiliaryUnion(file, digest, hostParent = null) {
       Object.entries(owners).some(([cik, owner]) => !/^\d{10}$/u.test(cik) || !validScope(owner) || owner.financial_as_of !== scope.financial_as_of)) {
     throw new Error("invalid explicit auxiliary union owner scope");
   }
-  return {scope, owners:new Map(Object.entries(owners))};
+  return {scope, ...(delta ? {scopes} : {}), owners:new Map(Object.entries(owners))};
 }
 function sameAssetScope(left, right) {
   return ["dataset_id","dataset_publication_id","financial_as_of","dataset_manifest_sha256"].every(key => left?.[key] === right?.[key]);
@@ -390,8 +395,8 @@ function serveRevenueBreakdowns(bundle, request, response, auxiliary = null) {
 }
 function serveFinancialGrowth(bundle, request, response, auxiliary = null) {
   if (request.method === "GET" && request.url === "/api/financial-growth") {
-    const contexts = auxiliary && bundle ? [{request_scope:auxiliary.scope, source_scope:bundle.scope,
-      available_ciks:[...auxiliary.owners].filter(([cik, owner]) => sameAssetScope(owner, bundle.scope) && bundle.byCik.has(cik)).map(([cik]) => cik)}] : [];
+    const contexts = auxiliary && bundle ? (auxiliary.scopes || [auxiliary.scope]).map(request_scope => ({request_scope, source_scope:bundle.scope,
+      available_ciks:[...auxiliary.owners].filter(([cik, owner]) => sameAssetScope(owner, bundle.scope) && bundle.byCik.has(cik)).map(([cik]) => cik)})) : [];
     writeJson(response, 200, { configured: Boolean(bundle), ...bundle?.scope,
       ...(auxiliary ? {owner_contexts:contexts} : {}) });
     return;
@@ -415,10 +420,12 @@ function serveProfileAsset(bundle, request, response, label, auxiliary = null) {
     return;
   }
   let delegated = false;
+  let requestScope = null;
   if (keys.slice(0, 3).some(key => query.get(key) !== bundle.scope[key])) {
     const owner = auxiliary?.owners.get(query.get("cik"));
-    if (!auxiliary || keys.slice(0, 3).some(key => query.get(key) !== auxiliary.scope[key]) ||
-        !sameAssetScope(owner, bundle.scope)) {
+    requestScope = (auxiliary?.scopes || [auxiliary?.scope]).find(scope =>
+      scope && keys.slice(0, 3).every(key => query.get(key) === scope[key]));
+    if (!requestScope || !sameAssetScope(owner, bundle.scope)) {
       writeJson(response, 409, { error: `선택한 기업 발행물에는 ${label} 자료가 준비되지 않았습니다.` });
       return;
     }
@@ -431,8 +438,8 @@ function serveProfileAsset(bundle, request, response, label, auxiliary = null) {
   }
   if (delegated) {
     body = Buffer.from(JSON.stringify({schema_version:"screening-auxiliary-owner-response-v1",
-      request_scope:{...auxiliary.scope,cik:query.get("cik")}, source_scope:auxiliary.owners.get(query.get("cik")),
-      owner_proof:{cik:query.get("cik"),union_manifest_sha256:auxiliary.scope.dataset_manifest_sha256,
+      request_scope:{...requestScope,cik:query.get("cik")}, source_scope:auxiliary.owners.get(query.get("cik")),
+      owner_proof:{cik:query.get("cik"),union_manifest_sha256:requestScope.dataset_manifest_sha256,
         source_manifest_sha256:bundle.scope.dataset_manifest_sha256}, data:JSON.parse(body.toString("utf8"))}));
   }
   response.writeHead(200, {
