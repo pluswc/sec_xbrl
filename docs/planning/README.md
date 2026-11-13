@@ -2,7 +2,10 @@
 
 2026-11-14 [Nasdaq92 운영 패치 통합](../implementation/nasdaq92-operating-integration-20261114.md)은
 main `cdb8f64`와 수락 운영 소스 `6ea4203b8d`의 제품 차이만 별도 branch에 통합한다.
-구현 승인·검증 대기이며 이번 runtime/자료 변경과 push·PR·main 병합은 미수행이다.
+제품 `914cfe8a9e`/문서 포함 `41dbd01668`에서 별도 독립 Node122·Python12·Ruff·diff
+PASS 후 리드 LOCALLY_ACCEPTED·push/PR GO다. 전체 pytest는2983통과/38skip/
+기존 main에서도 재현된 cached History 1실패이며 별도 [PR85](https://github.com/pluswc/sec_xbrl/pull/85)는 OPEN이다.
+이번 runtime/자료 변경과 push·PR 실행·CI·main 병합은 미수행이며 원격 전달은 리드가 수행한다.
 [기존 운영 계약](../implementation/nasdaq74-operating-20261113.md)의 로컬 운영 인수는
 이 PR 통합 검증과 별개다. Phase2 PR92는 main `cdb8f64`에 병합됐다.
 [CI 43449405710](https://github.com/pluswc/sec_xbrl/actions/runs/43449405710)도 통과했다.
