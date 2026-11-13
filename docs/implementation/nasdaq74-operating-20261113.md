@@ -210,3 +210,31 @@ WDC는 포함되지만 기존8분기 발행 범위 밖 최신 기간은 보류�
 최종 smoke(2026-11-13T15:06:32Z)와 backend PID/start 및 보호 파일5개·개인 journal
 보존은 같은 운영 근거 폴더의 `root-final-preservation.json`으로 확인했다.
 독립/로컬 수락·운영 연결·향후 main/CI 상태는 별개로 유지한다.
+
+## 2026-11-14 main 전달 통합 후보
+
+사용자는92개사 확장·분기 누락 정정·최신 미준비 경계·Phase2 보존의 검토와 main
+병합을 승인했다. main `cdb8f64b83`, 실제 상류 operator `401be11b04`, 실제 native
+발행 경계 `6064e98f73`를 일반 merge해 원래 수락한 Git commit도 도달 가능한 이력으로
+보존했다. 새 작업은 `work/nasdaq100-main-integration-20261114/source`에서만 수행한다.
+운영 checkout은 수락된 `6ea4203b8d`에 detached 상태로 유지하며 서버를 재시작하거나
+새 소스로 연결하지 않았다. 기존 main의 분석 모듈·Phase2와 지침은 그대로 보존했다.
+
+새 main용 operator는 **분기 호출만** hash 검증한 회사 QTD header의 최근5개 실제
+AVAILABLE FY에서 명시적 범위를 결정한다. 기존 `quarter_bounds`를 재사용하며
+연간 profile·완료 연간 FY 선택은 바꾸지 않는다. 동결401의 파일은 수정하지 않는다.
+새 회계 규칙·source wildcard·새 발행물/감사 실행은 없다.
+
+Native7개 Python 파일은 수락된6064와 정확히 같다. 이는 현재 통합 소스 전체를
+이전 packet으로 허용한다는 뜻이 아니다. 확대된 main inventory는 **별도 소스
+qualification 전에는 기존 native packet으로 거부**되어야 한다. 실제 재현은 Git의
+401(상류 준비)·6064(native 발행) 고정 소스와 명시적 pin/리드 승인 맥락을 사용한다.
+현재 main 소스로의 신규 producer 전이는 별도 승인·검증이며 이 통합에서 넓히지 않는다.
+
+새 기본 분기 범위 회귀1개와 native 공개 publish/reopen·context 격리2개의 합성
+상호작용 검사를 통과했다. 기존 native20·guard·분기 정정 도구·UI 및 실제92개사
+인수 증거를 재사용하며 전체 회사 감사·전체 pytest·데이터 재생성은 반복하지 않았다.
+추가로 기존6064 packet의 source inventory 검사를 현재 통합 소스에 적용해 명시적
+거부를 확인했다(소스 파일만 읽었으며 부모 발행물·감사는 열지 않았다). 전체 Ruff와
+diff 검사를 통과했고 실제 UI JS/CSS bytes·main 분석 모듈·지침 및 원래 native7개
+파일의 동일성을 확인했다. 독립 통합 검토·원격 PR/필수 CI·main 병합은 이후 단계다.

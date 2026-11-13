@@ -1,5 +1,11 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 main 전달 후보: 92개사 운영 소스에 main `cdb8f64b83`와 실제 사용한
+401 상류 operator·6064 native 경계를 일반 merge했다. 원래 수락 소스 이력과
+실제 UI bytes를 보존하고, 새 operator의 분기 FY 범위만 명시적으로 정정했다.
+현재 main inventory의 native 승인 범위는 넓히지 않는다. 통합 검토·PR/CI·병합은
+별도이며 실제 runtime/data는 유지한다. [통합 범위](../implementation/nasdaq74-operating-20261113.md).
+
 2026-11-14(KST) [Nasdaq 지원 기업 운영 연결](../implementation/nasdaq74-operating-20261113.md)은
 기존50+신규42의 **92개사로 로컬 인수·운영 적용**했다. UI `e0c72852f0`는 동시
 적용된 Phase2를 보존하고 backend `0634eb50fa`와 함께 18765(PID48788)→19072로

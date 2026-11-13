@@ -104,7 +104,7 @@ def test_cleanup_only_accepted_new_intake_scratch_and_preserves_raw(tmp_path):
 def test_default_quarter_uses_current_qtd_year_without_changing_annual_scope(tmp_path, monkeypatch):
     import polars as pl
 
-    path, config = _config(tmp_path, monkeypatch)
+    _path, config = _config(tmp_path, monkeypatch)
     company_root = Path(config["run_root"]) / "companies/NEW"
     history = tmp_path / "prepared-history"
     history.mkdir()
