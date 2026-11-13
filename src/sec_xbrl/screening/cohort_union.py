@@ -6,12 +6,14 @@ import hashlib
 import json
 import shutil
 import uuid
+from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 from sec_xbrl.screening.common import (
     canonical_json,
+    contained_file,
     digest_value,
     real_directory,
     regular_file,
@@ -40,7 +42,7 @@ def _read_pin(pin: dict[str, str]) -> tuple[Path, dict]:
 
 def _open_members(config: dict) -> list[ScreeningRuntimeProjection]:
     required = {"schema_version", "dataset_id", "members"}
-    if not isinstance(config, dict) or not required <= set(config) or set(config) - required - {"membership_evidence", "expose_auxiliary_owners"}:
+    if not isinstance(config, dict) or not required <= set(config) or set(config) - required - {"membership_evidence", "expose_auxiliary_owners", "latest_source_coverage"}:
         raise ValueError("unsupported cohort union configuration")
     if config["schema_version"] != CONFIG_VERSION or not isinstance(config["members"], list) or len(config["members"]) < 2:
         raise ValueError("cohort union requires at least two explicitly pinned members")
@@ -102,6 +104,73 @@ def _metadata(members: list[ScreeningRuntimeProjection], owners: dict[str, Scree
     return rows
 
 
+def _latest_source_coverage(config: dict, owners: dict, cutoff: str, spine: list[dict]) -> dict:
+    """Verify an optional source-header witness; never create financial observations."""
+    if "latest_source_coverage" not in config:
+        return {}
+    import polars as pl
+
+    _, evidence = _read_pin(config["latest_source_coverage"])
+    if (evidence.get("schema_version") != "screening-latest-source-coverage-v1"
+            or evidence.get("financial_as_of") != cutoff or not isinstance(evidence.get("records"), list)):
+        raise ValueError("latest source coverage scope differs")
+    overrides = {}
+    seen = set()
+    buckets = {(row["calendar_year"], row["calendar_quarter"]) for row in spine}
+    for record in evidence["records"]:
+        cik = record["cik"]
+        if cik in seen or cik not in owners:
+            raise ValueError("latest source coverage CIK is duplicated or unowned")
+        seen.add(cik)
+        owner = owners[cik]
+        owner_path, owner_manifest = _read_pin(record["owner_manifest"])
+        if (owner_manifest != owner.manifest or owner_path != owner.root / "screening_dataset_manifest.json"
+                or record["owner_manifest"]["sha256"] != owner._manifest_sha256):
+            raise ValueError("latest source coverage owner differs")
+        parent_config = owner.manifest["config"]
+        _quarter_path, quarter = _read_pin({
+            "path": str(Path(parent_config["quarterly_metric_root"]) / "quarterly_screening_metric_manifest.json"),
+            "sha256": parent_config["quarterly_manifest_sha256"],
+        })
+        if quarter["financial_as_of"] != cutoff:
+            raise ValueError("latest source coverage quarterly cutoff differs")
+        company, = [row for row in quarter["config"]["companies"] if row["cik"] == cik]
+        analysis_path, analysis = _read_pin(record["analysis_manifest"])
+        if (analysis_path != Path(company["analysis_root"]) / "analysis_manifest.json"
+                or record["analysis_manifest"]["sha256"] != company["analysis_manifest_sha256"]):
+            raise ValueError("latest source coverage analysis parent differs")
+        scope = analysis["companies"][company["ticker"]]
+        if scope["as_of"] != cutoff or analysis.get("period_mode", "QUARTERLY") != "QUARTERLY":
+            raise ValueError("latest source coverage analysis scope differs")
+        declaration = scope["views"]["LATEST_REPORTED"]["files"]["columns"]
+        header_path = contained_file(analysis_path.parent, declaration["path"], "latest source headers")
+        if hashlib.sha256(header_path.read_bytes()).hexdigest() != declaration["sha256"]:
+            raise ValueError("latest source coverage headers changed")
+        columns = [row for row in pl.read_parquet(header_path).to_dicts()
+                   if row.get("period_class") == "QTD_3M" and row.get("column_status") == "AVAILABLE"]
+        if not columns:
+            raise ValueError("latest source coverage has no available QTD headers")
+        end = max(row["actual_end_date"] for row in columns)
+        candidates = {canonical_json({"fiscal_year": row["fiscal_year"], "fiscal_quarter": row["fiscal_quarter"],
+                      "period_start": row["actual_start_date"], "period_end": row["actual_end_date"],
+                      "end_convention": "EXCLUSIVE"}) for row in columns if row["actual_end_date"] == end}
+        if len(candidates) != 1 or canonical_json(record["latest_qtd"]) not in candidates:
+            raise ValueError("latest source coverage latest tuple differs or is ambiguous")
+        actual = record["latest_qtd"]
+        if (date.fromisoformat(actual["period_start"]) >= date.fromisoformat(actual["period_end"])
+                or date.fromisoformat(actual["period_end"]) > date.fromisoformat(cutoff) + timedelta(days=1)):
+            raise ValueError("latest source coverage dates exceed source cutoff")
+        inclusive = date.fromisoformat(actual["period_end"]) - timedelta(days=1)
+        bucket = inclusive.year, (inclusive.month - 1) // 3 + 1
+        if bucket not in buckets:
+            overrides[cik] = {**copy.deepcopy(actual), "cik": cik,
+                "calendar_year": bucket[0], "calendar_quarter": bucket[1],
+                "bucket_status": "LATEST_SOURCE_PERIOD_NOT_PUBLISHED",
+                "unavailable_reason": "LATEST_SOURCE_PERIOD_NOT_PUBLISHED",
+                "reason_label": "최신 분기 조회 자료 미준비"}
+    return overrides
+
+
 def _compose(config: dict, members: list[ScreeningRuntimeProjection]) -> tuple[dict, dict]:
     cutoffs = {member.manifest["financial_as_of"] for member in members}
     kinds = {member.manifest["fixture_kind"] for member in members}
@@ -139,6 +208,9 @@ def _compose(config: dict, members: list[ScreeningRuntimeProjection]) -> tuple[d
                   "financial_as_of": owner.manifest["financial_as_of"], "dataset_manifest_sha256": owner._manifest_sha256}
             for cik, owner in sorted(owners.items())
         }
+    guards = _latest_source_coverage(config, owners, next(iter(cutoffs)), spine)
+    if "latest_source_coverage" in config:
+        body["latest_source_period_guards"] = guards
     manifest = {**body, "publication_id": "screening-cohort-union-" + digest_value(body)[:24]}
     return manifest, {
         "companies": sorted(companies, key=lambda row: row["cik"]), "metadata": _metadata(members, owners),
@@ -188,6 +260,7 @@ class ScreeningCohortUnionReader:
         self.companies = metadata["companies"]
         self.metadata = metadata["metadata"]
         self._owners = metadata["owners"]
+        self.latest_source_period_guards = manifest.get("latest_source_period_guards", {})
         self.metric_definitions = metadata["metric_definitions"]
         self.quarter_definitions = metadata["quarter_definitions"]
         self.quarterly = SimpleNamespace(manifest={"global_quarter_spine": manifest["global_quarter_spine"]})

@@ -421,6 +421,9 @@ class ScreeningService:
             "observations": json.loads(canonical_json([
                 hydrate_observation(reader, row, quarterly=True) for row in rows[-limit:]
             ])),
+            **({"period": public_copy(anchor), "unavailable_reason": "LATEST_SOURCE_PERIOD_NOT_PUBLISHED",
+                "reason_label": "최신 분기 조회 자료 미준비"}
+               if latest and anchor is not None and anchor.get("bucket_status") == "LATEST_SOURCE_PERIOD_NOT_PUBLISHED" else {}),
         }
 
     def quarter_explorer(
@@ -669,7 +672,7 @@ class ScreeningService:
     def _latest_series(
         rows: list[dict[str, Any]], anchor: dict[str, Any] | None, *, cik: str, quarterly: bool,
     ) -> list[dict[str, Any]]:
-        if anchor is None:
+        if anchor is None or anchor.get("bucket_status") == "LATEST_SOURCE_PERIOD_NOT_PUBLISHED":
             return []
         fields = ("calendar_year", "calendar_quarter") if quarterly else ("fiscal_year",)
         end = tuple(anchor[key] for key in fields)
@@ -1197,7 +1200,8 @@ class ScreeningService:
                            "calendar_quarter": anchor["calendar_quarter"]} if quarterly
                           else {"mode": "FIXED_FISCAL_YEAR", "fiscal_year": anchor["fiscal_year"]})
         evaluations = []
-        conflict = anchor is not None and anchor.get("bucket_status") == "PERIOD_CONFLICT"
+        hold_reason = anchor.get("bucket_status") if anchor is not None else None
+        conflict = hold_reason in {"PERIOD_CONFLICT", "LATEST_SOURCE_PERIOD_NOT_PUBLISHED"}
         for predicate in content["predicates"]:
             observation = None if latest and (anchor is None or conflict) else _find_observation(
                 reader,
@@ -1213,7 +1217,7 @@ class ScreeningService:
                 )
             evaluation = _evaluate_predicate(predicate, observation)
             if conflict:
-                evaluation["reason"] = "PERIOD_CONFLICT"
+                evaluation["reason"] = hold_reason
             evaluations.append(evaluation)
         valid_fail = any(row["result"] == "FAIL" for row in evaluations)
         quality_blocking = any(row["quality_blocking"] for row in evaluations)

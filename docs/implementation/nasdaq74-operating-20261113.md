@@ -132,3 +132,27 @@ header에서 최근5개 FY 범위를 확인하고 동결401의 공개 `prepare_a
 출력에 덮어쓰지 않으므로 재개 여부는 기존 driver의 완료 receipt 검증으로 결정한다.
 합성 focused3개(현재 FY 선택·pin 변조·공개 API 인자/중복 실행 거부), 해당 Ruff·diff
 검사를 통과했다. 실제39개사 준비와 독립 검증은 아직 수행하지 않았다.
+
+## 최신 실제 분기가 발행 범위 밖인 경우
+
+39개사 명시적 분기 준비는 완료했다. 일부 회사의 최신 실제 분기 종료일은 기존
+8개 달력분기 발행 범위 밖일 수 있다. 리드는 범위를 넓히거나 이전 분기를 최신으로
+표시하는 대신, 해당 회사의 최신 분기/TTM 조회를 명시적으로 미준비 처리하는
+공통 소비자 경계를 승인했다. 연간·고정 분기와 기존 여섯 catalog 의미는 유지한다.
+
+새 union의 선택적 `latest_source_coverage: {path, sha256}`는
+`screening-latest-source-coverage-v1`, `financial_as_of`, `records`를 담는다.
+각 record는 `cik`, `owner_manifest` pin, `analysis_manifest` pin 및 `latest_qtd`
+(`fiscal_year`, `fiscal_quarter`, `period_start`, `period_end`,
+`end_convention: EXCLUSIVE`)다. 고유 소유 부모의 정확한 quarterly manifest/config와
+분석 manifest·AVAILABLE QTD header의 최신 실제 기간을 hash로 결속한다.
+중복·불일치·변조는 거부하며 실제 범위 밖 anchor만
+`LATEST_SOURCE_PERIOD_NOT_PUBLISHED` / ‘최신 분기 조회 자료 미준비’로 처리한다.
+이때 최신 탐색·비교는 값 없음, 최신 시계열은 빈 관측과 실제 anchor/사유,
+스크리닝은 UNDETERMINED다. 숫자/재무 관측을 만들거나8분기 정책을 변경하지 않는다.
+이 경계는 후보 구현이며 실제 교정 발행물·coverage 검증·운영 수락은 별도다.
+
+합성 경계2개와 관련 최신 조회9개를 통과했다(HTTP 한 건은 sandbox 소켓 제한으로
+host에서 단독 확인). owner/header 변조·최신 tuple 불일치·중복 CIK 거부와 분기/TTM
+시계열·비교·탐색·스크리닝 보류, 기존 연간/고정 분기·다른 회사 보존을 검사했다.
+해당 Ruff, JS syntax, diff 검사 통과이며 실제 재무 발행/운영 검증은 별도다.
