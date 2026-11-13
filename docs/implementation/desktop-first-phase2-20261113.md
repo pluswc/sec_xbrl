@@ -50,12 +50,14 @@ dataset/publication/FY/metric/definition을 사용한다. 현재 요청 오류�
 표시하며 성공하면 지운다. 연간 안내에서 분기 draft로의 추가는 설명과 함께 거부해
 정의를 혼합하거나 기존 실행을 지우지 않는다. 숫자 변환·조건 직렬화는 원래 함수를 유지한다.
 이력은 검색/유형을 현재 active 또는 trash 투영에만 적용하고 선택을 초기화한다.
-시간은 원문 그대로 표시하고 ID/원문 JSON을 native details에 보존한다.
+시간은 원래 timezone을 유지한 날짜·분 캡션으로 표시하고 full ISO를 title/aria 및
+ID/원문 JSON native details에 보존한다. timezone 없는 값은 추정하지 않고 원문을 표시한다.
+기본 이력은 제목+시간/상세의 두 줄 원장이며 toolbar도 가까운 가로 배치를 사용한다.
 
-Writer: 기존 전체 Node 108에 신규 행동 4개(scope/definition draft, filter 선택 경계,
-invalid/annual→quarter 추가 실패 보존, 비동기 stale/current 오류 회복)를 추가했다.
-최종 전체 Node 112개, `ruff check .`, `git diff --check`가 통과했다. 실행 로그는
-writer 작업 근거 `/tmp/phase2-node-final-owned.log`이며 재현은
+Writer: 기존 전체 Node 108에 신규 행동 5개(scope/definition draft, filter 선택 경계,
+invalid/annual→quarter 추가 실패 보존, 비동기 stale/current 오류 회복, 시간대 캡션 보존)를 추가했다.
+최종 전체 Node 113개, `ruff check .`, `git diff --check`가 통과했다. 실행 로그는
+writer 작업 근거 `/tmp/phase2-node-ledger-final.log`이며 재현은
 `node --test tests/screening/*.test.cjs`이다. 리드 초기 실제 브라우저는
 3탭×8폭 및 guide/history/screening 7그룹을 통과했으며 최종 스냅샷/독립 검증은 별도다.
 실제 이력 삭제·복원/DB 변경은 하지 않는다.
