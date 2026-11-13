@@ -17,7 +17,8 @@
 허용: screening cli/cohort_union/explorer/runtime_projection/service, bridge,
 app.js의 owner/미준비 표시 차이, 관련 tests, quarter-window 도구와 tracked docs.
 전체 운영 tree 복사, 수집·재분석·재발행, 회계/기간/source-compatibility 변경,
-실제 journal·자료·runtime·main·원격 변경은 금지한다. 기존 untracked17개도 보존한다.
+실제 journal·자료·runtime·main 변경은 금지한다. 원격 push·PR은 독립 검증·
+리드 GO 뒤 수행하며, 기존 untracked17개도 보존한다.
 
 ## 수락과 재현
 

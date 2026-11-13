@@ -5,6 +5,7 @@ main `cdb8f64`와 수락 운영 소스 `6ea4203b8d`의 제품 차이만 별도 b
 구현 승인·검증 대기이며 이번 runtime/자료 변경과 push·PR·main 병합은 미수행이다.
 [기존 운영 계약](../implementation/nasdaq74-operating-20261113.md)의 로컬 운영 인수는
 이 PR 통합 검증과 별개다. Phase2 PR92는 main `cdb8f64`에 병합됐다.
+[CI 43449405710](https://github.com/pluswc/sec_xbrl/actions/runs/43449405710)도 통과했다.
 아래 PR92 OPEN/미병합 문구는 전달 당시 기록이다.
 
 2026-11-13 2차 원격 전달: 사용자 승인 후 head `5b814b944d`의 별도 독립
