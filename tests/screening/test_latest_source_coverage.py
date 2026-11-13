@@ -97,3 +97,44 @@ def test_all_latest_paths_hold_while_fixed_and_annual_stay_usable(tmp_path):
     assert service.quarter_explorer(key, calendar_year=2026, calendar_quarter=3) == fixed_before
     assert latest_company_period(reader, cik, quarterly=False) == annual_before
     assert service.quarter_series(key, cik=other, metric_id=metric, latest=True)["observations"]
+
+
+def test_historical_undated_headers_never_supply_or_hide_latest_dates(tmp_path):
+    path, payload, owners = _witness(tmp_path)
+    header = tmp_path / "analysis/columns.parquet"
+    original = pl.read_parquet(header).to_dicts()
+    spine = [{"calendar_year": 2026, "calendar_quarter": 3}]
+
+    def update(rows):
+        pl.DataFrame(rows).write_parquet(header)
+        analysis_path = tmp_path / "analysis/analysis_manifest.json"
+        import json
+        analysis = json.loads(analysis_path.read_bytes())
+        analysis["companies"]["TEST"]["views"]["LATEST_REPORTED"]["files"]["columns"]["sha256"] = sha256_file(header)
+        write_json(analysis_path, analysis)
+        quarter_path = tmp_path / "quarter/quarterly_screening_metric_manifest.json"
+        quarter = json.loads(quarter_path.read_bytes())
+        quarter["config"]["companies"][0]["analysis_manifest_sha256"] = sha256_file(analysis_path)
+        write_json(quarter_path, quarter)
+        owner = owners["0000000001"]
+        owner.manifest["config"]["quarterly_manifest_sha256"] = sha256_file(quarter_path)
+        owner_path = owner.root / "screening_dataset_manifest.json"
+        write_json(owner_path, owner.manifest)
+        owner._manifest_sha256 = sha256_file(owner_path)
+        payload["records"][0].update(owner_manifest=_pin(owner_path), analysis_manifest=_pin(analysis_path))
+        write_json(path, payload)
+        return {"latest_source_coverage": _pin(path)}
+
+    missing = {**original[0], "fiscal_year": 2025, "actual_start_date": None, "actual_end_date": None}
+    config = update([missing, *original])
+    assert _latest_source_coverage(config, owners, "2026-10-25", spine)["0000000001"]["bucket_status"] == REASON
+    for year in (2027, 2028):
+        config = update([{**missing, "fiscal_year": year}, *original])
+        with pytest.raises(ValueError, match="undated latest"):
+            _latest_source_coverage(config, owners, "2026-10-25", spine)
+    config = update([missing])
+    with pytest.raises(ValueError, match="no dated"):
+        _latest_source_coverage(config, owners, "2026-10-25", spine)
+    config = update([*original, {**original[0], "actual_start_date": "2026-07-02"}])
+    with pytest.raises(ValueError, match="ambiguous"):
+        _latest_source_coverage(config, owners, "2026-10-25", spine)

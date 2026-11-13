@@ -148,12 +148,21 @@ def _latest_source_coverage(config: dict, owners: dict, cutoff: str, spine: list
             raise ValueError("latest source coverage headers changed")
         columns = [row for row in pl.read_parquet(header_path).to_dicts()
                    if row.get("period_class") == "QTD_3M" and row.get("column_status") == "AVAILABLE"]
-        if not columns:
-            raise ValueError("latest source coverage has no available QTD headers")
-        end = max(row["actual_end_date"] for row in columns)
+        dated = [row for row in columns if row.get("actual_start_date") and row.get("actual_end_date")]
+        if not dated:
+            raise ValueError("latest source coverage has no dated available QTD headers")
+        for row in dated:
+            date.fromisoformat(row["actual_start_date"])
+            date.fromisoformat(row["actual_end_date"])
+        end = max(row["actual_end_date"] for row in dated)
+        latest_coordinate = max((row["fiscal_year"], str(row["fiscal_quarter"]))
+                                for row in dated if row["actual_end_date"] == end)
+        if any((row["fiscal_year"], str(row["fiscal_quarter"])) >= latest_coordinate
+               for row in columns if row not in dated):
+            raise ValueError("latest source coverage has unresolved undated latest headers")
         candidates = {canonical_json({"fiscal_year": row["fiscal_year"], "fiscal_quarter": row["fiscal_quarter"],
                       "period_start": row["actual_start_date"], "period_end": row["actual_end_date"],
-                      "end_convention": "EXCLUSIVE"}) for row in columns if row["actual_end_date"] == end}
+                      "end_convention": "EXCLUSIVE"}) for row in dated if row["actual_end_date"] == end}
         if len(candidates) != 1 or canonical_json(record["latest_qtd"]) not in candidates:
             raise ValueError("latest source coverage latest tuple differs or is ambiguous")
         actual = record["latest_qtd"]
