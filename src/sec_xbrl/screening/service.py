@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from sec_xbrl.screening.cohort_union import ScreeningCohortUnionReader
 from sec_xbrl.screening.common import (
     canonical_json,
     digest_value,
@@ -41,7 +42,7 @@ from sec_xbrl.screening.runtime_projection import (
 )
 from sec_xbrl.screening.store import ScreeningStore
 
-ScreeningReader = ScreeningDatasetReader | ScreeningDatasetV2Reader | ScreeningDatasetV3Reader | ScreeningRuntimeProjection
+ScreeningReader = ScreeningDatasetReader | ScreeningDatasetV2Reader | ScreeningDatasetV3Reader | ScreeningRuntimeProjection | ScreeningCohortUnionReader
 
 ENGINE_VERSION = "screening-executor-v1"
 EXPORT_VERSION = "screen-run-export-v1"
@@ -165,6 +166,7 @@ class ScreeningService:
         source_compatibility: dict[str, str] | None = None,
         batch_evidence: dict[str, Any] | None = None,
         runtime_projections: dict[str, dict[str, str]] | None = None,
+        cohort_unions: dict[str, dict[str, str]] | None = None,
     ) -> None:
         if not isinstance(datasets, dict) or not datasets:
             raise ValueError("at least one screening dataset is required")
@@ -172,12 +174,17 @@ class ScreeningService:
         projections = {} if runtime_projections is None else runtime_projections
         if not isinstance(projections, dict) or not set(projections) <= set(datasets):
             raise ValueError("runtime projection is outside the screening catalog")
+        unions = {} if cohort_unions is None else cohort_unions
+        if not isinstance(unions, dict) or not set(unions) <= set(datasets) or set(unions) & set(projections):
+            raise ValueError("cohort union is outside the catalog or overlaps a projection declaration")
         self.datasets: dict[str, ScreeningReader] = {}
         self.explorers: dict[str, ScreeningExplorer] = {}
         with self._compatibility_scope(), _share_v3_readers() as loaded:
             for dataset_id, root in datasets.items():
                 dataset_id = require_string(dataset_id, "dataset catalog ID")
-                if dataset_id in projections:
+                if dataset_id in unions:
+                    reader = ScreeningCohortUnionReader(root, unions[dataset_id])
+                elif dataset_id in projections:
                     reader = ScreeningRuntimeProjection(root, projections[dataset_id])
                 else:
                     reader = loaded.get(Path(root).absolute()) or open_screening_dataset(root)
@@ -593,10 +600,12 @@ class ScreeningService:
                 latest=latest,
             )
         )
-        if (
-            self.company_descriptions is not None
-            and self.company_descriptions.dataset_id == dataset_id
-        ):
+        owner = self._dataset(dataset_id).manifest.get("auxiliary_owners", {}).get(cik)
+        description_owner = (self.company_descriptions is not None and owner is not None
+            and self.company_descriptions.dataset_id == owner["dataset_id"]
+            and self.company_descriptions.dataset.publication_id == owner["dataset_publication_id"]
+            and getattr(self.company_descriptions.dataset, "_manifest_sha256", None) == owner["dataset_manifest_sha256"])
+        if self.company_descriptions is not None and (self.company_descriptions.dataset_id == dataset_id or description_owner):
             row = self.company_descriptions.company(cik)
             result["company_description"] = {
                 key: row.get(key)
@@ -617,6 +626,8 @@ class ScreeningService:
             result["company_description"]["publication_id"] = (
                 self.company_descriptions.publication_id
             )
+            if description_owner:
+                result["company_description"]["source_scope"] = public_copy(owner)
         return result
 
     def company_comparison(
@@ -1084,16 +1095,16 @@ class ScreeningService:
     def _explorer(self, dataset_id: str) -> ScreeningExplorer:
         dataset_id = require_string(dataset_id, "dataset_id")
         reader = self._dataset(dataset_id)
-        if dataset_id not in self.explorers and isinstance(reader, ScreeningRuntimeProjection):
+        if dataset_id not in self.explorers and isinstance(reader, (ScreeningRuntimeProjection, ScreeningCohortUnionReader)):
             self.explorers[dataset_id] = ScreeningExplorer(reader)
         try:
             return self.explorers[dataset_id]
         except KeyError as exc:
             raise ValueError("company explorer requires a v2 screening dataset") from exc
 
-    def _quarter_dataset(self, dataset_id: str) -> ScreeningDatasetV3Reader | ScreeningRuntimeProjection:
+    def _quarter_dataset(self, dataset_id: str) -> ScreeningDatasetV3Reader | ScreeningRuntimeProjection | ScreeningCohortUnionReader:
         reader = self._dataset(dataset_id)
-        if not isinstance(reader, (ScreeningDatasetV3Reader, ScreeningRuntimeProjection)):
+        if not isinstance(reader, (ScreeningDatasetV3Reader, ScreeningRuntimeProjection, ScreeningCohortUnionReader)):
             raise TypeError("quarterly analysis requires a v3 screening dataset")
         return reader
 

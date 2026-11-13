@@ -1228,6 +1228,26 @@ const BOARD_AXIS_OPTIONS='<option value="AUTO">자동 범위</option><option val
 
 function financialComparisonEligible(definition){return ["MONEY","PERCENT"].includes(definition?.unit_kind)}
 function financialComparisonMetric(definition){return definition.unit_kind==="PERCENT"?BOARD_PP:BOARD_RATE}
+function auxiliaryOwnerPayload(response,requested,dataset,expectedSource=null){
+  if(response?.schema_version!=="screening-auxiliary-owner-response-v1"){
+    if(dataset?.auxiliary_manifest_sha256||response?.auxiliary_owner)throw new Error("통합 자료의 공시 출처 증거를 확인할 수 없습니다.");
+    return response;
+  }
+  const {request_scope:query,source_scope:source,owner_proof:proof,data}=response;
+  const keys=["dataset_id","dataset_publication_id","financial_as_of","dataset_manifest_sha256"];
+  if(!/^[0-9a-f]{64}$/u.test(dataset?.auxiliary_manifest_sha256||"")||!query||!source||!proof||!data||
+      Object.keys(requested).some(key=>query[key]!==requested[key])||
+      query.dataset_manifest_sha256!==dataset.auxiliary_manifest_sha256||
+      proof.union_manifest_sha256!==dataset.auxiliary_manifest_sha256||proof.cik!==requested.cik||
+      !/^[0-9a-f]{64}$/u.test(source.dataset_manifest_sha256||"")||
+      proof.source_manifest_sha256!==source.dataset_manifest_sha256||source.financial_as_of!==requested.financial_as_of||
+      data.cik!==requested.cik||keys.some(key=>data[key]!==source[key])||
+      expectedSource&&keys.some(key=>source[key]!==expectedSource[key])){
+    throw new Error("통합 자료와 원본 공시 발행물의 범위가 다릅니다.");
+  }
+  return {...data,auxiliary_owner:{request_scope:query,source_scope:source,owner_proof:proof}};
+}
+
 function requestFinancialGrowth(model){
   if(model.growth||!model.slots.length||!model.selection.order.some(id=>financialComparisonEligible(model.definitions.get(id))))return;
   const scope={dataset_id:model.context.dataset,dataset_publication_id:model.context.publication,
@@ -1244,15 +1264,23 @@ function requestFinancialGrowth(model){
   financialGrowthCapability.then(capability=>{
     if(!ownsFinancialProfileBoard(model))return;
     const {cik,...dataset}=scope;
-    if(!capability.configured||Object.keys(dataset).some(key=>dataset[key]!==capability[key])){
-      throw new Error("선택한 발행물의 전년 비교 자료가 준비되지 않았습니다.");
+    const selected=explorerDataset();
+    const ownerContext=(capability.owner_contexts||[]).find(context=>
+      Object.keys(dataset).every(key=>dataset[key]===context.request_scope?.[key])&&
+      context.request_scope.dataset_manifest_sha256===selected?.auxiliary_manifest_sha256&&
+      context.available_ciks?.includes(cik));
+    if(!capability.configured||(!ownerContext&&Object.keys(dataset).some(key=>dataset[key]!==capability[key]))){
+      throw new Error("이 기업 발행물의 전년 비교 자료가 준비되지 않았습니다. 수준 값은 그대로 조회할 수 있습니다.");
     }
+    const sourceContext=ownerContext?.source_scope||capability;
     const query=new URLSearchParams(scope).toString();
     let pending=financialGrowthCache.get(query);
     if(!pending){
-      pending=api(`/api/financial-growth?${query}`).then(data=>{
+      pending=api(`/api/financial-growth?${query}`).then(response=>{
+        const data=auxiliaryOwnerPayload(response,scope,selected,ownerContext?.source_scope||null);
+        const expectedScope=data.auxiliary_owner?{...data.auxiliary_owner.source_scope,cik}:scope;
         if(!((data.schema_version==="screening-financial-growth-v1"&&data.rule_version===FINANCIAL_GROWTH_RULE)||(data.schema_version==="screening-financial-growth-v2"&&data.rule_version==="catalog-prepared-financial-comparison-v2"))||data.period_end_convention!=="EXCLUSIVE"||
-            Object.keys(scope).some(key=>scope[key]!==data[key])||data.dataset_manifest_sha256!==capability.dataset_manifest_sha256||
+            Object.keys(scope).some(key=>expectedScope[key]!==data[key])||data.dataset_manifest_sha256!==sourceContext.dataset_manifest_sha256||
             !data.definitions||!data.series){
           throw new Error("전년 비교 발행물의 범위가 선택과 다릅니다.");
         }
@@ -1730,9 +1758,10 @@ async function loadRevenueBreakdowns(){
   const current=()=>context.token===revenueBreakdowns.token&&context.profile===S.profile&&context.key===explorerContextKey()&&!panel.hidden;
   status.textContent="매출 구성 자료를 불러오는 중입니다…";
   try{
-    const data=await api(`/api/revenue-breakdowns?${new URLSearchParams(scope)}`);
+    const data=auxiliaryOwnerPayload(await api(`/api/revenue-breakdowns?${new URLSearchParams(scope)}`),scope,dataset);
     if(!current())return;
-    if(Object.keys(scope).some(key=>scope[key]!==data[key])||data.schema_version!=="screening-revenue-breakdowns-v1"){
+    const expectedScope=data.auxiliary_owner?{...data.auxiliary_owner.source_scope,cik}:scope;
+    if(Object.keys(scope).some(key=>expectedScope[key]!==data[key])||data.schema_version!=="screening-revenue-breakdowns-v1"){
       throw new Error("선택한 발행물과 매출 구성 자료가 다릅니다.");
     }
     revenueBreakdowns.data=data;
