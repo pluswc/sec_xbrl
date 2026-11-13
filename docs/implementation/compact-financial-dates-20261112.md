@@ -115,3 +115,16 @@ CSS는 `6be818971561405eb3f33d943ae8967b94b4264ca1d6900656b82e066e118f7a`다.
 이 통합의 별도 독립 재검증과 원격 push·PR·CI는 기록 시점에 대기다.
 작업 브랜치를 main에 병합하거나 운영·자료·기록을 변경하지 않았다. 앞선
 로컬 인수와 당시 원격 미수행 문구는 역사적 기록으로 보존한다.
+
+## PR 전달 상태 — 2026-11-13
+
+통합 전달 HEAD `bf91b303eac3df2f256dffa4c377457ed55ecdec`는 별도 독립
+Node 108개·Ruff·diff, 최신 main 포함 및 인수 UI 동일성 검증을 통과했다.
+리드가 push하고 [PR #91](https://github.com/pluswc/sec_xbrl/pull/91)을 열었다.
+PR은 OPEN이며 main에 병합하지 않았다. 원격 CI는 기록 시점에 진행 중이고,
+최종 근거는 [PR #91 최신 head checks](https://github.com/pluswc/sec_xbrl/pull/91/checks)다.
+
+리드는 실제 운영 JS/CSS가 기존 인수 hash와 같고 History API가 baseline과
+정확히 같음을 재확인했다. SQLite SHA-256도
+`3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`로 같다.
+앞선 로컬 전용/전달 대기 문구는 당시 기록이며 이 항목이 원격 전달 상태를 갱신한다.

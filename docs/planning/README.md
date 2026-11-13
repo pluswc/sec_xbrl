@@ -1,5 +1,12 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-13 원격 전달: 통합 HEAD `bf91b303ea`의 독립 Node 108개·Ruff·diff와
+main 포함/UI 동일성 PASS 후 [PR #91](https://github.com/pluswc/sec_xbrl/pull/91)을
+열었다. OPEN·main 미병합이며 CI는 진행 중이다. 최종 원격 근거는
+[최신 head checks](https://github.com/pluswc/sec_xbrl/pull/91/checks)다.
+리드가 live 자산·History API·SQLite의 인수 기준 동일성을 재확인했다.
+아래 전달 대기 문구는 당시 기록이다.
+
 2026-11-13 원격 전달 승인: 데스크톱 1차와 간결한 날짜가 포함된 작업 브랜치에
 origin/main `72575d89f5`를 일반 merge `1dfc42b3b0`로 통합했다. 충돌·tree 변화
 없이 인수된 UI 소스 `d19638fae3`를 보존했다. 통합의 별도 독립 재검증과
