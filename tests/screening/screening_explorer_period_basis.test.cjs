@@ -720,3 +720,28 @@ test("all revenue comparison contexts and financial growth include their prepare
   vm.runInContext('financialProfileBoard=testFinancial',h.context);
   assert.match(financial("cfo",0,"growth"),/2024-01-01/);
 });
+
+test("union profile growth validates owner capability and preserves parent header",async()=>{
+  const requested={dataset_id:"union",dataset_publication_id:"union-P",financial_as_of:"2026-10-25",cik:"0000000001"};
+  const parent={dataset_id:"old50",dataset_publication_id:"old-P",financial_as_of:requested.financial_as_of,dataset_manifest_sha256:"1".repeat(64)};
+  const union={...requested,dataset_manifest_sha256:"9".repeat(64)};delete union.cik;
+  const envelope={schema_version:"screening-auxiliary-owner-response-v1",request_scope:{...union,cik:requested.cik},source_scope:parent,
+    owner_proof:{cik:requested.cik,union_manifest_sha256:union.dataset_manifest_sha256,source_manifest_sha256:parent.dataset_manifest_sha256},
+    data:{...parent,cik:requested.cik,schema_version:"screening-financial-growth-v1",rule_version:"signed-prepared-financial-yoy-v1",period_end_convention:"EXCLUSIVE",definitions:{},series:{}}};
+  const h=harness(url=>url==="/api/financial-growth"?{configured:true,...parent,owner_contexts:[{request_scope:union,source_scope:parent,available_ciks:[requested.cik]}]}:envelope);
+  h.S.defaultDataset={...union,publication_id:union.dataset_publication_id,auxiliary_manifest_sha256:union.dataset_manifest_sha256};
+  h.S.profile={company:{cik:requested.cik}};
+  const model=vm.runInContext(`(()=>{renderFinancialProfileBoard=()=>{};const model={profile:S.profile,context:{dataset:"union",publication:"union-P",financialAsOf:"2026-10-25"},definitions:new Map([["cfo",{unit_kind:"MONEY"}]]),selection:{order:["cfo"]},slots:[{}],key:explorerContextKey()};financialProfileBoard=model;requestFinancialGrowth(model);return model})()`,h.context);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(model.growth.data.dataset_id,"old50");assert.equal(model.growth.data.auxiliary_owner.request_scope.dataset_id,"union");
+  assert.equal(h.calls.length,2);
+});
+
+test("union company without owner asset keeps levels and does not fetch another parent's growth",async()=>{
+  const h=harness(()=>({configured:true,dataset_id:"old50",dataset_publication_id:"old-P",financial_as_of:"2026-10-25",owner_contexts:[{request_scope:{dataset_id:"union",dataset_publication_id:"union-P",financial_as_of:"2026-10-25",dataset_manifest_sha256:"9".repeat(64)},available_ciks:["0000000001"]}]}));
+  h.S.defaultDataset={dataset_id:"union",publication_id:"union-P",auxiliary_manifest_sha256:"9".repeat(64)};
+  h.S.profile={company:{cik:"0000000002"}};
+  const model=vm.runInContext(`(()=>{renderFinancialProfileBoard=()=>{};const model={profile:S.profile,context:{dataset:"union",publication:"union-P",financialAsOf:"2026-10-25"},definitions:new Map([["cfo",{unit_kind:"MONEY"}]]),selection:{order:["cfo"]},slots:[{}],key:explorerContextKey()};financialProfileBoard=model;requestFinancialGrowth(model);return model})()`,h.context);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.match(model.growth.error,/수준 값/);assert.equal(h.calls.length,1);assert.equal(model.slots.length,1);
+});

@@ -976,7 +976,9 @@ def _validate_status(
         if prospective is None:
             raise ValueError("financial status storage proof has an unrelated parent")
         status_storage = None
-    status = read_universe_status(manifest_path=collection_manifest, validation_mode="financial_sources", storage_reuse=status_storage, _verified_storage_reuse=verified_storage if status_storage else None)
+    from sec_xbrl.financial_native_source import native_assessed_ciks
+    status = read_universe_status(manifest_path=collection_manifest, validation_mode="financial_sources", storage_reuse=status_storage, _verified_storage_reuse=verified_storage if status_storage else None,
+                                 assessed_ciks=native_assessed_ciks(collection_manifest=collection_manifest, scope_companies=expected_companies))
     status_parent = tuple(
         sorted(
             ({"ticker": row.ticker, "cik": str(row.cik)} for row in status.companies),

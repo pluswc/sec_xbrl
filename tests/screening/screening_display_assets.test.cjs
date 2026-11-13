@@ -41,6 +41,10 @@ test("all existing non-presentation functions and financial workflow handlers st
   const allowed = new Set(["showView", "markDirty", "setCriteriaCompact", "renderLibrary", "loadLibrary", "addGuideMetric", "revisionContent", "loadScreenRecord", "togglePeriod", "switchFrequency", "setRun", "explorerPeriod", "renderProfile", "loadAnnualExplorer", "openAnnualProfile", "renderAnnualComparison", "bindAnnualExplorer", "newScreen", "api", "refreshScreens", "refreshRuns", "renderTimeline", "saveDecision", "syncResultActions", "openRun", "openSavedScreenRecord", "boot", "formatDecimal", "unitLabel", "displayValue", "renderRows", "renderMetricEvidence", "comparePeer", "explorerValue", "renderExplorer", "profileObservationCell", "renderProfileTrend", "explorerMetric", "updateExplorerSort", "loadExplorer", "openProfile", "closeProfile", "renderComparison", "openComparison", "bindExplorer", "updateCompareButton"]);
   for (const line of frozen.split("\n")) {
     const name = line.match(/^(?:async )?function (\w+)\(/)?.[1];
+    if(name==="businessReason"){
+      assert(source.split("\n").includes(line.replace("return ({", 'return ({LATEST_SOURCE_PERIOD_NOT_PUBLISHED:"최신 분기 조회 자료 미준비",')), "only the pinned latest-readiness reason label may change");
+      continue;
+    }
     if (name && !allowed.has(name)) assert(source.split("\n").includes(line), `changed protected function ${name}`);
     if (!name && line.startsWith("$(")) assert(source.includes(line), "changed button/event workflow binding");
   }

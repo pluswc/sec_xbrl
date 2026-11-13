@@ -61,6 +61,8 @@ function parseArgs(argv) {
     "--financial-growth-sha256",
     "--history-worker",
     "--journal-store",
+    "--auxiliary-union",
+    "--auxiliary-union-sha256",
   ]);
   for (const key of Object.keys(values)) {
     if (!allowed.has(key)) throw new Error(`unknown argument: ${key}`);
@@ -111,7 +113,15 @@ function parseArgs(argv) {
         !/^[0-9a-f]{64}$/u.test(text("--financial-growth-sha256"))))) {
     throw new Error("financial growth requires an absolute asset path and SHA-256 pin");
   }
+  const hasAuxiliaryUnion = Object.hasOwn(values, "--auxiliary-union");
+  if (hasAuxiliaryUnion !== Object.hasOwn(values, "--auxiliary-union-sha256") ||
+      (hasAuxiliaryUnion && (!path.isAbsolute(text("--auxiliary-union")) ||
+        !/^[0-9a-f]{64}$/u.test(text("--auxiliary-union-sha256"))))) {
+    throw new Error("auxiliary union requires an absolute manifest path and SHA-256 pin");
+  }
   return {
+    auxiliaryUnion: hasAuxiliaryUnion ? text("--auxiliary-union") : null,
+    auxiliaryUnionSha256: hasAuxiliaryUnion ? text("--auxiliary-union-sha256") : null,
     revenueBreakdowns: hasBreakdowns ? text("--revenue-breakdowns") : null,
     revenueBreakdownsSha256: hasBreakdowns ? text("--revenue-breakdowns-sha256") : null,
     financialGrowth: hasGrowth ? text("--financial-growth") : null,
@@ -196,7 +206,7 @@ function loadDisplayAssets(root) {
   return { directory, assets };
 }
 
-function loadProfileAsset(file, digest, label, schema, validate, maxCompanyBytes = MAX_BREAKDOWN_COMPANY) {
+function loadPinnedJson(file, digest, label) {
   if (!path.isAbsolute(file) || !/^[0-9a-f]{64}$/u.test(digest)) {
     throw new Error(`${label} asset requires an absolute path and SHA-256 pin`);
   }
@@ -222,6 +232,11 @@ function loadProfileAsset(file, digest, label, schema, validate, maxCompanyBytes
   } finally {
     fs.closeSync(descriptor);
   }
+  return payload;
+}
+
+function loadProfileAsset(file, digest, label, schema, validate, maxCompanyBytes = MAX_BREAKDOWN_COMPANY) {
+  const payload = loadPinnedJson(file, digest, label);
   const { schema_version, dataset_id, dataset_publication_id, financial_as_of, dataset_manifest_sha256, companies } = payload;
   if (!(Array.isArray(schema) ? schema.includes(schema_version) : schema_version === schema) ||
       ![dataset_id, dataset_publication_id].every(value => typeof value === "string" && /^[A-Za-z0-9_.-]{1,128}$/u.test(value)) ||
@@ -324,17 +339,43 @@ function validateFinancialComparisonV2(payload, legacyRowValid, isRecord) {
   };
 }
 
-function serveRevenueBreakdowns(bundle, request, response) {
-  return serveProfileAsset(bundle, request, response, "매출 구성");
+function loadAuxiliaryUnion(file, digest) {
+  const manifest = loadPinnedJson(file, digest, "auxiliary union");
+  const validScope = scope => scope && Object.keys(scope).sort().join(",") ===
+      "dataset_id,dataset_manifest_sha256,dataset_publication_id,financial_as_of" &&
+    [scope.dataset_id, scope.dataset_publication_id].every(value => typeof value === "string" && /^[A-Za-z0-9_.-]{1,128}$/u.test(value)) &&
+    /^\d{4}-\d{2}-\d{2}$/u.test(scope.financial_as_of) && /^[0-9a-f]{64}$/u.test(scope.dataset_manifest_sha256);
+  const scope = {dataset_id:manifest.dataset_id, dataset_publication_id:manifest.publication_id,
+    financial_as_of:manifest.financial_as_of, dataset_manifest_sha256:digest};
+  const owners = manifest.auxiliary_owners;
+  if (manifest.schema_version !== "screening-cohort-union-v1" || manifest.config?.expose_auxiliary_owners !== true ||
+      !validScope(scope) || !owners || typeof owners !== "object" || Array.isArray(owners) ||
+      !Array.isArray(manifest.configured_ciks) || !manifest.configured_ciks.length ||
+      new Set(manifest.configured_ciks).size !== manifest.configured_ciks.length ||
+      JSON.stringify(Object.keys(owners).sort()) !== JSON.stringify([...manifest.configured_ciks].sort()) ||
+      Object.entries(owners).some(([cik, owner]) => !/^\d{10}$/u.test(cik) || !validScope(owner) || owner.financial_as_of !== scope.financial_as_of)) {
+    throw new Error("invalid explicit auxiliary union owner scope");
+  }
+  return {scope, owners:new Map(Object.entries(owners))};
 }
-function serveFinancialGrowth(bundle, request, response) {
+function sameAssetScope(left, right) {
+  return ["dataset_id","dataset_publication_id","financial_as_of","dataset_manifest_sha256"].every(key => left?.[key] === right?.[key]);
+}
+
+function serveRevenueBreakdowns(bundle, request, response, auxiliary = null) {
+  return serveProfileAsset(bundle, request, response, "매출 구성", auxiliary);
+}
+function serveFinancialGrowth(bundle, request, response, auxiliary = null) {
   if (request.method === "GET" && request.url === "/api/financial-growth") {
-    writeJson(response, 200, { configured: Boolean(bundle), ...bundle?.scope });
+    const contexts = auxiliary && bundle ? [{request_scope:auxiliary.scope, source_scope:bundle.scope,
+      available_ciks:[...auxiliary.owners].filter(([cik, owner]) => sameAssetScope(owner, bundle.scope) && bundle.byCik.has(cik)).map(([cik]) => cik)}] : [];
+    writeJson(response, 200, { configured: Boolean(bundle), ...bundle?.scope,
+      ...(auxiliary ? {owner_contexts:contexts} : {}) });
     return;
   }
-  return serveProfileAsset(bundle, request, response, "재무 전년 대비");
+  return serveProfileAsset(bundle, request, response, "재무 전년 대비", auxiliary);
 }
-function serveProfileAsset(bundle, request, response, label) {
+function serveProfileAsset(bundle, request, response, label, auxiliary = null) {
   if (request.method !== "GET") {
     writeJson(response, 405, { error: `${label} 자료는 조회만 할 수 있습니다.` });
     return;
@@ -350,14 +391,26 @@ function serveProfileAsset(bundle, request, response, label) {
     writeJson(response, 400, { error: `${label} 조회 범위를 확인해 주세요.` });
     return;
   }
+  let delegated = false;
   if (keys.slice(0, 3).some(key => query.get(key) !== bundle.scope[key])) {
-    writeJson(response, 409, { error: `선택한 자료 발행물에는 ${label} 자료가 준비되지 않았습니다.` });
-    return;
+    const owner = auxiliary?.owners.get(query.get("cik"));
+    if (!auxiliary || keys.slice(0, 3).some(key => query.get(key) !== auxiliary.scope[key]) ||
+        !sameAssetScope(owner, bundle.scope)) {
+      writeJson(response, 409, { error: `선택한 기업 발행물에는 ${label} 자료가 준비되지 않았습니다.` });
+      return;
+    }
+    delegated = true;
   }
-  const body = bundle.byCik.get(query.get("cik"));
+  let body = bundle.byCik.get(query.get("cik"));
   if (!body) {
     writeJson(response, 404, { error: `이 기업의 ${label} 자료가 준비되지 않았습니다.` });
     return;
+  }
+  if (delegated) {
+    body = Buffer.from(JSON.stringify({schema_version:"screening-auxiliary-owner-response-v1",
+      request_scope:{...auxiliary.scope,cik:query.get("cik")}, source_scope:auxiliary.owners.get(query.get("cik")),
+      owner_proof:{cik:query.get("cik"),union_manifest_sha256:auxiliary.scope.dataset_manifest_sha256,
+        source_manifest_sha256:bundle.scope.dataset_manifest_sha256}, data:JSON.parse(body.toString("utf8"))}));
   }
   response.writeHead(200, {
     "cache-control": "no-store",
@@ -431,6 +484,7 @@ function startBridge(options) {
   const breakdowns = options.revenueBreakdowns
     ? loadRevenueBreakdowns(options.revenueBreakdowns, options.revenueBreakdownsSha256) : null;
   const growth = options.financialGrowth ? loadFinancialGrowth(options.financialGrowth, options.financialGrowthSha256) : null;
+  const auxiliary = options.auxiliaryUnion ? loadAuxiliaryUnion(options.auxiliaryUnion, options.auxiliaryUnionSha256) : null;
   const relay = childProcess.spawn(
     options.wsl,
     [
@@ -535,12 +589,12 @@ function startBridge(options) {
     }
     const requestPath = (request.url || "").split("?", 1)[0];
     if (requestPath === "/api/revenue-breakdowns") {
-      serveRevenueBreakdowns(breakdowns, request, response);
+      serveRevenueBreakdowns(breakdowns, request, response, auxiliary);
       request.resume();
       return;
     }
     if (requestPath === "/api/financial-growth") {
-      serveFinancialGrowth(growth, request, response);
+      serveFinancialGrowth(growth, request, response, auxiliary);
       request.resume();
       return;
     }
@@ -657,4 +711,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { allowedPath, parseArgs, startBridge, loadDisplayAssets, loadRevenueBreakdowns, serveRevenueBreakdowns, loadFinancialGrowth, serveFinancialGrowth, startHistoryWorker, historyGuardRequired };
+module.exports = { loadAuxiliaryUnion, allowedPath, parseArgs, startBridge, loadDisplayAssets, loadRevenueBreakdowns, serveRevenueBreakdowns, loadFinancialGrowth, serveFinancialGrowth, startHistoryWorker, historyGuardRequired };
