@@ -76,7 +76,7 @@ nonempty/link/storage guard fail-closed·실패 진단 보존. 최신 통합의 
 `evidence/refresh-20261114/preservation-before.json`에 보관했고 원래 baseline과
 정확히 같다. 이 경로는 선택적 검증 근거이며 계약의 필수 소스는 이 문서다.
 
-최신 통합 자체 검사: focused 221개(cached NVDA API+CLI 포함), 전체 Node 122개,
+최신 통합 자체 검사: focused 222개(cached NVDA API+CLI 포함), 전체 Node 122개,
 Ruff/diff PASS. 전체 pytest는 실행 중이며 아직 통과를 주장하지 않는다.
 로그는 `/tmp/pr85-refresh-focused.log`, `/tmp/pr85-refresh-node.log`,
 `/tmp/pr85-refresh-full.log`다. focused 종료 후20파일 SHA와 journal 전체 논리
