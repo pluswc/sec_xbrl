@@ -100,3 +100,18 @@ byte-identical이다. SHA-256:
 `source-pin.json`·`bundle-hashes.json`은 소스/자산 pin이며 `bridge-growth.json`은
 현재 bundle의 전체 재시작 인자다. 원격 push·PR·CI·main 병합은 이 작업에서
 수행하지 않았다. 앞선 대기 문구는 해당 단계 당시의 기록이다.
+
+## 원격 전달 승인과 최신 main 통합 — 2026-11-13
+
+사용자는 push와 PR을 명시 승인했다. 원격 병합은 승인 범위가 아니다.
+`origin/main`의 `72575d89f578d6c0ae01528753d06a469141a1b3`를 일반 merge
+`1dfc42b3b04cc3b9ea826afcb22f5ff1328d232b`로 통합했다. 충돌이 없었고,
+통합 tree는 직전 로컬 인수 문서 HEAD `ee1bb723cd95947fb77e0b6fbee691df2207bf42`와
+정확히 같다. upstream 매출 변경은 이미 포함돼 있어 UI·계산·backend 변화가 없다.
+
+인수된 실행 소스 `d19638fae378a4ef91764d4e291bf0ed3b33958f`의 UI 자산은
+그대로다. JS SHA-256은 `802bef69a263758269181179fa794148ac8a77e2229aabdceea2955045e1eb0b`,
+CSS는 `6be818971561405eb3f33d943ae8967b94b4264ca1d6900656b82e066e118f7a`다.
+이 통합의 별도 독립 재검증과 원격 push·PR·CI는 기록 시점에 대기다.
+작업 브랜치를 main에 병합하거나 운영·자료·기록을 변경하지 않았다. 앞선
+로컬 인수와 당시 원격 미수행 문구는 역사적 기록으로 보존한다.
