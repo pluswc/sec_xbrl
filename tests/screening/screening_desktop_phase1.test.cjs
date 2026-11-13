@@ -116,6 +116,12 @@ test("an active annual company failure is visible and restores the selector to t
   assert.equal(h.S.profile.company.cik,"M");assert.equal(h.get("#analysis-company").value,"M");
   assert.equal(h.get("#analysis-status").hidden,false);assert.match(h.get("#analysis-status").textContent,/현재 표시한 기업.*current request failed/);
   assert.equal(h.desktop.mode,"PROFILE");
+  // Closing and successful new analysis must not inherit the previous target's error.
+  h.back();assert.equal(h.get("#analysis-status").hidden,true);assert.equal(h.get("#analysis-status").textContent,"");
+  h.S.profile={company:h.S.explorer.rows[0].company};h.enter("PROFILE");
+  assert.equal(h.get("#analysis-status").hidden,true);
+  h.get("#analysis-status").hidden=false;h.get("#analysis-status").textContent="old company failure";
+  h.enter("COMPARE");assert.equal(h.get("#analysis-status").hidden,true);assert.equal(h.get("#analysis-status").textContent,"");
 });
 
 

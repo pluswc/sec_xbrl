@@ -558,6 +558,7 @@ function syncAnalysisCompany(){
 }
 function enterExplorerAnalysis(mode){
   if(!desktopExplorer.mounted)return;
+  $("#analysis-status").hidden=true;$("#analysis-status").textContent="";
   if(desktopExplorer.mode==="LIST"){
     const matrix=$(".explorer-matrix");desktopExplorer.saved={top:matrix.scrollTop,left:matrix.scrollLeft,page:window.scrollY,mode,cik:mode==="PROFILE"?S.profile?.company.cik:null};
   }
@@ -568,6 +569,7 @@ function enterExplorerAnalysis(mode){
 }
 function leaveExplorerAnalysis(mode,restorePage=false){
   if(!desktopExplorer.mounted||desktopExplorer.mode!==mode)return;
+  $("#analysis-status").hidden=true;$("#analysis-status").textContent="";
   desktopExplorer.companyToken++;desktopExplorer.mode="LIST";$(".explorer-view").classList.remove("analysis-open");$("#explorer-analysis-bar").hidden=true;
   const matrix=$(".explorer-matrix"),saved=desktopExplorer.saved;
   if(saved){matrix.scrollTop=saved.top;matrix.scrollLeft=saved.left;if(restorePage)window.scrollTo({top:saved.page,left:0,behavior:"instant"})}
