@@ -96,7 +96,7 @@ def prepare_company(plan_path: Path, expected_sha: str, ticker: str, result: Pat
     payload = {"schema_version": VERSION, "status": "PASS", "ticker": ticker,
                "plan": {"path": str(plan_path), "sha256": expected_sha},
                "fiscal_start": start, "fiscal_end": end,
-               "output": {"path": str(output), "sha256": hashlib.sha256(output.read_bytes()).hexdigest()}}
+               "manifest": {"path": str(output), "sha256": hashlib.sha256(output.read_bytes()).hexdigest()}}
     result.parent.mkdir(parents=True, exist_ok=True)
     with result.open("x") as stream:
         json.dump(payload, stream, indent=2)
