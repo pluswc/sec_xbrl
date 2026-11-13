@@ -1,8 +1,13 @@
-# 기존 자료를 보존한 Nasdaq 준비 회사군 운영 연결
+# 기존 자료를 보존한 Nasdaq 지원 92개사 운영 연결 — LIVE
 
-2026-11-13 현재 구성 목표는 **92개사(기존50+완료24+추가18)**다. 아래74개사는
-최초 승인 범위의 기록이다. 추가18의 native 통합/projection 완료를 리드가 확인했고,
-새92 구성은 아직 union 발행·운영 완료를 뜻하지 않는다.
+2026-11-14(KST) **92개사(기존50+신규42) 로컬 인수·운영 적용 완료**다.
+UI `e0c72852f0`/backend `0634eb50fa`, 18765(PID48788)→19072이며 기존19070은
+rollback용으로 유지한다. 재무 기준일2026-10-25, 실제 준비 확인은
+2026-11-13T14:49:22.469771Z다. 최종 실제 smoke는2026-11-13T15:06:32Z에
+92개사·Phase2 이력 필터·JS 오류 없음을 확인했다. 개인 기록은 보존했고 WDC의
+최신 발행 범위 밖 분기/TTM 및 나머지23개 추가 대상은 명시적으로 보류한다.
+이 확장의 main 병합은 **NOT_MERGED**다. 아래74 승인·후보·중단은 당시 기록이며,
+최종 인수 근거는 문서 말미에 구분한다.
 
 ## 승인 계약 (2026-11-13)
 
@@ -169,3 +174,39 @@ CSS는 해당 운영 자산과 byte 동일하며, JS는 기존 owner/최신 미�
 유지한다. backend0634·교정 재무 발행물·private 저장/재열기/CSV 검증은 재사용하고
 재시작·재계산하지 않는다. Phase2 8개·owner 4개·display 5개 검사와 JS syntax·diff
 검사를 통과했다. 새 표시 자산의 독립 검증·preview와 운영 전환은 별도다.
+
+## 2026-11-14(KST) 실제 운영 인수
+
+리드는 독립 검증된 UI `e0c72852f01ea47ed452982de548d9ff99db720b`와 backend
+`0634eb50fa22b3635a59ad5067f2930c93b090a6`의 Python 동일성을 확인하고,
+Phase2를 보존한 18765(PID48788)→19072(PID1347405/start54415707) 연결을 수락했다.
+기존19070은 rollback용으로 유지한다. 이 확장의 main 병합은 **NOT_MERGED**다.
+
+교정 발행물은 `universe-expanded-supported-92-corrected-20261025`, publication
+`screening-cohort-union-d2758cfe339736fa18366711`, manifest SHA
+`b6e8c28d0025ff3abbbadcaeaf26a5f69db11755c3be169ab8c7c01c01c93b31`다.
+재무 기준일은2026-10-25이며, 최신 기간 조회 성공 후 실제 준비 확인을
+2026-11-13T14:49:22.469771Z에 새로 등록했다. 앞선 부정확한 후보와13:16 등록은
+역사 자료로 보존하고 활성화하지 않았다.
+
+39개 분기 분석을 정정하고 ADP/LITE/PANW 세 분석은 재사용했다. 연간72개 파일은
+byte 동일하며 Raw·History·연간 분석·quality 및 완료한 깊은 감사를 반복하지 않았다.
+실제39개 최신 기간 일치, ABNB2026Q2 매출3,608,000,000 USD와 WDC 최신 분기/TTM
+명시적 미준비·고정 분기 유지, 기존 여섯 catalog/보조자료를 확인했다. Private 복제본의
+교정 발행물 저장·재열기·CSV는 통과했고 이전 휴지통 복원 증거는 재사용했다.
+동시 적용된 Phase2의 지표/이력 필터·92개사/ABNB/WDC 화면은 오류 없이 확인했다.
+개인 journal hash `3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`와
+기존 이력 응답을 보존했다. Private19071은 소유권 확인 후 종료했다.
+
+92개사 안에서도 준비되지 않은 지표·신규 기업의 보조자료는 미준비로 표시한다.
+WDC는 포함되지만 기존8분기 발행 범위 밖 최신 기간은 보류한다. 별도23개 추가 대상
+(APP/TER/CRWD와 그 미발행 동료, partial7, ISRG, AEP/PLTR/RKLB)은 기존 보류를
+유지하며, 전체115 완료를 주장하지 않는다.
+
+운영 근거는 `work/nasdaq100-expansion-20261111/operating92-corrected-b13fc5/`의
+`union-publication.json`, `batch-registration.json`, `private-uat-acceptance.json`,
+`live-backend-ready.json`, `private-backend-final-stop.json`과 Windows
+`nasdaq-operating-20261113/quarter-corrected/phase2-integrated/live-switch.json`이다.
+최종 smoke(2026-11-13T15:06:32Z)와 backend PID/start 및 보호 파일5개·개인 journal
+보존은 같은 운영 근거 폴더의 `root-final-preservation.json`으로 확인했다.
+독립/로컬 수락·운영 연결·향후 main/CI 상태는 별개로 유지한다.
