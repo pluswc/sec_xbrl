@@ -1,7 +1,10 @@
 # Investor financial workbench interface system
 
-Current implementation baseline: accepted financial/screening workbench, revenue completeness,
-and compact captions at `d5324d381b`. Desktop-first phase 1 is the approved next display slice.
+Current locally accepted phase 1 source: `d19638fae378a4ef91764d4e291bf0ed3b33958f`
+(2026-11-13), preserving the accepted financial/screening workbench, revenue completeness
+and compact captions. Independent Node 108/Ruff and lead live-browser acceptance passed.
+The effective CSS viewport checks below are complete; actual browser zoom was not verified.
+Remote push/PR/CI/main incorporation for this phase has not been performed.
 The source dataset determines company/metric counts; examples such as 21 or 50 companies are
 fixtures and never the supported-company boundary.
 
