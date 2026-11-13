@@ -1,11 +1,11 @@
 # Investor financial workbench interface system
 
-Current locally accepted phase 1 source: `d19638fae378a4ef91764d4e291bf0ed3b33958f`
-(2026-11-13), preserving the accepted financial/screening workbench, revenue completeness
-and compact captions. Independent Node 108/Ruff and lead live-browser acceptance passed.
-The effective CSS viewport checks below are complete; actual browser zoom was not verified.
-Phase 1 is merged in main `0a89d5cf` through PR91; CI run 43427104449 passed.
-Phase 2 is implemented on its separate branch; independent verification and local acceptance are pending.
+Current locally accepted phase 2 source: `745bc76e3a4721de8d7734eb534ac0afc7cba212`
+(2026-11-13). Independent Node 116/Ruff/diff and lead exact-bundle preview/live-browser
+acceptance passed. The effective CSS viewport checks below are complete; actual browser zoom
+was not verified. Phase 1 is merged in main `0a89d5cf` through PR91 (CI 43427104449 passed).
+Phase 2 is locally accepted and operating on its separate branch; push/PR/CI/main incorporation
+have not been performed.
 The source dataset determines company/metric counts; examples such as 21 or 50 companies are
 fixtures and never the supported-company boundary.
 
@@ -104,6 +104,11 @@ and adjacent screening review described below. Further repeated-action redesign 
   consumes them without source parsing, recast selection, arithmetic or fabricated gap filling.
 
 
-## Desktop phase 2 — approved implementation, acceptance pending (2026-11-13)
+## Desktop phase 2 — locally accepted (2026-11-13)
 
 Phase 1 is incorporated through PR91 in main `0a89d5cf`; CI run 43427104449 passed. Phase 2 retains paper/ink/slate/annotation blue/review amber, 14px reading text, native controls and the 4px spacing scale. The guide uses a bounded annual metric list beside one selected detail; empty search hides detail without losing scoped input drafts. History uses adjacent ledger rows, explicit visible-scope search/type filters and original timestamps/IDs in accessible details. At wide desktop widths screening conditions sit beside their last result, with explicit draft-versus-executed state; smaller widths stack. No accounting, storage or source-data policy changes.
+
+All tabs were audited; guide/history/screening were selected for this phase, while the existing
+explorer/profile/comparison/revenue workspaces were preserved and regression-tested. Shared
+cross-tab scroll memory and further saved-result comparison layout cleanup remain unimplemented,
+lower-priority candidates, not automatically authorized follow-up work.

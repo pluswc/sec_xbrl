@@ -2,7 +2,10 @@
 
 2026-11-13 [데스크톱 2차 전체 탭 작업면](../implementation/desktop-first-phase2-20261113.md)은
 지표 안내의 목록/선택 상세, 이력 조회 필터와 원장, 스크리닝 조건/결과 인접
-배치를 다룬다. 구현 승인, 검증·인수·운영은 대기다. 1차 PR91은 main
+배치를 구현했다. 소스 `745bc76e3a` 독립 Node 116/Ruff/diff와 리드 exact-bundle
+실제 브라우저가 PASS하여 2026-11-13 LOCALLY_ACCEPTED·운영 반영됐다.
+2차 push/PR/CI/main 병합은 미수행이다. 전탭 감사 중 이번 세 영역을 우선했고
+공통 탭 스크롤 기억·저장 결과 비교 추가 정리는 미구현 후보다. 1차 PR91은 main
 `0a89d5cfda`에 병합됐고 [CI 43427104449](https://github.com/pluswc/sec_xbrl/actions/runs/43427104449)는
 통과했다. 아래 1차 전달 당시의 미병합/진행 중 문구는 당시 기록이다.
 
