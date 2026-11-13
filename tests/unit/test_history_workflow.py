@@ -930,3 +930,128 @@ def test_coverage_repair_preserves_real_cells_and_rejects_plan_mismatch(tmp_path
     history._write_json(intake_path, wrong)
     with pytest.raises(ValueError, match="disagrees"):
         history.repair_history_coverage(publication=root, destination=tmp_path / "rejected")
+
+
+def test_successful_history_spill_cleanup_removes_only_the_empty_shared_root(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    chunks = staging / ".chunks"
+    chunks.mkdir(parents=True)
+    table = staging / "reported.parquet"
+    table.write_bytes(b"immutable output")
+    history._remove_empty_history_spill_root(staging)
+    assert not chunks.exists()
+    assert table.read_bytes() == b"immutable output"
+    history._remove_empty_history_spill_root(staging)
+    assert table.read_bytes() == b"immutable output"
+
+
+def test_history_spill_cleanup_retains_nonempty_failure_diagnostics(tmp_path: Path) -> None:
+    chunks = tmp_path / ".chunks"
+    chunks.mkdir()
+    diagnostic = chunks / "failed.sqlite"
+    diagnostic.write_bytes(b"failure evidence")
+    with pytest.raises(OSError):
+        history._remove_empty_history_spill_root(tmp_path)
+    assert diagnostic.read_bytes() == b"failure evidence"
+
+
+@pytest.mark.parametrize("broken", [False, True])
+def test_history_spill_cleanup_rejects_alias_and_preserves_target(tmp_path: Path, broken: bool) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    target = tmp_path / "target"
+    if not broken:
+        target.mkdir()
+    (staging / ".chunks").symlink_to(target, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlink"):
+        history._remove_empty_history_spill_root(staging)
+    assert (staging / ".chunks").is_symlink()
+    assert target.exists() is (not broken)
+
+
+def test_history_spill_cleanup_honors_storage_guard(tmp_path: Path) -> None:
+    chunks = tmp_path / ".chunks"
+    chunks.mkdir()
+
+    def reject(path):
+        assert path == chunks
+        raise RuntimeError("storage guard rejected")
+
+    token = history._HISTORY_STORAGE_GUARD.set(reject)
+    try:
+        with pytest.raises(RuntimeError, match="storage guard"):
+            history._remove_empty_history_spill_root(tmp_path)
+    finally:
+        history._HISTORY_STORAGE_GUARD.reset(token)
+    assert chunks.is_dir()
+
+
+def test_history_producer_removes_shared_spill_root_before_validation_and_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sec_xbrl import longitudinal
+    from sec_xbrl.analytics import history_quarters
+
+    intake_path, run, plan = _history_reuse_fixture(tmp_path)
+    plan["as_of_date"] = "2026-05-01"
+    intake = json.loads(intake_path.read_text())
+    intake["plan"] = plan
+    history._write_json(intake_path, intake)
+    output = tmp_path / "history" / "AAPL"
+    for name in ("t1", "t2", "t3", "t4"):
+        (output / name / "AAPL").mkdir(parents=True)
+    filing = plan["companies"][0]["filings"][0]
+    snapshot = SimpleNamespace(
+        input=SimpleNamespace(cik=filing["cik"], accession=filing["accession"]),
+        records=lambda _: (filing,),
+    )
+    release = SimpleNamespace(
+        layer2_run=run, snapshots=(snapshot,),
+        records=lambda _: ({**filing, "filing_id": "filing"},),
+    )
+    monkeypatch.setattr(
+        longitudinal, "CohortReleaseAdapter",
+        lambda: SimpleNamespace(load=lambda *args, **kwargs: release),
+    )
+    monkeypatch.setattr(
+        longitudinal, "Layer2PublicationReader",
+        lambda: SimpleNamespace(load=lambda _: SimpleNamespace(
+            identity={"layer2_run_fingerprint": run.fingerprint},
+        )),
+    )
+    monkeypatch.setattr(
+        history, "_partition_current_observations",
+        lambda _: ({(filing["cik"], 2026, 1, "QTD_3M"): []}, {}),
+    )
+    monkeypatch.setattr(history, "_company_ledgers", lambda _, ciks: {ciks[0]: ()})
+    from sec_xbrl.analytics import CompanyAnalysisPanelResult, FiscalTimeSeriesInput
+
+    def inputs(**kwargs):
+        panel = CompanyAnalysisPanelResult((), (), (), {
+            "cik": filing["cik"], "fiscal_year": 2026, "fiscal_quarter": 1,
+            "period_class": "QTD_3M", "selection_view": kwargs["view"],
+            "selection_as_of_date": plan["as_of_date"],
+        })
+        return iter((FiscalTimeSeriesInput(panel, "--12-31"),))
+
+    monkeypatch.setattr(history, "_iter_fiscal_time_series_inputs", inputs)
+    validated = []
+
+    def reader(root, **kwargs):
+        def validate(**kwargs):
+            assert not (root / ".chunks").exists()
+            manifest = json.loads((root / "history_manifest.json").read_text())
+            assert len(manifest["tables"]) == 2
+            validated.append(root)
+        return SimpleNamespace(validate=validate)
+
+    def publish(**kwargs):
+        reported = kwargs["publication"]
+        assert validated and not (reported / ".chunks").exists()
+        assert reported == output / "reported-panels"
+        return output / "panels"
+
+    monkeypatch.setattr(history, "HistoryPublicationReader", reader)
+    monkeypatch.setattr(history_quarters, "publish_quarter_history", publish)
+    assert history.build_history(intake_manifest=intake_path, output_root=output) == output / "panels"
+    assert validated

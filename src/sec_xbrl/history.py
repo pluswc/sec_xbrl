@@ -725,6 +725,7 @@ def build_history(*, intake_manifest: Path, output_root: Path,
                 print(json.dumps({"stage": "PANEL_WRITTEN", "ticker": ticker, "view": view,
                                   "period_class": period_class, "rows": counts["rows"],
                                   "cells": counts["cells"]}), flush=True)
+    _remove_empty_history_spill_root(staging)
     manifest = {"version": HISTORY_VERSION, "plan": plan, "views": views, "tables": tables,
                 "source_intake": str(intake_manifest.absolute()),
                 "operational_roots": {key: str(path.absolute()) for key, path in roots.items()},
@@ -1810,6 +1811,15 @@ def _check_history_storage(path: Path | None = None) -> None:
     guard = _HISTORY_STORAGE_GUARD.get()
     if guard is not None:
         guard(path)
+
+
+def _remove_empty_history_spill_root(staging: Path) -> None:
+    """Finish successful table staging without discarding failed spill diagnostics."""
+    path = staging / ".chunks"
+    if path.exists() or path.is_symlink():
+        _check_history_storage(path)
+        _reject_symlink_components(path)
+        path.rmdir()
 
 
 def _remove_history_tree(path: Path) -> None:

@@ -190,7 +190,7 @@ def test_recovery_preserves_failed_bytes_and_matches_fresh_quarter_publication(t
     assert receipt["generation_source_identity"] != receipt["recovery_source_identity"]
 
 
-@pytest.mark.parametrize("fault", ["attestation", "manifest", "intake", "schema", "inventory", "log", "extra", "missing", "quarter", "copy"])
+@pytest.mark.parametrize("fault", ["attestation", "manifest", "intake", "schema", "inventory", "log", "extra", "extra_dir", "missing", "quarter", "copy"])
 def test_recovery_fails_closed_preserves_source_and_retains_failed_transaction(tmp_path, monkeypatch, fault):
     kwargs, proof = _recovery_fixture(tmp_path, monkeypatch)
     if fault == "attestation":
@@ -208,6 +208,8 @@ def test_recovery_fails_closed_preserves_source_and_retains_failed_transaction(t
         proof["source_execution_log"]["sha256"] = history._sha256_file(Path(proof["source_execution_log"]["path"]))
     elif fault == "extra":
         (kwargs["staged_publication"] / "unexpected").write_text("extra")
+    elif fault == "extra_dir":
+        (kwargs["staged_publication"] / ".chunks").mkdir()
     elif fault == "missing":
         (kwargs["staged_publication"] / proof["tables"][0]["files"]["cells"]["path"]).unlink()
     elif fault == "quarter":
