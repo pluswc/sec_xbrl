@@ -7,17 +7,18 @@ const test=require("node:test");
 const source=fs.readFileSync(path.resolve(__dirname,"../../examples/screening/display-assets/app.js"),"utf8");
 function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no});return{promise,resolve,reject}}
 function harness(respond=()=>({})){
-  const nodes=new Map(),buttons=[],timers=new Map(),calls=[],focus=[];let sequence=0,choices=[],chips=[];
+  const nodes=new Map(),buttons=[],timers=new Map(),calls=[],focus=[];let sequence=0,choices=[],chips=[],companyChips=[];
   const make=(selector="")=>({value:"",hidden:false,disabled:false,options:[],dataset:{},scrollTop:0,scrollLeft:0,style:{setProperty(){}},classList:{add(){},remove(){},toggle(){}},
     setAttribute(){},replaceChildren(){this.innerHTML="";this.textContent=""},scrollIntoView(){},getBoundingClientRect(){return{top:300}},insertAdjacentHTML(){},
     closest(){return{classList:{toggle(){}}}},focus(options){focus.push({selector,options})},
     get innerHTML(){return this.html||""},set innerHTML(html){this.html=html;
       if(selector==="#comparison-metric-choices")choices=[...html.matchAll(/data-comparison-metric="([^"]+)"/g)].map(match=>({...make(),dataset:{comparisonMetric:match[1]}}));
+      if(selector==="#comparison-company-chips")companyChips=[...html.matchAll(/data-comparison-remove-company="([^"]+)"/g)].map(match=>({...make(`company-chip:${match[1]}`),dataset:{comparisonRemoveCompany:match[1]}}));
       if(selector==="#comparison-metric-chips")chips=[...html.matchAll(/data-remove-comparison-metric="([^"]+)"/g)].map(match=>({...make(`chip:${match[1]}`),dataset:{removeComparisonMetric:match[1]}}));
     }});
   const get=selector=>{if(!nodes.has(selector))nodes.set(selector,make(selector));return nodes.get(selector)};
   const window={scrollY:80,addEventListener(){},scrollTo(value){this.scrollY=value.top}};
-  const context=vm.createContext({URLSearchParams,location:{search:""},window,Node:{TEXT_NODE:3},document:{querySelector:get,querySelectorAll:selector=>selector==="[data-profile-cik]"?buttons:selector==="[data-comparison-metric]"?choices:selector==="[data-remove-comparison-metric]"?chips:[]},
+  const context=vm.createContext({URLSearchParams,location:{search:""},window,Node:{TEXT_NODE:3},document:{querySelector:get,querySelectorAll:selector=>selector==="[data-profile-cik]"?buttons:selector==="[data-comparison-metric]"?choices:selector==="[data-remove-comparison-metric]"?chips:selector==="[data-comparison-remove-company]"?companyChips:[]},
     setTimeout:fn=>{timers.set(++sequence,fn);return sequence},clearTimeout:id=>timers.delete(id),fetch:async url=>{calls.push(url);const value=await respond(url);return{ok:true,json:async()=>value}}});
   vm.runInContext(source.slice(0,source.indexOf("async function boot()")),context);
   const api=vm.runInContext('({S,desktop:desktopExplorer,picker:comparisonPicker,basis:explorerBasis,enter:enterExplorerAnalysis,back:backToExplorerList,close:closeProfile,closeComparison:closeExplorerComparison,companies:desktopExplorerCompanies,navigate:switchAnalysisCompany,options:comparisonMetricOptions,filter:filteredComparisonMetrics,renderPicker:renderComparisonMetricPicker,setMetric:setComparisonMetric,queue:queueComparisonRefresh,caption:financialMetricCaption,fiscal:profileFiscalPrefix})',context);
@@ -115,4 +116,20 @@ test("an active annual company failure is visible and restores the selector to t
   assert.equal(h.S.profile.company.cik,"M");assert.equal(h.get("#analysis-company").value,"M");
   assert.equal(h.get("#analysis-status").hidden,false);assert.match(h.get("#analysis-status").textContent,/현재 표시한 기업.*current request failed/);
   assert.equal(h.desktop.mode,"PROFILE");
+});
+
+
+test("removing a comparison company restores adjacent live chip focus while two-to-one keeps the list fallback",()=>{
+  const h=harness();h.picker.mounted=true;h.desktop.mode="COMPARE";h.get("#comparison-panel").hidden=false;
+  h.S.explorerSelected.add("Z");h.S.explorerSelected.add("4");
+  vm.runInContext("mountCompanyTrend=()=>{}",h.context);h.renderPicker();
+  const chips=()=>vm.runInContext('document.querySelectorAll("[data-comparison-remove-company]")',h.context);
+  chips()[1].onclick(); // 4→3, next company replaces the removed chip.
+  assert.equal(h.S.explorerSelected.size,3);assert.equal(h.get("#comparison-panel").hidden,false);
+  assert.equal(h.focus.at(-1).selector,"company-chip:Z");assert.equal(h.focus.at(-1).options.preventScroll,true);
+  chips()[2].onclick(); // 3→2, last removal returns to the preceding chip.
+  assert.equal(h.S.explorerSelected.size,2);assert.equal(h.focus.at(-1).selector,"company-chip:Z");
+  chips()[1].onclick(); // 2→1 closes comparison; do not override its visible list fallback.
+  assert.equal(h.S.explorerSelected.size,1);assert.equal(h.get("#comparison-panel").hidden,true);
+  assert.equal(h.focus.at(-1).selector,"#explorer-query");
 });

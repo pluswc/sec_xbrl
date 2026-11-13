@@ -506,7 +506,13 @@ function renderComparisonMetricPicker(){
     (remaining[Math.min(index,remaining.length-1)]||$("#comparison-metric-picker summary"))?.focus({preventScroll:true});
   });
   $("#comparison-company-chips").innerHTML=[...S.explorerSelected].map(cik=>{const company=explorerSelectedCompany(cik);return `<button type="button" class="quiet" data-comparison-remove-company="${esc(cik)}" aria-label="${esc(company.ticker||company.name)} 비교에서 제외">${esc(company.ticker||company.name)} ×</button>`}).join("");
-  $$('[data-comparison-remove-company]').forEach(button=>button.onclick=()=>transitionExplorerSelection("remove",button.dataset.comparisonRemoveCompany,false,null,button));
+  $$('[data-comparison-remove-company]').forEach((button,index)=>button.onclick=()=>{
+    transitionExplorerSelection("remove",button.dataset.comparisonRemoveCompany,false,null,button);
+    if(!$("#comparison-panel").hidden){
+      const remaining=$$('[data-comparison-remove-company]');
+      (remaining[Math.min(index,remaining.length-1)]||$("#close-comparison"))?.focus({preventScroll:true});
+    }
+  });
 }
 function arrangeComparisonAnalysis(){
   if(!comparisonPicker.mounted)return;

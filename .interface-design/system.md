@@ -24,6 +24,21 @@ redesign and repeated actions are not implemented by this system update.
 - Native controls and visible focus: buttons, selects, checkboxes and details. Keep keyboard
   order equal to visual order, Escape handling local to active explanations before closing views.
 
+## Desktop viewport and density targets
+
+- Primary design viewport: **1920×1080**. Required smaller desktop: **1440×900**.
+  Expanded desktop: **2560×1440**. The default first financial level/change pair should
+  finish inside the primary and required desktop viewport before optional evidence is opened.
+- Target four financial cards at 1920, three at 1440 when container width permits, and a
+  maximum of four at 2560; retain minimum readable charts rather than stretching typography.
+- Standard controls target about **40px** height. Ordinary list rows target **44–48px**, with
+  more height when names, actual periods or meaningful status require wrapping. These are design
+  targets, not a claim that every measured row is 44px; compact mode changes padding only.
+- Check layouts corresponding to **125%/150%** scaling: effective CSS viewports such as
+  1536×864 / 1280×720 from 1920×1080, and 1152×720 / 960×600 from 1440×900.
+  Equivalent CSS viewport checks validate layout availability, not actual browser zoom;
+  report actual zoom verification separately. Retain the 390px basic-function fallback.
+
 ## Explorer and analysis
 
 - Company explorer is the default task. Company count, prepared periods and available metrics

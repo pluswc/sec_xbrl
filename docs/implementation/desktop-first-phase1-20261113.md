@@ -51,12 +51,13 @@ backend·artifact·계산·저장 기록·main·원격·운영 프로세스는 �
 | 로컬 인수·운영 | 대기 |
 | 원격 PR·CI·main | 미수행 |
 
-작성자 검사: 전체 `node --test tests/screening/*.test.cjs` 107개 및
-`ruff check .` 통과. 새 7개 행동 검사는 원래 목록 trigger/수직·수평 scroll·검색/
+작성자 검사: 전체 `node --test tests/screening/*.test.cjs` 108개 및
+`ruff check .` 통과. 새 8개 행동 검사는 원래 목록 trigger/수직·수평 scroll·검색/
 정렬·CIK 보존과 fallback, filtered/sorted 기업 순서와 늦은 실패 차단, 비교
 검색/카테고리의 선택 불변·닫힌 picker chip 삭제 후 보이는 포커스, 0개 선택/
 닫힌 화면의 오래된 성공·실패 차단, debounce/즉시 token 무효화·기업 수 경계,
-동일 회사 FY 중복/표시 alias와 활성 기업 전환 실패의 선택기 복원을 확인한다.
+동일 회사 FY 중복/표시 alias, 활성 기업 전환 실패의 선택기 복원과 비교 기업
+칩 삭제 뒤 인접한 보이는 포커스를 확인한다.
 현재 요청의 실패는 분석 바에 설명하고 기존 표시 기업 자료를 유지하며, 이전
 요청의 실패는 현재 화면을 덮지 않는다. root의 실제 브라우저·확대 대응 측정과
 독립 검증·운영 인수는 별도로 기록한다.
