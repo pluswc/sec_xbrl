@@ -213,11 +213,30 @@ def _work(config: dict, ticker: str, stage: str) -> tuple[list[Path], dict]:
         return [Path(marker["history_manifest"])], {"availability": "UNAVAILABLE_NO_ANNUAL_BASELINE"}
     if destination.exists():
         raise ValueError("unreceipted analysis destination exists; retain it for explicit recovery")
+    quarter_window = {}
+    if not annual:
+        import polars as pl
+
+        from tools.nasdaq100_quarter_window import quarter_bounds
+
+        history_path = _pin({"path": marker["history_manifest"], "sha256": marker["history_manifest_sha256"]})
+        if history_path.parent != publication:
+            raise ValueError("quarter window History differs from accepted build parent")
+        tables = [table for table in _json(history_path)["tables"]
+                  if table["ticker"] == ticker and table["cik"] == company["cik"]
+                  and table["period_class"] == "QTD_3M" and table["view"] == "LATEST_REPORTED"]
+        if len(tables) != 1:
+            raise ValueError("quarter window requires one exact company QTD header table")
+        declaration = tables[0]["files"]["columns"]
+        header = contained_file(publication, declaration["path"], "quarter window headers")
+        _pin({"path": str(header), "sha256": declaration["sha256"]})
+        start, end = quarter_bounds(pl.read_parquet(header).to_dicts())
+        quarter_window = {"fiscal_start": start, "fiscal_end": end}
     analysis.prepare_analysis(
         publication=publication, destination=destination, tickers=(ticker,), fiscal_years=5,
         configuration={ticker: {"core_rows": expanded_analysis_profile()}} if annual else None,
         period_mode="ANNUAL" if annual else "QUARTERLY", include_year_end_balances=annual,
-        include_quarter_source_evidence=not annual,
+        include_quarter_source_evidence=not annual, **quarter_window,
     )
     return [destination / "analysis_manifest.json"], extra
 

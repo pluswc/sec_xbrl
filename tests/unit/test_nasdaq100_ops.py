@@ -99,3 +99,35 @@ def test_cleanup_only_accepted_new_intake_scratch_and_preserves_raw(tmp_path):
     assert len(result["removed"]) == 1 and not accepted.exists() and failed.exists()
     assert manifest.read_bytes() == before
     assert ops._accepted_scratch({"run_root": str(tmp_path / "run")}, "NEW")["removed"] == []
+
+
+def test_default_quarter_uses_current_qtd_year_without_changing_annual_scope(tmp_path, monkeypatch):
+    import polars as pl
+
+    path, config = _config(tmp_path, monkeypatch)
+    company_root = Path(config["run_root"]) / "companies/NEW"
+    history = tmp_path / "prepared-history"
+    history.mkdir()
+    headers = history / "columns.parquet"
+    pl.DataFrame({"fiscal_year": list(range(2021, 2027)), "period_class": ["QTD_3M"] * 6,
+                  "column_status": ["AVAILABLE"] * 6}).write_parquet(headers)
+    history_pin = _write(history / "history_manifest.json", {"tables": [{
+        "ticker": "NEW", "cik": "0000000001", "period_class": "QTD_3M", "view": "LATEST_REPORTED",
+        "files": {"columns": {"path": headers.name, "sha256": sha256_file(headers)}}}]})
+    _write(company_root / "build_manifest.json", {"publication": str(history),
+        "history_manifest": history_pin["path"], "history_manifest_sha256": history_pin["sha256"]})
+    _write(company_root / "plan.json", {"companies": [{"filings": [{"form": "10-K"}]}]})
+    calls = []
+    monkeypatch.setattr(ops.analysis, "prepare_analysis", lambda **kwargs: calls.append(kwargs))
+    ops._work(config, "NEW", "quarterly")
+    ops._work(config, "NEW", "annual")
+    quarterly, annual = calls
+    assert (quarterly["fiscal_start"], quarterly["fiscal_end"]) == (2022, 2026)
+    assert quarterly["configuration"] is None and quarterly["include_quarter_source_evidence"] is True
+    assert "fiscal_start" not in annual and "fiscal_end" not in annual
+    assert annual["fiscal_years"] == 5 and annual["configuration"] is not None
+    assert annual["period_mode"] == "ANNUAL" and annual["include_year_end_balances"] is True
+    headers.write_bytes(b"changed")
+    with pytest.raises(ValueError, match="differs from pin"):
+        ops._work(config, "NEW", "quarterly")
+    assert len(calls) == 2
