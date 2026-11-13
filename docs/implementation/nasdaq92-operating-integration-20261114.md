@@ -1,5 +1,12 @@
 # Nasdaq92 운영 패치의 main 통합
 
+2026-11-14 원격 전달: 리드가 head `809735272f`를 push하여
+[PR #94](https://github.com/pluswc/sec_xbrl/pull/94)를 열었다. PR은 OPEN·main 미병합이며
+기록 시점 CI는 대기/진행 중이다([run 43453379537](https://github.com/pluswc/sec_xbrl/actions/runs/43453379537)).
+최종 원격 근거는 [PR94 최신 head checks](https://github.com/pluswc/sec_xbrl/pull/94/checks)다.
+아래 push·PR 미수행 문구는 각 인수/전달 당시 기록이며 CI 성공이나 main 병합을
+소급 주장하지 않는다.
+
 2026-11-14 사용자 승인. 기준 main `cdb8f64b837eab1c6373311bbe9d92fd168598e6`,
 운영 원본 `6ea4203b8d`를 비교한 별도 branch `codex/nasdaq92-operating-integration`에서
 단일 writer가 최소 제품 차이를 통합한다. 지정 구현 모델 unavailable에 대한

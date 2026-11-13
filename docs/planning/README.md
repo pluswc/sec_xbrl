@@ -1,5 +1,12 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 원격 전달: 리드가 head `809735272f`를 push하여
+[PR #94](https://github.com/pluswc/sec_xbrl/pull/94)를 열었다. PR은 OPEN·main 미병합이며
+기록 시점 CI는 대기/진행 중이다([run 43453379537](https://github.com/pluswc/sec_xbrl/actions/runs/43453379537)).
+최종 원격 근거는 [PR94 최신 head checks](https://github.com/pluswc/sec_xbrl/pull/94/checks)다.
+아래 push·PR 미수행 문구는 각 인수/전달 당시 기록이며 CI 성공이나 main 병합을
+소급 주장하지 않는다.
+
 2026-11-14 [Nasdaq92 운영 패치 통합](../implementation/nasdaq92-operating-integration-20261114.md)은
 main `cdb8f64`와 수락 운영 소스 `6ea4203b8d`의 제품 차이만 별도 branch에 통합한다.
 제품 `914cfe8a9e`/문서 포함 `41dbd01668`에서 별도 독립 Node122·Python12·Ruff·diff
