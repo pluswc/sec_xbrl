@@ -124,6 +124,10 @@ push·PR·CI·main 병합은 미수행이다.
 50개 회사·73개 정의 artifact는 독립 검증 및 리드 로컬 인수를 통과했고
 18765에 적용했다. 원격 push·PR·CI·main 병합은 미수행이다.
 
+2026-11-11 [Nasdaq100 후보 확장 계약](../implementation/nasdaq100-expansion-20261111.md)은
+관찰 목록과 SEC 공시 지원 확인, 기존 자료 재사용 및 자원 한도가 있는
+순차 준비를 정의한다. 실제 지원·보류, 발행과 운영 인수는 별도로 기록한다.
+
 2026-11-10 [저장 공간 정리 인수 기록](../implementation/storage-retention-cleanup-20261110.md)은
 승인된 MRK 감사 DB와 압축 해제 디렉터리 1,109개의 정리 완료, 보존·복원
 근거 및 Git 생성물 제외 범위를 기록한다. 이 문서·제외 규칙의 PR·CI·main
