@@ -1,31 +1,85 @@
-# Investor screening worksheet interface system
+# Investor financial workbench interface system
 
-- Direction: a calm investor screening worksheet. The company result matrix is the focal surface; technical provenance stays in the governed backend and explicit admin mode.
-- Domain signature: grouped investment criteria become financial columns, then continue into company detail and append-only judgment history.
-- Palette: ledger ivory canvas, filing-paper surface, ink charcoal text, filing-table slate, annotation blue, review amber, and blocking red. Color communicates state or action only.
-- Depth: borders and small surface shifts. Inputs are inset; the evidence drawer is the sole elevated overlay.
-- Spacing: 4px base. Use 8px within controls, 12px for dense groups, and 16px between sections.
-- Type: local Korean UI font with fallbacks; 11px metadata, 14px body, 18px section title, 24px page title. Use weight and muted color before adding size.
-- Navigation: a narrow screener, company-results, and watchlist/history rail on wide screens; a horizontal strip at compact desktop width.
-- Buttons: primary blue for commit/run actions; transparent bordered buttons for secondary actions. Native button semantics and a 3px focus outline.
-- Tables: sticky 11px headers, 9px by 12px cells, tabular numbers, blue selected-row tint. Company names open evidence; checkboxes select export scope.
-- Status: every state includes text. Amber means review/undetermined, red means failure/block, green means pass. Raw codes belong in expandable technical details where possible.
-- Evidence drawer: up to 570px wide, focus-trapped, Escape closes and returns focus. It shows one predicate metric at a time, with actual source dates and raw annual levels.
-- Criteria: expanded for new-condition editing, then reversibly compacted after a run opens or executes so the result matrix owns the viewport.
-- Data labels: money uses one million-dollar unit cue per criteria group or metric heading. Percent and ratio headings carry `%`. Exact values, IDs, hashes, parser metadata, and diagnostic codes stay out of ordinary mode.
-- Criteria catalog: searchable and grouped as growth, profitability, cash flow, financial stability, and reported items. Definition versions and scaling come from the dataset catalog; the browser never calculates financial metrics.
-- Administration: collector inventory and unprepared candidates mount only under `?mode=admin`, never in the ordinary investor document.
+Current implementation baseline: accepted financial/screening workbench, revenue completeness,
+and compact captions at `d5324d381b`. Desktop-first phase 1 is the approved next display slice.
+The source dataset determines company/metric counts; examples such as 21 or 50 companies are
+fixtures and never the supported-company boundary.
 
-## R2 company explorer addendum — 2026-10-09
+## Direction and hierarchy
 
-- Default task: company explorer. It opens with the prepared 21-company matrix and common eight metrics before a condition or run exists. The metric guide is a separate task view so it does not form a long stack above screening results.
-- Navigation: `기업 둘러보기 / 지표 안내 / 스크리닝 / 이력`. Historical-run context may change screening only; explorer and guide retain the latest verified v2 dataset and their own selected fiscal year.
-- Fiscal-year context: use the latest year common to every company when one exists. Show every published year with coverage, preserve all company rows for a partial year, and say `선택 연도 자료 없음` rather than substituting another year.
-- Profile: the drawer can open directly from the company matrix. Common eight summaries lead, 31 grouped values follow, and a selected metric shows four published fiscal years as a table plus modest SVG geometry. A missing year breaks the line.
-- Compare: two to four selected companies, one to 31 existing metrics, and each company’s actual period. There is no average, score, rank, or peer-equivalence cue.
-- Compact widths: keep the company matrix as the horizontally scrollable focal surface. Controls become two columns at 1,024px and one column at 760px; task sections do not stack simultaneously.
-- Period captions: prepared API dates remain canonical exclusive-end dates. Ordinary captions subtract one UTC day for an inclusive display end and call it the filing financial period; the technical convention stays in tracked usage and admin material.
-- Matrix density: the eight default metrics fit at 1,440px with short column aliases and one unit cue per heading. Missing cells use a dash plus accessible title instead of repeating the full reason; detail keeps the reason.
-- Guide actions: metric names carry the card hierarchy; source badges are quiet 11px metadata. `조건에 추가` is a bordered secondary draft action, while blue primary actions remain explicit save/run commits.
-- Trend chart: contain the SVG inside its panel at 1,440/1,024/768px, label every fiscal year and value/unit, and label missing years without drawing a zero or bridging a gap.
-- Reference patterns checked 2026-10-09: [Koyfin functionality](https://www.koyfin.com/help/topic/functionality/) for reusable column views and company history chart/table, [TradingView financial data](https://www.tradingview.com/support/solutions/43000543506-how-to-access-financial-data-on-tradingview/) for statement-group discovery, and [Finviz Screener](https://elite.finviz.com/help/screener) for dense financial column views. Only hierarchy and interaction patterns are used; no external assets, values, scores, or definitions are copied.
+A calm investor worksheet: use the company matrix to find candidates, then let a selected
+company's financial levels and prepared changes own the analysis screen. Preserve list state
+instead of building a second independent query. Use financial comparisons as the visual focus;
+technical provenance belongs in explicit evidence, never a substitute for missing/quality reasons.
+Phase 1 covers explorer/detail/comparison. The phase 2/3 proposals for guide/history/screening
+redesign and repeated actions are not implemented by this system update.
+
+- Palette: ledger ivory canvas, filing-paper panels, dark ink, filing slate, annotation blue,
+  review amber, blocking red. Color communicates state/action, with text and dash styles too.
+- Spacing: 4px base; 8px within controls, 12px between related blocks, 16px between sections.
+- Type: local Korean UI fonts; 14px table/body figures, 12–13px context, 11px minimum axis text,
+  18px section title and 24–36px task title. Density changes padding, not financial figure size.
+- Depth: quiet borders/surface shifts; rounded 8px controls and 12px panels. No repeated card
+  decoration for every financial value. A pinned chart explanation may overlay its own plot.
+- Native controls and visible focus: buttons, selects, checkboxes and details. Keep keyboard
+  order equal to visual order, Escape handling local to active explanations before closing views.
+
+## Explorer and analysis
+
+- Company explorer is the default task. Company count, prepared periods and available metrics
+  come from the selected immutable publication and availability context.
+- The list uses the remaining viewport, internal horizontal/vertical scrolling, sticky company/
+  selection columns, precise numeric sorting and missing-last behavior. Standard/compact row
+  density must retain 14px figures and full labels/periods through accessible descriptions.
+- Opening detail/comparison collapses the list into an analysis context with a nearby back action.
+  Returning restores query, preset, sort, basis/latest/fixed period, selection and both scroll axes.
+  Return focus uses the original list trigger with preventScroll, or a safe visible fallback.
+- Company navigation follows the current filtered/sorted list, with that scope stated. Async
+  success/error belongs only to the current company/basis/context and cannot reopen a closed view.
+- A narrow desktop task rail becomes a compact horizontal strip at small widths. Never hide
+  a required action at effective zoom widths or on the 390px fallback.
+
+## Financial detail and dates
+
+- Detail is a full-width inline analysis workspace, not the old fixed 570px company drawer.
+  Major summary values remain available in a default-collapsed native disclosure. Bounded
+  category ledgers retain all metrics and visible missing/quality explanations.
+- Financial boards use catalog groups plus core/custom selections, independent group order and
+  a maximum of eight selected metrics. Use 1/2/3/4 columns from actual container width, maximum
+  four at large desktop widths. Each card keeps level above a smaller prepared YoY/%p plot.
+- Money displays in million USD with zero decimals; PERCENT uses one decimal; RATIO uses its
+  declared multiples with appropriate existing precision. Tiny nonzero values use signed bounds,
+  not a false zero. Exact decimal values/units stay in native titles and evidence.
+- General dates use YY.MM.DD and ranges such as 24.09.29–25.09.27. True FY/company quarter labels
+  remain full. Full ISO captions remain in title/accessibility/evidence; state-bearing DOM/input
+  values stay canonical. Exclusive-end conversion and all accounting period policy stay upstream.
+- Deduplicate an FY label only when it repeats the same company's same prepared fiscal year.
+  Do not erase mixed company FY labels or turn TTM into a calendar-quarter financial period.
+
+## Comparison and chart interaction
+
+- Select two to four companies using the shared checkbox/chip registry. Metric comparison uses
+  search/category checkboxes and removable selected chips; the existing native select can remain
+  a hidden adapter. Search filters choices and never removes selected metrics.
+- Changes immediately invalidate old requests, then refresh prepared comparison data. Empty
+  metrics or invalid company counts need a visible explanation. No browser financial arithmetic,
+  derived ratio policy, scores, averages or claims of accounting equivalence.
+- Keep chart/table close on wide desktop and stack at narrow widths. Metric/units sit consistently
+  above plots and shared-period readouts below. Use FCF as an approved short display title with
+  its full catalog label available; source definitions never change with the alias.
+- Revenue supports prepared segment/product/geography views with exact full scope, mapping
+  epochs, hierarchy and missing reasons. Overlapping components do not form an inferred 100%.
+- Nearby legends retain full names via title/accessibility. Hover/focus links the item/period across
+  related plots, click/Enter/Space pins, arrows select periods, and Escape clears explanations.
+  Pin/focus survives resize and late responses within a valid scope; company/basis changes clear it.
+  Programmatic focus restoration must not reopen an explanation just cleared with Escape.
+
+## Screening, history and boundaries
+
+- Screening is a bounded native worksheet with precise editable thresholds, separate condition/
+  result saves, compact metadata groups and content-sized result columns. A changed draft must
+  not masquerade as the displayed prior result. Preview never implicitly saves a result.
+- History preserves definitions/revisions/runs/lifecycle records, explicit save/reopen/export and
+  reversible bulk/trash actions. Presentation state is ephemeral and not journal persistence.
+- Raw/Analytical/Derived data and exact publication ownership stay governed upstream. Display
+  consumes them without source parsing, recast selection, arithmetic or fabricated gap filling.
