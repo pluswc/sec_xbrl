@@ -316,7 +316,7 @@ def test_sec_english_duration_consumes_valid_ordered_whole_input(
 
 
 def test_metadata_transform_coverage_has_distinct_immutable_layer1_parser_version() -> None:
-    assert Layer1Extractor.parser_version == "m2-layer1-v6"
+    assert Layer1Extractor.parser_version == "m2-layer1-v7"
 
 
 @pytest.mark.parametrize(
@@ -628,3 +628,28 @@ def test_sec_word_duration_reference_compounds(source: str, expected: str) -> No
     from sec_xbrl.filing.sec_inline_transforms import _word_duration
 
     assert _word_duration(source) == expected
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    (("20", "PT20H"), ("1000", "PT1000H"), ("0", "PT0H"), ("-0", "PT0H"),
+     ("-20", "-PT20H"), ("20.99", "PT20H"), ("-20.99", "-PT20H"),
+     ("-.99", "PT0H"), (" +20. ", "PT20H"),
+     ("99999999999999999999999999999999999999.9", "PT99999999999999999999999999999999999999H")),
+)
+def test_sec_hour_duration_uses_whole_hours_only(source: str, expected: str) -> None:
+    from arelle import FunctionIxt
+
+    register_sec_inline_transforms()
+    with localcontext() as context:
+        context.prec = 2
+        assert FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["durhour"](source) == expected
+
+
+@pytest.mark.parametrize("source", ("", " ", "one", "NaN", "INF", "-Infinity", "1e3", "1,000", "2 hours", None))
+def test_sec_hour_duration_rejects_nondecimal_or_nonfinite_lexical(source: object) -> None:
+    from arelle import FunctionIxt
+
+    register_sec_inline_transforms()
+    with pytest.raises(ValueError, match="unsupported SEC hour duration"):
+        FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["durhour"](source)

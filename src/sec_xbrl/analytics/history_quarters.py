@@ -1910,7 +1910,13 @@ def derive_quarter(later: dict[str, Any], earlier: dict[str, Any], *, quarter: i
     """One reviewed additive difference; reject all incompatible scopes."""
     if quarter not in {2, 3, 4} or not approved_additive(later) or not approved_additive(earlier):
         return None
-    left, right = later["value_lineage"], earlier["value_lineage"]
+    return _derive_additive_difference(later["value_lineage"], earlier["value_lineage"], quarter=quarter)
+
+
+def _derive_additive_difference(
+    left: dict[str, Any], right: dict[str, Any], *, quarter: int, rule_version: str = QUARTER_RULE,
+) -> dict[str, Any] | None:
+    """Shared scope/date/arithmetic mechanism; callers must govern additivity."""
     expected = {2: ("YTD_6M", "QTD_3M"), 3: ("YTD_9M", "YTD_6M"), 4: ("FY", "YTD_9M")}[quarter]
     if (left.get("period_class"), right.get("period_class")) != expected or _scope(left) != _scope(right):
         return None
@@ -1934,8 +1940,8 @@ def derive_quarter(later: dict[str, Any], earlier: dict[str, Any], *, quarter: i
     except (ValueError, TypeError, KeyError, InvalidOperation):
         return None
     fact_ids = [left["selected_source_fact_id"], right["selected_source_fact_id"]]
-    metric_id = _id("derived", QUARTER_RULE, fact_ids, quarter, _scope(left))
-    return {"derived_metric_id": metric_id, "derivation_rule_version": QUARTER_RULE,
+    metric_id = _id("derived", rule_version, fact_ids, quarter, _scope(left))
+    return {"derived_metric_id": metric_id, "derivation_rule_version": rule_version,
             "formula": f"{expected[0]} - {expected[1]}", "fiscal_quarter": quarter,
             "value_numeric": str(amount), "context_start_date": str(start), "context_end_date": str(end),
             "period_class": "QTD_3M", "source_fact_ids": fact_ids,

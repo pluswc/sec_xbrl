@@ -74,3 +74,28 @@ test("growth bridge rejects tampered, malformed, oversized, and alias assets",t=
   fs.truncateSync(file,17*1024*1024);
   assert.throws(()=>bridge.loadFinancialGrowth(file,good),/bounded/);
 });
+
+test("v2 bridge serves catalog money and percentage-point values and keeps their semantics separate",t=>{
+  const {file,write}=temporary(t),payload=fixture();
+  payload.schema_version="screening-financial-growth-v2";
+  payload.rule_version="catalog-prepared-financial-comparison-v2";
+  payload.definitions={cash:{...defs.cfo,period_class:"INSTANT",unit_kind:"MONEY",comparison_kind:"YOY"},
+    current_ratio:{basis:"FY",period_class:"INSTANT",definition_version:"v1",unit_kind:"PERCENT",comparison_kind:"PERCENTAGE_POINT",
+      formulas:{change_pp:{unit:"PERCENTAGE_POINT",expression:"current - prior",eligibility:"compatible prepared inputs"}}}};
+  const row=payload.companies[cik].cfo[2025];
+  payload.companies[cik]={cash:{2025:row},current_ratio:{2025:{...row,status:"CHANGE_AVAILABLE",yoy:null,change_pp:"-0.0000001",delta:"-0.0000001"}}};
+  const bundle=bridge.loadFinancialGrowth(file,write(payload));
+  const served=serve(bundle,"?"+new URLSearchParams({...scope,cik}));
+  assert.equal(served.body.series.current_ratio[2025].change_pp,"-0.0000001");
+  assert.equal(served.body.series.cash[2025].yoy,row.yoy);
+  for(const mutate of [p=>p.definitions.current_ratio.comparison_kind="YOY",
+    p=>p.definitions.current_ratio.formulas.change_pp.unit="PERCENT",
+    p=>p.companies[cik].current_ratio[2025].yoy="1",
+    p=>p.companies[cik].current_ratio[2025].change_pp=1,
+    p=>p.companies[cik].cash[2025].status="CHANGE_AVAILABLE"]){
+    const invalid=structuredClone(payload);mutate(invalid);
+    assert.throws(()=>bridge.loadFinancialGrowth(file,write(invalid)),/comparison/);
+  }
+  const legacy=fixture();legacy.companies[cik].cfo[2025].status="CHANGE_AVAILABLE";
+  assert.throws(()=>bridge.loadFinancialGrowth(file,write(legacy)),/company series/);
+});

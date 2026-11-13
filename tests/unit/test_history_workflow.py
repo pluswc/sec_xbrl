@@ -811,8 +811,8 @@ def test_snapshot_metadata_must_match_plan() -> None:
         history._validate_snapshot_plan(snapshot, {**original, "filed_date": "2024-04-01"})
 
 
-@pytest.mark.parametrize("parser_version", ("m2-layer1-v5", "m2-layer1-v6"))
-def test_history_source_reuse_accepts_same_schema_v5_and_v6_without_relabelling(
+@pytest.mark.parametrize("parser_version", ("m2-layer1-v5", "m2-layer1-v6", "m2-layer1-v7"))
+def test_history_source_reuse_accepts_same_schema_v5_v6_v7_without_relabelling(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     parser_version: str,
@@ -840,7 +840,7 @@ def test_history_source_reuse_accepts_same_schema_v5_and_v6_without_relabelling(
 
 @pytest.mark.parametrize(
     "parser_version",
-    ("m2-layer1-v1", "m2-layer1-v2", "m2-layer1-v3", "m2-layer1-v4", "m2-layer1-v7", None),
+    ("m2-layer1-v1", "m2-layer1-v2", "m2-layer1-v3", "m2-layer1-v4", "m2-layer1-v8", None),
 )
 def test_history_source_reuse_rejects_ineligible_parser_versions(
     monkeypatch: pytest.MonkeyPatch,

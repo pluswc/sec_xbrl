@@ -330,7 +330,7 @@ def observation_rows(
     reader: Any, *, quarterly: bool = False, cik: str | None = None, metric_id: str | None = None,
     year: int | None = None, quarter: int | None = None,
 ) -> list[dict]:
-    if isinstance(reader, ScreeningRuntimeProjection):
+    if _core_reader(reader):
         return reader.rows(quarterly=quarterly, cik=cik, metric_id=metric_id, year=year, quarter=quarter)
     rows = getattr(reader, "quarter_observations", []) if quarterly else reader.observations
     year_field = "calendar_year" if quarterly else "fiscal_year"
@@ -344,4 +344,10 @@ def observation_rows(
 
 
 def hydrate_observation(reader: Any, row: dict, *, quarterly: bool = False) -> dict:
-    return reader.hydrate(row, quarterly=quarterly) if isinstance(reader, ScreeningRuntimeProjection) else row
+    return reader.hydrate(row, quarterly=quarterly) if _core_reader(reader) else row
+
+
+def _core_reader(reader: Any) -> bool:
+    from sec_xbrl.screening.cohort_union import ScreeningCohortUnionReader
+
+    return isinstance(reader, (ScreeningRuntimeProjection, ScreeningCohortUnionReader))

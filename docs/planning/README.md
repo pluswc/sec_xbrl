@@ -1,7 +1,176 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 [PR85 History 복구 갱신](../implementation/history-recovery-inventory-20261111.md)은
+최신 main `df694e4a88`를 기존 branch에 일반 merge해 빈 `.chunks` 정리 수정만
+유지한다. 기존 Nasdaq/UI/producer와 자료·journal을 보존하며 최신 통합 재검증과
+PR85 업데이트를 승인받았다. PR85 병합·운영 재시작은 승인하지 않았으며 미수행이다.
+
 2026-11-11 [History 복구 입력 목록 수정](../implementation/history-recovery-inventory-20261111.md)은
 성공 발행에 남은 빈 임시 디렉터리와 엄격한 복구 목록 검사의 충돌을 다룬다.
+
+2026-11-14 동시 main 통합: [PR93](https://github.com/pluswc/sec_xbrl/pull/93)이
+main `3cfe1b79fcdfe62c03cd432e509bcb4f361dfbce`에 병합되어 운영 consumer와
+추가 producer/operator 코드가 이미 포함됐다. PR94 branch는 최신 main을 일반
+merge하여 이를 그대로 보존하며, main 대비 변경은 별도 독립 검증·운영 보존·
+기존 History 한계의 문서 근거로 축소한다. 아래 이전 통합/미병합/CI 상태는
+각 전달 당시 기록이다. 이번 merge의 별도 검토와 PR94 최신 CI는 후속 확인한다.
+
+2026-11-14 원격 전달: 리드가 head `809735272f`를 push하여
+[PR #94](https://github.com/pluswc/sec_xbrl/pull/94)를 열었다. PR은 OPEN·main 미병합이며
+기록 시점 CI는 대기/진행 중이다([run 43453379537](https://github.com/pluswc/sec_xbrl/actions/runs/43453379537)).
+최종 원격 근거는 [PR94 최신 head checks](https://github.com/pluswc/sec_xbrl/pull/94/checks)다.
+아래 push·PR 미수행 문구는 각 인수/전달 당시 기록이며 CI 성공이나 main 병합을
+소급 주장하지 않는다.
+
+2026-11-14 [Nasdaq92 운영 패치 통합](../implementation/nasdaq92-operating-integration-20261114.md)은
+main `cdb8f64`와 수락 운영 소스 `6ea4203b8d`의 제품 차이만 별도 branch에 통합한다.
+제품 `914cfe8a9e`/문서 포함 `41dbd01668`에서 별도 독립 Node122·Python12·Ruff·diff
+PASS 후 리드 LOCALLY_ACCEPTED·push/PR GO다. 전체 pytest는2983통과/38skip/
+기존 main에서도 재현된 cached History 1실패이며 별도 [PR85](https://github.com/pluswc/sec_xbrl/pull/85)는 OPEN이다.
+이번 runtime/자료 변경과 push·PR 실행·CI·main 병합은 미수행이며 원격 전달은 리드가 수행한다.
+[기존 운영 계약](../implementation/nasdaq74-operating-20261113.md)의 로컬 운영 인수는
+이 PR 통합 검증과 별개다. Phase2 PR92는 main `cdb8f64`에 병합됐다.
+[CI 43449405710](https://github.com/pluswc/sec_xbrl/actions/runs/43449405710)도 통과했다.
+아래 PR92 OPEN/미병합 문구는 전달 당시 기록이다.
+
+2026-11-14 main 전달 후보: 92개사 운영 소스에 main `cdb8f64b83`와 실제 사용한
+401 상류 operator·6064 native 경계를 일반 merge했다. 원래 수락 소스 이력과
+실제 UI bytes를 보존하고, 새 operator의 분기 FY 범위만 명시적으로 정정했다.
+현재 main inventory의 native 승인 범위는 넓히지 않는다. 통합 검토·PR/CI·병합은
+별도이며 실제 runtime/data는 유지한다. [통합 범위](../implementation/nasdaq74-operating-20261113.md).
+
+2026-11-14(KST) [Nasdaq 지원 기업 운영 연결](../implementation/nasdaq74-operating-20261113.md)은
+기존50+신규42의 **92개사로 로컬 인수·운영 적용**했다. UI `e0c72852f0`는 동시
+적용된 Phase2를 보존하고 backend `0634eb50fa`와 함께 18765(PID48788)→19072로
+연결했다. 재무 기준일2026-10-25, 실제 준비 확인2026-11-13T14:49:22.469771Z다.
+39개 분기 범위 정정·3개 재사용과 연간72개 파일 동일성, 독립 검증·private 저장/
+재열기/CSV 및 실제 조회를 확인했다. WDC의 발행 범위 밖 최신 분기/TTM은 명시적
+미준비이며 고정 분기는 유지한다. 기존 여섯 catalog·개인 기록·rollback19070을
+보존했다. 나머지23개 대상은 미포함/보류이며 전체115 완료가 아니다. 이 확장의
+main 병합은 **NOT_MERGED**다. 아래 후보·이전 보류 문구는 당시 기록이다.
+
+2026-11-13 2차 원격 전달: 사용자 승인 후 head `5b814b944d`의 별도 독립
+Node 116/Ruff/diff PASS·인수 코드 동일성과 origin/main `0a89d5cf` 추가 변경 없음이
+확인됐다. push 후 [PR #92](https://github.com/pluswc/sec_xbrl/pull/92)를 열었으며
+OPEN·main 미병합이다. CI는 기록 시점 대기/진행 중이며 최종 근거는
+[최신 head checks](https://github.com/pluswc/sec_xbrl/pull/92/checks)다.
+리드가 live 인수 자산·History API baseline·SQLite/growth/revenue hash 보존을
+재확인했다. 아래 로컬 인수 당시의 원격 미수행 문구는 그 시점 기록이다.
+
+2026-11-13 [데스크톱 2차 전체 탭 작업면](../implementation/desktop-first-phase2-20261113.md)은
+지표 안내의 목록/선택 상세, 이력 조회 필터와 원장, 스크리닝 조건/결과 인접
+배치를 구현했다. 소스 `745bc76e3a` 독립 Node 116/Ruff/diff와 리드 exact-bundle
+실제 브라우저가 PASS하여 2026-11-13 LOCALLY_ACCEPTED·운영 반영됐다.
+2차 push/PR/CI/main 병합은 미수행이다. 전탭 감사 중 이번 세 영역을 우선했고
+공통 탭 스크롤 기억·저장 결과 비교 추가 정리는 미구현 후보다. 1차 PR91은 main
+`0a89d5cfda`에 병합됐고 [CI 43427104449](https://github.com/pluswc/sec_xbrl/actions/runs/43427104449)는
+통과했다. 아래 1차 전달 당시의 미병합/진행 중 문구는 당시 기록이다.
+
+2026-11-13 원격 전달: 통합 HEAD `bf91b303ea`의 독립 Node 108개·Ruff·diff와
+main 포함/UI 동일성 PASS 후 [PR #91](https://github.com/pluswc/sec_xbrl/pull/91)을
+열었다. OPEN·main 미병합이며 CI는 진행 중이다. 최종 원격 근거는
+[최신 head checks](https://github.com/pluswc/sec_xbrl/pull/91/checks)다.
+리드가 live 자산·History API·SQLite의 인수 기준 동일성을 재확인했다.
+아래 전달 대기 문구는 당시 기록이다.
+
+2026-11-13 원격 전달 승인: 데스크톱 1차와 간결한 날짜가 포함된 작업 브랜치에
+origin/main `72575d89f5`를 일반 merge `1dfc42b3b0`로 통합했다. 충돌·tree 변화
+없이 인수된 UI 소스 `d19638fae3`를 보존했다. 통합의 별도 독립 재검증과
+push·PR·CI는 대기이며 작업의 main 병합은 수행하지 않았다. 아래 로컬 인수와
+과거 미수행 상태는 당시 기록이다.
+
+2026-11-13 [데스크톱 분석 우선 1차](../implementation/desktop-first-phase1-20261113.md)는
+상태 보존 목록/분석 전환, 행 밀도, 접힌 반복 요약과 비교 지표 선택·자동 갱신을
+다룬다. 소스 `d19638fae3`는 독립 Node 108개·Ruff와 리드 실제 검사를
+통과해 LOCALLY_ACCEPTED(2026-11-13), 18765에 적용됐다. 1440의 3열/첫
+차트 쌍과 1920/2560의 4열을 확인했다. 125/150%는 effective CSS viewport
+검사이며 실제 zoom은 미검증이다. 자료·기록은 보존했고 원격 push·PR·CI·
+main 병합 및 2/3차 재설계는 미수행이다.
+
+2026-11-12 [재무기간의 간결한 날짜 표시](../implementation/compact-financial-dates-20261112.md)는
+일반 날짜를 YY.MM.DD로 줄이고 전체 ISO 근거와 회계기간 의미를 보존한다.
+통합 소스 `a19661910d`는 기존 매출 완전성 기능을 보존하고 독립 Node 100개·
+Python 42개·Ruff 및 리드 실제 날짜/매출/보드/스크리닝 검사를 통과했다.
+LOCALLY_ACCEPTED(2026-11-12), 18765(PID10580)에 적용했고 backend19070과
+기존 incoming artifact·기록을 유지했다. 이 작업의 push·PR·CI·main 병합은 미수행이다.
+
+2026-11-12 [매출 범위·누락 사유와 보수적 Q4](../implementation/revenue-completeness-20261112.md)는
+소스 `3c80c529be646fddfbbdf9137cc19db1513a4514`의 독립 확인·리드 로컬 인수 후
+18765(PID44272)에 운영 반영했다. 기존 PR89/main e64 workbench와 backend19070,
+catalog6개/기존50사 및 journal10테이블·22행/bytes를 유지했다. 원래 4,702개 값·
+계보·비율/계층은 그대로이고 762 reported scoped 셀과224 derived Q4 셀(각30사)을
+추가했다. 최종 GET-only/실제 화면·768px검증 PASS다. 상태는
+INDEPENDENTLY_VERIFIED / LOCALLY_ACCEPTED / LIVE이며 운영 인수 당시 main은
+**NOT_MERGED**(e64e1182)다. 이후 원격/main 상태는 Git·PR로 확인한다. 아래 PR89의
+과거 미병합 문구는 당시 snapshot이며 PR89 자체는 main e64에 병합됐다.
+
+2026-11-13 [Nasdaq native 연속성 자료 통합](../implementation/nasdaq100-native-continuity-20261112.md)은
+정확한 401 부모·보고서와 새 소스를 묶는 명시적 전이 및 선택 회사군 status 후보다.
+신규 20개 포함 focused 26 PASS·Ruff 통과, 독립 검증·리드 수락은 대기다.
+실자료 통합 재개·115개사 union·운영 완료를 뜻하지 않으며 기존 source/data/기록은 보존한다.
+
+2026-11-12 [스크리닝 근접 워크시트](../implementation/screening-workbench-20261112.md)는
+정확한 조건 편집의 제한된 폭과 의미 그룹, 최신 결과의 실제 기간 열 분류 및
+근접 결과 표를 다룬다. 구현 `8f1e466ffe`는 독립 Node 93개·Ruff·diff와
+리드의 실제 브라우저 검증을 통과해 LOCALLY_ACCEPTED(2026-11-12),
+18765 적용을 완료했다. 조건/응답·기존 보드·정렬·기록을 보존했다.
+이 작업의 원격 push·PR·CI·main 병합은 미수행이다.
+
+2026-11-11 [데스크톱 재무 워크벤치](../implementation/desktop-financial-workbench-20261111.md)는
+표와 값의 근접 폭, 적응형 작은 차트 쌍, 카탈로그 그룹별 선택 기억과
+근접 범례·기간 설명을 다룬다. 구현 `bde192d512`는 독립 Node 89개·Ruff
+검사와 리드 실제 브라우저 인수를 통과했고 18765에 적용했다. 기존 자료·
+artifact·기록을 보존했다. main `f46460086e`는 그대로이며 push·PR·CI·병합은
+미수행이다.
+
+2026-11-11 [공통 SEC durhour와 continuation 실패 진단](../implementation/sec-duration-hour-20261111.md)은
+소스 `82cc02eddfd6f05997c5e1e7d2a5c78ab2f4dd08`의 독립 PASS·리드 소스 인수 뒤,
+정상 공개 CLI에서 실패 연간 **5건만 v7 INGESTED**, 기존 **18건 v6 REUSED**로
+23건 Raw를 완성했다. 리드가 신규 manifest/Fact를 독립 읽기 검사해 Raw 5건을
+로컬 인수했다. 원래 162 snapshot 파일·intake·journal bytes를 보존했다.
+전체 Nasdaq 작업은 계속된다. 2026-11-12 사용자 승인으로 정확한 canonical82
+v7 binding/quality profile B를 보완했고 자체 focused 29 PASS이나 독립 검증·인수는
+대기다. 실제 ISRG History/quality/재무 발행은 아직 미준비이며 실제 Raw 소스
+82cc02ed는 유지한다. Main/원격 전달은 별도 PR·CI 상태로 판단한다.
+
+2026-11-11 상태 갱신: [PR #86](https://github.com/pluswc/sec_xbrl/pull/86)은
+main `d58e90ec87e2d51fbabc9b9ca49e983bcef0d80f`에 병합됐다. 아래의 PR86 OPEN/CI 대기
+문구는 전달 당시 snapshot이다. 지역 매출 [PR #87](https://github.com/pluswc/sec_xbrl/pull/87)은
+기존 head `5d9b221fe0`의 CI 통과 후 이 새 main을 branch에 통합했다. 실행 코드는
+수락된 `92876be5`와 같으며 새 head의 CI·병합 판단은 별도다. PR87 병합 완료를
+이 기록으로 주장하지 않는다.
+
+2026-11-11 [공시 매출의 지역 보기와 명시적 보기 등록](../implementation/revenue-geography-20261111.md)은
+통합 코드 `92876be5b93511c7f96541ecbf82da5a2c049d54`의 독립 PASS·리드 로컬 인수 후
+18765(PID 41344)에 운영 반영했다. 기존 backend19070, 헤더 정렬·재무 요약/growth-v2,
+원본 journal 10테이블·22행과 DB bytes를 보존했다. 실제 지역 보기·헤더 정렬 및
+1440/768px 검증은 PASS다. 기존 50사 필드 동등성과 3사×2빈도 근거를 재사용했다.
+운영 인수 당시 상태는 INDEPENDENTLY_VERIFIED / LOCALLY_ACCEPTED / LIVE / main 미병합이었다.
+이후 사용자가 현재 범위의 main 반영을 명시 승인했고 리드가 branch push·PR/CI 전달을
+진행한다. 실제 병합 상태는 Git main의 포함 관계와 PR로 확인하며 과거 snapshot으로 고정하지 않는다.
+
+2026-11-11 원격 전달: 재무 요약·준비된 비교·헤더 정렬의 결합 HEAD
+`42a5785473`(최종 구현 `cbd3ac31530`)을
+[PR #86](https://github.com/pluswc/sec_xbrl/pull/86)으로 전달했다. 전달 당시
+main `b1b783d418`은 그대로이며 OPEN·mergeable, CI는 실행 중이다.
+최종 결과는 [PR checks](https://github.com/pluswc/sec_xbrl/pull/86/checks)를 따른다.
+아래의 로컬 전용 상태는 당시 기록이고 main 병합은 수행하지 않았다.
+
+2026-11-11 [기업 탐색 헤더 정렬](../implementation/explorer-header-sort-20261111.md)은
+기존 정렬 경로를 사용하는 기업명·숫자 헤더 버튼을 기록한다. 구현
+`cbd3ac31530`은 독립 Node 33개·Ruff 및 리드의 연간·분기·TTM 실제
+키보드·정렬·기록 보존 검증을 통과했고 18765에 적용했다. 원격
+push·PR·CI·main 병합은 미수행이다.
+
+2026-11-11 [재무 요약 읽기 정리](../implementation/financial-summary-readability-20261111.md)는
+하단 지표 정렬, 반복 상자 축소, 금액·백분율 표시 및 전체 MONEY/PERCENT
+선택 지표의 준비된 전년비/%p 비교를 기록한다. 구현 `6b70244d70`과 실제
+50개 회사·73개 정의 artifact는 독립 검증 및 리드 로컬 인수를 통과했고
+18765에 적용했다. 원격 push·PR·CI·main 병합은 미수행이다.
+
+2026-11-11 [Nasdaq100 후보 확장 계약](../implementation/nasdaq100-expansion-20261111.md)은
+관찰 목록과 SEC 공시 지원 확인, 기존 자료 재사용 및 자원 한도가 있는
+순차 준비를 정의한다. 실제 지원·보류, 발행과 운영 인수는 별도로 기록한다.
 
 2026-11-10 [저장 공간 정리 인수 기록](../implementation/storage-retention-cleanup-20261110.md)은
 승인된 MRK 감사 DB와 압축 해제 디렉터리 1,109개의 정리 완료, 보존·복원

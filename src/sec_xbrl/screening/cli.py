@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from sec_xbrl.metrics.screening import publish_screening_metrics
+from sec_xbrl.screening.cohort_union import MANIFEST as COHORT_MANIFEST
+from sec_xbrl.screening.cohort_union import ScreeningCohortUnionReader, publish_cohort_union
 from sec_xbrl.screening.common import read_json, sha256_file
 from sec_xbrl.screening.company_descriptions import MANIFEST as DESCRIPTION_MANIFEST
 from sec_xbrl.screening.company_descriptions import (
@@ -69,6 +71,9 @@ def _parser() -> argparse.ArgumentParser:
     project.add_argument("--destination", type=Path, required=True)
     project.add_argument("--blob-store", type=Path, required=True)
     project.add_argument("--source-compatibility", nargs=2, metavar=("PATH", "SHA256"))
+    union = commands.add_parser("cohort-union", help="publish an explicitly pinned same-cutoff cohort union")
+    union.add_argument("--config", type=Path, required=True)
+    union.add_argument("--destination", type=Path, required=True)
     descriptions = commands.add_parser(
         "descriptions-prepare", help="publish governed Korean company-description text"
     )
@@ -87,6 +92,7 @@ def _parser() -> argparse.ArgumentParser:
     server = commands.add_parser("serve", help="start the loopback dashboard")
     server.add_argument("--catalog", type=Path, required=True)
     server.add_argument("--source-compatibility", nargs=2, metavar=("PATH", "SHA256"))
+    server.add_argument("--cohort-union", action="append", nargs=3, metavar=("DATASET_ID", "PATH", "SHA256"))
     server.add_argument("--runtime-projection", action="append", nargs=3, metavar=("DATASET_ID", "PATH", "SHA256"))
     server.add_argument("--batch-availability", nargs=2, metavar=("PATH", "SHA256"))
     server.add_argument("--store", type=Path, required=True)
@@ -134,6 +140,9 @@ def main(argv: list[str] | None = None) -> int:
         with use_source_compatibility(_optional_pin(args.source_compatibility)):
             manifest = publish_runtime_projection(args.dataset, args.destination, args.blob_store)
         _print({"manifest": str(manifest), "manifest_sha256": sha256_file(manifest)})
+    elif args.command == "cohort-union":
+        root = publish_cohort_union(args.config, args.destination)
+        _print({"manifest": str(root / COHORT_MANIFEST), "manifest_sha256": sha256_file(root / COHORT_MANIFEST)})
     elif args.command == "descriptions-prepare":
         if args.dry_run:
             result = review_company_description_plan(args.plan, args.dataset)
@@ -161,6 +170,11 @@ def main(argv: list[str] | None = None) -> int:
         batch_pin = _optional_pin(args.batch_availability)
         options: dict[str, Any] = {}
         projections = _runtime_pins(args.runtime_projection, catalog)
+        unions = _runtime_pins(args.cohort_union, catalog)
+        if set(unions) & set(projections):
+            raise ValueError("dataset cannot declare both a runtime projection and cohort union")
+        if unions:
+            options["cohort_unions"] = unions
         if projections:
             options["runtime_projections"] = projections
         if batch_pin is not None:
@@ -171,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
         if compatibility is not None:
             options["source_compatibility"] = compatibility
         with use_source_compatibility(compatibility):
-            descriptions = _serve_descriptions(args, catalog, projections)
+            descriptions = _serve_descriptions(args, catalog, projections, unions)
         if args.require_existing_store:
             _validate_existing_store(args.store)
         service = ScreeningService(
@@ -272,6 +286,7 @@ def _validate_existing_store(path: Path) -> None:
 
 def _serve_descriptions(
     args: argparse.Namespace, catalog: dict[str, Path], projections: dict[str, dict[str, str]],
+    unions: dict[str, dict[str, str]],
 ) -> CompanyDescriptionReader | None:
     if (args.descriptions is None) != (args.descriptions_manifest_sha256 is None):
         raise ValueError("serve requires both description publication and manifest SHA-256")
@@ -284,8 +299,12 @@ def _serve_descriptions(
     dataset_id = manifest.get("dataset_id")
     if dataset_id not in catalog:
         raise ValueError("company-description dataset is absent from the screening catalog")
-    dataset = (ScreeningRuntimeProjection(catalog[dataset_id], projections[dataset_id])
-               if dataset_id in projections else open_screening_dataset(catalog[dataset_id]))
+    if dataset_id in unions:
+        dataset = ScreeningCohortUnionReader(catalog[dataset_id], unions[dataset_id])
+    elif dataset_id in projections:
+        dataset = ScreeningRuntimeProjection(catalog[dataset_id], projections[dataset_id])
+    else:
+        dataset = open_screening_dataset(catalog[dataset_id])
     return CompanyDescriptionReader(
         args.descriptions,
         args.descriptions_manifest_sha256,

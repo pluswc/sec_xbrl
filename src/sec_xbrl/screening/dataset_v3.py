@@ -324,7 +324,7 @@ class ScreeningDatasetV3Reader:
             "config_sha256"
         ) or config != self.manifest.get("config"):
             raise ValueError("screening v3 config changed")
-        if config.get("source_compatibility") is not None and (
+        if (config.get("source_compatibility") is not None or "native_source" in config) and (
             annual_root != real_directory(Path(config["annual_dataset_root"]), "configured annual parent")
             or quarter_root != real_directory(Path(config["quarterly_metric_root"]), "configured quarter parent")
             or annual_parent["manifest_sha256"] != config["annual_manifest_sha256"]
@@ -496,6 +496,22 @@ def _verify_parent_binding(
 
 @contextmanager
 def _configured_compatibility(config: dict, *, quarter_path: Path | None = None) -> Iterator[None]:
+    """Keep native same-producer admission separate from historical successors."""
+    from sec_xbrl.financial_native_source import use_native_source
+
+    if "native_source" in config:
+        if config["native_source"] is None:
+            raise ValueError("native source requires an explicit approved declaration")
+        with use_native_source(config["native_source"], config=config, quarter_path=quarter_path):
+            yield
+    else:
+        # An old or pinless invocation cannot inherit a caller's native grant.
+        with use_native_source(None), _historical_configured_compatibility(config, quarter_path=quarter_path):
+            yield
+
+
+@contextmanager
+def _historical_configured_compatibility(config: dict, *, quarter_path: Path | None = None) -> Iterator[None]:
     """Bind all four preserved publications to the explicitly configured scope."""
     from sec_xbrl.financial_source_compatibility import (
         CONTINUITY_VERSION,

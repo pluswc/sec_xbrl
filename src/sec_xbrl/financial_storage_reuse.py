@@ -52,6 +52,7 @@ def resolve_storage_reuse(declaration: dict, *, collection_manifest: Path,
     from sec_xbrl.financial_source_compatibility import checked_source_compatibility
     from sec_xbrl.history import HistoryPublicationReader
     source_compatibility = checked_source_compatibility(source_compatibility)
+    from sec_xbrl.financial_native_source import native_policy_matches
     declaration = _pin(declaration)
     payload = read_json(Path(declaration["path"]))
     if source_compatibility is not None:
@@ -66,7 +67,9 @@ def resolve_storage_reuse(declaration: dict, *, collection_manifest: Path,
         or payload.get("status") != "ROOT_APPROVED"
         or (payload.get("current_policy_source_sha256s") != financial_storage_policy_sources()
             and not (source_compatibility is not None and source_compatibility.policy_matches(
-                payload.get("current_policy_source_sha256s"), financial_storage_policy_sources())))):
+                payload.get("current_policy_source_sha256s"), financial_storage_policy_sources()))
+            and not native_policy_matches(payload.get("current_policy_source_sha256s"),
+                                          financial_storage_policy_sources(), declaration))):
         raise ValueError("storage reuse requires exact ROOT-approved current policy compatibility")
     collection_pin = _pin(payload["collection_manifest"])
     if collection_pin["path"] != str(collection_manifest.resolve()):
@@ -326,6 +329,7 @@ def _current_routine_evidence(value: dict, *, pins: dict, declared: dict, source
     root=Path(pins["history_manifest"]["path"]).parent
     level=report.get("validation_level")
     native_result=report.get("result",{})
+    from sec_xbrl.financial_native_source import native_routine_matches
     allowed={"ROUTINE_INITIAL","ROUTINE_CHANGED","ROUTINE_UNCHANGED"}
     marker=build.get("storage_validation",{})
     if (report.get("version") != 1 or report.get("policy_version") != VALIDATION_POLICY_VERSION
@@ -333,7 +337,10 @@ def _current_routine_evidence(value: dict, *, pins: dict, declared: dict, source
             and not (source_compatibility is not None and source_compatibility.accepts_routine(
                 report=controls["report"], pins=pins, declared=declared,
                 rules=history_validation_rules(manifest),
-                current_identity=current_history_validation_identity(manifest))))
+                current_identity=current_history_validation_identity(manifest)))
+            and not native_routine_matches(report=controls["report"], pins=pins, declared=declared,
+                                           rules=history_validation_rules(manifest),
+                                           current_identity=current_history_validation_identity(manifest)))
         or report.get("scope_key") != _scope_key(manifest)
         or report.get("publication_root") != str(root)
         or report.get("manifest_sha256") != pins["history_manifest"]["sha256"]

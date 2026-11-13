@@ -17,6 +17,8 @@ import polars as pl
 
 from sec_xbrl.analysis import open_analysis
 from sec_xbrl.analytics.quarterly_derived_metrics import percentage_result
+from sec_xbrl.analytics.revenue_quarters import RULE_VERSION as REVENUE_Q4_RULE
+from sec_xbrl.analytics.revenue_quarters import derive_revenue_q4, scope_key
 from sec_xbrl.analytics.statement_structure import finite_decimal
 from sec_xbrl.longitudinal.materialization import (
     LAYER2_CONTRACT_VERSION,
@@ -37,9 +39,18 @@ from sec_xbrl.screening.common import (
 
 SCHEMA_VERSION = "screening-revenue-breakdowns-v1"
 MAX_ASSET_BYTES = 16 * 1024 * 1024
-MAX_COMPANY_BYTES = 512 * 1024
+MAX_COMPANY_BYTES = 1024 * 1024
 SEGMENT_AXIS = "us-gaap:StatementBusinessSegmentsAxis"
 PRODUCT_AXES = {"srt:ProductOrServiceAxis", "us-gaap:ProductOrServiceAxis"}
+GEOGRAPHY_AXIS = "srt:StatementGeographicalAxis"
+FIXED_DIMENSIONS = {"srt:ConsolidationItemsAxis": "us-gaap:OperatingSegmentsMember"}
+# Explicit semantic registration; axis names never auto-enable a view.
+REVENUE_VIEWS = (
+    {"id": "segments", "label": "사업부문", "axes": [SEGMENT_AXIS], "fixed_groups": [], "fixed_dimensions": FIXED_DIMENSIONS},
+    {"id": "products", "label": "제품·서비스", "axes": sorted(PRODUCT_AXES), "fixed_groups": ["segments"]},
+    {"id": "geography", "label": "지역", "axes": [GEOGRAPHY_AXIS],
+     "fixed_groups": ["segments", "products"], "share_basis": "EXACT_FIXED_SCOPE"},
+)
 REVENUE_QNAMES = {
     "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
     "us-gaap:Revenues",
@@ -80,9 +91,13 @@ def _company_declarations(manifest: dict) -> dict[str, dict]:
 
 def prepare_revenue_breakdowns(
     *, dataset_manifest: Path, dataset_manifest_sha256: str, output: Path,
-    ciks: list[str] | None = None,
+    ciks: list[str] | None = None, derived_output: Path | None = None,
+    baseline_asset: Path | None = None, baseline_sha256: str | None = None,
 ) -> Path:
     """Build an optional read-only artifact from exact active dataset parents."""
+    if (baseline_asset is None) != (baseline_sha256 is None):
+        raise ValueError("baseline asset and SHA-256 must be supplied together")
+    baseline = _pinned_json(baseline_asset, baseline_sha256) if baseline_asset is not None else None
     dataset = _pinned_json(dataset_manifest, dataset_manifest_sha256)
     if dataset.get("schema_version") != "screening-dataset-v3" or dataset.get("fixture_kind") != "ACTUAL_PREPARED":
         raise ValueError("revenue breakdowns require a prepared v3 screening dataset")
@@ -100,28 +115,38 @@ def prepare_revenue_breakdowns(
         raise ValueError("revenue breakdown selection is outside the prepared membership")
     destination = safe_new_destination(output, "revenue breakdown output")
     companies = {}
+    governed = {}
     for cik in selected:
         annual_config, quarter_config = annual_by_cik[cik], quarter_by_cik[cik]
         ticker = annual_config["ticker"]
         if ticker != quarter_config["ticker"]:
             raise ValueError("revenue breakdown company identity differs")
         relationship_cache = {}
-        company = {
-            "ticker": ticker,
-            "annual": _prepare_company(annual_config, cutoff, "FY", 4, relationship_cache),
-            "quarterly": _prepare_company(quarter_config, cutoff, "QTD_3M", 8, relationship_cache),
-        }
-        if len(_json(company)) > MAX_COMPANY_BYTES:
-            raise ValueError("revenue breakdown company exceeds response limit")
-        companies[cik] = company
+        annual_view = _prepare_company(annual_config, cutoff, "FY", 4, relationship_cache)
+        quarter_view = _prepare_company(quarter_config, cutoff, "QTD_3M", 8, relationship_cache,
+                                        annual_view=annual_view, derive_q4=derived_output is not None)
+        governed[cik] = quarter_view.pop("governed_q4")
+        companies[cik] = {"ticker": ticker, "annual": annual_view, "quarterly": quarter_view}
     payload = {
         "schema_version": SCHEMA_VERSION, "dataset_id": dataset["dataset_id"],
         "dataset_publication_id": dataset["publication_id"], "financial_as_of": cutoff,
         "dataset_manifest_sha256": dataset_manifest_sha256, "companies": companies,
     }
-    data = _json(payload)
-    if len(data) > MAX_ASSET_BYTES:
-        raise ValueError("revenue breakdown asset exceeds size limit")
+    if derived_output is not None:
+        derived_destination = safe_new_destination(derived_output, "governed revenue Q4 output")
+        if derived_destination == destination:
+            raise ValueError("derived and Display publications require distinct destinations")
+        companion = _json({"schema_version": "governed-dimensional-revenue-q4-v1", "rule_version": REVENUE_Q4_RULE,
+                           "dataset_id": dataset["dataset_id"], "dataset_publication_id": dataset["publication_id"],
+                           "financial_as_of": cutoff, "dataset_manifest_sha256": dataset_manifest_sha256, "companies": governed})
+        _finalize_revenue_projection(payload, json.loads(companion), companion_sha256=hashlib.sha256(companion).hexdigest(),
+                                     companion_path=str(derived_destination), baseline=baseline, baseline_sha256=baseline_sha256)
+    elif baseline is not None:
+        _reuse_reported_outputs(payload, baseline, baseline_sha256)
+    data = _bounded_payload(payload)
+    if derived_output is not None:
+        with derived_destination.open("xb") as stream:
+            stream.write(companion)
     with destination.open("xb") as stream:
         stream.write(data)
     return destination
@@ -131,8 +156,22 @@ def _json(payload: dict) -> bytes:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
 
+def _bounded_payload(payload: dict) -> bytes:
+    scope_keys = ("schema_version", "dataset_id", "dataset_publication_id", "financial_as_of", "dataset_manifest_sha256")
+    scope = {key: payload[key] for key in scope_keys}
+    for cik, company in payload["companies"].items():
+        size = len(_json(company | scope | {"cik": cik}))
+        if size > MAX_COMPANY_BYTES:
+            raise ValueError(f"revenue breakdown company {company['ticker']} exceeds response limit: {size}")
+    data = _json(payload)
+    if len(data) > MAX_ASSET_BYTES:
+        raise ValueError("revenue breakdown asset exceeds size limit")
+    return data
+
+
 def _prepare_company(
     declaration: dict, cutoff: str, period_class: str, limit: int, relationship_cache: dict,
+    *, annual_view: dict | None = None, derive_q4: bool = False,
 ) -> dict:
     root = real_directory(Path(declaration["analysis_root"]), "revenue breakdown analysis")
     digest = declaration["analysis_manifest_sha256"]
@@ -144,6 +183,10 @@ def _prepare_company(
     observations, evidence, history = _ratio_observations(manifest, ticker, cik, cutoff, period_class)
     result = project_breakdowns(client, ticker, cik, cutoff, period_class, limit, ratio_observations=observations)
     result["ratio_evidence"] = evidence
+    _complete_revenue_view(result, observations, client, ticker, cutoff, period_class,
+                           annual_view=annual_view, derive_q4=derive_q4)
+    if period_class == "FY":
+        result.pop("governed_q4", None)
     relationships = _relationship_lookup(history, cik, relationship_cache)
     result["product_hierarchy_version"] = PRODUCT_HIERARCHY_VERSION
     result["product_hierarchy"] = _product_hierarchy(result, observations, relationships)
@@ -195,14 +238,14 @@ def project_breakdowns(
     for node_id, cells in by_node.items():
         _project_row(series, nodes[node_id], cells, coordinates, client, context, cik, fallback=True)
     _hold_conflicts(series)
-    groups: dict[str, list] = {"segments": [], "products": []}
+    groups: dict[str, list] = {view["id"]: [] for view in REVENUE_VIEWS}
     for row in series.values():
         cells = [row["cells"].get(key, _gap("PERIOD_NOT_PREPARED")) for key in coordinates]
         if any(cell["value"] is not None or cell["reason"] == "COMPETING_PREPARED_SCOPE" for cell in cells):
             groups[row["group"]].append({**row, "cells": cells})
     totals = _consolidated_totals(overview, coordinates, client, context, cik, period_class)
     _add_revenue_ratios(totals, groups, periods, comparison_periods, ratio_observations)
-    return {"periods": periods, "totals": totals, "groups": groups, "ratio_rule_version": RATIO_RULE_VERSION}
+    return {"periods": periods, "totals": totals, "groups": groups, "ratio_rule_version": RATIO_RULE_VERSION, "views": list(REVENUE_VIEWS)}
 
 
 def _ratio_observations(
@@ -233,7 +276,7 @@ def _ratio_observations(
     data = regular_file(partition / f"{OBSERVATIONS}.parquet", "revenue ratio observations").read_bytes()
     frame = pl.scan_parquet(data).filter(
         (pl.col("cik") == cik) & (pl.col("filed_date") <= cutoff)
-        & (pl.col("period_class") == period_class)
+        & pl.col("period_class").is_in(["QTD_3M", "FY", "YTD_9M"] if period_class == "QTD_3M" else [period_class])
         & pl.col("raw_concept_qname").is_in(sorted(REVENUE_QNAMES))
         & pl.col("comparative_type").is_in(["CURRENT_FOCUS", "PRIOR_YEAR_COMPARABLE"])
     ).collect()
@@ -346,7 +389,7 @@ def _add_revenue_ratios(
         entries = [(row, row["cells"][index]) for rows in groups.values() for row in rows]
         segments = defaultdict(list)
         for row, cell in entries:
-            if row["group"] == "segments" and (cell["value"] is not None or cell["reason"] == "COMPETING_PREPARED_SCOPE"):
+            if row["group"] == "segments" and not row.get("fixed_axis_members") and (cell["value"] is not None or cell["reason"] == "COMPETING_PREPARED_SCOPE"):
                 segments[row["member"]].append(cell)
         total = totals[index]
         bound = {}
@@ -364,6 +407,13 @@ def _add_revenue_ratios(
             if row:
                 subtotal = segments[row["scope"]] if row["scope"] else []
                 parent = (subtotal[0] if len(subtotal) == 1 else {}) if row["scope"] else total
+                if "fixed_axis_members" in row:
+                    fixed = row["fixed_axis_members"]
+                    candidates = [candidate for candidate, candidate_cell in entries
+                                  if candidate["axis_members"] == fixed
+                                  and (candidate_cell["value"] is not None
+                                       or candidate_cell["reason"] == "COMPETING_PREPARED_SCOPE")]
+                    parent = candidates[0]["cells"][index] if len(candidates) == 1 else {} if fixed else total
                 denominator = bound.get(parent.get("cell_id"))
                 if denominator is not None:
                     parent_scope, parent_value = denominator
@@ -373,7 +423,7 @@ def _add_revenue_ratios(
                     ):
                         cell["share"] = str(percentage_result(value, parent_value, subtract_one=False))
                         ratios["share"] = {
-                            "denominator": "SEGMENT_SUBTOTAL" if row["scope"] else "CONSOLIDATED",
+                            "denominator": _share_denominator(row),
                             "numerator_fact_id": fact, "denominator_fact_id": parent["sources"][0]["fact_id"],
                         }
             if duration and value >= 0:
@@ -387,6 +437,12 @@ def _add_revenue_ratios(
                     }
             if ratios:
                 cell["ratios"] = ratios
+
+
+def _share_denominator(row: dict) -> str:
+    if "fixed_axis_members" in row:
+        return "FIXED_SCOPE_REPORTED" if row["fixed_axis_members"] else "CONSOLIDATED"
+    return "SEGMENT_SUBTOTAL" if row["scope"] else "CONSOLIDATED"
 
 
 def _bind_ratio_cell(
@@ -431,7 +487,7 @@ def _product_hierarchy(
             if cell["value"] is not None or cell["reason"] == "COMPETING_PREPARED_SCOPE":
                 by_segment[row["scope"]].append((row, cell))
         for segment, entries in by_segment.items():
-            parents = [row["cells"][index] for row in result["groups"]["segments"] if row["member"] == segment
+            parents = [row["cells"][index] for row in result["groups"]["segments"] if row["member"] == segment and row["axis_members"] == {SEGMENT_AXIS: segment}
                        and (row["cells"][index]["value"] is not None
                             or row["cells"][index]["reason"] == "COMPETING_PREPARED_SCOPE")] if segment else [result["totals"][index]]
             if len(parents) != 1:
@@ -707,6 +763,212 @@ def _consolidated_totals(
     return totals
 
 
+
+def _complete_revenue_view(
+    result: dict, observations: list[dict], client: Any, ticker: str, cutoff: str, period_class: str,
+    *, annual_view: dict | None, derive_q4: bool,
+) -> None:
+    """Project governed records and scoped coverage; never calculate a residual here."""
+    by_fact = defaultdict(list)
+    for observation in observations:
+        by_fact[(observation["source_snapshot_id"], observation["source_fact_id"])].append(observation)
+    rows = [row for group in result["groups"].values() for row in group]
+    for row in rows:
+        identities = {scope_key(observation) for cell in row["cells"] for source in cell["sources"]
+                      for observation in by_fact[(source["snapshot_id"], source["fact_id"]) ]}
+        if len(identities) == 1:
+            row["canonical_scope"] = list(identities.pop())
+    metrics, exclusions = derive_revenue_q4(observations, cutoff=cutoff) if derive_q4 else ([], [])
+    result["governed_q4"] = {"rule_version": REVENUE_Q4_RULE, "source_pins": result["ratio_evidence"],
+                             "derived_metrics": metrics, "exclusions": exclusions}
+    annual_rows = [row for group in (annual_view or {}).get("groups", {}).values() for row in group]
+    for metric in metrics:
+        identity = [metric["cik"], metric["company_canonical_concept_id"],
+                    json.dumps(sorted(metric["canonical_dimension_signature"]), separators=(",", ":"))]
+        coordinate = (metric["fiscal_year"], 4)
+        indexes = [index for index, period in enumerate(result["periods"]) if _coordinate(period) == coordinate]
+        if not indexes:
+            continue
+        index, = indexes
+        period = result["periods"][index]
+        if (metric["context_start_date"], metric["context_end_date"]) != (period["period_start"], period["period_end"]):
+            metric["projection_hold"] = "Q4_TARGET_PERIOD_MISMATCH"
+            continue
+        matches = [row for row in rows if row.get("canonical_scope") == identity and not row["mapping_review_required"]]
+        if len(matches) > 1:
+            ytd_snapshot = metric["source_inputs"][1]["source_snapshot_id"]
+            matches = [row for row in matches if any(source["snapshot_id"] == ytd_snapshot
+                       for cell in row["cells"] for source in cell["sources"])]
+        if not matches:
+            annual_source = metric["source_inputs"][0]
+            seeds = [row for row in annual_rows if row.get("canonical_scope") == identity and not row["mapping_review_required"]
+                     and any((source["snapshot_id"], source["fact_id"]) == (annual_source["source_snapshot_id"], annual_source["selected_source_fact_id"])
+                             for cell in row["cells"] for source in cell["sources"])]
+            # More than one mapping epoch is never joined by label/QName.
+            if len(seeds) == 1:
+                seed, = seeds
+                row = {**seed, "id": "derived-scope:" + metric["derived_metric_id"],
+                       "mapping_epoch": seed["mapping_epoch"],
+                       "cells": [_gap("NO_SCOPED_OBSERVATION_IN_PREPARED_INPUT") for _ in result["periods"]]}
+                result["groups"][row["group"]].append(row)
+                rows.append(row)
+                matches = [row]
+        if len(matches) != 1:
+            metric["projection_hold"] = "Q4_PREPARED_MAPPING_SCOPE_UNAVAILABLE"
+            continue
+        row, = matches
+        direct = [candidate["cells"][index] for candidate in rows if candidate["axis_members"] == row["axis_members"]
+                  and (candidate["cells"][index]["value"] is not None
+                       or candidate["cells"][index]["reason"] == "COMPETING_PREPARED_SCOPE")]
+        if direct:
+            metric["projection_hold"] = "DIRECT_OR_COMPETING_Q4_PRECEDENCE"
+            continue
+        sources = [_source(source, metric["cik"], cutoff) for source in metric["source_inputs"]]
+        if not all(sources):
+            metric["projection_hold"] = "Q4_SOURCE_TRACE_NOT_QUALIFIED"
+            continue
+        row["cells"][index] = {"value": metric["value_numeric"], "status": "DERIVED", "reason": None,
+                               "cell_id": metric["derived_metric_id"], "sources": sources, "share": None, "yoy": None,
+                               "derivation_rule_version": REVENUE_Q4_RULE, "formula": metric["formula"],
+                               "basis_assurance": metric["basis_assurance"], "ratio_hold_reason": "DERIVED_RATIO_NOT_QUALIFIED"}
+    excluded = {(row["cik"], row["company_canonical_concept_id"],
+                 json.dumps(sorted(row["canonical_dimension_signature"]), separators=(",", ":")), row["fiscal_year"]): row["reason"]
+                for row in exclusions}
+    for row in rows:
+        identity = row.get("canonical_scope")
+        for index, cell in enumerate(row["cells"]):
+            if cell["value"] is not None or cell["reason"] != "PERIOD_NOT_PREPARED":
+                continue
+            period = result["periods"][index]
+            peers = [other for other in rows if other is not row and other["axis_members"] == row["axis_members"]
+                     and other["cells"][index]["value"] is not None]
+            reason = "MAPPING_EPOCH_NOT_ACTIVE" if peers else "MAPPING_REVIEW_REQUIRED" if row["mapping_review_required"] else "NO_SCOPED_OBSERVATION_IN_PREPARED_INPUT"
+            if period_class == "QTD_3M" and period["fiscal_quarter"] == 4:
+                reason = excluded.get((*identity, period["fiscal_year"]), "Q4_INPUTS_OR_MAPPING_NOT_PREPARED") if identity else "Q4_INPUTS_OR_MAPPING_NOT_PREPARED"
+            cell["reason"] = reason
+    nodes = {node["node_id"]: node for node in client._records(ticker, VIEW, "nodes")
+             if node.get("kind") == "VALUE" and node.get("concept") in REVENUE_QNAMES
+             and node.get("period_class") == period_class and not _axis_identity(node.get("dimensions"))}
+    unsupported = defaultdict(int)
+    for cell in client._records(ticker, VIEW, "cells"):
+        node = nodes.get(cell.get("node_id"))
+        if node and cell.get("value") is not None:
+            axes = {dim[0] for dim in node.get("dimensions") or []}
+            for descriptor in REVENUE_VIEWS:
+                if axes & set(descriptor["axes"]):
+                    unsupported[(descriptor["id"], _coordinate(cell))] += 1
+    result["availability"] = {}
+    for group, group_rows in result["groups"].items():
+        summaries = []
+        for index, period in enumerate(result["periods"]):
+            counts = defaultdict(int)
+            for row in group_rows:
+                cell = row["cells"][index]
+                if cell["value"] is None:
+                    counts[cell["reason"] or "PREPARED_OBSERVATION_HELD"] += 1
+            unsupported_count = unsupported[(group, _coordinate(period))]
+            if unsupported_count:
+                counts["UNSUPPORTED_DIMENSION_SCOPE"] += unsupported_count
+            available = sum(row["cells"][index]["value"] is not None for row in group_rows)
+            if not available and not counts:
+                counts["NO_PREPARED_ROWS_FOR_VIEW"] += 1
+                if period_class == "QTD_3M" and period["fiscal_quarter"] == 4:
+                    seed_scopes = {tuple(row["canonical_scope"]) for row in annual_rows if row["group"] == group and row.get("canonical_scope")}
+                    for seed in seed_scopes:
+                        counts[excluded.get((*seed, period["fiscal_year"]), "Q4_INPUTS_OR_MAPPING_NOT_PREPARED")] += 1
+            summaries.append({"available_count": available, "gap_counts": dict(counts),
+                              "examined_scope": "EXACT_PREPARED_ROWS_AND_PINNED_T1_REVENUE", "period_class": period_class})
+        result["availability"][group] = summaries
+
+
+
+def _reuse_reported_outputs(payload: dict, baseline: dict, baseline_sha256: str) -> None:
+    """Reuse exact accepted outputs only after source and full row identity checks."""
+    for field in ("schema_version", "dataset_id", "dataset_publication_id", "financial_as_of", "dataset_manifest_sha256"):
+        if payload.get(field) != baseline.get(field):
+            raise ValueError("reported baseline dataset context differs")
+    for cik, company in payload["companies"].items():
+        prior = baseline["companies"][cik]
+        for frequency in ("annual", "quarterly"):
+            view, previous = company[frequency], prior[frequency]
+            for field in ("periods", "totals", "analysis_publication_id", "analysis_manifest_sha256", "ratio_evidence", "ratio_rule_version"):
+                if view.get(field) != previous.get(field):
+                    raise ValueError(f"reported baseline source/view differs: {field}")
+            for group, old_rows in previous["groups"].items():
+                new_rows = {row["id"]: row for row in view["groups"][group]}
+                for old_row in old_rows:
+                    row = new_rows.get(old_row["id"])
+                    if row is None or any(row.get(field) != value for field, value in old_row.items() if field != "cells"):
+                        raise ValueError("reported baseline full row/mapping scope differs")
+                    for index, old_cell in enumerate(old_row["cells"]):
+                        cell = row["cells"][index]
+                        if old_cell["reason"] == "COMPETING_PREPARED_SCOPE" and cell != old_cell:
+                            raise ValueError("reported baseline conflict must remain held")
+                        if old_cell["value"] is None:
+                            continue
+                        if any(cell.get(field) != old_cell.get(field) for field in ("value", "status", "cell_id", "sources", "reason")):
+                            raise ValueError("reported baseline Fact/value lineage differs")
+                        for field in ("share", "yoy", "ratios"):
+                            if field in old_cell:
+                                cell[field] = old_cell[field]
+                            else:
+                                cell.pop(field, None)
+            # Product/geography admission has not expanded; retain the exact
+            # already governed reported hierarchy, not a newly inferred layout.
+            view["product_hierarchy"] = previous["product_hierarchy"]
+    payload["reported_baseline_sha256"] = baseline_sha256
+
+
+def _finalize_revenue_projection(
+    payload: dict, companion: dict, *, companion_sha256: str, companion_path: str,
+    baseline: dict | None = None, baseline_sha256: str | None = None,
+) -> None:
+    pin = {"sha256": companion_sha256, "rule_version": REVENUE_Q4_RULE,
+           "schema_version": "governed-dimensional-revenue-q4-v1"}
+    payload["derived_publication"] = {**pin, "path": companion_path}
+    for cik, company in payload["companies"].items():
+        view = company["quarterly"]
+        view["derived_publication"] = dict(pin)
+        _refine_q4_gap_evidence(view, company["annual"], companion["companies"][cik]["exclusions"])
+    if baseline is not None:
+        _reuse_reported_outputs(payload, baseline, baseline_sha256)
+
+
+def _refine_q4_gap_evidence(view: dict, annual: dict, exclusions: list[dict]) -> None:
+    excluded = {(row["cik"], row["company_canonical_concept_id"],
+                 json.dumps(sorted(row["canonical_dimension_signature"]), separators=(",", ":")), row["fiscal_year"]): row
+                for row in exclusions}
+    for group, rows in view["groups"].items():
+        annual_rows = annual["groups"][group]
+        for index, period in enumerate(view["periods"]):
+            if period["fiscal_quarter"] != 4:
+                continue
+            year = period["fiscal_year"]
+            for row in rows:
+                cell = row["cells"][index]
+                if cell["value"] is not None or cell["reason"] not in {"Q4_INPUTS_OR_MAPPING_NOT_PREPARED", "Q4_SCOPE_NOT_CONNECTED", "NO_SCOPED_OBSERVATION_IN_PREPARED_INPUT"}:
+                    continue
+                # Diagnostic context only: these full disclosed scopes can say
+                # why linkage is pending, but never create a financial pair.
+                held = [excluded[(*other["canonical_scope"], year)] for other in annual_rows
+                        if other["axis_members"] == row["axis_members"] and other.get("canonical_scope")
+                        and (*other["canonical_scope"], year) in excluded]
+                cell["reason"] = "Q4_MAPPING_REVIEW_REQUIRED" if any(note["reason"] == "Q4_MAPPING_REVIEW_REQUIRED" for note in held) else "Q4_SCOPE_NOT_CONNECTED"
+            summary = view["availability"][group][index]
+            counts = defaultdict(int)
+            for row in rows:
+                if row["cells"][index]["value"] is None:
+                    counts[row["cells"][index]["reason"]] += 1
+            for reason in ("UNSUPPORTED_DIMENSION_SCOPE", "NO_PREPARED_ROWS_FOR_VIEW"):
+                if reason in summary["gap_counts"]:
+                    counts[reason] += summary["gap_counts"][reason]
+            if not rows:
+                for reason, count in summary["gap_counts"].items():
+                    if reason not in {"UNSUPPORTED_DIMENSION_SCOPE", "NO_PREPARED_ROWS_FOR_VIEW"}:
+                        counts["Q4_SCOPE_NOT_CONNECTED" if reason == "Q4_INPUTS_OR_MAPPING_NOT_PREPARED" else reason] += count
+            summary["gap_counts"] = dict(counts)
+
+
 def _coordinate(row: dict) -> tuple[int, int]:
     return row["fiscal_year"], row["fiscal_quarter"]
 
@@ -733,10 +995,21 @@ def _periods(overview: dict, cutoff: str, period_class: str, limit: int) -> list
     return periods[max(0, last_completed - limit):last_completed]
 
 
+def _view_for_axes(axes: set[str]) -> dict | None:
+    registry = {view["id"]: view for view in REVENUE_VIEWS}
+    # Later registrations take priority when their primary axis is present.
+    for view in reversed(REVENUE_VIEWS):
+        allowed = set(view["axes"]) | set(view.get("fixed_dimensions", {}))
+        fixed = [registry[group] for group in view["fixed_groups"]]
+        allowed.update(axis for group in fixed for axis in group["axes"])
+        if (len(axes & set(view["axes"])) == 1 and axes <= allowed
+                and all(len(axes & set(group["axes"])) <= 1 for group in fixed)):
+            return view
+    return None
+
+
 def _supported_axes(axes: set[str]) -> bool:
-    return axes == {SEGMENT_AXIS} or (
-        len(axes & PRODUCT_AXES) == 1 and axes <= PRODUCT_AXES | {SEGMENT_AXIS}
-    )
+    return _view_for_axes(axes) is not None
 
 
 def _axis_identity(dimensions: Any) -> dict[str, str] | None:
@@ -747,7 +1020,8 @@ def _axis_identity(dimensions: Any) -> dict[str, str] | None:
     ):
         return None
     axes = {row[0]: row[1] for row in dimensions}
-    return axes if len(axes) == len(dimensions) and _supported_axes(set(axes)) else None
+    return axes if (len(axes) == len(dimensions) and _supported_axes(set(axes))
+                    and all(axes.get(axis, member) == member for axis, member in (_view_for_axes(set(axes)) or {}).get("fixed_dimensions", {}).items())) else None
 
 
 def _project_row(
@@ -757,14 +1031,20 @@ def _project_row(
     axes = _axis_identity(node.get("dimensions"))
     if not axes or node.get("concept") not in REVENUE_QNAMES:
         return
-    group = "segments" if set(axes) == {SEGMENT_AXIS} else "products"
+    view = _view_for_axes(set(axes))
+    assert view is not None
+    group = view["id"]
+    primary_axis, = set(axes) & set(view["axes"])
     row = series.setdefault(node["node_id"], {
         "id": node["node_id"], "label": node["label"], "group": group,
         "scope": axes.get(SEGMENT_AXIS) if group == "products" else None,
-        "member": axes[SEGMENT_AXIS] if group == "segments" else next(axes[axis] for axis in axes if axis in PRODUCT_AXES),
+        "member": axes[primary_axis],
         "axis_members": axes, "mapping_epoch": node["row_id"],
         "mapping_review_required": bool(node.get("mapping_review_required")), "cells": {},
     })
+    if view.get("share_basis") == "EXACT_FIXED_SCOPE" or set(axes) & set(FIXED_DIMENSIONS):
+        row["fixed_axis_members"] = {axis: member for axis, member in axes.items() if axis != primary_axis}
+        row["raw_dimensions"] = node["dimensions"]
     pending = defaultdict(list)
     for cell in cells:
         if _coordinate(cell) in coordinates and (not fallback or _coordinate(cell) not in row["cells"]):
@@ -859,6 +1139,9 @@ def main() -> None:
     parser.add_argument("--dataset-manifest-sha256", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--cik", action="append", dest="ciks")
+    parser.add_argument("--derived-output", type=Path)
+    parser.add_argument("--baseline-asset", type=Path)
+    parser.add_argument("--baseline-sha256")
     args = parser.parse_args()
     print(prepare_revenue_breakdowns(**vars(args)))
 

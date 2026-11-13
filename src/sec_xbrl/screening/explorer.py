@@ -82,6 +82,7 @@ _REASON_LABELS = {
     "NEGATIVE_EQUITY": "자본이 0 이하",
     "CAPEX_SIGN_UNCERTAIN": "유형자산 지출 부호 확인 필요",
     "PERIOD_MISMATCH": "재무기간 불일치",
+    "LATEST_SOURCE_PERIOD_NOT_PUBLISHED": "최신 분기 조회 자료 미준비",
     "SOURCE_FILING_MISMATCH": "출처 공시 불일치",
     "BASIS_INCOMPATIBLE": "회계 기준 비교 불가",
     "SEMANTIC_IDENTITY_MISMATCH": "보고 항목 의미 불일치",
@@ -97,6 +98,9 @@ LATEST_PERIOD_MODES = frozenset({LATEST_ANNUAL, LATEST_QUARTER})
 def latest_company_period(reader: Any, cik: str, *, quarterly: bool) -> dict[str, Any] | None:
     """Resolve a prepared company period before reading any metric value."""
     if quarterly:
+        guard = getattr(reader, "latest_source_period_guards", {}).get(cik)
+        if guard is not None:
+            return json.loads(canonical_json(guard))
         periods = [
             row for row in getattr(reader, "quarter_period_inventory", [])
             if row["cik"] == cik and row["bucket_status"] != "NO_FILING_AS_OF_CUTOFF"
@@ -157,8 +161,9 @@ def latest_period_observation(
     if row is None:
         return None
     blocked = bool(row.get("quality_blocking") or row.get("quality_status") == "BLOCK")
-    reason = None
-    if anchor is not None and row["availability_status"] == "AVAILABLE":
+    reason = ("LATEST_SOURCE_PERIOD_NOT_PUBLISHED" if anchor is not None
+              and anchor.get("bucket_status") == "LATEST_SOURCE_PERIOD_NOT_PUBLISHED" else None)
+    if reason is None and anchor is not None and row["availability_status"] == "AVAILABLE":
         fields = ("cik", "fiscal_year", "period_end")
         if quarterly:
             fields += ("calendar_year", "calendar_quarter", "fiscal_quarter")

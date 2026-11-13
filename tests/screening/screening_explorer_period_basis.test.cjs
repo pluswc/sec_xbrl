@@ -184,7 +184,7 @@ test("growth sidecar drops stale company replies and reuses verified bytes for t
   const setModel=()=>vm.runInContext(`(()=>{
     renderFinancialProfileBoard=()=>{};
     const model={profile:S.profile,context:{dataset:"current50",publication:"P",financialAsOf:"2026-10-25"},
-      selection:{order:["cfo"]},slots:[{}],key:explorerContextKey()};
+      definitions:new Map([["cfo",{unit_kind:"MONEY"}]]),selection:{order:["cfo"]},slots:[{}],key:explorerContextKey()};
     financialProfileBoard=model;
     requestFinancialGrowth(model);
     return model;
@@ -234,13 +234,13 @@ test("negative expansion summary shows direction and magnitude while evidence re
   const point={status:"영업손실 확대",evidence:{status:"NEGATIVE_MAGNITUDE_EXPANDED",
     negative_magnitude_change:"-941.860465",delta:"-2835000000",current:reference,prior:reference}};
   const summary=evidence(point);
-  assert.match(summary,/영업손실 확대.*확대 규모 .*941\.86.* %/s);
+  assert.match(summary,/영업손실 확대.*확대 규모 .*941\.9.* %/s);
   assert.doesNotMatch(summary,/-941\.86/);
   assert.match(evidence(point,true),/음수 규모 축소율 -941\.860465 %.*전년 절댓값 − 현재 절댓값/);
   point.status="영업현금 순유출 축소";
   point.evidence.status="NEGATIVE_MAGNITUDE_REDUCED";
   point.evidence.negative_magnitude_change="38.06";
-  assert.match(evidence(point),/축소 규모 .*38\.06.* %/s);
+  assert.match(evidence(point),/축소 규모 .*38\.1.* %/s);
 });
 
 test("board axes adapt to displayed sign ranges and columns retain a zero baseline",()=>{
@@ -256,7 +256,7 @@ test("board axes adapt to displayed sign ranges and columns retain a zero baseli
     assert(result.lower<value&&value<result.upper);
     assert(Number.isFinite(result.step));
   }
-  assert.notEqual(tick(0.00001,0.00001,{unit_kind:"PERCENT"}),tick(0.00002,0.00001,{unit_kind:"PERCENT"}));
+  assert.equal(tick(0.00001,0.00001,{unit_kind:"PERCENT"}),tick(0.00002,0.00001,{unit_kind:"PERCENT"}));
   const chart={periods:[{label:"first"},{label:"second"},{label:"third"},{label:"fourth"}],
     series:[{color:0,label:rate.label,points:[{value:"3"},{value:"-2",connect:true},{value:null},{value:"0"}]}],
     definition:{unit_kind:"PERCENT"},label:"전년비"};
@@ -276,7 +276,7 @@ test("board axes adapt to displayed sign ranges and columns retain a zero baseli
 test("comparison validates each metric through existing endpoint and prints actual/fiscal scopes",async()=>{
   const h=harness(url=>{const metric_id=new URLSearchParams(url.split("?")[1]).get("metric_id");return{calendar_year:2026,calendar_quarter:2,metric_id,rows:[{company:{cik:"1",name:"Alpha",ticker:"A"},observation:observation("109417000000")},{company:{cik:"2",name:"Beta",ticker:"B"},observation:observation(null,{availability_status:"UNAVAILABLE"})}]}});
   prepared(h);h.state.metrics=definitions.slice(0,32);h.S.explorerSelected=new Set(["1","2"]);await h.renderComparison();
-  assert.equal(h.calls.length,1);assert.match(h.calls[0],/quarter-comparison/);assert.match(h.get("#comparison-result").innerHTML,/109,417.0/);assert.match(h.get("#comparison-result").innerHTML,/FY2026 Q3/);assert.match(h.get("#comparison-result").innerHTML,/class="missing"/);
+  assert.equal(h.calls.length,1);assert.match(h.calls[0],/quarter-comparison/);assert.match(h.get("#comparison-result").innerHTML,/109,417/);assert.match(h.get("#comparison-result").innerHTML,/FY2026 Q3/);assert.match(h.get("#comparison-result").innerHTML,/class="missing"/);
 });
 
 
@@ -299,10 +299,10 @@ test("fixed comparison shows quarter dates once with explicit exceptions, instan
   await h.renderComparison();
   const [heading,body]=h.get("#comparison-result").innerHTML.split("<tbody>");
   assert.match(heading,/Alpha · A/);
-  assert.equal((heading.match(/분기 2026-03-29 ~ 2026-06-27/g)||[]).length,2);
+  assert.equal((heading.match(/title="분기 2026-03-29 ~ 2026-06-27/g)||[]).length,2);
   assert.doesNotMatch(body,/2026-03-29/);
   assert.equal((body.match(/class="comparison-period-exception"/g)||[]).length,2);
-  assert.match(body,/0\.0[\s\S]*분기 2026-04-01 ~ 2026-06-27/);
+  assert.match(body,/0[\s\S]*분기 2026-04-01 ~ 2026-06-27/);
   assert.match(body,/기말 기준[\s\S]*기준일 2026-06-26/);
   assert.match(body,/aria-label="자료 없음: 준비 자료에서 항목을 확인할 수 없음"/);
 });
@@ -322,7 +322,7 @@ test("latest TTM comparison uses TTM spans, anchor-only dates and no conflicted 
   assert.match(h.calls[0],/latest=true/);
   assert.match(heading,/TTM 2025-07-01 ~ 2026-06-30/);
   assert.match(heading,/기준 종료일 2026-06-30/);
-  assert.match(heading,/Gamma<small[^>]+>실제 기간 확인 불가/);
+  assert.match(heading,/Gamma<small[^>]+>[\s\S]*?실제 기간 확인 불가/);
   assert.doesNotMatch(heading,/2026-03-29|2026-06-19/);
   assert.doesNotMatch(body,/comparison-period-exception/);
   assert.match(body,/aria-label="자료 없음: 분기 합계 조건을 충족하지 않음"/);
@@ -340,7 +340,7 @@ test("annual comparison honors legacy context-end conventions and displays a dif
   h.S.explorerSelected=new Set(["1","2","3"]);h.get("#comparison-metrics").selectedOptions=[{value:id}];
   await h.renderComparison();
   const [heading,body]=h.get("#comparison-result").innerHTML.split("<tbody>");
-  assert.equal((heading.match(/연간 2024-01-01 ~ 2024-12-31/g)||[]).length,3);
+  assert.equal((heading.match(/title="연간 2024-01-01 ~ 2024-12-31/g)||[]).length,3);
   assert.equal((body.match(/class="comparison-period-exception"/g)||[]).length,1);
   assert.match(body,/기준일 2024-12-28/);
 });
@@ -484,4 +484,264 @@ test("source selection folds only after a ready matrix and distinguishes a later
   assert.equal(h.get("#batch-editor").open,true);
   assert.match(h.get("#batch-status").textContent,/기업표를 불러오지 못했습니다/);
   assert.doesNotMatch(h.get("#batch-status").textContent,/유지/);
+});
+
+test("catalog comparison renders prepared percentage points and generic money states without browser arithmetic",()=>{
+  const h=harness(()=>{});
+  const {points,eligible,value,pp,status,evidence}=vm.runInContext('({points:financialGrowthPoints,eligible:financialComparisonEligible,value:profileBoardValue,pp:BOARD_PP,status:financialGrowthStatus,evidence:financialGrowthEvidence})',h.context);
+  assert(eligible({unit_kind:"MONEY"}));assert(eligible({unit_kind:"PERCENT"}));assert(!eligible({unit_kind:"RATIO"}));
+  const definition={metric_id:"current_ratio",unit_kind:"PERCENT",definition_version:"v1"};
+  const row={value:"120.125",period_start:null,period_end:"2025-01-01",fiscal_year:2024};
+  const model={context:{basis:"ANNUAL"},slots:[{key:"2024"}],growth:{data:{rule_version:"catalog-prepared-financial-comparison-v2",
+    definitions:{current_ratio:{basis:"FY",definition_version:"v1",comparison_kind:"PERCENTAGE_POINT"}},
+    series:{current_ratio:{2024:{status:"CHANGE_AVAILABLE",current:{...row,observation_id:"x"},change_pp:"-0.00001",yoy:null}}}}}};
+  const result=points(model,definition,[{value:row.value,row}]);
+  assert.equal(result[0].value,"-0.00001");
+  result[0].evidence.prior={...row,value:"120.12501",observation_id:"prior"};
+  result[0].formula="current - prior";
+  assert.match(evidence(result[0],true),/현재 비율 − 전년 비율 · current - prior/);
+  assert.doesNotMatch(evidence(result[0]),/변화 공식/);
+  assert.match(value(result[0].value,pp),/aria-label="&gt;-0.1 %p"/);
+  assert.match(value(result[0].value,pp),/title="-0.00001 %p"/);
+  assert.equal(status("cash","NEGATIVE_TURN"),"음수 전환");
+  assert.equal(status("cash","NEGATIVE_MAGNITUDE_EXPANDED"),"음수 규모 확대");
+  assert.equal(points(model,definition,[{value:"120",row}])[0].value,null);
+});
+
+test("ledger preserves all metrics and missing reasons while plots share compact period labels and rounded ticks",()=>{
+  const h=harness(()=>{}),{ledger,plot}=vm.runInContext('({ledger:profileMetricLedger,plot:profileBoardPlot})',h.context);
+  const markup=ledger([{label:"안정성",metrics:[{definition:{metric_id:"cash",label:"현금",unit_kind:"MONEY"},observation:{value:"123456789"}},
+    {definition:{metric_id:"fcf",label:"표준화 FCF",unit_kind:"MONEY"},observation:{value:null,reason_labels:["자료 부족"]}}]}]);
+  assert.equal((markup.match(/class="profile-ledger-row"/g)||[]).length,2);
+  assert.match(markup,/현금/);assert.match(markup,/자료 부족/);assert.doesNotMatch(markup,/profile-card/);
+  const chart={periods:[{label:"FY2023"},{label:"FY2024"}],series:[{color:0,label:"정확값",points:[{value:"0.00001"},{value:"0.00002"}]}],
+    definition:{unit_kind:"PERCENT"},label:"비율"};
+  const full=plot(chart),compact=plot({...chart,showPeriods:false});
+  assert.match(full,/viewBox="0 0 570 154"/);assert.match(compact,/viewBox="0 0 570 134"/);
+  assert.doesNotMatch(compact,/class="board-x"/);assert.match(compact,/<title>정확값 · FY2024 · 0.00002 %/);
+  const labels=[...full.matchAll(/class="board-y"[^>]*>([^<]+)/g)].map(match=>match[1]);
+  assert.equal(labels.length,new Set(labels).size);assert.match(full,/같은 반올림 눈금/);
+});
+
+test("sortable headers are native buttons with current order and explicit next action",()=>{
+  const h=harness(()=>{}),header=vm.runInContext('explorerSortHeader',h.context);
+  assert.match(header("company","기업명","기업"),/scope="col" aria-sort="ascending"/);
+  assert.match(header("company","기업명","기업"),/type="button"[^>]*data-explorer-sort="company"[^>]*aria-label="기업명: 내림차순 정렬"/);
+  assert.match(header("quarter_revenue","매출","매출","백만 달러"),/aria-sort="none".*내림차순 정렬/s);
+  h.get("#explorer-sort").value="quarter_revenue";h.get("#explorer-direction").value="desc";
+  assert.match(header("quarter_revenue","매출"),/aria-sort="descending".*오름차순 정렬/s);
+  assert.match(header("company","기업명"),/aria-sort="none".*오름차순 정렬/s);
+  assert.match(header("quarter_revenue","매출"),/aria-hidden="true">↓/);
+});
+
+test("header sorting synchronizes interim dropdowns and retains exact missing-last rules and scope",async()=>{
+  const data=snapshot();data.rows.push(row("3",null,"Missing"));
+  const h=harness(()=>data);prepared(h);
+  h.get("#explorer-sort").options=["company","quarter_revenue","ttm_revenue"].map(value=>({value}));
+  const sort=vm.runInContext('sortExplorerByHeader',h.context);
+  h.S.explorerSelected.add("1");await h.loadExplorer();
+  await sort("quarter_revenue");
+  assert.equal(h.get("#explorer-direction").value,"desc");
+  assert.equal(h.get("#explorer-sort").value,"quarter_revenue");
+  assert.equal(h.state.visibleRows.map(r=>r.company.cik).join(),"1,2,3");
+  assert.match(h.get("#explorer-head").innerHTML,/aria-sort="descending"[^>]*title="quarter_revenue"/);
+  await sort("quarter_revenue");
+  assert.equal(h.get("#explorer-direction").value,"asc");
+  assert.equal(h.state.visibleRows.map(r=>r.company.cik).join(),"2,1,3");
+  await sort("company");assert.equal(h.get("#explorer-direction").value,"asc");
+  await sort("company");assert.equal(h.get("#explorer-direction").value,"desc");
+  assert.equal(h.state.views.QUARTERLY.sort,"company");assert.equal(h.state.views.QUARTERLY.direction,"desc");
+  assert.equal(h.S.explorerSelected.has("1"),true);assert.equal(h.state.periods.QUARTERLY,"2026Q2");
+  h.state.basis="TTM";await sort("ttm_revenue");
+  assert.equal(h.get("#explorer-direction").value,"desc");
+  assert.equal(h.state.views.TTM.sort,"ttm_revenue");assert.equal(h.calls.length,1);
+  await sort("period");assert.equal(h.get("#explorer-sort").value,"ttm_revenue");
+});
+
+test("annual header sort uses the existing API and preserves query latest year and selected companies",async()=>{
+  const h=harness(()=>({rows:[],fiscal_years:[{fiscal_year:2024,companies_prepared:2}],selected_fiscal_year:2024,default_fiscal_year:2024,
+    company_count:2,selected_year_company_count:2,financial_as_of:"2026-10-25"}));
+  h.S.explorerCatalog={metrics:core.map(metric_id=>({metric_id,label:metric_id,unit_kind:"MONEY"}))};h.S.explorerCatalogKey="current50:2024";
+  h.get("#explorer-sort").options=["company",...core].map(value=>({value}));h.get("#explorer-query").value="Alpha";
+  h.S.explorerSelected.add("1");h.state.latestAnnual=true;
+  const sort=vm.runInContext('sortExplorerByHeader',h.context);
+  await sort("net_income");await sort("net_income");
+  const params=h.calls.map(url=>new URLSearchParams(url.split("?")[1]));
+  assert.equal(params[0].get("sort"),"net_income");assert.equal(params[0].get("direction"),"desc");
+  assert.equal(params[1].get("direction"),"asc");
+  for(const query of params){assert.equal(query.get("latest"),"true");assert.equal(query.get("query"),"Alpha")}
+  assert.equal(h.S.explorerSelected.has("1"),true);assert.equal(h.S.explorerYear,2024);
+  assert.match(h.get("#explorer-head").innerHTML,/aria-sort="ascending"[^>]*title="net_income"/);
+  assert.doesNotMatch(h.get("#explorer-head").innerHTML,/data-explorer-sort="(?:period|selection)"/);
+});
+
+test("header rerender binds click and restores only an already focused header",async()=>{
+  const h=harness(()=>{});prepared(h);h.state.metrics=definitions;
+  const render=vm.runInContext('renderExplorerHeaders',h.context);
+  const document=vm.runInContext('document',h.context);let focused=0;
+  const button={dataset:{explorerSort:"quarter_revenue"},focus(options){focused++;assert.equal(options.preventScroll,true)}};
+  document.querySelectorAll=selector=>selector==='[data-explorer-sort]'?[button]:[];
+  document.activeElement={dataset:{explorerSort:"quarter_revenue"}};
+  render(["quarter_revenue"],"실제 기간",false);
+  assert.equal(focused,1);assert.equal(typeof button.onclick,"function");
+  document.activeElement=h.get("#explorer-sort");render(["quarter_revenue"],"기간",false);assert.equal(focused,1);
+  // A native button supplies Enter/Space activation; no custom key listener can double-toggle it.
+  assert.match(h.get("#explorer-head").innerHTML,/<button type="button" class="explorer-header-sort"/);
+});
+
+test("financial catalog groups retain separate order, limits and all custom metric access",()=>{
+  const h=harness(()=>{}),{groups,change,activate}=vm.runInContext('({groups:financialBoardGroups,change:changeProfileBoard,activate:activateFinancialBoardGroup})',h.context);
+  const definitions=new Map(Array.from({length:13},(_,i)=>[`m${i}`,{label:`metric ${i}`,category:i<10?"PROFITABILITY":"CASH_FLOW"}]));
+  const model={groups:groups(definitions,["m0","m10"])};
+  vm.runInContext('financialProfileBoardHost={};renderProfileBoardSelection=()=>{};updateFinancialProfileBoard=()=>{}',h.context);
+  activate(model,"CORE");assert.equal(model.selection.order.join(),"m0,m10");
+  change(model.selection,"m0","down");
+  activate(model,"PROFITABILITY");assert.equal(model.selection.order.length,8);
+  change(model.selection,"m9","add");assert.equal(model.selection.order.length,8);
+  change(model.selection,"m0","remove");change(model.selection,"m9","add");change(model.selection,"m9","up");
+  const profit=model.selection.order.join();
+  activate(model,"CORE");assert.equal(model.selection.order.join(),"m10,m0");
+  activate(model,"CUSTOM");assert.equal(model.groups.get("CUSTOM").options.length,13);
+  change(model.selection,"m12","add");
+  activate(model,"PROFITABILITY");assert.equal(model.selection.order.join(),profit);
+  activate(model,"CUSTOM");assert.equal(model.selection.order.join(),"m0,m10,m12");
+  assert.equal(h.get("#financial-board-group-label").textContent,"현재 그룹: 사용자 선택");
+  assert.equal(model.groups.get("OTHER_REPORTED").options.length,0);
+});
+
+test("adaptive plot geometry keeps exact points and legible compact paired dimensions",()=>{
+  const h=harness(()=>{}),{plot,x,width}=vm.runInContext('({plot:profileBoardPlot,x:profileBoardPeriodX,width:financialBoardPlotWidth})',h.context);
+  assert.equal(x(0,8),94);assert.equal(x(7,8),542);
+  for(const available of [330,760,1212,1668,2308]){
+    const pixels=width({clientWidth:available});assert(pixels>=320&&pixels<650);
+    const svg=plot({periods:Array.from({length:8},(_,i)=>({label:`2025Q${i%4+1}`,short:`25Q${i%4+1}`})),
+      series:[{id:"item",label:"Full item",color:0,points:Array.from({length:8},(_,i)=>({value:String(i-2),connect:true}))}],
+      definition:{unit_kind:"PERCENT"},label:"growth",width:pixels,height:108,type:"COLUMN"});
+    assert.match(svg,new RegExp(`viewBox="0 0 ${pixels} 108"`));assert.match(svg,/class="board-adaptive"/);
+    assert.doesNotMatch(svg,/NaN|Infinity/);assert.match(svg,/Full item · 2025Q1 · -2 %/);
+    assert(x(7,8,pixels)<pixels);
+  }
+});
+
+test("nearby context escapes labels, explains missing and revenue denominator or same-filing scope",()=>{
+  const h=harness(()=>{}),{line,legend,context}=vm.runInContext('({line:profileBoardContextLine,legend:profileBoardLegend,context:revenueBoardContext})',h.context);
+  const missing=line('<unsafe name>',"FY2024",null,{unit_kind:"PERCENT"},"검토 필요 <raw>","분모 설명");
+  assert.match(missing,/&lt;unsafe name&gt;/);assert.match(missing,/검토 필요 &lt;raw&gt;/);assert.doesNotMatch(missing,/<unsafe/);
+  assert.match(legend([{id:'"x',label:"Full long name",color:0}]),/data-board-item="&quot;x"/);
+  h.context.testBoard={periods:[{label:"FY2024"}],view:{periods:[{period_start:"2024-01-01",period_end:"2025-01-01"}]},
+    visible:[{id:"x",label:"Complete source label",points:{amount:[{value:"123456789",reason:"missing"}],yoy:[{value:"12.345",reason:"missing"}],share:[{value:"45.678",reason:"missing",basis:"고정 지역 범위"}]}}]};
+  vm.runInContext('revenueBreakdowns.board=testBoard',h.context);
+  assert.match(context("x",0,"share"),/Complete source label[\s\S]*45.7[\s\S]*비중 분모: 고정 지역 범위/);
+  assert.match(context("x",0,"yoy"),/같은 공시의 전년 비교값/);
+  assert.match(context(null,0,"amount"),/123456789 USD/);
+});
+
+test("chart interaction links hover and keyboard periods, pins until Escape and rejects stale context",()=>{
+  const h=harness(()=>{});vm.runInContext('window={addEventListener(){}}',h.context);
+  const bind=vm.runInContext('bindProfileBoardPeriod',h.context),events={},attributes=new Map();
+  let active=0,key="company1",valid=true,prevented=0,stopped=0,canvasFocus=0;
+  const context={hidden:true,innerHTML:""},classes=new Set();
+  const item={dataset:{boardItem:"item"},classList:{toggle(name,on){on?classes.add(name):classes.delete(name)},remove(name){classes.delete(name)}}};
+  const canvas={focus(){canvasFocus++},parentElement:{querySelector(){return context}},closest(selector){return selector===".board-plot-canvas"?this:selector==="[data-financial-card]"?{dataset:{financialCard:"item"}}:null}};
+  const target=index=>({closest(selector){
+    if(selector==="[data-board-period]")return{dataset:{boardPeriod:String(index)}};
+    if(selector==="[data-board-item]")return item;
+    if(selector===".board-plot-canvas")return canvas;
+    if(selector==="[data-board-period],.board-plot-canvas,[data-board-item]")return this;
+    return null;
+  }});
+  const host={addEventListener(name,handler){events[name]=handler},setAttribute(k,v){attributes.set(k,v)},removeAttribute(k){attributes.delete(k)},
+    querySelectorAll(selector){return selector===".board-context"?[context]:selector==="[data-board-item]"||selector===".board-item-active"?[item]:[]},contains(){return false}};
+  bind(host,index=>{active=index},()=>active,{key:()=>key,valid:()=>valid,count:()=>4,describe:(id,index)=>`${id} period${index}`});
+  events.pointerover({target:target(2),pointerType:"mouse"});assert.equal(active,2);assert.equal(context.hidden,false);assert(classes.has("board-item-active"));
+  events.click({target:target(2)});assert.equal(attributes.get("data-board-pinned"),"true");assert.equal(canvasFocus,1);
+  events.pointerover({target:target(1),pointerType:"mouse"});assert.equal(active,2);assert.match(context.innerHTML,/period2/);
+  const escape=()=>events.keydown({key:"Escape",target:canvas,preventDefault(){prevented++},stopPropagation(){stopped++}});
+  escape();assert.equal(context.hidden,true);assert.equal(prevented,1);assert.equal(stopped,1);escape();assert.equal(stopped,1);
+  events.keydown({key:"ArrowRight",target:canvas,preventDefault(){}});assert.equal(active,3);
+  events.keydown({key:" ",target:canvas,preventDefault(){}});assert.equal(attributes.get("data-board-pinned"),"true");
+  key="company2";events.pointerover({target:target(1),pointerType:"mouse"});assert.equal(active,1);
+  valid=false;events.pointerover({target:target(0),pointerType:"mouse"});assert.equal(context.hidden,true);assert.equal(active,1);
+});
+
+test("pinned context and active legend or canvas survive DOM replacement with refreshed data",()=>{
+  for(const kind of ["legend","canvas","close"]){
+    const h=harness(()=>{});vm.runInContext('window={addEventListener(){}}',h.context);
+    const bind=vm.runInContext('bindProfileBoardPeriod',h.context),document=vm.runInContext('document',h.context),events={};
+    let active=1,scope="company1",order="item",version=1,dom;
+    const attributes=new Map(),root={contains:node=>[dom.legend,dom.canvas,dom.close].includes(node)};
+    function makeDOM(){
+      const context={hidden:true,innerHTML:""},classes={toggle(){},remove(){}};
+      const panel={dataset:{boardMode:"amount"},closest(){return null},querySelector(selector){return selector===".board-context"?context:selector===".board-plot-canvas"?canvas:selector==="[data-board-clear]"?close:null},querySelectorAll(){return[legend]}};
+      const closest=(self,selector)=>selector==="[data-board-mode]"?panel:selector==="button[data-board-item]"&&self===legend?legend:
+        selector==="[data-board-item]"&&self===legend?legend:selector===".board-plot-canvas"&&self===canvas?canvas:
+        selector==="[data-board-clear]"&&self===close?close:selector===".financial-board-card,.revenue-board-plot"?panel:
+        selector==="[data-board-period],.board-plot-canvas,[data-board-item]"&&self!==close?self:null;
+      const legend={dataset:{boardItem:"item"},classList:classes,closest(selector){return closest(this,selector)},focus(){document.activeElement=this;events.focusin?.({target:this})}};
+      const canvas={parentElement:panel,closest(selector){return closest(this,selector)},focus(){document.activeElement=this;events.focusin?.({target:this})}};
+      const close={closest(selector){return closest(this,selector)},focus(){document.activeElement=this;events.focusin?.({target:this})}};
+      return{context,panel,legend,canvas,close};
+    }
+    dom=makeDOM();
+    const host={addEventListener(name,fn){events[name]=fn},removeAttribute(key){attributes.delete(key)},setAttribute(key,value){attributes.set(key,value)},
+      querySelectorAll(selector){return selector===".board-context"?[dom.context]:selector==="[data-board-mode]"?[dom.panel]:selector==="[data-board-item]"||selector===".board-item-active"?[dom.legend]:[]},querySelector(){return dom.context},contains:root.contains};
+    bind(host,index=>{active=index},()=>active,{valid:()=>true,key:()=>scope,order:()=>order,items:()=>order?order.split(","):[],count:()=>4,defaultMode:"amount",describe:(item,index,mode)=>`${item}:${index}:${mode}:version${version}`});
+    events.click({target:dom.legend});document.activeElement=dom[kind];
+    assert.equal(dom.context.hidden,false);const saved=host.profileBoardInteraction.beforeRender(root);
+    dom=makeDOM();document.activeElement={};version=2;
+    host.profileBoardInteraction.afterRender(saved);
+    assert.equal(dom.context.hidden,false);assert.match(dom.context.innerHTML,/item:1:amount:version2/);
+    assert.equal(document.activeElement,dom[kind]);assert.equal(attributes.get("data-board-pinned"),"true");
+    events.pointerover({target:dom.canvas,pointerType:"mouse"});assert.match(dom.context.innerHTML,/version2/);
+    // Programmatic focus after Escape and another render is not a new request for explanation.
+    events.keydown({key:"Escape",target:dom.canvas,preventDefault(){},stopPropagation(){}});
+    assert.equal(dom.context.hidden,true);
+    const cleared=host.profileBoardInteraction.beforeRender(root);dom=makeDOM();document.activeElement={};
+    host.profileBoardInteraction.afterRender(cleared);
+    assert.equal(dom.context.hidden,true);assert.equal(attributes.has("data-board-pinned"),false);
+    assert.equal(document.activeElement,dom[kind]);
+    events.click({target:dom.legend});document.activeElement=dom[kind];
+    // A newly loaded company or changed selection cannot reuse the previous pin.
+    const next=host.profileBoardInteraction.beforeRender(root);scope="company2";order="";dom=makeDOM();
+    host.profileBoardInteraction.afterRender(next);assert.equal(dom.context.hidden,true);assert.equal(attributes.has("data-board-pinned"),false);
+  }
+});
+
+test("all revenue comparison contexts and financial growth include their prepared actual dates",()=>{
+  const h=harness(()=>{}),{revenue,financial}=vm.runInContext('({revenue:revenueBoardContext,financial:financialBoardContext})',h.context);
+  const period={period_start:"2024-01-01",period_end:"2025-01-01",end_convention:"EXCLUSIVE",fiscal_year:2024};
+  h.context.testRevenue={periods:[{label:"FY2024"}],view:{periods:[period]},visible:[{id:"x",label:"Item",points:{
+    amount:[{value:"100"}],yoy:[{value:"2"}],share:[{value:"3",basis:"연결 매출"}]}}]};
+  vm.runInContext('revenueBreakdowns.board=testRevenue',h.context);
+  for(const mode of ["amount","yoy","share"])assert.match(revenue("x",0,mode),/2024-01-01/);
+  const definition={metric_id:"cfo",unit_kind:"MONEY",definition_version:"v1"},row={...period,value:"100",metric_observation_id:"id"};
+  h.context.testFinancial={definitions:new Map([["cfo",definition]]),context:{basis:"ANNUAL"},slots:[{key:2024,label:"FY2024"}],series:new Map([["cfo",{rows:[row]}]]),
+    growth:{data:{definitions:{cfo:{basis:"FY",definition_version:"v1"}},series:{cfo:{2024:{current:{...period,value:"100",observation_id:"id"},prior:{...period,value:"50"},status:"RATE_AVAILABLE",yoy:"100",delta:"50"}}}}}};
+  vm.runInContext('financialProfileBoard=testFinancial',h.context);
+  assert.match(financial("cfo",0,"growth"),/2024-01-01/);
+});
+
+test("union profile growth validates owner capability and preserves parent header",async()=>{
+  const requested={dataset_id:"union",dataset_publication_id:"union-P",financial_as_of:"2026-10-25",cik:"0000000001"};
+  const parent={dataset_id:"old50",dataset_publication_id:"old-P",financial_as_of:requested.financial_as_of,dataset_manifest_sha256:"1".repeat(64)};
+  const union={...requested,dataset_manifest_sha256:"9".repeat(64)};delete union.cik;
+  const envelope={schema_version:"screening-auxiliary-owner-response-v1",request_scope:{...union,cik:requested.cik},source_scope:parent,
+    owner_proof:{cik:requested.cik,union_manifest_sha256:union.dataset_manifest_sha256,source_manifest_sha256:parent.dataset_manifest_sha256},
+    data:{...parent,cik:requested.cik,schema_version:"screening-financial-growth-v1",rule_version:"signed-prepared-financial-yoy-v1",period_end_convention:"EXCLUSIVE",definitions:{},series:{}}};
+  const h=harness(url=>url==="/api/financial-growth"?{configured:true,...parent,owner_contexts:[{request_scope:union,source_scope:parent,available_ciks:[requested.cik]}]}:envelope);
+  h.S.defaultDataset={...union,publication_id:union.dataset_publication_id,auxiliary_manifest_sha256:union.dataset_manifest_sha256};
+  h.S.profile={company:{cik:requested.cik}};
+  const model=vm.runInContext(`(()=>{renderFinancialProfileBoard=()=>{};const model={profile:S.profile,context:{dataset:"union",publication:"union-P",financialAsOf:"2026-10-25"},definitions:new Map([["cfo",{unit_kind:"MONEY"}]]),selection:{order:["cfo"]},slots:[{}],key:explorerContextKey()};financialProfileBoard=model;requestFinancialGrowth(model);return model})()`,h.context);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(model.growth.data.dataset_id,"old50");assert.equal(model.growth.data.auxiliary_owner.request_scope.dataset_id,"union");
+  assert.equal(h.calls.length,2);
+});
+
+test("union company without owner asset keeps levels and does not fetch another parent's growth",async()=>{
+  const h=harness(()=>({configured:true,dataset_id:"old50",dataset_publication_id:"old-P",financial_as_of:"2026-10-25",owner_contexts:[{request_scope:{dataset_id:"union",dataset_publication_id:"union-P",financial_as_of:"2026-10-25",dataset_manifest_sha256:"9".repeat(64)},available_ciks:["0000000001"]}]}));
+  h.S.defaultDataset={dataset_id:"union",publication_id:"union-P",auxiliary_manifest_sha256:"9".repeat(64)};
+  h.S.profile={company:{cik:"0000000002"}};
+  const model=vm.runInContext(`(()=>{renderFinancialProfileBoard=()=>{};const model={profile:S.profile,context:{dataset:"union",publication:"union-P",financialAsOf:"2026-10-25"},definitions:new Map([["cfo",{unit_kind:"MONEY"}]]),selection:{order:["cfo"]},slots:[{}],key:explorerContextKey()};financialProfileBoard=model;requestFinancialGrowth(model);return model})()`,h.context);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.match(model.growth.error,/수준 값/);assert.equal(h.calls.length,1);assert.equal(model.slots.length,1);
 });

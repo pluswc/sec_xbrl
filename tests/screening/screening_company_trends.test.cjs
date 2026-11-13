@@ -78,7 +78,7 @@ test("negative and zero values share a labeled zero axis; missing/quality values
   assert.equal(new Set(geometry.ticks).size,geometry.ticks.length);
   assert.equal(model.series[0].points.find(point=>point.slot.key==="2025Q2").observation.value,null);
   h.state.model=model;h.renderCompanyTrendPlot();const svg=h.get("#comparison-trend-chart").innerHTML;
-  assert.match(svg,/>0.0<\/text>/);assert.match(svg,/-5,855.0/);
+  assert.match(svg,/>0<\/text>/);assert.match(svg,/-5,855/);
   assert.equal((svg.match(/<circle/g)||[]).length,6);
   assert.equal((svg.match(/<line x1=/g)||[]).length,4);
 });
