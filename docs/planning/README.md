@@ -1,5 +1,11 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-13 [데스크톱 2차 전체 탭 작업면](../implementation/desktop-first-phase2-20261113.md)은
+지표 안내의 목록/선택 상세, 이력 조회 필터와 원장, 스크리닝 조건/결과 인접
+배치를 다룬다. 구현 승인, 검증·인수·운영은 대기다. 1차 PR91은 main
+`0a89d5cfda`에 병합됐고 [CI 43427104449](https://github.com/pluswc/sec_xbrl/actions/runs/43427104449)는
+통과했다. 아래 1차 전달 당시의 미병합/진행 중 문구는 당시 기록이다.
+
 2026-11-13 원격 전달: 통합 HEAD `bf91b303ea`의 독립 Node 108개·Ruff·diff와
 main 포함/UI 동일성 PASS 후 [PR #91](https://github.com/pluswc/sec_xbrl/pull/91)을
 열었다. OPEN·main 미병합이며 CI는 진행 중이다. 최종 원격 근거는
