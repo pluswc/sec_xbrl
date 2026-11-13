@@ -2,8 +2,13 @@
 
 2026-11-14 [PR85 History 복구 갱신](../implementation/history-recovery-inventory-20261111.md)은
 최신 main `df694e4a88`를 기존 branch에 일반 merge해 빈 `.chunks` 정리 수정만
-유지한다. 기존 Nasdaq/UI/producer와 자료·journal을 보존하며 최신 통합 재검증과
-PR85 업데이트를 승인받았다. PR85 병합·운영 재시작은 승인하지 않았으며 미수행이다.
+유지했다. source `018797db68`에서 집중222·Node122·Ruff/diff, 별도 독립222,
+전체pytest3015통과/38skip/0실패와 private journal의 저장·재열기·휴지통복원 UAT가
+PASS하여 리드가 인수·PR85 업데이트 GO를 내렸다. 원본20파일/journal논리·SHA는
+그대로이며 [PR85](https://github.com/pluswc/sec_xbrl/pull/85)는 OPEN·main미병합이다.
+push 후 최신 head checks는 별도 확인하며 PR85 병합·운영 재시작은 미승인·미수행이다.
+PR94는 main `df694e4a88`에 병합됐고 CI43456688979도 성공했다.
+아래 PR94미병합/History baseline실패 기록은 당시 상태다.
 
 2026-11-11 [History 복구 입력 목록 수정](../implementation/history-recovery-inventory-20261111.md)은
 성공 발행에 남은 빈 임시 디렉터리와 엄격한 복구 목록 검사의 충돌을 다룬다.

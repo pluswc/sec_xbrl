@@ -1,5 +1,12 @@
 # History 정상 발행의 임시 디렉터리 정리
 
+2026-11-14 최신 통합 인수: main `df694e4a88`를 일반 merge한 소스
+`018797db68d562a5c458720f47784d640f7dec1a`에서 집중222·전체Node122·Ruff/diff 및
+독립 집중222 검증, private journal 저장/재열기/휴지통 복원이 통과했다. 전체
+pytest는 **3015 passed, 38 skipped, 0 failed**다. 리드는 소스를 인수하고 PR85
+업데이트 GO를 내렸다. PR85는 OPEN·main 미병합이며, push 후 최신 head checks는
+리드가 별도 확인한다. 아래 원래 기준/검증 상태는 당시 기록이다.
+
 2026-11-11 사용자는 main의 캐시 History 복구 실패를 수정하고 별도 PR로
 검증하는 범위를 승인했다. 기준은 `b1b783d418`이다.
 
@@ -36,6 +43,8 @@ POLARS_MAX_THREADS=2 PYTHONPATH=src:. python -m pytest -q
 `data/processed/history_runs/20260906_five_company/history_intake.json`과
 여기서 참조하는 NVDA 두 공시가 필요하다. 캐시가 없는 환경에서는 해당
 통합 검사를 건너뛰며, 임시 파일의 안전 경계는 합성 테스트로 검사한다.
+
+2026-11-11 당시 단계 기록:
 
 | 단계 | 상태 |
 | --- | --- |
@@ -77,9 +86,52 @@ nonempty/link/storage guard fail-closed·실패 진단 보존. 최신 통합의 
 정확히 같다. 이 경로는 선택적 검증 근거이며 계약의 필수 소스는 이 문서다.
 
 최신 통합 자체 검사: focused 222개(cached NVDA API+CLI 포함), 전체 Node 122개,
-Ruff/diff PASS. 전체 pytest는 실행 중이며 아직 통과를 주장하지 않는다.
+Ruff/diff PASS. 이 시점 전체 pytest는 실행 중이었다. 최종 완료 결과는 아래에 별도 기록한다.
 로그는 `/tmp/pr85-refresh-focused.log`, `/tmp/pr85-refresh-node.log`,
 `/tmp/pr85-refresh-full.log`다. focused 종료 후20파일 SHA와 journal 전체 논리
 dump는 사전 및2026-11-11 원래 baseline과 동일했다
 (`evidence/refresh-20261114/preservation-after-focused.json`). 최신 독립 검증/
 복제 journal UAT/리드 인수/원격 CI와 병합 상태는 후속 단계다.
+
+## 2026-11-14 최종 검증·인수와 전달
+
+생산 코드 변경은 최신 main 대비 원래 `history.py`10줄뿐이다. 일반 merge
+`fb8aafdee93c38981d0126acdd9a3f8b5ab5af26`는 기존 `b94b751a8b`와
+main `df694e4a88e5b5aeb7f68ac3590205989bc0b37c`를 부모로 보존한다. 문서의
+정확한 테스트 개수 정정이 포함된 동결 `018797db68`에서 별도 reviewer는
+focused **222/222 (112.51s)**·Ruff/diff와 보호20파일 전후 hash를 PASS했다.
+Nasdaq/UI/producer 새 코드와 엄격한 recovery inventory는 main 그대로다.
+
+Writer 자체 검사:
+
+- 집중222(cached NVDA API+CLI 포함),112.04s PASS.
+- 전체 Node122,35.13s 및 Ruff/diff PASS.
+- 전체 pytest **3015 passed, 38 skipped, 29 warnings, 0 failed**,388.81s.
+  원래 main의 cached recovery 실패가 이 branch에서 해결됐다.
+- 집중 종료 후와 전체 종료 후20파일 SHA·실제 journal 전체 readonly dump가
+  사전 및2026-11-11 baseline과 같았다. 전체 종료 근거는
+  `work/history-recovery-inventory-20261111/evidence/refresh-20261114/preservation-after-full.json`이다.
+
+리드의 private UAT는 실제 journal을 `mode=ro` backup한 복제본과 독립19185
+backend/실제 journal-history worker에서 수행했다. 기존 휴지통8개 전체 복원,
+기존 조건/결과 재열기, 새 조건·92개사 결과 저장/재열기/CSV92행, 새 항목
+삭제 후 읽기409·오래된 version 복원409·정상 복원, private server/worker 재시작
+후 snapshot/저장 내용 동일성을 확인했다. 원래 모든 SQL row는 복제본에서도
+보존됐고 실제 journal 전체 dump와 SHA는 그대로다. private 서버와 worker는
+종료됐다. 운영 backend/bridge는 재시작하지 않았다. 근거는
+`work/pr85-main-sync-20261114/private-uat-acceptance.json`,
+`journal-copy-uat.py`와 실행 log다. 합성 수명 테스트와 실제 복제본 검증을 구분한다.
+
+실제 journal SHA256:
+`3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`.
+보존 범위는 선언된 입력·manifest·journal20파일과 journal 전체 논리 내용이며
+전체 Raw/cache 전수 재감사를 주장하지 않는다. 과거 발행물의 `.chunks`를
+삭제/마이그레이션하지 않았고 테스트 출력은 private tmp에만 생성했다.
+
+PR94는 main `df694e4a88`에 병합됐고 리드가
+[CI43456688979](https://github.com/pluswc/sec_xbrl/actions/runs/43456688979)의 성공을
+확인했다. PR85는 기존 [OPEN PR85](https://github.com/pluswc/sec_xbrl/pull/85)를
+리드가 push 후 갱신한다. 최종 원격 근거는
+[PR85 최신 head checks](https://github.com/pluswc/sec_xbrl/pull/85/checks)다.
+이번 소스 인수는 PR85 원격 최신 CI 성공이나 main 병합을 뜻하지 않으며
+PR85 병합은 승인·수행하지 않았다. 이 완료 문서 commit은 동결 구현 SHA와 별도다.
