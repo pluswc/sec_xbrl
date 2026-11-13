@@ -1,5 +1,33 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-13 원격 전달: 통합 HEAD `bf91b303ea`의 독립 Node 108개·Ruff·diff와
+main 포함/UI 동일성 PASS 후 [PR #91](https://github.com/pluswc/sec_xbrl/pull/91)을
+열었다. OPEN·main 미병합이며 CI는 진행 중이다. 최종 원격 근거는
+[최신 head checks](https://github.com/pluswc/sec_xbrl/pull/91/checks)다.
+리드가 live 자산·History API·SQLite의 인수 기준 동일성을 재확인했다.
+아래 전달 대기 문구는 당시 기록이다.
+
+2026-11-13 원격 전달 승인: 데스크톱 1차와 간결한 날짜가 포함된 작업 브랜치에
+origin/main `72575d89f5`를 일반 merge `1dfc42b3b0`로 통합했다. 충돌·tree 변화
+없이 인수된 UI 소스 `d19638fae3`를 보존했다. 통합의 별도 독립 재검증과
+push·PR·CI는 대기이며 작업의 main 병합은 수행하지 않았다. 아래 로컬 인수와
+과거 미수행 상태는 당시 기록이다.
+
+2026-11-13 [데스크톱 분석 우선 1차](../implementation/desktop-first-phase1-20261113.md)는
+상태 보존 목록/분석 전환, 행 밀도, 접힌 반복 요약과 비교 지표 선택·자동 갱신을
+다룬다. 소스 `d19638fae3`는 독립 Node 108개·Ruff와 리드 실제 검사를
+통과해 LOCALLY_ACCEPTED(2026-11-13), 18765에 적용됐다. 1440의 3열/첫
+차트 쌍과 1920/2560의 4열을 확인했다. 125/150%는 effective CSS viewport
+검사이며 실제 zoom은 미검증이다. 자료·기록은 보존했고 원격 push·PR·CI·
+main 병합 및 2/3차 재설계는 미수행이다.
+
+2026-11-12 [재무기간의 간결한 날짜 표시](../implementation/compact-financial-dates-20261112.md)는
+일반 날짜를 YY.MM.DD로 줄이고 전체 ISO 근거와 회계기간 의미를 보존한다.
+통합 소스 `a19661910d`는 기존 매출 완전성 기능을 보존하고 독립 Node 100개·
+Python 42개·Ruff 및 리드 실제 날짜/매출/보드/스크리닝 검사를 통과했다.
+LOCALLY_ACCEPTED(2026-11-12), 18765(PID10580)에 적용했고 backend19070과
+기존 incoming artifact·기록을 유지했다. 이 작업의 push·PR·CI·main 병합은 미수행이다.
+
 2026-11-12 [매출 범위·누락 사유와 보수적 Q4](../implementation/revenue-completeness-20261112.md)는
 소스 `3c80c529be646fddfbbdf9137cc19db1513a4514`의 독립 확인·리드 로컬 인수 후
 18765(PID44272)에 운영 반영했다. 기존 PR89/main e64 workbench와 backend19070,

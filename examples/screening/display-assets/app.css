@@ -620,6 +620,13 @@ g.board-item-active .board-line { stroke-width: 4; }
 }
 @media (max-width:760px) { .explorer-v2 .criteria .view-settings > div { grid-template-columns: minmax(0,1fr); padding-inline: 0; } }
 .explorer-v2 .criteria .screening-period-fields > #screen-batch-status { order: 1; flex: 1 0 100%; margin: 4px 0 0; font-size: 12px; line-height: 1.5; }
+/* Ordinary dates are compact; their exact ISO caption stays in title and accessible name. */
+.financial-date { display: inline-block; max-width: 100%; vertical-align: top; font-variant-numeric: tabular-nums; }
+.financial-date-line { display: block; white-space: normal; line-height: 1.45; }
+.financial-date-token { white-space: nowrap; overflow-wrap: normal; word-break: keep-all; }
+.display-table .period-cell:has([data-financial-date]) { white-space: normal; }
+.display-table .period-caption:has([data-financial-date]) { white-space: normal; }
+
 
 .profile-revenue-breakdowns .missing[tabindex]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
@@ -628,3 +635,55 @@ g.board-item-active .board-line { stroke-width: 4; }
 .explorer-v2 #revenue-breakdown-table:has(td[data-revenue-derived]) thead th:last-child { width: 180px; }
 .profile-revenue-breakdowns [data-revenue-derived] > .revenue-source-kind,
 .profile-revenue-breakdowns [data-revenue-derived] > a { display: block; white-space: nowrap; }
+/* Desktop-first phase 1: keep the list intact and let analysis own the first screen. */
+.explorer-v2 .explorer-matrix { max-height: max(240px,calc(100dvh - var(--explorer-list-offset,320px))); }
+.explorer-v2 .explorer-matrix:has(+ #company-profile:not([hidden])) { max-height: max(240px,calc(100dvh - var(--explorer-list-offset,320px))); }
+.explorer-v2 .explorer-view.analysis-open > .section-head,
+.explorer-v2 .explorer-view.analysis-open .explorer-tools,
+.explorer-v2 .explorer-view.analysis-open .explorer-summary,
+.explorer-v2 .explorer-view.analysis-open #explorer-selection-tray,
+.explorer-v2 .explorer-view.analysis-open .batch-availability,
+.explorer-v2 .explorer-view.analysis-open .explorer-message,
+.explorer-v2 .explorer-view.analysis-open > .explorer-matrix { display: none; }
+.explorer-analysis-bar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; position: sticky; top: 0; z-index: 8; padding: 8px 0; margin: 0 0 8px; background: var(--paper); border-bottom: 1px solid var(--line); }
+#analysis-company-controls { display: flex; gap: 6px; align-items: center; min-width: 0; }
+#analysis-company { max-width: min(360px,45vw); }
+#analysis-company-scope { color: var(--slate); font-size: 12px; }
+#analysis-status { flex: 1 0 100%; margin: 0; color: var(--red); }
+.explorer-v2 [data-row-density="COMPACT"] .explorer-matrix th,
+.explorer-v2 [data-row-density="COMPACT"] .explorer-matrix td { padding-block: 4px; font-size: 14px; }
+.explorer-v2 [data-row-density="COMPACT"] .explorer-matrix .company { min-height: 28px; }
+.profile-summary-disclosure { margin: 4px 0 8px; }
+.profile-summary-disclosure > summary { cursor: pointer; color: var(--blue); font-size: 13px; padding: 4px 0; }
+.explorer-v2 .analysis-open #company-profile { margin-top: 0; }
+#profile-title,#comparison-trend { scroll-margin-top: 72px; }
+.comparison-metric-workspace { padding: 8px 12px; }
+#comparison-metric-picker > summary { cursor: pointer; color: var(--blue); padding: 4px 0; }
+.comparison-metric-tools { display: flex; gap: 12px; flex-wrap: wrap; margin: 8px 0; }
+.comparison-metric-tools label { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 13px; }
+#comparison-metric-query { width: min(320px,100%); }
+#comparison-metric-choices { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,240px),1fr)); gap: 8px; max-height: 240px; overflow: auto; }
+#comparison-metric-choices label { display: flex; gap: 6px; align-items: start; min-width: 0; font-size: 14px; }
+#comparison-metric-choices small { display: block; color: var(--slate); font-size: 12px; }
+#comparison-metric-chips { display: flex; flex-wrap: wrap; gap: 4px; list-style: none; padding: 0; margin: 8px 0 4px; max-height: 112px; overflow: auto; }
+.explorer-v2 #comparison-metric-chips button { max-width: 300px; white-space: normal; font-size: 12px; padding: 4px 8px; }
+#comparison-metric-status { margin: 4px 0 0; font-size: 12px; }
+#comparison-company-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+#comparison-analysis-grid { display: grid; grid-template-columns: minmax(0,1fr); gap: 12px; padding: 0 12px 12px; align-items: start; }
+#comparison-analysis-grid > * { min-width: 0; margin: 0; }
+#comparison-analysis-grid #comparison-result { overflow: auto; }
+#comparison-analysis-grid .company-trend-heading { gap: 8px; }
+#comparison-analysis-grid .company-trend-legend { gap: 4px 12px; }
+@media (min-width:1200px) { #comparison-analysis-grid { grid-template-columns: minmax(0,1fr) minmax(0,1fr); } }
+@media (max-width:760px) {
+  .explorer-analysis-bar { gap: 6px; }
+  #analysis-company-controls { flex: 1 0 100%; }
+  #analysis-company { flex: 1 1 auto; max-width: calc(100% - 116px); }
+  #comparison-analysis-grid { padding-inline: 8px; }
+}
+.explorer-v2 .financial-board-card h4 { min-height: 24px; line-height: 24px; margin-bottom: 8px; }
+.explorer-v2 .financial-board-plot[data-board-mode="level"] { min-height: 192px; }
+.explorer-v2 .financial-board-plot[data-board-mode="growth"] { min-height: 158px; }
+.explorer-v2 .financial-board-plot h5 { line-height: 16px; min-height: 16px; }
+.explorer-v2 .financial-board-card .financial-board-readout { margin: 8px 0; min-height: 108px; }
+.explorer-v2 .explorer-view.analysis-open .batch-source { display: none; }

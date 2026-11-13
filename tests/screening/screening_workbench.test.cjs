@@ -94,7 +94,7 @@ test("rendered results retain selection and status filters across latest and fix
   h.S.run={period_policy:{mode:"LATEST_COMPANY_ANNUAL_V1"},rows:[row("1","PASS"),row("2","FAIL")]};
   h.render();assert.match(h.get("#result-head").innerHTML,/data-display-role="period"/);
   assert.match(h.get("#result-body").innerHTML,/data-cik="1" class="selected"/);
-  assert.match(h.get("#result-body").innerHTML,/2025-09-27\n공시일 2025-10-31/);
+  assert.match(h.get("#result-body").innerHTML,/title="FY2025 · 2024-09-29 ~ 2025-09-27 · 공시일 2025-10-31"/);
   h.S.activeFilter="FAIL";h.render();assert.doesNotMatch(h.get("#result-body").innerHTML,/data-cik="1"/);
   assert.match(h.get("#result-body").innerHTML,/data-cik="2"/);
   h.S.activeFilter="ALL";h.get("#show-all").checked=false;h.S.run.period_policy={mode:"FIXED_FISCAL_YEAR",fiscal_year:2024};h.render();
