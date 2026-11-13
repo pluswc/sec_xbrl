@@ -161,3 +161,22 @@ test("latest trends request guarded series even after caching the same fixed coo
   assert.match(q.calls.at(-1),/latest=true/);
   assert.equal(q.calls.length,2);
 });
+
+test("published latest coordinates extend only latest chart slots under the exact dataset scope",()=>{
+  const h=harness(()=>{});interim(h,"QUARTERLY","LATEST");
+  h.S.defaultDataset={dataset_id:"D",publication_id:"P",financial_as_of:"2026-10-25"};
+  const a="0000000001",b="0000000002";h.S.explorerSelected=new Set([a,b]);
+  h.basis.snapshot.rows=[{company:{cik:a},period:{calendar_year:2026,calendar_quarter:4}},{company:{cik:b},period:{calendar_year:2026,calendar_quarter:3}}];
+  const published={schema_version:"screening-latest-company-periods-v1",dataset_id:"D",dataset_publication_id:"P",financial_as_of:"2026-10-25",
+    records:[{cik:a,calendar_year:2026,calendar_quarter:4,bucket_status:"PERIOD_AVAILABLE",end_convention:"EXCLUSIVE",period_end:"2026-10-03"}]};
+  h.basis.inventory.latest_company_periods=published;
+  let context=h.companyTrendContext("quarter_revenue");
+  assert.equal(context.spine.length,9);assert.equal(h.companyTrendSlots(context,[]).at(-1).key,"2026Q4");
+  const payload=quarterSeries(a);payload.observations=[{...payload.observations[0],availability_status:"AVAILABLE",value:"300",calendar_quarter:4,period_end:"2026-10-03"}];
+  assert.equal(h.validateCompanyTrendSeries(context,a,payload).rows.length,1);
+  h.basis.periods.QUARTERLY="2026Q3";h.basis.readyKey="D:QUARTERLY:2026Q3";
+  context=h.companyTrendContext("quarter_revenue");assert.equal(context.spine.length,8);assert.equal(h.companyTrendSlots(context,[]).at(-1).key,"2026Q3");
+  h.basis.periods.QUARTERLY="LATEST";h.basis.readyKey="D:QUARTERLY:LATEST";
+  published.dataset_publication_id="foreign";assert.throws(()=>h.companyTrendContext("quarter_revenue"),/범위/);
+  published.dataset_publication_id="P";published.records[0].period_end="2027-01-01";assert.throws(()=>h.companyTrendContext("quarter_revenue"),/범위/);
+});

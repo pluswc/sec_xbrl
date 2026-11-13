@@ -328,8 +328,10 @@ class ScreeningRuntimeProjection:
 
 def observation_rows(
     reader: Any, *, quarterly: bool = False, cik: str | None = None, metric_id: str | None = None,
-    year: int | None = None, quarter: int | None = None,
+    year: int | None = None, quarter: int | None = None, latest: bool = False,
 ) -> list[dict]:
+    if latest and callable(getattr(reader, "latest_rows", None)):
+        return reader.latest_rows(quarterly=quarterly, cik=cik, metric_id=metric_id, year=year, quarter=quarter)
     if _core_reader(reader):
         return reader.rows(quarterly=quarterly, cik=cik, metric_id=metric_id, year=year, quarter=quarter)
     rows = getattr(reader, "quarter_observations", []) if quarterly else reader.observations
@@ -349,5 +351,6 @@ def hydrate_observation(reader: Any, row: dict, *, quarterly: bool = False) -> d
 
 def _core_reader(reader: Any) -> bool:
     from sec_xbrl.screening.cohort_union import ScreeningCohortUnionReader
+    from sec_xbrl.screening.governed_delta import ScreeningGovernedDeltaReader
 
-    return isinstance(reader, (ScreeningRuntimeProjection, ScreeningCohortUnionReader))
+    return isinstance(reader, (ScreeningRuntimeProjection, ScreeningCohortUnionReader, ScreeningGovernedDeltaReader))

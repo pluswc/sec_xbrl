@@ -69,3 +69,20 @@ test("optional union flags fail closed and retain the old bridge default",t=>{
   const request={method:"POST",url:"/api/financial-growth?"+new URLSearchParams({dataset_id:"union",dataset_publication_id:"union-publication",financial_as_of:source.financial_as_of,cik})};
   const denied=response();bridge.serveFinancialGrowth(f.bundle,request,denied,f.owner);assert.equal(denied.status,405);
 });
+
+test("governed delta preserves exact parent ownership and rejects relabelled owners",t=>{
+  const f=fixture(t),file=path.join(f.root,"delta.json");
+  const manifest={schema_version:"screening-governed-delta-v1",dataset_id:"delta",publication_id:"delta-publication",
+    financial_as_of:f.manifest.financial_as_of,configured_ciks:f.manifest.configured_ciks,
+    parent:{path:"/home/immutable/union/screening_cohort_union_manifest.json",sha256:f.digest},auxiliary_owners:structuredClone(f.manifest.auxiliary_owners)};
+  const write=value=>{fs.writeFileSync(file,JSON.stringify(value));return crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex")};
+  const digest=write(manifest),owner=bridge.loadAuxiliaryUnion(file,digest,{path:f.file,sha256:f.digest});
+  const served=growth(f.bundle,owner,{dataset_id:"delta",dataset_publication_id:"delta-publication",financial_as_of:source.financial_as_of,cik});
+  assert.equal(served.status,200);assert.deepEqual(served.body.data,f.data);
+  assert.equal(served.body.owner_proof.union_manifest_sha256,digest);
+  const bad=structuredClone(manifest);bad.auxiliary_owners[cik].dataset_publication_id="wrong";
+  assert.throws(()=>bridge.loadAuxiliaryUnion(file,write(bad),{path:f.file,sha256:f.digest}),/ownership/);
+  const tampered=structuredClone(manifest);tampered.parent.sha256="0".repeat(64);
+  assert.throws(()=>bridge.loadAuxiliaryUnion(file,write(tampered),{path:f.file,sha256:f.digest}),/pin/);
+  assert.throws(()=>bridge.loadAuxiliaryUnion(file,write(manifest)),/host parent/);
+});

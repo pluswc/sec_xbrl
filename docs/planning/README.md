@@ -1,5 +1,10 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 [매출 성장률·최신 실제 분기 교정](../implementation/governed-latest-revenue-delta-20261114.md)은
+기존92 projection을 공유하는 별도 governed delta 구현 승인 단계다. 같은 공시의
+정확한 전년 비교/typed primary 근거와 최신 실제 분기만 다루며 옛 정의·발행물·
+호환 게이트·기록은 보존한다. 실제 발행·운영은 독립 검증 후 별도 수락한다.
+
 2026-11-14 main 전달 후보: 92개사 운영 소스에 main `cdb8f64b83`와 실제 사용한
 401 상류 operator·6064 native 경계를 일반 merge했다. 원래 수락 소스 이력과
 실제 UI bytes를 보존하고, 새 operator의 분기 FY 범위만 명시적으로 정정했다.

@@ -98,6 +98,9 @@ LATEST_PERIOD_MODES = frozenset({LATEST_ANNUAL, LATEST_QUARTER})
 def latest_company_period(reader: Any, cik: str, *, quarterly: bool) -> dict[str, Any] | None:
     """Resolve a prepared company period before reading any metric value."""
     if quarterly:
+        supplement = getattr(reader, "latest_quarter_periods", {}).get(cik)
+        if supplement is not None:
+            return json.loads(canonical_json(supplement))
         guard = getattr(reader, "latest_source_period_guards", {}).get(cik)
         if guard is not None:
             return json.loads(canonical_json(guard))
@@ -561,6 +564,10 @@ class ScreeningExplorer:
             "source_filings": row.get("source_filings", []),
             "quality_status": row.get("quality_status"),
             "warnings": row.get("warnings", []),
+            **({"continuity_evidence": {"rule_version": row["comparability_policy"],
+                "proof_available_on": row["proof_available_on"], "known_on": row["known_on"],
+                "original_observation": row["original_observation"],
+                "source_fact_ids": row["source_fact_ids"]}} if row.get("proof_available_on") else {}),
         }
 
     def _company(self, row: dict[str, Any]) -> dict[str, Any]:

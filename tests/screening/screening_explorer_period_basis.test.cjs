@@ -745,3 +745,18 @@ test("union company without owner asset keeps levels and does not fetch another 
   await new Promise(resolve=>setImmediate(resolve));
   assert.match(model.growth.error,/수준 값/);assert.equal(h.calls.length,1);assert.equal(model.slots.length,1);
 });
+
+test("annual revenue board consumes published continuity growth without auxiliary arithmetic",()=>{
+  const h=harness();h.S.profile={};
+  const api=vm.runInContext('({growth:financialProfileGrowth,points:financialProfilePoints,request:requestFinancialGrowth})',h.context);
+  const level={metric_id:"revenue",period_class:"FY",unit_kind:"MONEY",unit:"USD",definition_version:"annual-core-reported-v1"};
+  const growth={metric_id:"revenue_yoy",period_class:"FY",unit_kind:"PERCENT",unit:"PERCENT",definition_version:"annual-revenue-yoy-same-filing-continuity-v2"};
+  const definitions=new Map([[level.metric_id,level],[growth.metric_id,growth]]);
+  const row={metric_id:"revenue_yoy",fiscal_year:2025,value:"15.09008108154437771771737453502390",definition_version:growth.definition_version,
+    continuity_evidence:{rule_version:"same-filing-primary-revenue-exact-prior-v1",proof_available_on:"2026-02-05",original_observation:{id:"old"}}};
+  const model={definitions,selection:{order:["revenue"]},slots:[{key:2025,ordinal:2025}],context:{basis:"ANNUAL"},series:new Map([["revenue_yoy",{rows:[row]}]])};
+  assert.equal(api.growth("revenue",definitions),growth);
+  assert.equal(api.points(model,growth)[0].value,row.value);
+  assert.equal(api.points(model,growth)[0].row.continuity_evidence.original_observation.id,"old");
+  api.request(model);assert.equal(model.growth,undefined);assert.equal(h.calls.length,0);
+});

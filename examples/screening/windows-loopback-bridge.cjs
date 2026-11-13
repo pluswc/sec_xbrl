@@ -63,6 +63,8 @@ function parseArgs(argv) {
     "--journal-store",
     "--auxiliary-union",
     "--auxiliary-union-sha256",
+    "--auxiliary-union-parent",
+    "--auxiliary-union-parent-sha256",
   ]);
   for (const key of Object.keys(values)) {
     if (!allowed.has(key)) throw new Error(`unknown argument: ${key}`);
@@ -119,9 +121,16 @@ function parseArgs(argv) {
         !/^[0-9a-f]{64}$/u.test(text("--auxiliary-union-sha256"))))) {
     throw new Error("auxiliary union requires an absolute manifest path and SHA-256 pin");
   }
+  const hasAuxiliaryParent = Object.hasOwn(values, "--auxiliary-union-parent");
+  if (hasAuxiliaryParent !== Object.hasOwn(values, "--auxiliary-union-parent-sha256") ||
+      (hasAuxiliaryParent && (!hasAuxiliaryUnion || !path.isAbsolute(text("--auxiliary-union-parent")) ||
+        !/^[0-9a-f]{64}$/u.test(text("--auxiliary-union-parent-sha256"))))) {
+    throw new Error("auxiliary delta parent requires an explicit host path and SHA-256 pin");
+  }
   return {
     auxiliaryUnion: hasAuxiliaryUnion ? text("--auxiliary-union") : null,
     auxiliaryUnionSha256: hasAuxiliaryUnion ? text("--auxiliary-union-sha256") : null,
+    ...(hasAuxiliaryParent ? {auxiliaryUnionParent:{path:text("--auxiliary-union-parent"),sha256:text("--auxiliary-union-parent-sha256")}} : {}),
     revenueBreakdowns: hasBreakdowns ? text("--revenue-breakdowns") : null,
     revenueBreakdownsSha256: hasBreakdowns ? text("--revenue-breakdowns-sha256") : null,
     financialGrowth: hasGrowth ? text("--financial-growth") : null,
@@ -339,7 +348,7 @@ function validateFinancialComparisonV2(payload, legacyRowValid, isRecord) {
   };
 }
 
-function loadAuxiliaryUnion(file, digest) {
+function loadAuxiliaryUnion(file, digest, hostParent = null) {
   const manifest = loadPinnedJson(file, digest, "auxiliary union");
   const validScope = scope => scope && Object.keys(scope).sort().join(",") ===
       "dataset_id,dataset_manifest_sha256,dataset_publication_id,financial_as_of" &&
@@ -348,7 +357,21 @@ function loadAuxiliaryUnion(file, digest) {
   const scope = {dataset_id:manifest.dataset_id, dataset_publication_id:manifest.publication_id,
     financial_as_of:manifest.financial_as_of, dataset_manifest_sha256:digest};
   const owners = manifest.auxiliary_owners;
-  if (manifest.schema_version !== "screening-cohort-union-v1" || manifest.config?.expose_auxiliary_owners !== true ||
+  const delta = manifest.schema_version === "screening-governed-delta-v1";
+  if (delta) {
+    if (!hostParent || hostParent.sha256 !== manifest.parent?.sha256) {
+      throw new Error("governed delta requires an explicit byte-identical host parent pin");
+    }
+    const parent = loadPinnedJson(hostParent.path, hostParent.sha256, "governed delta auxiliary parent");
+    if (parent.schema_version !== "screening-cohort-union-v1" || parent.config?.expose_auxiliary_owners !== true ||
+        parent.financial_as_of !== manifest.financial_as_of ||
+        JSON.stringify(parent.configured_ciks) !== JSON.stringify(manifest.configured_ciks) ||
+        JSON.stringify(parent.auxiliary_owners) !== JSON.stringify(owners)) {
+      throw new Error("governed delta auxiliary ownership differs from exact parent");
+    }
+  }
+  if (!delta && hostParent) throw new Error("host parent pin is only valid for a governed delta");
+  if ((!delta && (manifest.schema_version !== "screening-cohort-union-v1" || manifest.config?.expose_auxiliary_owners !== true)) ||
       !validScope(scope) || !owners || typeof owners !== "object" || Array.isArray(owners) ||
       !Array.isArray(manifest.configured_ciks) || !manifest.configured_ciks.length ||
       new Set(manifest.configured_ciks).size !== manifest.configured_ciks.length ||
@@ -484,7 +507,7 @@ function startBridge(options) {
   const breakdowns = options.revenueBreakdowns
     ? loadRevenueBreakdowns(options.revenueBreakdowns, options.revenueBreakdownsSha256) : null;
   const growth = options.financialGrowth ? loadFinancialGrowth(options.financialGrowth, options.financialGrowthSha256) : null;
-  const auxiliary = options.auxiliaryUnion ? loadAuxiliaryUnion(options.auxiliaryUnion, options.auxiliaryUnionSha256) : null;
+  const auxiliary = options.auxiliaryUnion ? loadAuxiliaryUnion(options.auxiliaryUnion, options.auxiliaryUnionSha256, options.auxiliaryUnionParent || null) : null;
   const relay = childProcess.spawn(
     options.wsl,
     [

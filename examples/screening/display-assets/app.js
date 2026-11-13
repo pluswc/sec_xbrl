@@ -1281,7 +1281,7 @@ function auxiliaryOwnerPayload(response,requested,dataset,expectedSource=null){
 }
 
 function requestFinancialGrowth(model){
-  if(model.growth||!model.slots.length||!model.selection.order.some(id=>financialComparisonEligible(model.definitions.get(id))))return;
+  if(model.growth||!model.slots.length||!model.selection.order.some(id=>financialComparisonEligible(model.definitions.get(id))&&!financialProfileGrowth(id,model.definitions)))return;
   const scope={dataset_id:model.context.dataset,dataset_publication_id:model.context.publication,
     financial_as_of:model.context.financialAsOf,cik:model.profile.company.cik};
   if(Object.values(scope).some(value=>typeof value!=="string"||!value)){
@@ -1521,7 +1521,7 @@ function beginFinancialProfileBoard(){
     (profile.latestAnchor?periodCoordinate(profile.latestAnchor):null):explorerBasis.periods[basis];
   const context={basis,end,ends:latest?{[profile.company.cik]:end}:null,
     dataset:dataset.dataset_id,publication:dataset.publication_id,financialAsOf:profile.financial_as_of,
-    spine:explorerBasis.inventory?.spine||[],annualYears:profile.prepared_years||[],companies:[profile.company]};
+    spine:companyTrendSpine(latest),annualYears:profile.prepared_years||[],companies:[profile.company]};
   const slots=end==null?[]:companyTrendSlots(context,annual?[{preparedYears:profile.prepared_years||[]}]:[])
     .map(slot=>({...slot,short:annual?slot.label:slot.label.slice(2)}));
   const model={profile,selection,groups:financialBoardGroups(definitions,defaults),group:"CORE",definitions,context,slots,series:new Map(),active:Math.max(0,slots.length-1),key:explorerContextKey()};
@@ -1601,7 +1601,7 @@ function renderFinancialProfileBoard(model){
         <div class="table-wrap" tabindex="0" role="region" aria-label="${esc(definition.label)} 기간별 값">
           <table class="series-table"><thead><tr><th scope="col">기간</th><th scope="col">수준 · ${esc(profileBoardUnit(definition))}</th>${growth?`<th scope="col">${growth.unit==="pp"?"전년 대비 변화 (%p)":"전년비 (%)"}</th>`:""}</tr></thead>
           <tbody>${model.slots.map((slot,index)=>{
-            const level=levels[index],rate=rates?.[index],caption=point=>point?.row?`<small>${esc(actualPeriod(point.row))}${point.row.fiscal_quarter?` · ${esc(fiscalLabel(point.row))}`:""}</small>`:"";
+            const level=levels[index],rate=rates?.[index],caption=point=>point?.row?`<small>${esc(actualPeriod(point.row))}${point.row.fiscal_quarter?` · ${esc(fiscalLabel(point.row))}`:""}${point.row.continuity_evidence?` · 전년 비교 공시 ${esc(compactFinancialDate(point.row.continuity_evidence.proof_available_on))}`:""}</small>`:"";
             return `<tr><th scope="row">${esc(slot.label)}</th><td>${profileBoardValue(level.value,definition,level.reason,true)}${caption(level)}</td>${growth?`<td>${profileBoardValue(rate.value,growth,rate.reason,true)}${caption(rate)}${adjunct?financialGrowthEvidence(rate,true):""}</td>`:""}</tr>`;
           }).join("")}</tbody></table></div>
       </details></article>`;
@@ -2151,6 +2151,24 @@ function companyTrendMetricOptions(){
   const prefix=explorerBasis.basis==="ANNUAL"?"":explorerBasis.basis==="TTM"?"ttm_":"quarter_";
   return Object.entries(COMPANY_TREND_METRICS).map(([base,label])=>({base,label,definition:activeExplorerMetrics().find(metric=>metric.metric_id===prefix+base)})).filter(item=>item.definition?.unit_kind==="MONEY"&&item.definition.unit==="USD");
 }
+function companyTrendSpine(latest){
+  const inventory=explorerBasis.inventory||{},base=(inventory.spine||[]).map(row=>({...row})),published=inventory.latest_company_periods;
+  if(!latest||!published)return base;
+  const dataset=explorerDataset(),cutoff=dataset?.financial_as_of||explorerBasis.snapshot?.financial_as_of;
+  if(published.schema_version!=="screening-latest-company-periods-v1"||published.dataset_id!==dataset?.dataset_id||
+      published.dataset_publication_id!==(dataset?.publication_id||dataset?.dataset_publication_id)||published.financial_as_of!==cutoff||!Array.isArray(published.records))throw new Error("최신 분기 공표 범위가 선택한 자료와 다릅니다.");
+  const byCoordinate=new Map(base.map(row=>[periodCoordinate(row),row])),seen=new Set();
+  for(const row of published.records){
+    const end=row.period_end;
+    if(!/^\d{10}$/u.test(row.cik||"")||seen.has(row.cik)||row.bucket_status!=="PERIOD_AVAILABLE"||row.end_convention!=="EXCLUSIVE"||
+        !/^\d{4}-\d{2}-\d{2}$/u.test(end||"")||!Number.isInteger(row.calendar_year)||![1,2,3,4].includes(row.calendar_quarter))throw new Error("최신 분기 공표 좌표를 확인할 수 없습니다.");
+    const date=new Date(`${end}T00:00:00Z`);if(!Number.isFinite(date.getTime())||date.toISOString().slice(0,10)!==end)throw new Error("최신 분기 날짜가 올바르지 않습니다.");
+    date.setUTCDate(date.getUTCDate()-1);
+    if(date.toISOString().slice(0,10)>cutoff||date.getUTCFullYear()!==row.calendar_year||Math.floor(date.getUTCMonth()/3)+1!==row.calendar_quarter)throw new Error("최신 분기 날짜가 자료 기준 범위를 벗어납니다.");
+    seen.add(row.cik);byCoordinate.set(periodCoordinate(row),{calendar_year:row.calendar_year,calendar_quarter:row.calendar_quarter});
+  }
+  return [...byCoordinate.values()].sort((a,b)=>a.calendar_year-b.calendar_year||a.calendar_quarter-b.calendar_quarter);
+}
 function companyTrendContext(metric){
   const basis=explorerBasis.basis,dataset=explorerDataset(),annual=basis==="ANNUAL",ciks=[...S.explorerSelected].sort();
   if(ciks.length<2||ciks.length>4)throw new Error("같은 지표를 비교할 기업을 2~4개 선택해 주세요.");
@@ -2165,7 +2183,7 @@ function companyTrendContext(metric){
   const availableEnds=ends?Object.values(ends).filter(value=>value!==null).sort():[];
   const end=availableEnds.at(-1)??(annual?S.explorerYear:explorerBasis.periods[basis]);
   if(ends&&!availableEnds.length)throw new Error("비교 기업에 준비된 기간이 없습니다.");
-  return{annualDefinitions:annual?companyTrendMetricOptions().map(item=>item.definition):[],dataset:dataset.dataset_id,publication:S.explorer?.dataset_publication_id,financialAsOf:annual?S.explorer.financial_as_of:explorerBasis.snapshot.financial_as_of,basis,end,ends,ciks,definition,companies:rows.map(row=>row.company),annualYears:annual?S.explorer.fiscal_years.map(row=>row.fiscal_year):[],spine:annual?[]:explorerBasis.inventory.spine.map(row=>({...row})),explorerKey:explorerContextKey(),key:JSON.stringify([dataset.dataset_id,basis,end,ends,ciks,metric])};
+  return{annualDefinitions:annual?companyTrendMetricOptions().map(item=>item.definition):[],dataset:dataset.dataset_id,publication:S.explorer?.dataset_publication_id,financialAsOf:annual?S.explorer.financial_as_of:explorerBasis.snapshot.financial_as_of,basis,end,ends,ciks,definition,companies:rows.map(row=>row.company),annualYears:annual?S.explorer.fiscal_years.map(row=>row.fiscal_year):[],spine:annual?[]:companyTrendSpine(latestExplorerPeriod()),explorerKey:explorerContextKey(),key:JSON.stringify([dataset.dataset_id,basis,end,ends,ciks,metric])};
 }
 function companyTrendOwns(context,token){
   if(token!==companyTrend.token||$("#comparison-panel").hidden||context.explorerKey!==explorerContextKey())return false;
