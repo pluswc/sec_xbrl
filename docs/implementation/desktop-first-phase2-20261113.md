@@ -54,10 +54,16 @@ dataset/publication/FY/metric/definition을 사용한다. 현재 요청 오류�
 ID/원문 JSON native details에 보존한다. timezone 없는 값은 추정하지 않고 원문을 표시한다.
 기본 이력은 제목+시간/상세의 두 줄 원장이며 toolbar도 가까운 가로 배치를 사용한다.
 
-Writer: 기존 전체 Node 108에 신규 행동 5개(scope/definition draft, filter 선택 경계,
-invalid/annual→quarter 추가 실패 보존, 비동기 stale/current 오류 회복, 시간대 캡션 보존)를 추가했다.
-최종 전체 Node 113개, `ruff check .`, `git diff --check`가 통과했다. 실행 로그는
-writer 작업 근거 `/tmp/phase2-node-ledger-final.log`이며 재현은
+Writer: 기존 전체 Node 108에 신규 행동 8개(scope/definition draft, filter 선택 경계,
+invalid/annual→quarter 추가 실패 보존, 비동기 stale/current 오류 회복, 시간대 캡션 보존, 실행 최신성 분리, epoch 취소 열기, scope 전환 실패 차단)를 추가했다.
+최종 전체 Node 116개, `ruff check .`, `git diff --check`가 통과했다. 실행 로그는
+writer 작업 근거 `/tmp/phase2-node-review-final.log`이며 재현은
 `node --test tests/screening/*.test.cjs`이다. 리드 초기 실제 브라우저는
 3탭×8폭 및 guide/history/screening 7그룹을 통과했으며 최종 스냅샷/독립 검증은 별도다.
 실제 이력 삭제·복원/DB 변경은 하지 않는다.
+
+독립 사전 검토의 세 경계는 표시 전용 상태로 보완했다. 실행 결과 최신성은 조건의
+저장 여부(`S.dirty`)와 분리해 현재 run의 편집 여부만 추적한다. 이력 조건 열기는
+기존 epoch 소유 opener에 맡기고 취소 후 탭을 강제로 전환하지 않는다. 성공한 안내
+응답의 dataset/publication/FY를 pin하여 새 범위가 로딩/실패 중이면 이전 상세와
+추가를 차단한다. 같은 범위 검색 실패는 기존 자료와 명시적 오류를 함께 유지한다.
