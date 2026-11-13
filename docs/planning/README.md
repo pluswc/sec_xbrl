@@ -1,5 +1,13 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-13 2차 원격 전달: 사용자 승인 후 head `5b814b944d`의 별도 독립
+Node 116/Ruff/diff PASS·인수 코드 동일성과 origin/main `0a89d5cf` 추가 변경 없음이
+확인됐다. push 후 [PR #92](https://github.com/pluswc/sec_xbrl/pull/92)를 열었으며
+OPEN·main 미병합이다. CI는 기록 시점 대기/진행 중이며 최종 근거는
+[최신 head checks](https://github.com/pluswc/sec_xbrl/pull/92/checks)다.
+리드가 live 인수 자산·History API baseline·SQLite/growth/revenue hash 보존을
+재확인했다. 아래 로컬 인수 당시의 원격 미수행 문구는 그 시점 기록이다.
+
 2026-11-13 [데스크톱 2차 전체 탭 작업면](../implementation/desktop-first-phase2-20261113.md)은
 지표 안내의 목록/선택 상세, 이력 조회 필터와 원장, 스크리닝 조건/결과 인접
 배치를 구현했다. 소스 `745bc76e3a` 독립 Node 116/Ruff/diff와 리드 exact-bundle

@@ -105,3 +105,18 @@ writer 작업 근거 `/tmp/phase2-node-review-final.log`이며 재현은
 결과가 멀어진 screening을 이번 우선순위로 구현했다. 공통 탭 스크롤 기억과
 저장 결과 비교 배치 추가 정리는 낮은 우선순위의 미구현 후보이며 이번 인수나
 향후 자동 구현으로 간주하지 않는다. 기존 탐색/상세/비교/매출은 회귀 범위다.
+
+## 원격 전달 후속 (2026-11-13)
+
+사용자가 push·PR 전달을 승인했다. 리드는 origin/main `0a89d5cf`가 기준 이후
+변경되지 않았음을 확인하고, 문서 완료 head `5b814b944d`에서 별도 독립
+Node 116/Ruff/diff PASS 및 인수 소스 `745bc76e3a`와 코드 동일성을 재확인한 뒤
+branch를 push하여 [PR #92](https://github.com/pluswc/sec_xbrl/pull/92)를 열었다.
+PR은 OPEN·main 미병합이며 원격 CI는 이 기록 시점 대기/진행 중이다. 최종
+원격 검증 근거는 [PR92 최신 head checks](https://github.com/pluswc/sec_xbrl/pull/92/checks)다.
+merge는 승인·수행하지 않았다. 이 문단은 위 로컬 인수 당시의 원격 미수행 기록을
+후속 갱신하며, 과거 검증 상태를 소급 변경하지 않는다.
+
+이번 전달에서도 리드는 live JS/CSS가 인수 자산과 같고 History API가 baseline과
+정확히 같으며 SQLite·지정 growth/revenue hash가 그대로임을 재확인했다.
+소스·runtime·자료·main은 이 문서 갱신에서 변경하지 않았다.
