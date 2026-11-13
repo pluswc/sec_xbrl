@@ -52,7 +52,7 @@ def test_same_filing_primary_bridge_keeps_original_identities_and_exact_arithmet
     before = deepcopy(case)
     result = _bridge_from_prepared(**case)
     assert result["metric_definition_version"] == REVENUE_VERSION
-    assert result["value"] == "15.09008108154437771771737453502390"
+    assert result["value"] == "15.09008108154437771771737453502391"
     assert result["continuity_proof"]["original_prior"] == case["prior"]
     assert result["original_observation"]["id"] == "old-growth"
     assert result["known_on"] == result["proof_available_on"] == "2026-02-05"
@@ -178,3 +178,14 @@ def test_bridge_rejects_raw_snapshot_different_from_pinned_input():
     case["source_snapshot_id"] = "another-pinned-snapshot"
     with pytest.raises(ValueError, match="pinned occurrence"):
         _bridge_from_prepared(**case)
+
+
+def test_bridge_annual_percentage_is_independent_of_ambient_decimal_context():
+    from decimal import ROUND_DOWN, ROUND_UP, localcontext
+
+    case = bridge_case()
+    for precision, rounding in ((6, ROUND_DOWN), (80, ROUND_UP)):
+        with localcontext() as context:
+            context.prec = precision
+            context.rounding = rounding
+            assert _bridge_from_prepared(**case)["value"] == "15.09008108154437771771737453502391"

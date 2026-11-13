@@ -5,12 +5,15 @@ import copy
 import json
 import re
 from datetime import date, timedelta
-from decimal import localcontext
 from pathlib import Path
 
-from sec_xbrl.analytics.quarterly_derived_metrics import percentage_result
 from sec_xbrl.analytics.statement_structure import finite_decimal
-from sec_xbrl.metrics.screening import DECIMAL_CONTEXT, _basis_compatibility, _is_usd_unit
+from sec_xbrl.metrics.screening import (
+    _basis_compatibility,
+    _decimal_string,
+    _is_usd_unit,
+    _percentage,
+)
 from sec_xbrl.metrics.statement_metric_evidence import (
     LEGACY_REVENUE,
     NEW_REVENUE,
@@ -171,8 +174,7 @@ def _bridge_from_prepared(*, current: dict, prior: dict, original: dict,
             raise ValueError("revenue bridge original filing is after cutoff")
         filed_dates.append(filed)
     result = adopt_revenue_version(original)
-    with localcontext(DECIMAL_CONTEXT):
-        value = str(percentage_result(top, bottom, subtract_one=True))
+    value = _decimal_string(_percentage(top, bottom, subtract_one=True))
     result.update(value=value, availability_status="AVAILABLE",
                   unavailable_reason=None, diagnostic_reasons=[], status="DERIVED_METRIC",
                   compatibility=BRIDGE_RULE, comparability_policy=BRIDGE_RULE,
