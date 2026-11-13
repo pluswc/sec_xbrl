@@ -1,5 +1,10 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-13 [Nasdaq 74개사 운영 연결](../implementation/nasdaq74-operating-20261113.md)은
+기존50+완료24의 strict union과 명시적 보조자료 소유자 연결 승인 범위다.
+구현·독립 검증·실제 배치 등록·private UAT·운영 전환은 단계별로 별도 수락한다.
+기존 재무 기준일10/25, 여섯 catalog와 저장 기록을 보존하며 전체115 완료를 뜻하지 않는다.
+
 2026-11-13 원격 전달: 통합 HEAD `bf91b303ea`의 독립 Node 108개·Ruff·diff와
 main 포함/UI 동일성 PASS 후 [PR #91](https://github.com/pluswc/sec_xbrl/pull/91)을
 열었다. OPEN·main 미병합이며 CI는 진행 중이다. 최종 원격 근거는
