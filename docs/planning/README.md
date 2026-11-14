@@ -1,13 +1,16 @@
 # 계획 등록부 — 단일 진입점
 
 2026-11-14 [스크리닝 준비된 변화 조건 v1](../implementation/screening-prepared-changes-20261114.md)은
-수락된 native100 원소스의 승인 read snapshot을 부모로 새 numeric YoY9개와
-순수 비율의 전년 %p18개를 별도 발행·등록하도록 승인받았다. 기존 발행물·
-원래 logical ID·저장 이력과 source qualification은 불변이다. 후보 구현과 자체
-Node146(실제 미준비 근거 표시 보정 포함) 및 support 보정 후 관련 Python150
-검사는 통과했다. 기존 11개
-read snapshot은 리드가 별도 수락했으며, 새 27개 source의 재검토·실제 발행·운영
-인수는 대기다. 기존 source qualification과 실제 발행·운영은 리드가 소유한다.
+최종 UI `86b87d592c`/financial `2070a27d7a`에서 IMPLEMENTED·독립 검증·리드
+LOCALLY_ACCEPTED 및 실제 18765 운영 인수 PASS다. 원 11개 publication의 458,800개
+view 행과 부모 45,114개 고유 관측을 보존하고, 별도 100개사 발행물에 새 27개 정의를
+등록했다(연간41/분기·TTM59개 정의, 관측 가용성은 별도). Node146/Python150/Ruff
+PASS, 실제 2,700판정·기존89API·보조비교8,800cell·복제본 저장/복원과 화면 검사를
+통과했다. history baseline/원 journal 및 선언된 5,535 pin은 동일하다. 전체 pytest는
+중단된 1,085PASS/34SKIP/2FAIL이며 전체 PASS가 아니다(PR85 기존 History 실패와
+환경 arelle 실패; journal 환경 재검1PASS). 원격 push·PR·CI·main 병합은 미요청·
+미수행이며 main `deb074bc49`를 유지한다. 상세 범위/coverage/운영·rollback locator는
+계약의 최종 인수 절에 있다. 아래는 각 이전 작업의 당시 상태 기록이다.
 
 2026-11-14 [신규8 native 승인·100개사 합성](../implementation/native-eight-admission-20261114.md)은
 **소스 `4c1ff49303` 독립 검증 PASS·로컬 인수·100개사 LIVE 완료, main 미병합**이다.

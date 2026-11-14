@@ -77,10 +77,12 @@ TTM gap/duplicate·fixed/latest 구분, 등록/조회/evaluation/threshold/expor
 | 단계 | 상태 |
 | --- | --- |
 | 승인 | 2026-11-14 명시 범위 GO |
-| 구현 | 후보 구현 및 자체 검증 완료; 독립 검증 대상 동결 예정 |
-| 실제 export/ROOT 승인/발행 | 리드가 기존 11개 read snapshot 수락; 새 27개 발행·인수는 대기 |
-| 독립 검증/로컬 인수/운영 | 대기 |
-| 원격 전달 | 이번 새 기능은 미요청·미수행 |
+| 구현 | IMPLEMENTED: 최종 UI `86b87d592c`, financial producer `2070a27d7a` |
+| 실제 export/ROOT 승인/발행 | 리드가 원본 11개 snapshot과 새 27개 발행물 승인·준비 완료 |
+| 독립 검증 | INDEPENDENTLY_VERIFIED: Node146/Python150/Ruff 및 아래 범위 PASS |
+| 로컬 인수 | LOCALLY_ACCEPTED: 리드, 2026-11-14 |
+| 운영 | 18765 실제 화면 인수 PASS; 아래 PID/rollback 기록 참조 |
+| 원격 전달/main | push·PR·CI·main 병합 미요청·미수행; main `deb074bc49` 유지 |
 
 ## 구현 경계와 재현 인터페이스
 
@@ -226,3 +228,139 @@ bridge 및 이미 준비된 실제 자료 bytes는 이 보정에서 바꾸지 �
 기존 8항목 복원·삭제 및 기존 4결과 재열기, 신규 조건·결과 삭제/복원/재열기도
 확인했다. 이는 리드의 복제본 검증이며 writer의 실제 journal 변경은 없다.
 UI 보정의 독립 재검·리드 실제 화면 인수와 운영 전환은 별도 대기다.
+
+
+## 최종 로컬·운영 인수 (2026-11-14)
+
+리드는 최종 코드 `86b87d592cc1e2fcd5136e395ae4106af9038f81`과 financial
+producer `2070a27d7aa41a651cee15d5906aae8803543b7d`를 로컬 인수했다.
+이후 문서 전용 커밋은 이 코드/자료의 인수 근거를 기록하며 source SHA를 바꾸지 않는다.
+위 이전의 대기·HOLD 문구는 당시 기록이며, 현재 상태는 이 절과 상태표가 정정한다.
+원격 전달과 main 병합은 이번 새 기능의 요청 범위가 아니며 수행하지 않았다.
+
+### 승인된 실제 발행물
+
+- Dataset `universe100-prepared-changes-20261025`, publication
+  `screening-prepared-changes-5fe69f578c5e9ce55a6978c2`, 재무 기준일 2026-10-25.
+- 100개사, 연간 catalog 41개, 분기·TTM catalog 59개. 이는 정의 수이며 모든
+  회사·모든 기간에 수치가 있다는 뜻은 아니다.
+- Snapshot manifest SHA256
+  `b82caa4c896da4098c23896dac2934dccbb33883c28b8b5efdcc8cdd03059845`.
+- Logical publication manifest SHA256
+  `9ce9153f336e9a9e68efa20a1b1e746540a6f838b85a60afd4341fe22abb2712`.
+- 물리 경로는 `work/screening-prepared-changes-20261114/derived-v1`이며 기존 부모나
+  구 publication을 덮어쓰지 않았다. 별도 ROOT read/발행 승인과 catalog/batch 증거를
+  사용했다. 새 batch ready_at은 실제 준비 시점이며 재무 cutoff로 소급하지 않는다.
+
+### 검증 결과와 한계
+
+독립 Node **146 PASS**, 관련 Python **150 PASS**, Ruff/diff PASS다.
+전체 pytest는 중단된 선택 검사로 **1,085 PASS/34 SKIP/2 FAIL**이며 전체 PASS를
+주장하지 않는다. 두 실패는 별도 PR85의 기존 cached History inventory 실패와
+환경의 arelle import 실패였다. 올바른 interpreter 환경으로 journal 재시작 검사
+한 건을 재실행해 PASS했다. PR85 수정은 이번 코드에 포함하지 않았다.
+
+리드의 실제 자료/소비 검증은 다음과 같다.
+
+- 원래 11개 publication의 네 view **458,800행** 전체 내용·계약 동등성.
+- 부모 **45,114개** 고유 관측 및 **90,187개** view 행, metadata/단위/입력 보존.
+  신규 고유 관측은 AVAILABLE **5,593**, UNAVAILABLE **11,854**다.
+- 기존 50개사 보조 비교 **8,800 cell** 동일; 기존 56 API와 최신 33 API 응답 동일.
+- 새 27개 조건×100개사 **2,700판정** 정확 대조(FY2025/2026Q3):
+  683 PASS/428 FAIL/1,589 UNDETERMINED. Decimal 5개 연산자 경계,
+  AAPL OI 약 7.981…%의 GTE8 FAIL, 저장·재열기·CSV를 확인했다.
+- WDC 최신 보충 분기의 4개 성장 조건은 PASS이며 고정 분기는 UNDETERMINED다.
+  최신 수치를 고정 spine에 채워 넣지 않았다.
+- Private journal에서 기존 휴지통 8항목 복원·삭제, 기존 4결과 동등성, 새 조건/
+  결과 저장·삭제·복원·재열기 PASS. **실제 journal의 삭제/복원은 수행하지 않았다.**
+- 실제 Chrome 1920px에서 연간·분기·TTM pair, 조건 추가와 조합 preview,
+  매출 구성과 다른 상세 aux의 200 응답, page/console error 없음 확인.
+
+위 값 대조는 명시된 입력·API·view/사례 범위다. SEC Raw 전체를 다시 파싱하거나
+모든 보관 파일의 바이트를 재감사했다는 주장은 하지 않는다.
+
+### 보존과 운영 locator
+
+리드는 원 native 소스/자료와 운영 입력 **5,535 pin**의 동일성을 확인했다.
+원래 journal SHA256은
+`3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`로 같고,
+version8/active0/trash8 및 history API baseline도 유지됐다.
+실제 frontend는 18765/PID48956, backend는 19079/PID1463410이다.
+원래 backend 19076/PID1428674와 원 bundle은 rollback용으로 유지했다.
+PID는 인수 당시 식별자이며 자동 재사용 대상으로 해석하지 않는다.
+
+프로젝트 상대 위치 `work/screening-prepared-changes-20261114` 아래의
+`runtime-v1/live-backend.json`은 source SHA와 정확한 backend 시작 args,
+`runtime-v1/read-declarations.json`, `catalog.json`, `batch-evidence.json`은
+불변 파일 선언을 보존한다. Windows frontend의 exact args/이전 과정은 아래
+visual evidence의 `live-switch.json`을 참조한다. 재시작 때 새로 publish/apply하지
+않고 이 기록의 hash 검증된 기존 선언과 args를 사용한다. 실제 재시작/rollback은
+프로세스 소유자 확인 후 리드가 수행하며 문서 갱신자가 실행하지 않는다.
+
+### 증거와 재현
+
+자료/API 증거는 프로젝트 상대 `work/screening-prepared-changes-20261114/evidence`의
+`original-snapshot-equivalence-v1.json`, `new-publication-preservation-v1.json`,
+`old-auxiliary-comparison-v1.json`, `legacy-api-after-v1.json`,
+`legacy-latest-api-after-v1.json`, `all-conditions-api-v1.json`,
+`new-conditions-api-v1.json`, `wdc-latest-versus-fixed-v1.json`에 있다.
+독립 검사는 같은 폴더의 `prepared-independent-final-display-node.log`,
+`prepared-independent-final-focused.log`, `prepared-independent-full.log`,
+`prepared-independent-journal-recheck.log`에 결과와 중단 한계를 남겼다.
+
+실제 화면/복제 이력/운영 증거의 공통 절대 위치는
+`/mnt/c/Users/plusbdw/.codex/visualizations/2026/11/08/01a1bb67-6275-70d2-989e-208966314006/screening-prepared-changes-20261114`다.
+`verify-history.json`, `verify-ui.json`, `verify-live-ui.json`, `live-switch.json`이
+각각 복제본 이력·private 화면·실제 화면·운영 전환의 근거다. 실제 1920px 화면은
+`live-01-annual-published-conditions.png`, `live-02-screening-yoy-pp.png`에 있다.
+리드는 검사 후 private 18885/19078/19077 프로세스를 종료하고 실제 18765/19079와
+rollback 19076만 유지했다. 실제 화면 검사 뒤에도 원 journal SHA는 동일했다.
+
+앞선 export/publish 명령은 새 목적지만 받는다. 이미 인수된 자료를 반복 발행하지
+않고 재검할 때는 위 config/declarations와 검사 스크립트를 사용한다. 예를 들어
+새 출력 보고서 경로를 지정하는 다음 검사는 원 입력을 읽기만 한다.
+
+```sh
+"$PYTHON" "$EVIDENCE/verify_new_publication.py" \
+  "$ACCEPTED_PARENT_SNAPSHOT" "$ACCEPTED_CHANGE_SNAPSHOT" "$NEW_REPORT_JSON"
+```
+
+API/저장·복원 재현은 반드시 private 복제 journal/backend에서 수행하며 원래
+journal에 검증용 기록을 쓰지 않는다. writer는 실제 발행·운영 작업을 하지 않았다.
+
+### 지표별 준비 범위
+
+아래는 `old-auxiliary-comparison-v1.json`의 **고정 view** coverage다.
+기업 수는 100개 중 **하나 이상의 기간에** AVAILABLE이 있는 회사 수이며 해당 FY/
+분기에서 그 모든 회사가 AVAILABLE이라는 뜻이 아니다. 최신 보충 view는 별도로
+보존되며 실행 지원은 어느 지원 view에서든 유효한 값이 있는지로 판단한다.
+
+| 지표 ID | 가용 기간이 있는 기업 | 가용 회사×기간 |
+| --- | ---: | ---: |
+| `operating_income_yoy` | 71 | 196 |
+| `cfo_yoy` | 93 | 261 |
+| `gross_margin_yoy_pp` | 42 | 118 |
+| `operating_margin_yoy_pp` | 71 | 197 |
+| `net_margin_yoy_pp` | 78 | 220 |
+| `standardized_fcf_yoy` | 69 | 182 |
+| `fcf_margin_yoy_pp` | 65 | 180 |
+| `current_ratio_yoy_pp` | 94 | 266 |
+| `liabilities_to_equity_yoy_pp` | 55 | 148 |
+| `liabilities_to_assets_yoy_pp` | 64 | 179 |
+| `quarter_cfo_yoy` | 96 | 302 |
+| `quarter_current_ratio_yoy_pp` | 96 | 316 |
+| `quarter_fcf_margin_yoy_pp` | 62 | 195 |
+| `quarter_gross_margin_yoy_pp` | 42 | 137 |
+| `quarter_liabilities_to_assets_yoy_pp` | 67 | 221 |
+| `quarter_liabilities_to_equity_yoy_pp` | 59 | 195 |
+| `quarter_net_margin_yoy_pp` | 74 | 229 |
+| `quarter_operating_income_yoy` | 72 | 225 |
+| `quarter_operating_margin_yoy_pp` | 67 | 207 |
+| `quarter_standardized_fcf_yoy` | 71 | 209 |
+| `ttm_cfo_yoy` | 87 | 288 |
+| `ttm_fcf_margin_yoy_pp` | 53 | 178 |
+| `ttm_gross_margin_yoy_pp` | 37 | 128 |
+| `ttm_net_margin_yoy_pp` | 61 | 205 |
+| `ttm_operating_income_yoy` | 64 | 208 |
+| `ttm_operating_margin_yoy_pp` | 57 | 189 |
+| `ttm_standardized_fcf_yoy` | 60 | 197 |
