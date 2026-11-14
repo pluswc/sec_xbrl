@@ -77,7 +77,109 @@ TTM gap/duplicate·fixed/latest 구분, 등록/조회/evaluation/threshold/expor
 | 단계 | 상태 |
 | --- | --- |
 | 승인 | 2026-11-14 명시 범위 GO |
-| 구현 | 진행 |
+| 구현 | 후보 구현 및 자체 검증 완료; 독립 검증 대상 동결 예정 |
 | 실제 export/ROOT 승인/발행 | 리드 수행, 아직 미수행 |
 | 독립 검증/로컬 인수/운영 | 대기 |
 | 원격 전달 | 이번 새 기능은 미요청·미수행 |
+
+## 구현 경계와 재현 인터페이스
+
+구현은 기존 source qualification을 재승인하지 않는 읽기 전용 스냅샷이다.
+원 reader의 수락된 검증 계약과 네 가지 조회 view를 보존한다. 특히 기존 runtime
+projection의 `verify_all()`은 수락 당시 status를 돌려주므로 upstream V3 전체를
+새로 재검증했다는 주장은 하지 않는다. 리드의 원본 읽기 inventory/strace 대조는
+실제로 읽은 의존 파일 누락 여부를 확인하는 별도 증거다. 새 snapshot의 읽기 승인은
+기존 Raw·financial producer·release HOLD 권한을 확대하지 않는다.
+
+외부 도구 `tools/export_screening_read_snapshot.py`는 **원소스 PYTHONPATH**로만
+실행한다. config는 다음 필드를 요구한다.
+
+- `source_root`: 원래 `src/sec_xbrl` 절대 경로, `source_revision`: 정확한 Git HEAD.
+- `source_files`: 그 디렉터리의 모든 Python 파일 `{path,sha256}` 배열.
+- `source_aux_files`: 원래 bridge 파일의 정확한 `{path,sha256}` 한 개.
+- `artifact_files`: 전이 의존 manifest/receipt/blob/Parquet 등 전체 pin 배열.
+- `exporter_sha256`: 동결된 외부 exporter 자체 SHA256.
+- `catalog`: 기존 `screening-catalog-v1` envelope 파일 pin, `service_options`: 기존
+  runtime_projections/cohort_unions/governed_deltas/batch_evidence의 명시 옵션 그대로.
+- `dataset_ids`: export할 기존 logical dataset 목록. 실제 journal 경로는 받지 않는다.
+
+```sh
+PYTHONPATH="$ACCEPTED_SOURCE/src:$ACCEPTED_SOURCE" "$PYTHON" \
+  "$CANDIDATE_SOURCE/tools/export_screening_read_snapshot.py" \
+  --config "$EXPORT_CONFIG" --config-sha256 "$EXPORT_CONFIG_SHA256" \
+  --destination "$NEW_SNAPSHOT_DIRECTORY"
+```
+
+내부 임시 journal만 만들고 원소스·bridge·artifact·catalog·exporter의 전후 pin과
+원소스 HEAD/해당 소스 diff를 확인한 뒤에만 각 `verification.json`을 쓴다.
+회사 파일은 작은 core와 전체 근거를 분리하고 hydration 시 원래 trace를 복원한다.
+관측 ID가 없던 V1은 내부 저장 좌표만 사용하며 원래 행에 ID를 새로 쓰지 않는다.
+전역 행 순서, V1/V2의 원래 explorer/quarterly 비지원 응답도 보존한다.
+
+ROOT는 검증 receipt와 snapshot manifest의 정확한 SHA, 전체 logical SHA,
+origin 전체, schema/reader version을 결속한 별도 승인 파일을 작성한다.
+승인은 `screening-read-snapshot-root-approval-v1`, `authority: ROOT`, `approved: true`,
+`reader_version`, `manifest_sha256`, `verification_sha256`, `logical_sha256`, `origin`의
+정확한 객체다. ROOT 승인은 검증을 대체하지 않는다.
+
+새 publisher config는 `{parent_root,parent,dataset_id}`이며 `parent`는
+`manifest/verification/approval` 각각의 `{path,sha256}`다.
+
+```sh
+PYTHONPATH="$CANDIDATE_SOURCE/src:$CANDIDATE_SOURCE" "$PYTHON" \
+  -m examples.screening.prepare_screening_changes \
+  --config "$PREPARE_CONFIG" --config-sha256 "$PREPARE_CONFIG_SHA256" \
+  --destination "$NEW_CHANGE_SNAPSHOT_DIRECTORY"
+```
+
+완료 시 새 manifest/verification과 외부 `*.coverage.json`을 생성한다. 목적지가
+있으면 덮어쓰지 않는다. 새 Python 전체·producer·기존 v1/v2 엔진·exporter·bridge
+inventory를 새 origin/publication에 묶고 전후 검사한다. 새 결과에도 ROOT의 별도
+승인이 필요하다. 구 catalog는 그대로 두고 새 dataset 항목만 추가한다.
+
+서버는 각 scope마다 아래 명시 옵션을 사용한다. `status`의 원래 필드와 원래
+logical publication은 old snapshot에서 그대로이며 새 발행물은 별도 ID다.
+
+```text
+--read-snapshot DATASET_ID MANIFEST_PATH MANIFEST_SHA256 VERIFICATION_PATH VERIFICATION_SHA256 APPROVAL_PATH APPROVAL_SHA256
+```
+
+bridge에서 기존 매출 구성과 다른 상세 비교 보조자료를 유지하려면 기존
+`--auxiliary-union` pin에 아래 **세 쌍**을 더한다. 새 publication의 정확한 부모
+logical ID/pub/manifest SHA와 owner map이 기존 union과 다르면 거부한다.
+
+```text
+--prepared-changes-snapshot PATH --prepared-changes-snapshot-sha256 SHA256
+--prepared-changes-verification PATH --prepared-changes-verification-sha256 SHA256
+--prepared-changes-approval PATH --prepared-changes-approval-sha256 SHA256
+```
+
+이는 새 요청 scope를 기존 소유자에게 연결하는 읽기 relay이며 원 보조자료를
+재계산하거나 source qualification을 완화하지 않는다. 기존 요청 scope도 유지한다.
+준비된 27개는 공표 pair를 우선 사용하고 다른 항목은 원래 aux 가용성에 따른다.
+
+
+## 자체 검증 후보 (2026-11-14)
+
+- `node --test tests/screening/*.test.cjs`: **144 PASS**, 호스트 socket 허용 환경.
+- `PYTHONPATH=src:. POLARS_MAX_THREADS=2 python -m pytest`에 아래 관련 파일을 지정:
+  **145 PASS** (10.48초). `test_financial_growth.py`, `test_financial_comparison_v2.py`,
+  `test_runtime_projection.py`, `test_screening_explorer.py`,
+  `test_screening_quarterly_consumer.py`, `test_screening_http.py`,
+  `test_read_snapshot.py`, `test_prepared_changes.py`.
+- 마지막 monetary source-definition-version gate 회귀를 포함해
+  `test_read_snapshot.py test_prepared_changes.py`: **28 PASS** (2.99초).
+- `ruff check .`, JS/bridge syntax, `git diff --check`: PASS.
+- 앞선 관련 Python sandbox 실행은 socket 4건이 EPERM으로 실패했으며 위 호스트
+  재실행에서 모두 통과했다. 제품 실패로 분류하지 않는다.
+- 전체 pytest는 최종 소규모 gate 수정 전 collection된 중간 후보여서 리드 지시에
+  따라 중단했다. 중간 결과는 250 PASS/6 SKIP/1 FAIL이며 최종 전체 결과로 사용하지
+  않는다. 실패는 `test_history_quarters_cached.py::test_default_history_build_connects_reported_and_derived_consumer`
+  의 기존 `recovery unexpected or missing staged files/directories`이고 PR85의 별도
+  범위다. 최종 동결 source 전체 검증은 독립 검증에서 수행한다.
+
+합성 검사는 원 ID/정밀값/trace·support·status·기간 view와 V1/V2/V3 기능 경계의
+동등성, ROOT/receipt/파일/전후 source pin 거부, 고정·보충 최신 분리, 부호 정책,
+정확 %p·threshold·정의 버전, 새 catalog 등록→preview→저장→새 service 재열기→
+trace, 기존 aux와 새 scope의 소유자 결속을 확인했다. 실제 원소스 export·ROOT 승인·
+100개사 발행/old50 대조·복제 journal UAT·운영 인수는 아직 미수행이며 리드가 소유한다.

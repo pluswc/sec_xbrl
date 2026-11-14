@@ -5,8 +5,8 @@ Current locally accepted phase 2 source: `745bc76e3a4721de8d7734eb534ac0afc7cba2
 acceptance passed. The effective CSS viewport checks below are complete; actual browser zoom
 was not verified. Phase 1 is merged in main `0a89d5cf` through PR91 (CI 43427104449 passed).
 Phase 2 is merged through PR92; governed latest-period/revenue UI scope fixes are now in
-main PR95 (`ebdbe938d7`). The information-consistency frontend candidate below is implemented
-on its separate branch; its independent verification, acceptance and deployment are pending.
+main PR95 (`ebdbe938d7`). Information-consistency frontend changes are merged through PR96 (`deb074bc49`).
+The prepared-screening-change registration candidate below is separate and awaits verification/acceptance.
 The source dataset determines company/metric counts; examples such as 21 or 50 companies are
 fixtures and never the supported-company boundary.
 
@@ -136,3 +136,16 @@ selection. Every registered metric remains selectable. A historical result-profi
 read-only; condition links additionally require matching dataset, publication and financial cutoff.
 The candidate's writer checks passed (Node 138/Python 35/Ruff/diff); independent and final
 browser acceptance remain pending.
+
+## Prepared screening changes (candidate, 2026-11-14)
+
+- The selected publication owns capability. A registered comparison pair declares
+  `comparison_of`, `comparison_kind` and its exact source definition version. Connect
+  the same published value to conditions, company detail and multi-company comparison.
+- Ordinary monetary YoY uses `%`; ratio differences use `%p` with raw threshold 1
+  meaning one percentage point. Current/prior ratio inputs remain `%`, never `%p`.
+  A prepared change metric does not acquire another automatically derived change pair.
+- Preserve the visible sign/zero/missing reason and exact evidence when ordinary numeric
+  YoY is unavailable. Old publications retain their detail-only adjunct and labels.
+- No browser calculation or new display layout is introduced. Implementation/independent
+  verification and actual publication/acceptance remain separate in the milestone contract.

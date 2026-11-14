@@ -8,7 +8,11 @@ from typing import Any
 
 from sec_xbrl.screening.common import canonical_json, require_cik, require_string
 from sec_xbrl.screening.dataset_v2 import ScreeningDatasetV2Reader
-from sec_xbrl.screening.runtime_projection import ScreeningRuntimeProjection, observation_rows
+from sec_xbrl.screening.runtime_projection import (
+    ScreeningRuntimeProjection,
+    hydrate_observation,
+    observation_rows,
+)
 
 CORE_METRIC_IDS = (
     "revenue",
@@ -478,7 +482,12 @@ class ScreeningExplorer:
             )
             for code in codes:
                 reasons[code] = reasons.get(code, 0) + 1
-        meaning, use = _GUIDANCE[metric_id]
+        if metric_id in _GUIDANCE:
+            meaning, use = _GUIDANCE[metric_id]
+        elif definition.get("comparison_of") and definition.get("meaning") and definition.get("use"):
+            meaning, use = definition["meaning"], definition["use"]
+        else:
+            raise ValueError("registered metric guidance is not prepared")
         return {
             "metric_id": metric_id,
             "label": definition["label"],
@@ -495,6 +504,8 @@ class ScreeningExplorer:
             "definition_version": definition["definition_version"],
             "formula": definition.get("formula"),
             "input_metric_ids": definition.get("input_metric_ids", []),
+            **({key: definition[key] for key in ("comparison_of", "comparison_kind", "period_relationship", "source_definition_version", "comparison_engine", "description") if key in definition}
+               if definition.get("comparison_of") else {}),
             "selected_year_coverage": {
                 "companies_available": available,
                 "companies_prepared": prepared,
@@ -564,6 +575,9 @@ class ScreeningExplorer:
             "source_filings": row.get("source_filings", []),
             "quality_status": row.get("quality_status"),
             "warnings": row.get("warnings", []),
+            **({"comparison_status": row["comparison_status"], "comparison_evidence":
+                hydrate_observation(self.reader, row).get("comparison_evidence")}
+               if row.get("comparison_status") else {}),
             **({"continuity_evidence": {"rule_version": row["comparability_policy"],
                 "proof_available_on": row["proof_available_on"], "known_on": row["known_on"],
                 "original_observation": row["original_observation"],

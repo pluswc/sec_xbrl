@@ -3,8 +3,9 @@
 2026-11-14 [스크리닝 준비된 변화 조건 v1](../implementation/screening-prepared-changes-20261114.md)은
 수락된 native100 원소스의 승인 read snapshot을 부모로 새 numeric YoY9개와
 순수 비율의 전년 %p18개를 별도 발행·등록하도록 승인받았다. 기존 발행물·
-원래 logical ID·저장 이력과 source qualification은 불변이다. 구현·검증 진행
-단계이며 실제 export/발행/승인·운영은 리드가 별도 수행한다.
+원래 logical ID·저장 이력과 source qualification은 불변이다. 후보 구현과 자체
+Node144·관련 Python145 및 마지막 gate 포함 신규28검사는 통과했다. 독립 검증·
+실제 export/발행/승인·운영은 대기이며 리드가 별도 수행한다.
 
 2026-11-14 [신규8 native 승인·100개사 합성](../implementation/native-eight-admission-20261114.md)은
 **소스 `4c1ff49303` 독립 검증 PASS·로컬 인수·100개사 LIVE 완료, main 미병합**이다.

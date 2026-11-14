@@ -116,3 +116,28 @@ test("typed union preserves exact ancestor auxiliary scope and CIK boundaries",t
   const invalid=structuredClone(manifest);invalid.auxiliary_contexts[0].ciks=["9999999999"];
   assert.throws(()=>bridge.loadAuxiliaryUnion(f.file,f.write(invalid)),/ancestor scope/);
 });
+
+test("prepared publication binds separate ROOT approval to exact original union while retaining legacy contexts",t=>{
+  const f=fixture(t);
+  const stable=value=>JSON.stringify(value,(_,item)=>item&&typeof item==="object"&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
+  const hash=value=>crypto.createHash("sha256").update(stable(value)).digest("hex");
+  const write=(name,value)=>{const file=path.join(f.root,name);fs.writeFileSync(file,stable(value));return{path:file,sha256:hash(value)}};
+  const original={schema_version:"screening-prepared-changes-v1",dataset_id:"new-changes",publication_id:"changes-pub",financial_as_of:source.financial_as_of,
+    parent_dataset_id:f.owner.scope.dataset_id,parent_publication_id:f.owner.scope.dataset_publication_id,parent_manifest_sha256:f.owner.scope.dataset_manifest_sha256,
+    parent_logical_sha256:"8".repeat(64),configured_ciks:[cik,newCik],auxiliary_owners:structuredClone(f.manifest.auxiliary_owners)};
+  function declared(change=()=>{}){
+    const manifest=structuredClone(original);change(manifest);
+    const snapshot={schema_version:"screening-read-snapshot-v1",reader_version:"screening-read-snapshot-v1",logical_sha256:"9".repeat(64),origin:{kind:"screening-prepared-changes-v1"},properties:{original_manifest:manifest,original_manifest_sha256:hash(manifest)}};
+    const declaration={manifest:write("snapshot.json",snapshot)};
+    declaration.verification=write("verification.json",{schema_version:"screening-read-export-verification-v1",verified:true,manifest_sha256:declaration.manifest.sha256,logical_sha256:snapshot.logical_sha256,origin:snapshot.origin});
+    declaration.approval=write("approval.json",{schema_version:"screening-read-snapshot-root-approval-v1",authority:"ROOT",approved:true,reader_version:snapshot.reader_version,manifest_sha256:declaration.manifest.sha256,verification_sha256:declaration.verification.sha256,logical_sha256:snapshot.logical_sha256,origin:snapshot.origin});return declaration;
+  }
+  const binding=bridge.bindPreparedAuxiliary(f.owner,declared());
+  const contexts=growth(f.bundle,binding).body.owner_contexts;assert.equal(contexts.length,2);assert.deepEqual(contexts[1].available_ciks,[cik]);
+  const served=growth(f.bundle,binding,{dataset_id:"new-changes",dataset_publication_id:"changes-pub",financial_as_of:source.financial_as_of,cik});
+  assert.equal(served.status,200);assert.deepEqual(served.body.data,f.data);assert.equal(served.body.owner_proof.union_manifest_sha256,hash(original));
+  assert.equal(growth(f.bundle,binding,{dataset_id:f.manifest.dataset_id,dataset_publication_id:f.manifest.publication_id,financial_as_of:source.financial_as_of,cik}).status,200);
+  for(const mutate of [x=>x.parent_manifest_sha256="0".repeat(64),x=>x.parent_publication_id="foreign",x=>x.auxiliary_owners[cik].dataset_publication_id="foreign"]){assert.throws(()=>bridge.bindPreparedAuxiliary(f.owner,declared(mutate)),/exact approved parent/)}
+  const missing=declared();delete missing.approval;assert.throws(()=>bridge.bindPreparedAuxiliary(f.owner,missing));
+  assert.throws(()=>bridge.bindPreparedAuxiliary(null,declared()),/explicit original union/);
+});
