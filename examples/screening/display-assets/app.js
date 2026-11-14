@@ -517,6 +517,7 @@ function syncResultProfileContext(){
 function metricPresentationUnit(definition){return definition?.unit_kind==="MONEY"?(definition.unit?`백만 ${definition.unit}`:"금액 단위 미정"):definition?.unit_kind==="RATIO"?"배":["pp","PERCENTAGE_POINT"].includes(definition?.unit)?"%p":definition?.unit_kind==="PERCENT"?"%":definition?.unit||"단위 미정"}
 function metricComparisonLabel(definition){
   const id=definition?.metric_id;
+  if(definition?.comparison_of)return definition.comparison_kind==="PERCENTAGE_POINT"?"전년 비율 변화 (%p)":definition.period_relationship==="PRIOR_FISCAL_YEAR"?"전년 대비 (YoY)":"전년 동기 대비 (YoY)";
   if(id==="quarter_revenue_qoq")return "전분기 대비 (QoQ)";
   if(id==="revenue_yoy")return "전년 대비 (YoY)";
   if(id==="quarter_revenue_yoy")return "전년 동기 대비 (YoY)";
@@ -1232,13 +1233,13 @@ const PROFILE_BOARD_SELECTION=`<details class="profile-board-picker"><summary>�
 
 function profileBoardExact(value,definition){
   return definition.unit_kind==="MONEY"?`${shiftDecimal(value,0)} USD`:
-    `${shiftDecimal(value,0)}${definition.unit_kind==="PERCENT"?(definition.unit==="pp"?" %p":" %"):definition.unit_kind==="RATIO"?" 배":""}`;
+    `${shiftDecimal(value,0)}${definition.unit_kind==="PERCENT"?(["pp","PERCENTAGE_POINT"].includes(definition.unit)?" %p":" %"):definition.unit_kind==="RATIO"?" 배":""}`;
 }
-function profileBoardUnit(definition){if(definition.unit==="pp")return "%p";return definition.unit_kind==="RATIO"?"배":unitLabel(definition)}
+function profileBoardUnit(definition){if(["pp","PERCENTAGE_POINT"].includes(definition.unit))return "%p";return definition.unit_kind==="RATIO"?"배":unitLabel(definition)}
 function profileBoardValue(value,definition,reason="준비된 값이 없습니다.",exact=false){
   if(value==null)return `<span class="missing" title="${esc(reason)}" aria-label="${esc(reason)}">—</span>`;
   const raw=esc(profileBoardExact(value,definition));
-  const text=definition.unit_kind==="RATIO"||definition.unit==="pp"?esc(displayValue(value,definition)):null;
+  const text=definition.unit_kind==="RATIO"||["pp","PERCENTAGE_POINT"].includes(definition.unit)?esc(displayValue(value,definition)):null;
   const number=text===null?numberMarkup(value,definition):
     `<span class="display-number" aria-label="${text} ${profileBoardUnit(definition)}">${text}</span>`;
   return `<span title="${raw}">${number}</span>${exact?`<small>공표값 ${raw}</small>`:""}`;
@@ -1444,7 +1445,7 @@ const BOARD_PP={label:"전년 대비 변화",unit_kind:"PERCENT",unit:"pp"};
 const BOARD_USD={unit_kind:"MONEY",unit:"USD"};
 const BOARD_AXIS_OPTIONS='<option value="AUTO">자동 범위</option><option value="ZERO">0 포함</option>';
 
-function financialComparisonEligible(definition){return ["MONEY","PERCENT"].includes(definition?.unit_kind)}
+function financialComparisonEligible(definition){return !definition?.comparison_of&&["MONEY","PERCENT"].includes(definition?.unit_kind)}
 function financialComparisonMetric(definition){return definition.unit_kind==="PERCENT"?BOARD_PP:BOARD_RATE}
 function auxiliaryOwnerPayload(response,requested,dataset,expectedSource=null){
   if(response?.schema_version!=="screening-auxiliary-owner-response-v1"){
@@ -1564,18 +1565,21 @@ function financialGrowthPoints(model,definition,levels){
 function financialGrowthEvidence(point,exact=false){
   const record=point.evidence;
   if(!record)return "";
-  const status=point.status?`<span class="financial-growth-status" data-growth-status="${esc(record.status)}">${esc(point.status)}</span>`:"";
-  const amount=(value,definition,unit)=>exact?esc(profileBoardExact(value,definition)):`${profileBoardValue(value,definition)} ${unit}`;
+  const reason=record.reason?financialGrowthReason(record.reason):point.reason||"준비된 값이 없습니다.";
+  const statusText=point.status||(record.status==="UNAVAILABLE"?reason:"");
+  const status=statusText?`<span class="financial-growth-status" data-growth-status="${esc(record.status)}">${esc(statusText)}</span>`:"";
+  const amount=(value,definition,unit)=>value==null?`<span class="missing" title="${esc(reason)}" aria-label="${esc(reason)}">— · 미준비</span>`:exact?esc(profileBoardExact(value,definition)):`${profileBoardValue(value,definition)} ${unit}`;
   const publishedMagnitude=record.negative_magnitude_change;
   const expanded=record.status==="NEGATIVE_MAGNITUDE_EXPANDED";
   const direction=expanded?"확대 규모":record.status==="NEGATIVE_MAGNITUDE_REDUCED"?"축소 규모":"음수 규모 변화";
   const magnitude=publishedMagnitude==null?"":exact?
     `<small>음수 규모 축소율 ${amount(publishedMagnitude,BOARD_RATE,"%")} · (전년 절댓값 − 현재 절댓값) ÷ 전년 절댓값 × 100</small>`:
     `<small>${direction} ${amount(expanded?publishedMagnitude.replace(/^-/u,""):publishedMagnitude,BOARD_RATE,"%")}</small>`;
-  const percent=point.definition?.unit_kind==="PERCENT";
+  const percent=point.definition?.comparison_kind==="PERCENTAGE_POINT"||(!point.definition?.comparison_of&&point.definition?.unit_kind==="PERCENT");
   const delta=percent?"":`<small>금액 증감 ${amount(record.delta,BOARD_USD,"백만 USD")}</small>`;
   if(!exact)return status+magnitude+delta+(record.basis_assurance==="ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"?'<small>산술 비교 · 재작성 비교성 미검증</small>':"");
-  const evidence=(label,input)=>`<small>${label} ${esc(profileBoardExact(input.value,point.definition||BOARD_USD))} · ${esc(actualPeriod(input))}<br>관측 ${esc(input.observation_id)}</small>`;
+  const sourceDefinition=point.definition?.comparison_of?(percent?BOARD_RATE:BOARD_USD):point.definition||BOARD_USD;
+  const evidence=(label,input)=>input?`<small>${label} ${amount(input.value,sourceDefinition,profileBoardUnit(sourceDefinition))} · ${esc(actualPeriod(input))}<br>관측 ${esc(input.observation_id||"미준비")}</small>`:`<small>${label} 관측 미준비</small>`;
   const assurance=record.basis_assurance==="ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"?
     "산술 비교 · 재작성 기준 검증 없음":`선언 기준 ${record.basis_assurance?.replace(/^DECLARED_BASIS:/u,"")||"—"}`;
   const legs=record.ttm_input_ids?`<small>현재 분기 관측 ${esc(record.ttm_input_ids.current.join(", "))}<br>전년 분기 관측 ${esc(record.ttm_input_ids.prior.join(", "))}</small>`:"";
@@ -1687,13 +1691,16 @@ function financialBoardContext(id,index,mode){
   const growth=published||financialComparisonMetric(definition),rate=published?financialProfilePoints(model,published)[index]:financialGrowthPoints(model,definition,levels)[index];
   const point=mode==="growth"?rate:level,metric=mode==="growth"?growth:definition;
   const reference=point.evidence?.current||point.row||level.row;
-  const rationale=mode==="growth"?`${preparedChangeCaption(definition)} · ${growth.unit==="pp"?"공표된 현재 비율 − 전년 비율":"발행된 비교 · 비교 불가 상태는 근거 표 확인"}`:"";
+  const rationale=mode==="growth"?`${preparedChangeCaption(definition)} · ${["pp","PERCENTAGE_POINT"].includes(growth.unit)?"공표된 현재 비율 − 전년 비율":"발행된 비교 · 비교 불가 상태는 근거 표 확인"}`:"";
   const detail=[reference?actualPeriod(reference):"",rationale].filter(Boolean).join(" · ");
   return profileBoardContextLine(definition.label,model.slots[index].label,point.value,metric,point.reason,detail)+(mode==="growth"?financialGrowthEvidence(rate):"");
 }
 function financialProfileGrowth(id,definitions){
-  const level=definitions.get(id),definition=definitions.get(PROFILE_GROWTH[id]);
-  return level?.unit_kind==="MONEY"&&definition?.unit_kind==="PERCENT"&&
+  const level=definitions.get(id);if(!level||level.comparison_of)return null;
+  const registered=[...definitions.values()].filter(item=>item.comparison_of===id&&item.source_definition_version===level.definition_version&&
+    item.comparison_kind===(level.unit_kind==="PERCENT"?"PERCENTAGE_POINT":"YOY")&&item.unit===(level.unit_kind==="PERCENT"?"PERCENTAGE_POINT":"PERCENT"));
+  const definition=registered.length===1?registered[0]:registered.length?null:definitions.get(PROFILE_GROWTH[id]);
+  return ["MONEY","PERCENT"].includes(level.unit_kind)&&definition?.unit_kind==="PERCENT"&&
     level.period_class===definition.period_class&&level.observation_basis===definition.observation_basis?definition:null;
 }
 function beginFinancialProfileBoard(){
@@ -1757,7 +1764,9 @@ function financialProfilePoints(model,definition){
   return model.slots.map((slot,index)=>{
     const row=rows.get(slot.key),previous=model.slots[index-1];
     return {value:row?.value??null,connect:previous?.ordinal===slot.ordinal-1,
-      reason:record?.error||row?.reason_labels?.[0]||"이 기간에 준비된 값이 없습니다.",row};
+      reason:record?.error||row?.reason_labels?.[0]||businessReason(row?.unavailable_reason||row?.reason)||"이 기간에 준비된 값이 없습니다.",row,
+      ...(row?.comparison_evidence?{evidence:row.comparison_evidence,status:financialGrowthStatus(definition.comparison_of||definition.metric_id,row.comparison_evidence.status),definition,
+        rule:definition.comparison_engine,formula:definition.formula}: {})};
   });
 }
 function renderFinancialProfileBoard(model){
@@ -1781,16 +1790,16 @@ function renderFinancialProfileBoard(model){
     };
     return `<article class="financial-board-card" data-financial-card="${esc(id)}"><h4 data-board-item="${esc(id)}" title="${esc(definition.label)}" aria-label="${esc(definition.label)}">${esc(financialMetricCaption(definition))}</h4>
       ${chart(definition,levels,"수준",model.chartType||"DOT")}
-      ${growth?chart(growth,rates,growth.unit==="pp"?"전년 대비 변화":"전년비","COLUMN",adjunct?model.growth:undefined):`<div class="financial-board-plot" data-board-mode="growth"><p class="board-empty">${definition.unit_kind==="MONEY"?"이 지표에 대응하는 전년비가 발행되지 않았습니다.":"이 지표는 수준으로 표시합니다. 대응하는 전년비가 발행되지 않았습니다."}</p></div>`}
+      ${growth?chart(growth,rates,["pp","PERCENTAGE_POINT"].includes(growth.unit)?"전년 대비 변화":"전년비","COLUMN",adjunct?model.growth:undefined):`<div class="financial-board-plot" data-board-mode="growth"><p class="board-empty">${definition.unit_kind==="MONEY"?"이 지표에 대응하는 전년비가 발행되지 않았습니다.":"이 지표는 수준으로 표시합니다. 대응하는 전년비가 발행되지 않았습니다."}</p></div>`}
       <div class="metric-condition-capability"><small>${esc(metricPresentation(definition).source)}</small>${published?`${conditionActionMarkup(published)} <small>공표된 ${esc(published.label)} · 조건 등록 지표</small>`:adjunct?'<small>상세 비교 전용 · 조건 미지원</small>':""}</div>
       <p class="financial-board-readout" data-financial-readout="${esc(id)}"></p>
-      ${adjunct?financialGrowthPeriodStatuses(rates,model.slots,model.active):""}
+      ${growth?financialGrowthPeriodStatuses(rates,model.slots,model.active):""}
       <details data-financial-details="${esc(id)}" ${expanded.has(id)?"open":""}><summary>기간별 값과 실제 기간</summary>
         <div class="table-wrap" tabindex="0" role="region" aria-label="${esc(definition.label)} 기간별 값">
           <table class="series-table"><thead><tr><th scope="col">기간</th><th scope="col">수준 · ${esc(profileBoardUnit(definition))}</th>${growth?`<th scope="col">${esc(preparedChangeCaption(definition))}</th>`:""}</tr></thead>
           <tbody>${model.slots.map((slot,index)=>{
             const level=levels[index],rate=rates?.[index],caption=point=>point?.row?`<small>${esc(actualPeriod(point.row))}${point.row.fiscal_quarter?` · ${esc(fiscalLabel(point.row))}`:""}${point.row.continuity_evidence?` · 전년 비교 공시 ${esc(compactFinancialDate(point.row.continuity_evidence.proof_available_on))}`:""}</small>`:"";
-            return `<tr><th scope="row">${esc(slot.label)}</th><td>${profileBoardValue(level.value,definition,level.reason,true)}${caption(level)}</td>${growth?`<td>${profileBoardValue(rate.value,growth,rate.reason,true)}${caption(rate)}${adjunct?financialGrowthEvidence(rate,true):""}</td>`:""}</tr>`;
+            return `<tr><th scope="row">${esc(slot.label)}</th><td>${profileBoardValue(level.value,definition,level.reason,true)}${caption(level)}</td>${growth?`<td>${profileBoardValue(rate.value,growth,rate.reason,true)}${caption(rate)}${rate.evidence?financialGrowthEvidence(rate,true):""}</td>`:""}</tr>`;
           }).join("")}</tbody></table></div>
       </details></article>`;
   }).join("")||'<p class="board-empty">비교할 재무 지표를 선택해 주세요.</p>';
@@ -1817,7 +1826,7 @@ function updateFinancialBoardPeriod(model,index,force=false){
     const growth=published||financialComparisonMetric(definition);
     target.innerHTML=`<strong>${esc(model.slots[index].label)}</strong>
       · 수준 ${profileBoardValue(level.value,definition,level.reason)} ${esc(profileBoardUnit(definition))}
-      ${rate?` · ${esc(preparedChangeCaption(definition).replace(/\s*\(%p?\)$/u,""))} ${profileBoardValue(rate.value,growth,rate.reason)} ${esc(profileBoardUnit(growth))}${adjunct?financialGrowthEvidence(rate):""}`:""}
+      ${rate?` · ${esc(preparedChangeCaption(definition).replace(/\s*\(%p?\)$/u,""))} ${profileBoardValue(rate.value,growth,rate.reason)} ${esc(profileBoardUnit(growth))}${rate?.evidence?financialGrowthEvidence(rate):""}`:""}
       ${level.value==null?`<small>${esc(level.reason)}</small>`:""}
       ${rate?.value==null&&!rate?.status?`<small>${esc(rate.reason)}</small>`:""}
       ${level.row?`<small>${financialPeriodDisplay(level.row)}</small>`:""}`;

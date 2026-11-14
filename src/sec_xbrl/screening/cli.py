@@ -96,6 +96,7 @@ def _parser() -> argparse.ArgumentParser:
     status.add_argument("--dataset", type=Path, required=True)
     server = commands.add_parser("serve", help="start the loopback dashboard")
     server.add_argument("--catalog", type=Path, required=True)
+    server.add_argument("--read-snapshot", action="append", nargs=7, metavar=("DATASET_ID", "MANIFEST", "SHA256", "VERIFICATION", "SHA256", "APPROVAL", "SHA256"))
     server.add_argument("--source-compatibility", nargs=2, metavar=("PATH", "SHA256"))
     server.add_argument("--governed-delta", action="append", nargs=5, metavar=("DATASET_ID", "PATH", "SHA256", "APPROVAL_PATH", "APPROVAL_SHA256"))
     server.add_argument("--governed-delta-reader-transition", action="append", nargs=3, metavar=("DATASET_ID", "PATH", "SHA256"))
@@ -179,6 +180,15 @@ def main(argv: list[str] | None = None) -> int:
         compatibility = _optional_pin(args.source_compatibility)
         batch_pin = _optional_pin(args.batch_availability)
         options: dict[str, Any] = {}
+        snapshots = {}
+        for key, path, digest, verification, verification_digest, approval, approval_digest in args.read_snapshot or []:
+            if key in snapshots or key not in catalog:
+                raise ValueError("read snapshot declaration is duplicated or outside catalog")
+            snapshots[key] = {"manifest": {"path": path, "sha256": digest},
+                              "verification": {"path": verification, "sha256": verification_digest},
+                              "approval": {"path": approval, "sha256": approval_digest}}
+        if snapshots:
+            options["read_snapshots"] = snapshots
         projections = _runtime_pins(args.runtime_projection, catalog)
         unions = _runtime_pins(args.cohort_union, catalog)
         deltas = {}

@@ -352,5 +352,6 @@ def hydrate_observation(reader: Any, row: dict, *, quarterly: bool = False) -> d
 def _core_reader(reader: Any) -> bool:
     from sec_xbrl.screening.cohort_union import ScreeningCohortUnionReader
     from sec_xbrl.screening.governed_delta import ScreeningGovernedDeltaReader
+    from sec_xbrl.screening.read_snapshot import ScreeningReadSnapshot
 
-    return isinstance(reader, (ScreeningRuntimeProjection, ScreeningCohortUnionReader, ScreeningGovernedDeltaReader))
+    return isinstance(reader, (ScreeningReadSnapshot, ScreeningRuntimeProjection, ScreeningCohortUnionReader, ScreeningGovernedDeltaReader))

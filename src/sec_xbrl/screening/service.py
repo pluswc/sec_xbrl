@@ -35,6 +35,7 @@ from sec_xbrl.screening.explorer import (
     public_copy,
 )
 from sec_xbrl.screening.governed_delta import ScreeningGovernedDeltaReader
+from sec_xbrl.screening.read_snapshot import ScreeningReadSnapshot
 from sec_xbrl.screening.runtime_projection import (
     ScreeningRuntimeProjection,
     compact_observation,
@@ -43,7 +44,7 @@ from sec_xbrl.screening.runtime_projection import (
 )
 from sec_xbrl.screening.store import ScreeningStore
 
-ScreeningReader = ScreeningDatasetReader | ScreeningDatasetV2Reader | ScreeningDatasetV3Reader | ScreeningRuntimeProjection | ScreeningCohortUnionReader | ScreeningGovernedDeltaReader
+ScreeningReader = ScreeningReadSnapshot | ScreeningDatasetReader | ScreeningDatasetV2Reader | ScreeningDatasetV3Reader | ScreeningRuntimeProjection | ScreeningCohortUnionReader | ScreeningGovernedDeltaReader
 
 ENGINE_VERSION = "screening-executor-v1"
 EXPORT_VERSION = "screen-run-export-v1"
@@ -169,6 +170,7 @@ class ScreeningService:
         runtime_projections: dict[str, dict[str, str]] | None = None,
         cohort_unions: dict[str, dict[str, str]] | None = None,
         governed_deltas: dict[str, dict] | None = None,
+        read_snapshots: dict[str, dict] | None = None,
     ) -> None:
         if not isinstance(datasets, dict) or not datasets:
             raise ValueError("at least one screening dataset is required")
@@ -182,11 +184,21 @@ class ScreeningService:
         deltas = {} if governed_deltas is None else governed_deltas
         if not isinstance(deltas, dict) or not set(deltas) <= set(datasets) or set(deltas) & (set(unions) | set(projections)):
             raise ValueError("governed delta is outside the catalog or overlaps another declaration")
+        snapshots = {} if read_snapshots is None else read_snapshots
+        if (not isinstance(snapshots, dict) or not set(snapshots) <= set(datasets)
+            or set(snapshots) & (set(deltas) | set(unions) | set(projections))):
+            raise ValueError("read snapshot is outside catalog or overlaps another declaration")
         self.datasets: dict[str, ScreeningReader] = {}
         self.explorers: dict[str, ScreeningExplorer] = {}
         pending = {}
         with self._compatibility_scope(), _share_v3_readers() as loaded:
             for dataset_id, root in datasets.items():
+                if dataset_id in snapshots:
+                    reader = ScreeningReadSnapshot(root, snapshots[dataset_id])
+                    if reader.manifest["dataset_id"] != dataset_id:
+                        raise ValueError("snapshot catalog identity differs")
+                    self.datasets[dataset_id] = reader
+                    continue
                 if dataset_id in deltas:
                     pending[dataset_id] = ("delta", json.loads(Path(deltas[dataset_id]["manifest"]["path"]).read_bytes()))
                     continue
@@ -226,6 +238,13 @@ class ScreeningService:
                 progressed = True
             if not progressed:
                 raise ValueError("composed dataset requires its exact acyclic shared parents in the catalog")
+        scopes = {}
+        for reader in self.datasets.values():
+            scope = (reader.manifest["dataset_id"], reader.publication_id)
+            identity = getattr(reader, "logical_sha256", None) or getattr(reader, "_manifest_sha256", digest_value(reader.manifest))
+            if scope in scopes and scopes[scope] != identity:
+                raise ValueError("different contents registered for the same logical publication")
+            scopes[scope] = identity
         self.datasets = {key: self.datasets[key] for key in datasets}
         self.batch_registrations, self.batch_sessions = _batch_evidence(batch_evidence, self.datasets)
         if company_descriptions is not None:
@@ -1138,7 +1157,9 @@ class ScreeningService:
     def _explorer(self, dataset_id: str) -> ScreeningExplorer:
         dataset_id = require_string(dataset_id, "dataset_id")
         reader = self._dataset(dataset_id)
-        if dataset_id not in self.explorers and isinstance(reader, (ScreeningRuntimeProjection, ScreeningCohortUnionReader, ScreeningGovernedDeltaReader)):
+        if isinstance(reader, ScreeningReadSnapshot) and not reader.capabilities["explorer"]:
+            raise ValueError("company explorer requires a v2 screening dataset")
+        if dataset_id not in self.explorers and isinstance(reader, (ScreeningReadSnapshot, ScreeningRuntimeProjection, ScreeningCohortUnionReader, ScreeningGovernedDeltaReader)):
             self.explorers[dataset_id] = ScreeningExplorer(reader)
         try:
             return self.explorers[dataset_id]
@@ -1147,7 +1168,8 @@ class ScreeningService:
 
     def _quarter_dataset(self, dataset_id: str) -> ScreeningDatasetV3Reader | ScreeningRuntimeProjection | ScreeningCohortUnionReader | ScreeningGovernedDeltaReader:
         reader = self._dataset(dataset_id)
-        if not isinstance(reader, (ScreeningDatasetV3Reader, ScreeningRuntimeProjection, ScreeningCohortUnionReader, ScreeningGovernedDeltaReader)):
+        if (isinstance(reader, ScreeningReadSnapshot) and not reader.capabilities["quarterly"]
+            or not isinstance(reader, (ScreeningReadSnapshot, ScreeningDatasetV3Reader, ScreeningRuntimeProjection, ScreeningCohortUnionReader, ScreeningGovernedDeltaReader))):
             raise TypeError("quarterly analysis requires a v3 screening dataset")
         return reader
 

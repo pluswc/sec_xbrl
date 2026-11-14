@@ -1,5 +1,26 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 원격 전달 승인: 사용자가 준비된 변화 조건의 push·PR을 승인했다.
+별도 branch에서 [PR97](https://github.com/pluswc/sec_xbrl/pull/97)이 포함된 최신
+`origin/main d724c54e24257af9600a6427f83dcea792bea738`을 일반 merge했다.
+기존 준비된 변화 제품 bytes는 `62e36392f8`과 동일하고, main의 이력 recovery
+검사 polling 보정을 보존했다. 이번 통합은 운영·자료·journal을 바꾸지 않는다.
+Node146/Python151(관련150+상류 polling1)/Ruff/diff는 PASS다. 독립 통합 검증과
+리드 push/PR·원격 CI는 대기이며 준비된 변화 기능의 main 병합은
+아직 수행하지 않았다. 아래 미요청/미병합 문구는 각 당시 기록이다.
+
+2026-11-14 [스크리닝 준비된 변화 조건 v1](../implementation/screening-prepared-changes-20261114.md)은
+최종 UI `86b87d592c`/financial `2070a27d7a`에서 IMPLEMENTED·독립 검증·리드
+LOCALLY_ACCEPTED 및 실제 18765 운영 인수 PASS다. 원 11개 publication의 458,800개
+view 행과 부모 45,114개 고유 관측을 보존하고, 별도 100개사 발행물에 새 27개 정의를
+등록했다(연간41/분기·TTM59개 정의, 관측 가용성은 별도). Node146/Python150/Ruff
+PASS, 실제 2,700판정·기존89API·보조비교8,800cell·복제본 저장/복원과 화면 검사를
+통과했다. history baseline/원 journal 및 선언된 5,535 pin은 동일하다. 전체 pytest는
+중단된 1,085PASS/34SKIP/2FAIL이며 전체 PASS가 아니다(PR85 기존 History 실패와
+환경 arelle 실패; journal 환경 재검1PASS). 원격 push·PR·CI·main 병합은 미요청·
+미수행이며 main `deb074bc49`를 유지한다. 상세 범위/coverage/운영·rollback locator는
+계약의 최종 인수 절에 있다. 아래는 각 이전 작업의 당시 상태 기록이다.
+
 2026-11-14 사용자 요청으로 신규8 native 승인·100개사 운영 소스를 main 전달한다.
 운영 checkout `5a8fe55775`는 유지하고 별도 작업 트리에서 main `deb074bc49`을
 일반 merge했다. 실행 Python/bridge는 수락 소스와 같고 UI·검사·interface는 최신

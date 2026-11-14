@@ -61,6 +61,12 @@ function parseArgs(argv) {
     "--financial-growth-sha256",
     "--history-worker",
     "--journal-store",
+    "--prepared-changes-snapshot",
+    "--prepared-changes-snapshot-sha256",
+    "--prepared-changes-verification",
+    "--prepared-changes-verification-sha256",
+    "--prepared-changes-approval",
+    "--prepared-changes-approval-sha256",
     "--auxiliary-union",
     "--auxiliary-union-sha256",
     "--auxiliary-union-parent",
@@ -127,7 +133,19 @@ function parseArgs(argv) {
         !/^[0-9a-f]{64}$/u.test(text("--auxiliary-union-parent-sha256"))))) {
     throw new Error("auxiliary delta parent requires an explicit host path and SHA-256 pin");
   }
+  const preparedNames = ["snapshot", "verification", "approval"];
+  const hasPrepared = preparedNames.some(name => Object.hasOwn(values, `--prepared-changes-${name}`) || Object.hasOwn(values, `--prepared-changes-${name}-sha256`));
+  let preparedChanges = null;
+  if (hasPrepared) {
+    if (!hasAuxiliaryUnion || preparedNames.some(name => !path.isAbsolute(text(`--prepared-changes-${name}`)) ||
+        !/^[0-9a-f]{64}$/u.test(text(`--prepared-changes-${name}-sha256`)))) {
+      throw new Error("prepared changes requires all exact snapshot/verification/ROOT approval pins and auxiliary union");
+    }
+    preparedChanges = Object.fromEntries(preparedNames.map(name => [name === "snapshot" ? "manifest" : name,
+      {path:text(`--prepared-changes-${name}`), sha256:text(`--prepared-changes-${name}-sha256`)}]));
+  }
   return {
+    ...(preparedChanges ? {preparedChanges} : {}),
     auxiliaryUnion: hasAuxiliaryUnion ? text("--auxiliary-union") : null,
     auxiliaryUnionSha256: hasAuxiliaryUnion ? text("--auxiliary-union-sha256") : null,
     ...(hasAuxiliaryParent ? {auxiliaryUnionParent:{path:text("--auxiliary-union-parent"),sha256:text("--auxiliary-union-parent-sha256")}} : {}),
@@ -397,6 +415,40 @@ function loadAuxiliaryUnion(file, digest, hostParent = null) {
   return {scope, ...((delta || composed) ? {scopes:scopes.map(({ciks, ...identity}) => identity),
     contextCiks:scopes.map(item => item.ciks || manifest.configured_ciks)} : {}), owners:new Map(Object.entries(owners))};
 }
+function bindPreparedAuxiliary(auxiliary, declaration) {
+  if (!auxiliary) throw new Error("prepared auxiliary requires an explicit original union");
+  const snapshot = loadPinnedJson(declaration.manifest.path, declaration.manifest.sha256, "prepared snapshot");
+  const verification = loadPinnedJson(declaration.verification.path, declaration.verification.sha256, "prepared verification");
+  const approval = loadPinnedJson(declaration.approval.path, declaration.approval.sha256, "prepared ROOT approval");
+  const stable = value => JSON.stringify(value, (_, item) => item && typeof item === "object" && !Array.isArray(item)
+    ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
+  const receipt = {schema_version:"screening-read-export-verification-v1", verified:true,
+    manifest_sha256:declaration.manifest.sha256, logical_sha256:snapshot.logical_sha256, origin:snapshot.origin};
+  const expected = {schema_version:"screening-read-snapshot-root-approval-v1", authority:"ROOT", approved:true,
+    reader_version:"screening-read-snapshot-v1", manifest_sha256:declaration.manifest.sha256,
+    verification_sha256:declaration.verification.sha256, logical_sha256:snapshot.logical_sha256, origin:snapshot.origin};
+  const manifest = snapshot.properties?.original_manifest;
+  if (snapshot.schema_version !== "screening-read-snapshot-v1" || snapshot.reader_version !== "screening-read-snapshot-v1" ||
+      stable(verification) !== stable(receipt) || stable(approval) !== stable(expected) ||
+      manifest?.schema_version !== "screening-prepared-changes-v1" || snapshot.origin?.kind !== "screening-prepared-changes-v1" ||
+      manifest.parent_dataset_id !== auxiliary.scope.dataset_id || manifest.parent_publication_id !== auxiliary.scope.dataset_publication_id ||
+      manifest.parent_manifest_sha256 !== auxiliary.scope.dataset_manifest_sha256 || manifest.financial_as_of !== auxiliary.scope.financial_as_of ||
+      stable(manifest.auxiliary_owners) !== stable(Object.fromEntries(auxiliary.owners)) ||
+      stable([...(manifest.configured_ciks || [])].sort()) !== stable([...auxiliary.owners.keys()].sort()) ||
+      !/^[0-9a-f]{64}$/u.test(manifest.parent_logical_sha256) || !/^[0-9a-f]{64}$/u.test(snapshot.logical_sha256)) {
+    throw new Error("prepared auxiliary snapshot differs from exact approved parent/owner scope");
+  }
+  const digest = crypto.createHash("sha256").update(stable(manifest)).digest("hex");
+  if (digest !== snapshot.properties.original_manifest_sha256) throw new Error("prepared logical manifest pin differs");
+  const scope = {dataset_id:manifest.dataset_id, dataset_publication_id:manifest.publication_id,
+    financial_as_of:manifest.financial_as_of, dataset_manifest_sha256:digest};
+  if (![scope.dataset_id,scope.dataset_publication_id].every(value => typeof value === "string" && /^[A-Za-z0-9_.-]{1,128}$/u.test(value))) {
+    throw new Error("invalid prepared auxiliary scope");
+  }
+  const scopes = [...(auxiliary.scopes || [auxiliary.scope]), scope];
+  const contextCiks = [...(auxiliary.contextCiks || [[...auxiliary.owners.keys()]]), [...auxiliary.owners.keys()]];
+  return {...auxiliary, scopes, contextCiks};
+}
 function sameAssetScope(left, right) {
   return ["dataset_id","dataset_publication_id","financial_as_of","dataset_manifest_sha256"].every(key => left?.[key] === right?.[key]);
 }
@@ -526,7 +578,8 @@ function startBridge(options) {
   const breakdowns = options.revenueBreakdowns
     ? loadRevenueBreakdowns(options.revenueBreakdowns, options.revenueBreakdownsSha256) : null;
   const growth = options.financialGrowth ? loadFinancialGrowth(options.financialGrowth, options.financialGrowthSha256) : null;
-  const auxiliary = options.auxiliaryUnion ? loadAuxiliaryUnion(options.auxiliaryUnion, options.auxiliaryUnionSha256, options.auxiliaryUnionParent || null) : null;
+  let auxiliary = options.auxiliaryUnion ? loadAuxiliaryUnion(options.auxiliaryUnion, options.auxiliaryUnionSha256, options.auxiliaryUnionParent || null) : null;
+  if (options.preparedChanges) auxiliary = bindPreparedAuxiliary(auxiliary, options.preparedChanges);
   const relay = childProcess.spawn(
     options.wsl,
     [
@@ -753,4 +806,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { loadAuxiliaryUnion, allowedPath, parseArgs, startBridge, loadDisplayAssets, loadRevenueBreakdowns, serveRevenueBreakdowns, loadFinancialGrowth, serveFinancialGrowth, startHistoryWorker, historyGuardRequired };
+module.exports = { bindPreparedAuxiliary, loadAuxiliaryUnion, allowedPath, parseArgs, startBridge, loadDisplayAssets, loadRevenueBreakdowns, serveRevenueBreakdowns, loadFinancialGrowth, serveFinancialGrowth, startHistoryWorker, historyGuardRequired };
