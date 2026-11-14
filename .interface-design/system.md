@@ -112,3 +112,19 @@ All tabs were audited; guide/history/screening were selected for this phase, whi
 explorer/profile/comparison/revenue workspaces were preserved and regression-tested. Shared
 cross-tab scroll memory and further saved-result comparison layout cleanup remain unimplemented,
 lower-priority candidates, not automatically authorized follow-up work.
+
+
+## Information consistency contract — approved, implementation pending (2026-11-14)
+
+Use one metric presentation/capability vocabulary in explorer, profile, comparison, guide and
+screening: catalog full name and exact definition/unit, FY/quarter/TTM basis, published comparison
+kind (YoY/QoQ/TTM YoY or percentage points), source and unavailable reason. Display rounding
+never changes raw values or editable thresholds. A PERCENT catalog ratio stays percent; do not
+rename it as a multiple. Separate data availability from registered-condition capability.
+Board adjunct comparisons that lack a screening catalog definition say “상세 비교 전용 · 조건 미지원”.
+Only registered governed catalog metrics can become conditions; never calculate new browser
+conditions or infer a comparison formula. Default explorer eight metrics stay unchanged; expanded
+columns remain explicit ephemeral display selections. Historical screening analysis pins the run's
+publication and period and returns to its original draft/result/selection/scroll context.
+Different metrics get independent axes with visible units and company-consistent colors. Preserve
+existing amount/index100 behavior, exact evidence, missing gaps, source scopes and keyboard/pins.
