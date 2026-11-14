@@ -2162,10 +2162,11 @@ function revenueBreakdownValueCells(cell,missingReason,expectedDenominator){
   const reason=conflict?"같은 범위의 준비 자료가 일치하지 않습니다.":cell?.reason?revenueGapLabel(cell.reason):missingReason;
   const share=cell?.ratios?.share,yoy=cell?.ratios?.yoy;
   const denominator=({CONSOLIDATED:"연결 매출",SEGMENT_SUBTOTAL:"부문 소계",FIXED_SCOPE_REPORTED:"같은 공시 범위의 보고 매출",FIXED_SCOPE_Q4:"같은 Q4 공시 범위의 매출",DISCLOSED_FIXED_SCOPE_TOTAL:"공시 부문 총매출"})[share?.denominator];
+  const denominatorCaption=({FIXED_SCOPE_REPORTED:"동일 범위",FIXED_SCOPE_Q4:"동일 범위",DISCLOSED_FIXED_SCOPE_TOTAL:"부문 총매출"})[share?.denominator]||denominator;
   const priorCaption=yoy?`${yoy.prior_period_start} ~ ${inclusiveEnd(yoy.prior_period_end)}`:"";
   const shareReason=cell?.ratio_hold_reason||cell?.q4_ratio_reviewed?revenueRatioReason(cell,"share"):expectedDenominator?`같은 공시에서 비중을 계산할 수 있는 분모가 확인되지 않았습니다. 기준은 ${expectedDenominator}입니다.`:"연결 매출은 비중 계산의 기준입니다.";
   return `<td>${present?numberMarkup(cell.value,REVENUE_MONEY):revenueRate(null,reason)}</td>
-    <td>${revenueRate(cell?.share,shareReason)}${denominator?`<small title="비중의 분모">${denominator}</small>`:""}</td>
+    <td>${revenueRate(cell?.share,shareReason)}${denominator?denominatorCaption===denominator?`<small title="비중의 분모">${denominator}</small>`:`<small title="${esc("비중의 분모 · "+denominator)}" aria-label="${esc("비중의 분모 · "+denominator)}">${denominatorCaption}</small>`:""}</td>
     <td>${revenueRate(cell?.yoy,revenueRatioReason(cell,"yoy"))}${priorCaption?`<small title="${esc(priorCaption+(revenueQ4Yoy(cell)?" · "+revenueQ4YoyDetail(cell):""))}" aria-label="전년 비교 기간 ${esc(priorCaption+(revenueQ4Yoy(cell)?" · "+revenueQ4YoyDetail(cell):""))}">${revenueQ4Yoy(cell)?"Q4 계산":"같은 공시"}</small>`:""}</td>
     <td${present&&cell.derivation_rule_version?' data-revenue-derived':""}>${present?(cell.status==="REPORTED"?"공시값":cell.derivation_rule_version?'<span class="revenue-source-kind">계산값 · 연간−9개월</span>':"계산값")+(revenueSourceLinks(cell.sources||[],revenueBreakdowns.data.cik)):(cell?.review_hold?`<span class="revenue-source-kind">공시 항목 검토</span>${revenueSourceLinks(cell.review_hold.sources||[],revenueBreakdowns.data.cik)}`:conflict?"범위 확인 필요":"자료 없음")}</td>`;
 }
