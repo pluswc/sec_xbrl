@@ -1,5 +1,12 @@
 # Price, EPS and shares common inputs — 2026-11-14
 
+Latest operating status (2026-11-14): product source `9d78a279de` independently
+verified, profile artifact independently PASS, Root LIVE_ACCEPTED at
+http://127.0.0.1:18765/ (Windows Node PID58984). Original qualified Python
+backend19078/source `d1e74d90` was unchanged and not restarted. This is operating
+acceptance under the stated limits, not PER approval or main merge. Earlier
+no-activation/pending statements below are chronological scope/status records.
+
 Latest overlay status (2026-11-14): implementation `cc3c9e85ab` and actual
 assessment v2 independently PASS; Root LOCALLY_ACCEPTED the common assessment
 under the limits below. No PER approval, UI/runtime activation or main merge.
@@ -310,3 +317,49 @@ handlers and legacy owner dispatch); other tests were filtered out. JavaScript
 syntax, targeted Ruff and diff checks passed. No prior27/overlay9/company audit
 or real-data projection was rerun by the writer. Frozen-source independent review
 and root-operated asset/private/live acceptance remain pending.
+
+
+## Actual operating acceptance — 2026-11-14
+
+Source `9d78a279de553141bef5c5dab6ee884aec3ed175` is frozen separately from
+this docs-only handoff. Independent source verification passed the new projection/
+route/UI boundaries (new7 checks, affected existing checks), and the tiny shared-
+table-wrapper regression passed separately. The earlier27 common-input and8
+overlay checks were reused; no completed company audits were repeated.
+
+Actual profile asset `work/price-common-inputs-20261114/operating/market-input-profile.json`
+has SHA256 `271100cca9f27802088ea4bd262fa73bd9e8635248234c8d348f5831c0bd32f6`,
+size1,968,650 bytes. Projection took0.55s with peak RSS231,168KiB. Root and
+independent artifact review passed: all109 configured ticker/CIK pairs have109
+default prices,12 latest direct12m EPS are available, and class alternatives and
+missing states remain explicit. No PER or other valuation ratio is supplied.
+
+The requested supplier chat `01a09991-9bd0-7c20-b3c7-048130610c54` was read and
+its official guidance used: SDK0.5.1/contract1.1.1, recommended broad-price-r1,
+exact frozen delivery pins and release-tag package-tree equality with the existing
+export. No recollection or replacement price query was performed. Financial
+cutoff remains2026-10-25; displayed prices are2026-10-23 observations, with currency
+UNKNOWN. They are not current or automatically updated quotations.
+
+Private actual checks confirmed MSFT524.51/17.95, AAPL347.73 with missing latest
+12m EPS, negative LITE EPS, exact GOOGL identity/class alternatives, fixed-view
+hiding and old-scope409 rejection. Desktop1440 and390px checks passed; expanding
+shares uses the existing shared table viewport without page errors. Actual live
+read-only acceptance confirmed109 companies,14 datasets,12 existing financial
+charts and share expansion with zero page errors. Old21 functions, catalog and
+journal were preserved; all20 protected file hashes remained identical.
+
+The live URL is http://127.0.0.1:18765/ via Node PID58984; the qualified Python
+backend19078 remains the original process/source. The first bridge-switch port-
+release race restored the previous source and checked UI hashes; a bounded port
+wait allowed the second switch to pass. Financial data was untouched. The owned
+private PID7844 was stopped; no worktree or data directories were deleted.
+
+Optional receipt: `work/price-common-inputs-20261114/operating/activation-acceptance.json`.
+Windows visual evidence is under `market-inputs-operating-20261114` in the allowed
+Oct7 visualization root (`live-browser-acceptance.json` and accepted live PNG).
+The generic profile-asset command and two bridge flags above reproduce the
+connection from pinned inputs without issuer branches. Implementation, independent
+verification, artifact acceptance and LIVE acceptance are complete for this scope;
+main is NOT_MERGED and no main merge was requested. No instructions/design-system
+files, source modules, tests, runtime or data were changed by this final doc update.
