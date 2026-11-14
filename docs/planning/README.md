@@ -1,5 +1,12 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 [Q4 매출 구성 연결·비율 companion](../implementation/revenue-q4-continuity-20261114.md)은
+main `245a52bc44` 기준 별도 branch에서 조사·설계와 네 grant 분리 방식을 승인받았다.
+원 canonical/검토 flag·기존 파생과 실제109/History는 불변이며 정확한 원문/T1/T2와
+ROOT overlay로만 새 companion/asset을 준비한다. 후보 구현은 Python77/Node151/
+Ruff 자체 검사를 통과했고 실제 ROOT registry는 별도 승인됐다. 독립 source 검증·
+발행·운영 인수는 대기다. 기존 전체50 analysis 재준비와 label 기반 자동 연결은 하지 않는다.
+
 2026-11-14 사용자가109 확장·상세 연결의 main 전달을 승인했다. 별도 branch에서
 원래 financial3fa와 PR98 main `ad877d26be`를 일반 merge해 계획 항목을 모두 보존했다.
 Python130/수락 bridge·최신 main UI는 부모 bytes와 같고 focused Python10·Node9/

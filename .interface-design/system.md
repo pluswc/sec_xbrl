@@ -149,3 +149,14 @@ browser acceptance remain pending.
   YoY is unavailable. Old publications retain their detail-only adjunct and labels.
 - No browser calculation or new display layout is introduced. Implementation/independent
   verification and actual publication/acceptance remain separate in the milestone contract.
+
+## Reviewed Q4 revenue companion
+
+Keep reported same-filing YoY distinct from `Q4 전년비 · 연간−9개월 계산`.
+The latter exposes its current/prior Q4 amounts, actual periods, paired input sources,
+comparison-only retrospective presentation when applicable, and arithmetic-only assurance.
+Amount/share/YoY readiness is independent; a missing denominator does not hide a valid amount.
+Distinguish absent prepared input from an unresolved scope or a source tag/table conflict;
+`공시 태그와 표의 항목 불일치 · 계산 보류` does not mean no disclosure exists.
+Keep original Raw/T1 and accepted amount/source values unchanged. Review evidence grants
+never silently merge labels/epochs or connect unapproved chart edges. Retain the current layout.
