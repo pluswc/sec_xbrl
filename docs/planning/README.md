@@ -853,3 +853,5 @@ retained held-FD typed journal evidence; previous failed-source evidence remains
 unchanged. See the [dated ownership contract](../implementation/company-history-workflow.md#2026-10-15-sqlite-ownership-repair-after-source-951-fail).
 New writer checks, independent source acceptance and actual execution remain
 separate; actual recovery is pending and financial readiness is not declared.
+
+2026-11-14 추가 검증 후보: 빈 fixed scope와 미지정 scope를 동일하게 처리하고, 고정 범위의 분모는 부모의 전체 축·구성원 및 원문 입력과 정확 대조한다. 신규 비중은 `FIXED_SCOPE_Q4`(같은 Q4 공시 범위의 매출)로 구분한다. 선택 기간에 빈 선택 항목과 미선택 준비 항목이 함께 있으면 `이 기간의 준비 항목 보기` 버튼을 제공한다. 사용자 클릭 전 선택은 불변이며 명시적인 클릭 후에는 해당 기간에 준비된 항목 최대 8개로 선택을 교체한다. 관련 Python 86개 통과; 새 소스 독립 검증 및 실제 v2 발행·운영 인수는 대기 중이다. 기존 published-v1 및 ROOT 승인 v2는 변경하지 않았다.

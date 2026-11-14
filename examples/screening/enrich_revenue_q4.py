@@ -346,9 +346,9 @@ def enrich(review: dict, baseline: dict, old: dict, observations: list[dict], *,
             reason = "Q4_SHARE_PARENT_PERIOD_OR_BASIS_MISMATCH"
         elif not share_revenue_scope(source, parent):
             reason = "Q4_SHARE_REVENUE_CONCEPT_OR_FILING_MISMATCH"
-        elif (row.get("fixed_axis_members") != (parent_row or {}).get("fixed_axis_members") and not disclosed_parent) or row.get("scope") and (parent_row is None or parent_row.get("member") != row["scope"]):
+        elif (bool(row.get("fixed_axis_members")) and row.get("fixed_axis_members") != (parent_row or {}).get("axis_members", {}) and not disclosed_parent) or row.get("scope") and (parent_row is None or parent_row.get("member") != row["scope"]):
             reason = "Q4_SHARE_FIXED_PARENT_SCOPE_MISMATCH"
-        elif not row.get("scope") and parent_row is not None:
+        elif not row.get("scope") and not row.get("fixed_axis_members") and parent_row is not None:
             reason = "Q4_SHARE_PARENT_SCOPE_MISMATCH"
         elif Decimal(parent["value_numeric"]) <= 0 or not 0 <= Decimal(source["value_numeric"]) <= Decimal(parent["value_numeric"]):
             reason = "Q4_SHARE_PARENT_OR_NUMERATOR_NOT_ELIGIBLE"
@@ -360,7 +360,7 @@ def enrich(review: dict, baseline: dict, old: dict, observations: list[dict], *,
         if cell.get("share") is not None:
             raise ValueError("existing non-null ratio must not be replaced")
         cell["share"] = _percentage(source["value_numeric"], parent["value_numeric"], yoy=False)
-        cell.setdefault("ratios", {})["share"] = {"denominator": "DISCLOSED_FIXED_SCOPE_TOTAL" if disclosed_parent else "SEGMENT_SUBTOTAL" if row.get("scope") else "CONSOLIDATED",
+        cell.setdefault("ratios", {})["share"] = {"denominator": "DISCLOSED_FIXED_SCOPE_TOTAL" if disclosed_parent else "FIXED_SCOPE_Q4" if row.get("fixed_axis_members") else "SEGMENT_SUBTOTAL" if row.get("scope") else "CONSOLIDATED",
             **({"denominator_relation": grant["denominator_relation"], "denominator_source_fact_ids": grant["denominator_source_fact_ids"]} if disclosed_parent else {}),
             "derivation_rule_version": RATIO_RULE, "parent_value": parent["value_numeric"], "basis_assurance": ASSURANCE,
             "source_fact_ids": [item["source_fact_id"] for item in parent["source_inputs"]]}

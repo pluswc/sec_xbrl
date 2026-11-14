@@ -336,3 +336,42 @@ def test_publish_uses_real_pinned_parquet_loader_and_name_maps(fixture, tmp_path
     with pytest.raises(ValueError, match="pin"):
         publish(review_pin, tmp_path / "tampered-asset.json", tmp_path / "tampered-companion.json")
     assert not (tmp_path / "tampered-asset.json").exists()
+
+@pytest.mark.parametrize("empty", [{}, None])
+def test_absent_and_empty_fixed_scope_both_allow_undimensioned_parent(fixture, empty):
+    fixture[1]["companies"]["0000000001"]["quarterly"]["groups"]["products"][0]["fixed_axis_members"] = empty
+    asset, _ = run(fixture)
+    assert asset["companies"]["0000000001"]["quarterly"]["groups"]["products"][0]["cells"][0]["share"] == "25.00"
+
+@pytest.mark.parametrize("extra_axis", [False, True])
+def test_fixed_parent_matches_full_parent_axes_not_parent_fixed_metadata(fixture, extra_axis):
+    from sec_xbrl.analytics.revenue_q4_continuity import _digest, review_endpoint
+    review, baseline, _, observations, names = fixture
+    view = baseline["companies"]["0000000001"]["quarterly"]
+    row = view["groups"]["products"][0]
+    qualifier = {"fixed-axis": "fixed-member"}
+    row["fixed_axis_members"] = qualifier
+    for source in observations:
+        source["raw_dimension_signature"].append(["qual-axis", "qual-member", None, "EXPLICIT", "false"])
+        source["canonical_dimension_signature"].append(["canonical-qual-axis", "canonical-qual-member", None, "EXPLICIT", "false"])
+        source["dimension_mapping_ids"].append(["qual-axis-map", "qual-member-map"])
+        names[(source["cik"], source["source_filing_id"], "qual-axis")] = "fixed-axis"
+        names[(source["cik"], source["source_filing_id"], "qual-member")] = "fixed-member"
+    for index, approved in enumerate(review["amount_links"]):
+        approved["annual"] = review_endpoint(observations[index * 2])
+        approved["ytd9"] = review_endpoint(observations[index * 2 + 1])
+    parent = {"id": "fixed-parent", "mapping_epoch": "parent", "scope": None, "axis_members": qualifier, "fixed_axis_members": {}, "cells": [deepcopy(view["totals"][0])]}
+    parent["cells"][0]["sources"] = [_review_source(source, source["cik"], "2026-10-25") for source in observations[-2:]]
+    view["groups"]["products"].append(parent)
+    reference = review["share_grants"][0]["denominator"]
+    reference["target"].update(group="products", row_id="fixed-parent", mapping_epoch="parent")
+    reference["cell_sha256"] = _digest(parent["cells"][0])
+    if extra_axis:
+        parent["axis_members"]["unexpected"] = "scope"
+        with pytest.raises(ValueError, match="full axis/member"):
+            run(fixture)
+    else:
+        asset, _ = run(fixture)
+        cell = asset["companies"]["0000000001"]["quarterly"]["groups"]["products"][0]["cells"][0]
+        assert cell["share"] == "25.00"
+        assert cell["ratios"]["share"]["denominator"] == "FIXED_SCOPE_Q4"
