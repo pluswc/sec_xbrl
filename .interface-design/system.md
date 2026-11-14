@@ -164,3 +164,12 @@ never silently merge labels/epochs or connect unapproved chart edges. Retain the
 An explicitly reviewed `DISCLOSED_FIXED_SCOPE_TOTAL` denominator is named `공시 부문 총매출`.
 It retains its full fixed-scope identity and paired source proof; do not label it as a
 same-filing reported parent or infer permission from component totals adding up.
+
+Q4 companion local operating acceptance (2026-11-14): financial source `76e475f0be`,
+consumer integration `7b6cb45f81`; independent checks and ROOT live UI/data acceptance passed.
+Use compact table captions `동일 범위` / `부문 총매출` with exact denominator definitions in
+native title and accessible labels; chart context retains the full definition. A partially
+missing selected period may offer `이 기간의 준비 항목 보기`; only explicit activation replaces
+selection with that period's prepared items. Never silently merge raw scope groups.
+Existing market-input consumers remain present; this does not authorize a new price producer.
+Remote delivery/main merge for this milestone has not been requested or performed.

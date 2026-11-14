@@ -4,10 +4,13 @@
 
 사용자는 AMD를 포함한 Q4 구성항목 누락 개선을 승인했다. 별도
 `codex/revenue-q4-continuity` 작업 트리는 main `245a52bc44`에서 시작한다.
-리드는 원본 불변·네 가지 grant 분리 설계를 승인했으며, 실제 연결의 ROOT 승인
-파일은 source evidence 검토 뒤 별도로 작성한다. 후보 구현과 자체 검증을 완료했으며
-독립 검증·실제 발행/화면 인수는 대기다. 원격 전달·main 병합은 수행하지 않았다.
-기존 109 운영과 이력을 유지한다.
+상태는 **IMPLEMENTED / INDEPENDENTLY_VERIFIED / LOCALLY_ACCEPTED / OPERATING**다.
+최종 인수 판단과 실제 발행·운영 검증은 ROOT가 수행했다. 금융 소스는
+`76e475f0be29ef11449256e6d88efbd468c459b1`, 최종 시장 소비자 통합 소스는
+`7b6cb45f815b3c75e1406aec8e5060db8ca26ca3`로 구분한다. 문서 전용 후속
+커밋은 이 코드 동결을 바꾸지 않는다. 독립 Python 86개·Node 159개와 Ruff/diff,
+독립 실제 data-v2 검증이 PASS다. main 기준은 `245a52bc44`이며 원격 push/PR은
+요청되지 않았고 수행하지 않았다. main 병합도 수행하지 않았다.
 
 상위 계약은 delivery-workflow, analytical-data-model, layer-model, period-rules와
 revenue-completeness-20261112다. 기존 Raw/T1/Analytical/canonical/매핑 검토 flag,
@@ -273,3 +276,48 @@ published-v2의 구현 source pins는 불변이며 재발행하지 않는다.
 기존 Python 86개 검증의 금융 구현 bytes를 유지하며 실제 자료를 재발행하거나
 시장 producer를 이 브랜치에 추가하지 않았다. 새 통합 SHA의 독립 검증과 운영
 인수는 별도 단계다.
+
+## 최종 실제 자료·운영 인수 — 2026-11-14
+
+아래 결과는 ROOT의 `local-live-acceptance.json`을 기록한 것이다. writer는 실제
+자료 발행·운영 전환·원 journal 쓰기를 실행하지 않았다. 앞 절의 초기 P1,
+false HOLD, 후보 대기 문구는 당시 단계의 기록이며 최종 상태는 이 절을 따른다.
+
+- ROOT 승인 v3 SHA: `2b3a3b857d41df3378822890f09224483e0133b7e5606aca30d410b16b3ebde2`.
+  22 amount links / 11 projections / 221 conditional shares / 17 YoY / 3 holds.
+  특수 공시 총매출 관계는 AMD 3개와 별도 원문 검토한 NVDA 2개만 명시 승인했다.
+  AMD 권한을 NVDA나 다른 범위에 자동 전파하지 않았다.
+- 실제 published-v2 asset SHA:
+  `e75142559ce27b4a2b0eb6e12d0fa541317e81b32e60bab6b0ea2e524ef56636`.
+  companion SHA:
+  `2a57efd64ebe62e3a50b0d07f559b2d341baf0f53196a2da0034756358cf52c9`.
+- 원 50사 annual/totals, 기존 quarterly component 3,228개 금액 및 4,910개 비율의
+  값·계보와 408개 입력 pins를 보존했다. 새 금액 11개(AMD 4/AAPL 5/NVDA 2),
+  share 209개, YoY 17개를 검증했다. 28사에 비율이 준비되었으며 모든 회사·기간의
+  완전한 구성을 뜻하지 않는다. 새 22개 레코드 중 11개 prior comparison-only는
+  과거 표시 셀에 투영하지 않았다. AMD 2024 진단 3개와 cross-concept share
+  12개의 보류를 유지했다. 원 Raw/T1 및 기존 공시 수치는 바꾸지 않았다.
+- 실제 UI 1920/1440에서 AMD Q4·2024 태그 충돌 안내, AAPL/NVDA의 명시적 준비
+  항목 선택 버튼, KO의 짧은 분모 캡션과 전체 title/aria를 검증했다. JS 오류와
+  가로 넘침은 0이다. 기존 시장 4개 API payload가 정확히 같고 MSFT 가격 524.51,
+  EPS 17.95, 표시 날짜 26.10.23, 주식 수 확장 및 고정 기간 숨김도 PASS다.
+- live frontend `18765` PID `40460`에서 기존 backend `19078`을 그대로 소비한다.
+  datasets 14 / companies 109 / history version 8 / trash 8을 보존했고 실제 GUI
+  검증 뒤 원 SQLite SHA를 다시 확인했다:
+  `3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`.
+  Q4 금융 Python 133개 구현 pins와 시장 profile SHA
+  `271100cca9f27802088ea4bd262fa73bd9e8635248234c8d348f5831c0bd32f6`는 불변이다.
+  시장 소비자 보존은 새 가격 producer 승인이나 가격 재계산을 의미하지 않는다.
+
+증거 기준 디렉터리는
+`/mnt/c/Users/plusbdw/.codex/visualizations/2026/11/08/01a1bb67-6275-70d2-989e-208966314006/revenue-q4-continuity-20261114`다.
+`local-live-acceptance.json`, `live-ui.json`, `live-market.json`,
+`ko-fixed-parent.json` 및 source 작업 상위의 `actual-publication-acceptance.json`과
+published-v2를 함께 참조한다. `live-switch.json`과 `original-process.json`은
+시장 기능을 포함한 이전 PID 58984의 args를 보존한 현재 롤백 locator다.
+`original-process-initial109.json`은 stale PID 23088 guard 이전의 역사 자료이며
+현재 롤백 명령으로 쓰지 않는다. guard는 프로세스 중단 전에 안전하게 멈췄다.
+잘못된 CLI SHA placeholder는 pin 검사에서 출력 0개로 거부된 운영자 입력 실수로
+`operator-bad-sha.stderr`에 보존했고 제품 결함으로 분류하지 않는다.
+작업용 private frontend들은 ROOT가 종료했다. 기존 backend·원 자료·store 쓰기는
+없었으며 이 보존 확인을 전체 Raw 아카이브 재검증으로 확대 해석하지 않는다.
