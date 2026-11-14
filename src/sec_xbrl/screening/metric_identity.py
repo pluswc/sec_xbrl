@@ -73,7 +73,14 @@ class GenericMetricIdentityPublication:
     manifest_path: Path
 
 
-def publish_generic_metric_identity(
+def publish_generic_metric_identity(config_path: Path | str, destination: Path | str) -> GenericMetricIdentityPublication:
+    from sec_xbrl.financial_native_source import use_native_preparation
+    config = _validate_config(read_json(Path(config_path)))
+    with use_native_preparation(config.get("native_preparation"), config=config):
+        return _publish_generic_metric_identity(config_path, destination)
+
+
+def _publish_generic_metric_identity(
     config_path: Path | str, destination: Path | str
 ) -> GenericMetricIdentityPublication:
     """Validate every governed parent and atomically publish its identity."""
@@ -217,6 +224,12 @@ class GenericMetricIdentityReader:
 
 
 def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
+    from sec_xbrl.financial_native_source import use_native_preparation
+    with use_native_preparation(config.get("native_preparation"), config=config):
+        return _verify_configured_sources_inner(config)
+
+
+def _verify_configured_sources_inner(config: dict[str, Any]) -> dict[str, Any]:
     collection_path = regular_file(
         Path(config["collection_manifest"]), "generic metric collection manifest"
     )
@@ -316,23 +329,27 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
     quality = GenericMetricQualityReader(
         quality_root, manifest_sha256=config["quality_manifest_sha256"]
     )
-    if quality.manifest.get("prospective_selection") != config.get("prospective_selection"):
-        raise ValueError("quality and identity prospective selection companions differ")
-    if quality.manifest.get("storage_reuse") != config.get("storage_reuse"):
-        raise ValueError("quality and identity storage reuse companions differ")
-    if quality.manifest.get("history_selection") != config.get("history_selection"):
-        raise ValueError("quality and identity History selection companions differ")
-    quality.verify_sources(
-        collection_manifest=collection_path,
-        history_manifest_sha256s=history_hashes,
-        financial_as_of=config["financial_as_of"],
-        _verified_storage_reuse=storage,
-        _verified_prospective_selection=prospective,
-        _source_compatibility=compatibility,
-        expected_companies=tuple(
-            {"ticker": row["ticker"], "cik": row["cik"]} for row in config["companies"]
-        ),
-    )
+    if "native_preparation" in config:
+        from sec_xbrl.financial_native_source import verify_prepared_quality
+        verify_prepared_quality(quality, config=config, history_hashes=history_hashes)
+    else:
+        if quality.manifest.get("prospective_selection") != config.get("prospective_selection"):
+            raise ValueError("quality and identity prospective selection companions differ")
+        if quality.manifest.get("storage_reuse") != config.get("storage_reuse"):
+            raise ValueError("quality and identity storage reuse companions differ")
+        if quality.manifest.get("history_selection") != config.get("history_selection"):
+            raise ValueError("quality and identity History selection companions differ")
+        quality.verify_sources(
+            collection_manifest=collection_path,
+            history_manifest_sha256s=history_hashes,
+            financial_as_of=config["financial_as_of"],
+            _verified_storage_reuse=storage,
+            _verified_prospective_selection=prospective,
+            _source_compatibility=compatibility,
+            expected_companies=tuple(
+                {"ticker": row["ticker"], "cik": row["cik"]} for row in config["companies"]
+            ),
+        )
     if (
         quality.manifest.get("state") != "PASS"
         or quality.manifest.get("assurance_scope") != QUALITY_SCOPE
@@ -380,6 +397,7 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
         },
         "quality": {
             "root": str(quality_root),
+            **({"assessment": copy.deepcopy(config["native_preparation"])} if "native_preparation" in config else {}),
             "publication_id": quality.publication_id,
             "manifest_sha256": sha256_file(quality_manifest),
             "assurance_scope": QUALITY_SCOPE,
@@ -683,6 +701,11 @@ def _validate_config(value: Any) -> dict[str, Any]:
     }
     if coverage_policy is not None:
         normalized["annual_coverage_policy"] = coverage_policy
+    if "native_preparation" in value:
+        declaration = value["native_preparation"]
+        if not isinstance(declaration, dict) or set(declaration) != {"packet", "approval"}:
+            raise ValueError("native preparation requires packet and approval")
+        normalized["native_preparation"] = {key: selection_declaration(pin) for key, pin in declaration.items()}
     if "source_compatibility" in value:
         normalized["source_compatibility"] = selection_declaration(value["source_compatibility"])
     if "prospective_selection" in value:
