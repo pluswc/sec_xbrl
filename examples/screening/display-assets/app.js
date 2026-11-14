@@ -1565,8 +1565,10 @@ function financialGrowthPoints(model,definition,levels){
 function financialGrowthEvidence(point,exact=false){
   const record=point.evidence;
   if(!record)return "";
-  const status=point.status?`<span class="financial-growth-status" data-growth-status="${esc(record.status)}">${esc(point.status)}</span>`:"";
-  const amount=(value,definition,unit)=>exact?esc(profileBoardExact(value,definition)):`${profileBoardValue(value,definition)} ${unit}`;
+  const reason=record.reason?financialGrowthReason(record.reason):point.reason||"준비된 값이 없습니다.";
+  const statusText=point.status||(record.status==="UNAVAILABLE"?reason:"");
+  const status=statusText?`<span class="financial-growth-status" data-growth-status="${esc(record.status)}">${esc(statusText)}</span>`:"";
+  const amount=(value,definition,unit)=>value==null?`<span class="missing" title="${esc(reason)}" aria-label="${esc(reason)}">— · 미준비</span>`:exact?esc(profileBoardExact(value,definition)):`${profileBoardValue(value,definition)} ${unit}`;
   const publishedMagnitude=record.negative_magnitude_change;
   const expanded=record.status==="NEGATIVE_MAGNITUDE_EXPANDED";
   const direction=expanded?"확대 규모":record.status==="NEGATIVE_MAGNITUDE_REDUCED"?"축소 규모":"음수 규모 변화";
@@ -1577,7 +1579,7 @@ function financialGrowthEvidence(point,exact=false){
   const delta=percent?"":`<small>금액 증감 ${amount(record.delta,BOARD_USD,"백만 USD")}</small>`;
   if(!exact)return status+magnitude+delta+(record.basis_assurance==="ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"?'<small>산술 비교 · 재작성 비교성 미검증</small>':"");
   const sourceDefinition=point.definition?.comparison_of?(percent?BOARD_RATE:BOARD_USD):point.definition||BOARD_USD;
-  const evidence=(label,input)=>input?`<small>${label} ${esc(profileBoardExact(input.value,sourceDefinition))} · ${esc(actualPeriod(input))}<br>관측 ${esc(input.observation_id)}</small>`:`<small>${label} 관측 미준비</small>`;
+  const evidence=(label,input)=>input?`<small>${label} ${amount(input.value,sourceDefinition,profileBoardUnit(sourceDefinition))} · ${esc(actualPeriod(input))}<br>관측 ${esc(input.observation_id||"미준비")}</small>`:`<small>${label} 관측 미준비</small>`;
   const assurance=record.basis_assurance==="ARITHMETIC_ONLY_NOT_RECAST_VALIDATED"?
     "산술 비교 · 재작성 기준 검증 없음":`선언 기준 ${record.basis_assurance?.replace(/^DECLARED_BASIS:/u,"")||"—"}`;
   const legs=record.ttm_input_ids?`<small>현재 분기 관측 ${esc(record.ttm_input_ids.current.join(", "))}<br>전년 분기 관측 ${esc(record.ttm_input_ids.prior.join(", "))}</small>`:"";

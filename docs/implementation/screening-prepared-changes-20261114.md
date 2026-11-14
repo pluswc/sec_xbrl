@@ -209,3 +209,20 @@ bytes도 초기 동결과 같아 기존 실제 read snapshot을 다시 export할
 대조 후 원본 read snapshot만 별도로 수락했다. 이는 새 27개 정의의 실제 발행이나
 운영 인수를 뜻하지 않으며 새 발행물/운영은 계속 HOLD다. 실제 원본·journal·
 운영 서버는 writer가 변경하지 않았다.
+
+## 실제 화면의 미준비 근거 보정 (2026-11-14)
+
+`2070a27d7a` 이후 리드의 실제 새 발행물 화면 검사에서 첫 FY의 이전 기간이 없을 때
+`delta: null` 또는 `current/prior.value: null`을 정확값 formatter에 전달해 보드가
+중단되는 결함을 확인했다. 표시 함수만 null을 명시적 미준비로 처리하도록 수정했다.
+0으로 바꾸지 않으며 존재하는 상태·사유·기간·관측 ID와 %/%p 입력 의미는 유지한다.
+실제 형태의 all-null evidence와 첫 FY published pair를 포함한 전체 보드 render
+회귀를 추가했고 전체 Node **146 PASS**, Ruff/diff PASS다. Python/producer/reader/
+bridge 및 이미 준비된 실제 자료 bytes는 이 보정에서 바꾸지 않았다.
+
+리드가 별도로 보고한 실제 자료 검증은 새 27조건×100개사 2,700판정 정확 대조
+(683 PASS/428 FAIL/1,589 UNDETERMINED; FY2025/2026Q3), 기존 89 API 응답 동등,
+기존 보조 비교 8,800 cell 동등, 부모 45,114개 고유 관측 보존이다. private journal의
+기존 8항목 복원·삭제 및 기존 4결과 재열기, 신규 조건·결과 삭제/복원/재열기도
+확인했다. 이는 리드의 복제본 검증이며 writer의 실제 journal 변경은 없다.
+UI 보정의 독립 재검·리드 실제 화면 인수와 운영 전환은 별도 대기다.

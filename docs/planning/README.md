@@ -4,7 +4,8 @@
 수락된 native100 원소스의 승인 read snapshot을 부모로 새 numeric YoY9개와
 순수 비율의 전년 %p18개를 별도 발행·등록하도록 승인받았다. 기존 발행물·
 원래 logical ID·저장 이력과 source qualification은 불변이다. 후보 구현과 자체
-Node144 및 독립 P2 support 보정 후 관련 Python150 검사는 통과했다. 기존 11개
+Node146(실제 미준비 근거 표시 보정 포함) 및 support 보정 후 관련 Python150
+검사는 통과했다. 기존 11개
 read snapshot은 리드가 별도 수락했으며, 새 27개 source의 재검토·실제 발행·운영
 인수는 대기다. 기존 source qualification과 실제 발행·운영은 리드가 소유한다.
 
