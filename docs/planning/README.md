@@ -1,5 +1,14 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 [정보 일관성](../implementation/information-consistency-20261114.md)은
+코드 `4f59ed55`에서 독립 Node139·Python35·Ruff/diff와 리드의 최종 실제 화면
+검사를 통과해 LOCALLY_ACCEPTED다. 연간 추가 열/정밀 정렬, 고정 범위 전체
+프로필 왕복, 다중 지표와 %p·LEVEL/BOTH, desktop3폭·390px, 실제 QoQ/YoY/TTM
+근거 설명 및 실패/취소·기존 governed 값 보존을 확인했다. 선언된27파일 hash와
+SQLite 무결성을 보존했고 Python/bridge/출판·실제 기록은 변경하지 않았다.
+PR85는 별도 OPEN 작업이다. 이 작업의 원격 PR·CI·main 병합·운영 반영은
+아직 대기이며 리드가 수행한다.
+
 2026-11-14 main 전달 승인: 사용자가 수락된 매출 성장률·WDC 최신 분기 교정의
 검토와 main 병합을 요청했다. 문서만 달라진 main `df694e4a88`을 일반 merge하여
 양쪽 기록을 보존했다. 아래 LIVE/main 미병합 문구는 병합 전 인수 기록이다.
