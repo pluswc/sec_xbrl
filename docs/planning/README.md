@@ -1,6 +1,6 @@
 # 계획 등록부 — 단일 진입점
 
-2026-11-14 [Common-input assessment overlay](../implementation/price-common-inputs-20261114.md#approved-follow-up-small-referenced-assessment-overlay--2026-11-14): approved implementation separates latest financial12m EPS availability, four-QTD diagnostics and exact reported header class identity from valuation/share-basis approval. Original common109 publication/rule/data remain unchanged; independent review and actual overlay acceptance pending.
+2026-11-14 [Common-input assessment overlay](../implementation/price-common-inputs-20261114.md#approved-follow-up-small-referenced-assessment-overlay--2026-11-14): sourcecc3c9 and actual v2 independently PASS, Root LOCALLY_ACCEPTED. All109 header issuers/128 contexts (46 class-identity contexts);12 latest direct12m EPS (11 positive/LITE negative), only2 latest four-QTD windows with basis unknown. Original common109/all18 protected files preserved. No PER/UI/runtime/main acceptance; earlier pending states are historical.
 
 2026-11-14 [Price/EPS/shares common inputs](../implementation/price-common-inputs-20261114.md): source9540 independent27 PASS; actual109 publication completed (13,549 financial rows/129 quotes/132 securities). Availability counts cover any retained period/scope, not current PER coverage; all109 market TTM remain SHARE_BASIS_UNKNOWN. Protected12 pins/journal unchanged. Root artifact review PASS and first-slice publication/query LOCALLY_ACCEPTED under these limits; no UI/runtime activation or main merge, and no service acceptance claim.
 

@@ -1,5 +1,10 @@
 # Price, EPS and shares common inputs — 2026-11-14
 
+Latest overlay status (2026-11-14): implementation `cc3c9e85ab` and actual
+assessment v2 independently PASS; Root LOCALLY_ACCEPTED the common assessment
+under the limits below. No PER approval, UI/runtime activation or main merge.
+Earlier pending-status statements are chronological implementation records.
+
 Status (2026-11-14): source `9540f559703cf7643310a6051a07f6efd1506956`
 IMPLEMENTED and independently verified (27 tests PASS); actual109 publication
 completed; artifact review PASS and first-slice publication/query LOCALLY_ACCEPTED
@@ -200,3 +205,35 @@ Raw source values and overlay v1 remain unchanged. The new Analytical-cover-only
 regression also checks same-day preservation, future/older filing exclusion and
 parent-pin tamper rejection. Nine affected overlay tests passed; no actual overlay
 publication or prior company audits were run by the writer.
+
+
+## Actual assessment v2 acceptance — 2026-11-14
+
+Source `cc3c9e85ab181a1450150fc0705703d27e9542ed` and the actual overlay v2
+passed independent review. Root LOCALLY_ACCEPTED publication/query assessment,
+not PER valuation, UI, operating-service or main integration. Eight original
+overlay checks were reused and the routing regression independently passed; the
+prior27 common-input checks and completed company audits were not repeated.
+
+Publication `screening-market-assessment-e5875febdf0ae3ca778cdbda`:
+`data/processed/market_inputs/20261114_common109_assessment_v2/market_input_assessment_manifest.json`,
+SHA256 `ec827bfa25a21b336416e0a2673f69394dd9b9cd2c5a1ce0e88281b1ef2c93fa`.
+All109 issuers have reported header matches:128 contexts, including46 explicit
+class-identity **contexts**, not46 companies. Twelve issuers have directly
+reported12m EPS at their latest financial end (11 positive; LITE negative and
+valid financial EPS). Only HON/ABBV have latest four-direct-QTD input windows;
+their share-basis approval remains unknown. Other issuers have no direct12m at
+their latest financial end, missing/gapped quarters or multiple scopes requiring
+selection. No older FY fallback or automatic EPS/security/PER approval was added.
+
+The small overlay is768,474 bytes; actual build2.18s, peak RSS443,288KiB. The
+original40,342,758-byte common publication and all18 protected files, including
+the original journal, remained byte-identical. Intermediate overlay v1 (header
+coverage87 issuers) was never accepted and is retained unchanged. V2 corrects
+header routing for Analytical-cover issuers while preserving all109 financial
+12m/four-QTD assessments. No runtime or main changes occurred.
+
+Optional local evidence: `work/price-common-inputs-20261114/basis-review/overlay-v2/acceptance.json`
+and `coverage109.csv`; the tracked contract records the authoritative limits.
+The generic `assess` then `assessment-query` commands above apply to new registered
+filers with pinned inputs; there are no issuer exceptions.
