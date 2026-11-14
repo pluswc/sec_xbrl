@@ -36,11 +36,13 @@ APPROVAL_VERSION = "screening-governed-delta-approval-v1"
 MANIFEST = "screening_governed_delta_manifest.json"
 PAYLOAD = "governed_observations.json"
 
-def _source_hashes() -> dict[str, str]:
-    root = Path(__file__).parents[1]
+def _source_hashes(source_root: Path | None = None) -> dict[str, str]:
+    root = Path(__file__).parents[1] if source_root is None else source_root
+    if not root.is_absolute() or root.resolve() != root:
+        raise ValueError("governed source root must be absolute without aliases")
     result = {str(path.relative_to(root)): sha256_file(checked_file(_pin(path)))
               for path in sorted(root.rglob("*.py"))}
-    bridge = Path(__file__).parents[3] / "examples/screening/windows-loopback-bridge.cjs"
+    bridge = root.parent.parent / "examples/screening/windows-loopback-bridge.cjs"
     result["examples/screening/windows-loopback-bridge.cjs"] = sha256_file(bridge)
     return result
 
@@ -159,6 +161,13 @@ def publish_governed_delta(config_path: Path | str, destination: Path | str,
     old_support = {row["cik"]: row for row in parent.metric_support if row["metric_id"] == "revenue_yoy"}
     support = [{**old_support[row["cik"]], **row, "definition_version": REVENUE_VERSION,
                 "reason": (row["reasons"] or [None])[0]} for row in support]
+    represented = {row["cik"] for row in annual_records}
+    for row in support:
+        if row["cik"] not in represented:
+            # An admitted quarter-only company retains its published annual absence reason.
+            old = old_support[row["cik"]]
+            row["reasons"] = copy.deepcopy(old.get("reasons") or ([old["reason"]] if old.get("reason") else []))
+            row["reason"] = (row["reasons"] or [None])[0]
     payload = {"schema_version": VERSION, "annual_records": annual_records, "annual_support": support,
                "quarter_records": quarter, "latest_quarter_periods": periods}
     _validate_payload(payload, parent)
@@ -262,7 +271,7 @@ class ScreeningGovernedDeltaReader:
         if (manifest.get("schema_version") != VERSION or approval != {
                 "schema_version": APPROVAL_VERSION, "status": "ROOT_APPROVED_GOVERNED_DELTA",
                 "manifest": declaration["manifest"], "implementation_sources": manifest["implementation_sources"]}
-                or manifest["implementation_sources"] != _source_hashes()):
+                or not _reader_sources_match(manifest, declaration)):
             raise ValueError("governed delta requires exact ROOT-approved current source and artifact")
         if (_load(manifest["config_pin"]) != manifest["config"]
                 or manifest["parent"] != manifest["config"]["parent"]
@@ -290,6 +299,7 @@ class ScreeningGovernedDeltaReader:
         if manifest["publication_id"] != "screening-governed-delta-" + digest_value(body)[:24]:
             raise ValueError("governed delta publication identity differs")
         self.manifest = manifest
+        self._declaration = copy.deepcopy(declaration)
         self.publication_id = manifest["publication_id"]
         self._manifest_sha256 = declaration["manifest"]["sha256"]
         self.companies, self.metadata = self.parent.companies, self.parent.metadata
@@ -348,3 +358,29 @@ class ScreeningGovernedDeltaReader:
         return {**self.parent.verify_all(), "dataset_id": self.manifest["dataset_id"],
                 "publication_id": self.publication_id, "auxiliary_manifest_sha256": self._manifest_sha256,
                 "latest_supplement_observation_count": len(self._quarter)}
+
+
+def _reader_sources_match(manifest: dict, declaration: dict) -> bool:
+    """Explicit per-artifact read grant; never enters a producer/native context."""
+    current = _source_hashes()
+    transition = declaration.get("reader_source_transition")
+    if transition is None:
+        return manifest["implementation_sources"] == current
+    from sec_xbrl.financial_native_source import qualified_consumer_files
+
+    receipt = _load(transition)
+    fields = {"schema_version", "status", "manifest", "approval", "origin_source_root",
+              "origin_implementation_sources", "current_implementation_sources", "consumer_baseline_files"}
+    if (set(receipt) != fields or receipt["schema_version"] != "governed-delta-reader-source-transition-v1"
+            or receipt["status"] != "ROOT_APPROVED_READER_ONLY_SOURCE_TRANSITION"
+            or receipt["manifest"] != declaration["manifest"] or receipt["approval"] != declaration["approval"]
+            or receipt["origin_implementation_sources"] != manifest["implementation_sources"]
+            or receipt["current_implementation_sources"] != current):
+        raise ValueError("governed delta reader source transition scope differs")
+    origin = _source_hashes(Path(receipt["origin_source_root"]))
+    if origin != manifest["implementation_sources"]:
+        raise ValueError("governed delta reader accepted origin differs")
+    qualified_consumer_files(receipt["consumer_baseline_files"],
+                             {key: value for key, value in current.items() if key.endswith(".py")})
+    # Only the bounded owner-context consumer bridge may change; its exact bytes are root-pinned above.
+    return True

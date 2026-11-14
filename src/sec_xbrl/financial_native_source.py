@@ -33,6 +33,44 @@ _PARENT_SCHEMAS = {"identity": "generic-metric-identity-attestation-v1", "annual
                    "annual_dataset": "screening-dataset-v2", "quarterly_metrics": "quarterly-screening-metric-manifest-v1"}
 
 
+VERSION_V2 = "financial-native-source-v2"
+APPROVAL_VERSION_V2 = "financial-native-source-approval-v2"
+_CONSUMER_BASELINE_INVENTORY = "e38792671c712b1a9167749c41138f1e2d9f64cf70c6c8a226e3735bb8e73a74"
+_CONSUMER_CHANGES = frozenset({"financial_native_source.py", "metrics/screening.py",
+    "screening/metric_identity.py", "screening/verified_source_closure.py",
+    "screening/governed_delta.py", "screening/cohort_union.py", "screening/runtime_projection.py",
+    "screening/service.py", "screening/cli.py"})
+_PARTIAL_CONSUMER_FILES = {'metrics/screening.py': '58e9bdb42d579085a685a71c167cf413cafb68a80f03d5de5d9c4e145ed9134b',
+ 'screening/metric_identity.py': 'a66dce05b3428361826a190e6198bbc87ec0792d91f01dec0089ff24a2e1a9ba',
+ 'screening/verified_source_closure.py': '75dd64bd1bc4b309298c6bd2c567aa6eb0db45b6daec5a4ffbe17976b5575412'}
+_PRODUCER_PROFILES = {'partial-annual-882-v1': {'producer_revision': '882ac6ac6b0682d2c593cc511a5a1c565cd8d9fb',
+                           'origin_inventory': '9eaac547d7f119a0f2494b633cf44f2206a13f745843ccba78abe9e9b7356d2a',
+                           'parser_profiles': [{'parser_source_commit': '4077e87097c294ed779186b613157839f215a63e',
+                                                'parser_version': 'm2-layer1-v6',
+                                                'profile': 'sec-inline-duration-approved-lexical-and-metadata-v1',
+                                                'transform_rule_version': 'sec-duration-conformance-v1'}],
+                           'quality_rules': {'approved_lexical_repair_rule': 'sec-supported-lexical-repairs-v1',
+                                             'duration_transform_rule': 'sec-duration-conformance-v1',
+                                             'quality_rule': 'generic-metric-raw-transform-quality-v1',
+                                             'source_binding_schema': 'sec-source-bindings-v2'},
+                           'annual_coverage_policy': 'available-annual-baselines-v1'},
+ 'duration-hour-20ec-v1': {'producer_revision': '20ec4398ba7f6841edf5d03bef482d34a8b2e26c',
+                           'origin_inventory': 'c5dfc52013c8e57a451d09a03a3edfe18036bb5337b8616bc898099f14e58d73',
+                           'parser_profiles': [{'parser_source_commit': '4077e87097c294ed779186b613157839f215a63e',
+                                                'parser_version': 'm2-layer1-v6',
+                                                'profile': 'sec-inline-duration-approved-lexical-and-metadata-v1',
+                                                'transform_rule_version': 'sec-duration-conformance-v1'},
+                                               {'parser_source_commit': '82cc02eddfd6f05997c5e1e7d2a5c78ab2f4dd08',
+                                                'parser_version': 'm2-layer1-v7',
+                                                'profile': 'sec-inline-duration-hour-approved-lexical-and-metadata-v1',
+                                                'transform_rule_version': 'sec-duration-hour-conformance-v1'}],
+                           'quality_rules': {'approved_lexical_repair_rule': 'sec-supported-lexical-repairs-v1',
+                                             'duration_transform_rule': 'sec-duration-conformance-v1',
+                                             'quality_rule': 'generic-metric-raw-transform-quality-v1',
+                                             'source_binding_schema': 'sec-source-bindings-v2'},
+                           'annual_coverage_policy': 'STRICT_5_INPUT_4_DISPLAY'}}
+
+
 def _file(path: Path) -> Path:
     if not isinstance(path, Path) or not path.is_absolute() or path.resolve() != path:
         raise ValueError("native control requires an absolute non-aliased path")
@@ -60,6 +98,8 @@ def _inventory(root: Path) -> dict[str, str]:
 
 
 def _source_controls(payload: dict) -> dict[str, dict]:
+    if payload.get("schema_version") == VERSION_V2:
+        return _source_controls_v2(payload)
     source = payload["source"]
     if set(source) != {"old_root", "old_files", "current_files"}:
         raise ValueError("native source fields differ")
@@ -100,6 +140,7 @@ def _data_controls(payload: dict) -> dict[str, dict]:
         read_statement_metric_evidence,
     )
 
+    producer = _profile(payload)["producer_revision"] if payload.get("schema_version") == VERSION_V2 else PRODUCER
     parents = payload["parents"]
     if set(parents) != set(_PARENT_FILES):
         raise ValueError("native four parent roles differ")
@@ -127,11 +168,11 @@ def _data_controls(payload: dict) -> dict[str, dict]:
             or dataset["config"].get("metric_root") != str(Path(parents["annual_metrics"]["path"]).parent)
             or quarter.get("annual_parent", {}).get("manifest_sha256") != parents["annual_metrics"]["sha256"]
             or quarter.get("annual_parent", {}).get("generic_identity", {}).get("manifest_sha256") != identity_pin["sha256"]
-            or quarter.get("catalog_version") != CONTINUITY_CATALOG or quarter.get("source_commit_sha") != PRODUCER
+            or quarter.get("catalog_version") != CONTINUITY_CATALOG or quarter.get("source_commit_sha") != producer
             or quarter.get("config", {}).get("statement_metric_evidence") != payload["statement_metric_evidence"]):
         raise ValueError("native parent/definition/producer linkage differs")
     quality = read_json(_checked(payload["quality"]))
-    if (quality.get("producer_revision") != PRODUCER or quality.get("financial_as_of") != payload["financial_as_of"]
+    if (quality.get("producer_revision") != producer or quality.get("financial_as_of") != payload["financial_as_of"]
             or identity.get("quality", {}).get("manifest_sha256") != payload["quality"]["sha256"]
             or identity["quality"].get("root") != str(Path(payload["quality"]["path"]).parent)
             or quality.get("storage_reuse") != payload["storage_reuse"]
@@ -175,6 +216,8 @@ def _data_controls(payload: dict) -> dict[str, dict]:
         raise ValueError("native named routine scope differs")
     for pin in controls.values():
         _checked(pin)
+    if payload.get("schema_version") == VERSION_V2:
+        controls.update(_occurrence_controls(payload, quality, identity))
     return controls
 
 
@@ -208,13 +251,17 @@ def use_native_source(declaration: dict | None, *, config: dict | None = None,
             raise ValueError("native declaration requires explicit packet and ROOT receipt")
         packet_path = _checked(declaration["packet"])
         approval = read_json(_checked(declaration["approval"]))
-        if approval != {"schema_version": APPROVAL_VERSION, "status": "ROOT_APPROVED_NATIVE_SOURCE_TRANSITION",
+        if approval != {"schema_version": (APPROVAL_VERSION_V2 if read_json(packet_path).get("schema_version") == VERSION_V2 else APPROVAL_VERSION), "status": "ROOT_APPROVED_NATIVE_SOURCE_TRANSITION",
                         "packet": declaration["packet"]}:
             raise ValueError("native ROOT receipt differs")
         payload = read_json(packet_path)
-        if (set(payload) != {"schema_version", "producer_revision", "financial_as_of", "ciks", "parents", "quality",
-                            "statement_metric_evidence", "storage_reuse", "source", "routines"}
-                or payload["schema_version"] != VERSION or payload["producer_revision"] != PRODUCER):
+        fields = {"schema_version", "producer_revision", "financial_as_of", "ciks", "parents", "quality",
+                  "statement_metric_evidence", "storage_reuse", "source", "routines"}
+        v2 = payload.get("schema_version") == VERSION_V2
+        if v2:
+            fields |= {"producer_profile", "consumer_baseline_files", "occurrence_inputs"}
+        if (set(payload) != fields or payload.get("schema_version") not in {VERSION, VERSION_V2}
+                or payload["producer_revision"] != (_profile(payload)["producer_revision"] if v2 else PRODUCER)):
             raise ValueError("native packet contract differs")
         controls = {"PACKET": declaration["packet"], "APPROVAL": declaration["approval"],
                     **_source_controls(payload), **_data_controls(payload)}
@@ -290,7 +337,8 @@ def require_native_assessment(assessed_ciks: tuple[str, ...] | None, *, collecti
 
 
 def prepare_native_source_packet(*, parents: dict[str, dict], old_source_root: Path,
-                                 destination: Path) -> Path:
+                                 destination: Path, producer_profile: str | None = None,
+                                 consumer_baseline_files: dict | None = None, occurrence_inputs: dict | None = None) -> Path:
     """Write a proposal only; a separate pinned ROOT approval is mandatory."""
     from sec_xbrl.financial_storage_reuse import history_validation_rules
     identity = read_json(_checked(parents["identity"]))
@@ -311,9 +359,108 @@ def prepare_native_source_packet(*, parents: dict[str, dict], old_source_root: P
                "statement_metric_evidence": quarter["config"]["statement_metric_evidence"], "storage_reuse": storage_pin,
                "source": {"old_root": str(old_source_root), "old_files": _inventory(old_source_root),
                           "current_files": _inventory(_SOURCE_ROOT)}, "routines": routines}
+    if producer_profile is not None:
+        payload.update(schema_version=VERSION_V2, producer_profile=producer_profile,
+                       consumer_baseline_files=consumer_baseline_files, occurrence_inputs=occurrence_inputs)
+        payload["producer_revision"] = _profile(payload)["producer_revision"]
+    elif consumer_baseline_files is not None or occurrence_inputs is not None:
+        raise ValueError("native v2 controls require an explicit named profile")
     _source_controls(payload)
     _data_controls(payload)
     if destination.exists():
         raise ValueError("native proposal destination must be new")
     write_json(destination, payload)
     return destination
+
+
+def _profile(payload: dict) -> dict:
+    profile = _PRODUCER_PROFILES.get(payload.get("producer_profile"))
+    if profile is None:
+        raise ValueError("native producer profile is not qualified")
+    return profile
+
+
+def qualified_consumer_files(baseline: dict, current: dict) -> None:
+    """Accept only named consumer changes from the exact merged acceptance baseline."""
+    if not isinstance(baseline, dict) or digest_value(baseline) != _CONSUMER_BASELINE_INVENTORY:
+        raise ValueError("consumer acceptance baseline inventory differs")
+    if set(baseline) != set(current):
+        raise ValueError("consumer source additions/removals differ")
+    changed = {name for name in baseline if baseline[name] != current[name]}
+    if not changed <= _CONSUMER_CHANGES:
+        raise ValueError("consumer changes an unqualified accounting/source module")
+    if any(current.get(name) != value for name, value in _PARTIAL_CONSUMER_FILES.items()):
+        raise ValueError("consumer partial-window transplant or invariant arithmetic differs")
+
+
+def _source_controls_v2(payload: dict) -> dict:
+    profile = _profile(payload)
+    source = payload["source"]
+    if set(source) != {"old_root", "old_files", "current_files"}:
+        raise ValueError("native source fields differ")
+    old_root = Path(source["old_root"])
+    old, current = _inventory(old_root), _inventory(_SOURCE_ROOT)
+    if (old != source["old_files"] or digest_value(old) != profile["origin_inventory"]
+            or current != source["current_files"]):
+        raise ValueError("native named producer/current inventory differs")
+    qualified_consumer_files(payload["consumer_baseline_files"], current)
+    return {f"{kind}:{name}": {"path": str(directory / name), "sha256": digest}
+            for kind, directory, files in (("OLD_SOURCE", old_root, old), ("CURRENT_SOURCE", _SOURCE_ROOT, current))
+            for name, digest in files.items()}
+
+
+def _occurrence_controls(payload: dict, quality: dict, identity: dict) -> dict:
+    profile = _profile(payload)
+    if (quality.get("rule_versions") != profile["quality_rules"]
+            or sorted(quality.get("parser_profiles", []), key=digest_value) != sorted(profile["parser_profiles"], key=digest_value)):
+        raise ValueError("native quality/parser profile differs")
+    policy = identity["config"].get("annual_coverage_policy")
+    expected = profile["annual_coverage_policy"]
+    if policy != (None if expected == "STRICT_5_INPUT_4_DISPLAY" else expected):
+        raise ValueError("native named annual coverage policy differs")
+    controls = {"OCCURRENCE_INPUTS": payload["occurrence_inputs"]}
+    inputs = read_json(_checked(payload["occurrence_inputs"]))
+    evidence = read_json(_checked(payload["statement_metric_evidence"]))
+    if (inputs.get("evidence") != payload["statement_metric_evidence"] or inputs.get("admitted_records") != 0
+            or evidence.get("records") != [] or not isinstance(inputs.get("selected_filings"), list)):
+        raise ValueError("native empty occurrence requires its exact input inventory")
+    controls["OCCURRENCE_PLAN"] = inputs["cohort_plan"]
+    _checked(inputs["cohort_plan"])
+    expected_entries = {}
+    intakes = {}
+    for company in quality["collection_status"]:
+        pin = {"path": company["intake_manifest_path"], "sha256": company["intake_sha256"]}
+        intake = read_json(_checked(pin))
+        if not intake.get("complete"):
+            raise ValueError("native occurrence intake is incomplete")
+        controls[f"OCCURRENCE_INTAKE:{company['cik']}"] = pin
+        intakes[company["cik"]] = pin
+        for entry in intake["filings"]:
+            if entry.get("status") not in {"INGESTED", "REUSED"}:
+                raise ValueError("native occurrence intake is not accepted")
+            ref = entry["filing"]
+            key = (ref["cik"], ref["accession"])
+            if key in expected_entries or ref["cik"] != company["cik"]:
+                raise ValueError("native occurrence intake scope conflicts")
+            expected_entries[key] = entry
+    actual = set()
+    for index, row in enumerate(inputs["selected_filings"]):
+        scope = row["scope"]
+        key = (scope["cik"], scope["accession"])
+        checkpoint = read_json(_checked(row["checkpoint"]))
+        if (key in actual or key not in expected_entries or scope["entry"] != expected_entries[key]
+                or scope["intake"] != intakes[scope["cik"]] or scope["financial_as_of"] != payload["financial_as_of"]
+                or scope["builder_sha256"] != payload["source"]["old_files"]["metrics/statement_metric_evidence.py"]
+                or scope["entry"]["filing"]["filed_date"] > payload["financial_as_of"]
+                or checkpoint != {"input": scope, "records": []} or row["admitted_records"] != 0):
+            raise ValueError("native occurrence checkpoint/scope differs")
+        expected_path = Path(scope["entry"]["source_run"]) / "snapshots" / scope["cik"] / scope["accession"].replace("-", "") / "layer1_manifest.json"
+        if Path(scope["snapshot_manifest"]["path"]) != expected_path:
+            raise ValueError("native occurrence Raw parent differs")
+        _checked(scope["snapshot_manifest"])
+        controls[f"OCCURRENCE_CHECKPOINT:{index}"] = row["checkpoint"]
+        controls[f"OCCURRENCE_RAW:{index}"] = scope["snapshot_manifest"]
+        actual.add(key)
+    if actual != set(expected_entries) or set(intakes) != set(payload["ciks"]):
+        raise ValueError("native occurrence filing/company coverage differs")
+    return controls

@@ -98,6 +98,7 @@ def _parser() -> argparse.ArgumentParser:
     server.add_argument("--catalog", type=Path, required=True)
     server.add_argument("--source-compatibility", nargs=2, metavar=("PATH", "SHA256"))
     server.add_argument("--governed-delta", action="append", nargs=5, metavar=("DATASET_ID", "PATH", "SHA256", "APPROVAL_PATH", "APPROVAL_SHA256"))
+    server.add_argument("--governed-delta-reader-transition", action="append", nargs=3, metavar=("DATASET_ID", "PATH", "SHA256"))
     server.add_argument("--cohort-union", action="append", nargs=3, metavar=("DATASET_ID", "PATH", "SHA256"))
     server.add_argument("--runtime-projection", action="append", nargs=3, metavar=("DATASET_ID", "PATH", "SHA256"))
     server.add_argument("--batch-availability", nargs=2, metavar=("PATH", "SHA256"))
@@ -186,6 +187,11 @@ def main(argv: list[str] | None = None) -> int:
                 raise ValueError("governed delta declaration is duplicated or outside catalog")
             deltas[key] = {"manifest": {"path": path, "sha256": digest},
                            "approval": {"path": approval, "sha256": approval_digest}}
+        transitions = _runtime_pins(args.governed_delta_reader_transition, catalog)
+        if not set(transitions) <= set(deltas):
+            raise ValueError("reader source transition requires its exact governed delta declaration")
+        for key, pin in transitions.items():
+            deltas[key]["reader_source_transition"] = pin
         if deltas:
             options["governed_deltas"] = deltas
         if set(unions) & set(projections):

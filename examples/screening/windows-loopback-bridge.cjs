@@ -375,8 +375,18 @@ function loadAuxiliaryUnion(file, digest, hostParent = null) {
     if (!validScope(parentScope)) throw new Error("invalid auxiliary parent scope");
     scopes.push(parentScope);
   }
+  const composed = manifest.schema_version === "screening-cohort-union-v2";
+  if (composed) {
+    if (!Array.isArray(manifest.auxiliary_contexts)) throw new Error("composed auxiliary contexts are absent");
+    for (const context of manifest.auxiliary_contexts) {
+      if (!context || !validScope(context.scope) || context.scope.financial_as_of !== scope.financial_as_of ||
+          !Array.isArray(context.ciks) || !context.ciks.length || new Set(context.ciks).size !== context.ciks.length ||
+          context.ciks.some(cik => !Object.hasOwn(owners || {}, cik))) throw new Error("invalid composed auxiliary ancestor scope");
+      scopes.push({...context.scope, ciks:context.ciks});
+    }
+  }
   if (!delta && hostParent) throw new Error("host parent pin is only valid for a governed delta");
-  if ((!delta && (manifest.schema_version !== "screening-cohort-union-v1" || manifest.config?.expose_auxiliary_owners !== true)) ||
+  if ((!delta && (!["screening-cohort-union-v1", "screening-cohort-union-v2"].includes(manifest.schema_version) || manifest.config?.expose_auxiliary_owners !== true)) ||
       !validScope(scope) || !owners || typeof owners !== "object" || Array.isArray(owners) ||
       !Array.isArray(manifest.configured_ciks) || !manifest.configured_ciks.length ||
       new Set(manifest.configured_ciks).size !== manifest.configured_ciks.length ||
@@ -384,7 +394,8 @@ function loadAuxiliaryUnion(file, digest, hostParent = null) {
       Object.entries(owners).some(([cik, owner]) => !/^\d{10}$/u.test(cik) || !validScope(owner) || owner.financial_as_of !== scope.financial_as_of)) {
     throw new Error("invalid explicit auxiliary union owner scope");
   }
-  return {scope, ...(delta ? {scopes} : {}), owners:new Map(Object.entries(owners))};
+  return {scope, ...((delta || composed) ? {scopes:scopes.map(({ciks, ...identity}) => identity),
+    contextCiks:scopes.map(item => item.ciks || manifest.configured_ciks)} : {}), owners:new Map(Object.entries(owners))};
 }
 function sameAssetScope(left, right) {
   return ["dataset_id","dataset_publication_id","financial_as_of","dataset_manifest_sha256"].every(key => left?.[key] === right?.[key]);
@@ -395,8 +406,8 @@ function serveRevenueBreakdowns(bundle, request, response, auxiliary = null) {
 }
 function serveFinancialGrowth(bundle, request, response, auxiliary = null) {
   if (request.method === "GET" && request.url === "/api/financial-growth") {
-    const contexts = auxiliary && bundle ? (auxiliary.scopes || [auxiliary.scope]).map(request_scope => ({request_scope, source_scope:bundle.scope,
-      available_ciks:[...auxiliary.owners].filter(([cik, owner]) => sameAssetScope(owner, bundle.scope) && bundle.byCik.has(cik)).map(([cik]) => cik)})) : [];
+    const contexts = auxiliary && bundle ? (auxiliary.scopes || [auxiliary.scope]).map((request_scope, index) => ({request_scope, source_scope:bundle.scope,
+      available_ciks:[...auxiliary.owners].filter(([cik, owner]) => sameAssetScope(owner, bundle.scope) && bundle.byCik.has(cik) && (!auxiliary.contextCiks || auxiliary.contextCiks[index].includes(cik))).map(([cik]) => cik)})) : [];
     writeJson(response, 200, { configured: Boolean(bundle), ...bundle?.scope,
       ...(auxiliary ? {owner_contexts:contexts} : {}) });
     return;
@@ -423,8 +434,9 @@ function serveProfileAsset(bundle, request, response, label, auxiliary = null) {
   let requestScope = null;
   if (keys.slice(0, 3).some(key => query.get(key) !== bundle.scope[key])) {
     const owner = auxiliary?.owners.get(query.get("cik"));
-    requestScope = (auxiliary?.scopes || [auxiliary?.scope]).find(scope =>
-      scope && keys.slice(0, 3).every(key => query.get(key) === scope[key]));
+    requestScope = (auxiliary?.scopes || [auxiliary?.scope]).find((scope, index) =>
+      scope && keys.slice(0, 3).every(key => query.get(key) === scope[key]) &&
+      (!auxiliary.contextCiks || auxiliary.contextCiks[index].includes(query.get("cik"))));
     if (!requestScope || !sameAssetScope(owner, bundle.scope)) {
       writeJson(response, 409, { error: `선택한 기업 발행물에는 ${label} 자료가 준비되지 않았습니다.` });
       return;

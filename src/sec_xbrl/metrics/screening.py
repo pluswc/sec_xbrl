@@ -288,6 +288,9 @@ def publish_screening_metrics(
 
     for company in config["companies"]:
         ticker, cik = company["ticker"], company["cik"]
+        if _no_annual_baseline(company):
+            sources.append(_empty_annual_parent(identity_kind, source_dataset, company))
+            continue
         analysis_root = real_directory(Path(company["analysis_root"]), f"{ticker} analysis")
         manifest_path = regular_file(analysis_root / "analysis_manifest.json", f"{ticker} analysis manifest")
         manifest_sha = sha256_file(manifest_path)
@@ -472,6 +475,9 @@ class ScreeningMetricReader:
             "metric observation grain",
         )
         _assert_unique(self.support, ("cik", "metric_id"), "metric support")
+        empty = {row["cik"] for row in self.manifest["config"]["companies"] if _no_annual_baseline(row)}
+        if any(row["cik"] in empty for row in self.observations):
+            raise ValueError("NO_ANNUAL_BASELINE cannot publish annual observations")
         expected_support = _support_rows(self.manifest["config"]["companies"], self.observations)
         if expected_support != self.support:
             raise ValueError("screening metric support differs from frozen observations")
@@ -551,6 +557,10 @@ class ScreeningMetricReader:
                 metric_source = next(
                     row for row in self.manifest["sources"] if row["cik"] == cik
                 )
+                if _no_annual_baseline(company):
+                    if metric_source != _empty_annual_parent(kind, reader, company):
+                        raise ValueError("annual unavailable source differs from generic identity")
+                    continue
                 _validate_generic_identity_analysis_parent(
                     kind,
                     reader,
@@ -570,6 +580,10 @@ class ScreeningMetricReader:
         for cik in self.manifest["configured_ciks"]:
             source = source_by_cik[cik]
             company = config_by_cik[cik]
+            if _no_annual_baseline(company):
+                if source.get("kind") != "NO_ANNUAL_BASELINE" or source.get("annual_coverage") != company["annual_coverage"]:
+                    raise ValueError("annual unavailable source coverage differs")
+                continue
             root = real_directory(Path(source["root"]), "screening metric analysis source")
             manifest_path = regular_file(root / "analysis_manifest.json", "screening metric analysis manifest")
             if sha256_file(manifest_path) != source.get("manifest_sha256"):
@@ -719,10 +733,34 @@ def _validate_generic_identity_analysis_parent(
     if (
         company.get("input_years") != identity_company.get("input_years")
         or company.get("display_years") != identity_company.get("display_years")
+        or company.get("annual_coverage") != identity_company.get("annual_coverage")
     ):
         raise ValueError(
             f"{company['ticker']}: annual metric year window differs from generic identity"
         )
+
+
+def _no_annual_baseline(company: dict[str, Any]) -> bool:
+    return company.get("annual_coverage", {}).get("status") == "NO_ANNUAL_BASELINE"
+
+
+def _empty_annual_parent(kind: str, reader: Any, company: dict[str, Any]) -> dict[str, Any]:
+    from sec_xbrl.screening.metric_identity import SOURCE_KIND, _no_annual_source
+
+    if kind != SOURCE_KIND:
+        raise ValueError("annual unavailable coverage requires a governed generic identity")
+    identity_company = next(row for row in reader.companies if row["cik"] == company["cik"])
+    source = reader.annual_analysis_source(company["cik"])
+    if (company.get("annual_coverage") != identity_company.get("annual_coverage")
+        or not _no_annual_baseline(identity_company)
+        or company.get("input_years") != [] or company.get("display_years") != []
+        or source != _no_annual_source(identity_company["history"]["manifest_sha256"])):
+        raise ValueError("annual unavailable coverage differs from governed History identity")
+    return {
+        "ticker": company["ticker"], "cik": company["cik"], "kind": "NO_ANNUAL_BASELINE",
+        "annual_coverage": copy.deepcopy(company["annual_coverage"]), "input_years": [], "display_years": [],
+        "history_manifest_sha256": source["history_manifest_sha256"],
+    }
 
 
 def _validate_config(value: Any) -> dict[str, Any]:
@@ -732,6 +770,18 @@ def _validate_config(value: Any) -> dict[str, Any]:
     }:
         raise ValueError("unsupported screening metric config")
     config_version = value["schema_version"]
+    from sec_xbrl.screening.metric_identity import (
+        ANNUAL_COVERAGE_POLICY,
+        _available_years,
+        annual_coverage,
+    )
+
+    coverage_policy = value.get("annual_coverage_policy")
+    if coverage_policy is not None and (
+        coverage_policy != ANNUAL_COVERAGE_POLICY or config_version != EXPLICIT_IDENTITY_CONFIG_VERSION
+        or value.get("identity_source", {}).get("kind") != "GENERIC_METRIC_IDENTITY_ATTESTATION"
+    ):
+        raise ValueError("annual coverage requires the explicit versioned generic identity policy")
     companies = value.get("companies")
     if not isinstance(companies, list) or not companies:
         raise ValueError("screening metric config requires companies")
@@ -739,27 +789,40 @@ def _validate_config(value: Any) -> dict[str, Any]:
     for index, row in enumerate(companies):
         if not isinstance(row, dict):
             raise TypeError("screening metric company config must be an object")
-        manifest_sha = require_string(
-            row.get("analysis_manifest_sha256"),
-            f"companies[{index}].analysis_manifest_sha256",
-        )
-        if len(manifest_sha) != 64 or any(char not in "0123456789abcdef" for char in manifest_sha):
-            raise ValueError("analysis manifest hash must be lowercase SHA-256")
+        empty = coverage_policy is not None and row.get("input_years") == []
+        if empty and (row.get("analysis_root") is not None or row.get("analysis_manifest_sha256") is not None):
+            raise ValueError("zero annual coverage cannot declare an annual analysis parent")
+        if empty:
+            manifest_sha = None
+        else:
+            manifest_sha = _require_sha256(row.get("analysis_manifest_sha256"), f"companies[{index}].analysis_manifest_sha256")
         normalized_company = {
             "ticker": require_ticker(row.get("ticker"), f"companies[{index}].ticker"),
             "cik": require_cik(row.get("cik"), f"companies[{index}].cik"),
-            "analysis_root": require_string(row.get("analysis_root"), f"companies[{index}].analysis_root"),
+            "analysis_root": None if empty else require_string(row.get("analysis_root"), f"companies[{index}].analysis_root"),
             "analysis_manifest_sha256": manifest_sha,
         }
         has_input_years = "input_years" in row
         has_display_years = "display_years" in row
-        if has_input_years != has_display_years:
+        if has_input_years != has_display_years or (coverage_policy is not None and not has_input_years):
             raise ValueError("input_years and display_years must be declared together")
         if has_input_years:
-            input_years = _validate_year_list(row["input_years"], f"companies[{index}].input_years", maximum=5)
-            display_years = _validate_year_list(row["display_years"], f"companies[{index}].display_years", maximum=4)
-            if display_years != input_years[-len(display_years):]:
-                raise ValueError("display_years must be the latest ordered subset of input_years")
+            if coverage_policy is not None:
+                input_years = _available_years(row["input_years"], f"companies[{index}].input_years", 5)
+                display_years = _available_years(row["display_years"], f"companies[{index}].display_years", 4)
+                if display_years != input_years[-4:]:
+                    raise ValueError("display_years must use the available latest four fiscal years")
+                coverage = annual_coverage(input_years, display_years)
+                if "annual_coverage" in row and row["annual_coverage"] != coverage:
+                    raise ValueError("annual metric coverage declaration differs")
+                normalized_company["annual_coverage"] = coverage
+            else:
+                if "annual_coverage" in row:
+                    raise ValueError("annual coverage requires an explicit versioned policy")
+                input_years = _validate_year_list(row["input_years"], f"companies[{index}].input_years", maximum=5)
+                display_years = _validate_year_list(row["display_years"], f"companies[{index}].display_years", maximum=4)
+                if display_years != input_years[-len(display_years):]:
+                    raise ValueError("display_years must be the latest ordered subset of input_years")
             normalized_company.update(input_years=input_years, display_years=display_years)
         normalized.append(normalized_company)
     _assert_unique(normalized, ("ticker",), "configured metric ticker")
@@ -774,6 +837,8 @@ def _validate_config(value: Any) -> dict[str, Any]:
         "financial_as_of": financial_as_of,
         "companies": normalized,
     }
+    if coverage_policy is not None:
+        result["annual_coverage_policy"] = coverage_policy
     if config_version == CONFIG_VERSION:
         result.update(
             source_dataset_root=require_string(
@@ -1704,7 +1769,8 @@ def _support_rows(companies: list[dict[str, Any]], observations: list[dict[str, 
                 if row["cik"] == cik and row["metric_id"] == definition["metric_id"]
             ]
             available = sum(row["availability_status"] == "AVAILABLE" for row in rows)
-            reasons = sorted({row["unavailable_reason"] for row in rows if row.get("unavailable_reason")})
+            reasons = (["NO_ANNUAL_BASELINE"] if _no_annual_baseline(company) else
+                       sorted({row["unavailable_reason"] for row in rows if row.get("unavailable_reason")}))
             result.append(
                 {
                     "cik": cik,

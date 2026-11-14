@@ -852,11 +852,12 @@ def _discover_identity(
                 or storage_history(prospective.storage_reuse if prospective else None,
                                    ticker, history_root / "history_manifest.json")),
         )
-        _add_analysis(
-            collector,
-            Path(company["annual_analysis_root"]),
-            f"{prefix}_ANNUAL_ANALYSIS:{ticker}",
-        )
+        if company.get("annual_coverage", {}).get("status") != "NO_ANNUAL_BASELINE":
+            _add_analysis(
+                collector,
+                Path(company["annual_analysis_root"]),
+                f"{prefix}_ANNUAL_ANALYSIS:{ticker}",
+            )
         _add_analysis(
             collector,
             Path(company["quarterly_analysis_root"]),
