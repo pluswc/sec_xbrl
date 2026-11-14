@@ -4,8 +4,9 @@ Current locally accepted phase 2 source: `745bc76e3a4721de8d7734eb534ac0afc7cba2
 (2026-11-13). Independent Node 116/Ruff/diff and lead exact-bundle preview/live-browser
 acceptance passed. The effective CSS viewport checks below are complete; actual browser zoom
 was not verified. Phase 1 is merged in main `0a89d5cf` through PR91 (CI 43427104449 passed).
-Phase 2 is locally accepted and operating on its separate branch; push/PR/CI/main incorporation
-have not been performed.
+Phase 2 is merged through PR92; governed latest-period/revenue UI scope fixes are now in
+main PR95 (`ebdbe938d7`). The information-consistency frontend candidate below is implemented
+on its separate branch; its independent verification, acceptance and deployment are pending.
 The source dataset determines company/metric counts; examples such as 21 or 50 companies are
 fixtures and never the supported-company boundary.
 
@@ -112,3 +113,26 @@ All tabs were audited; guide/history/screening were selected for this phase, whi
 explorer/profile/comparison/revenue workspaces were preserved and regression-tested. Shared
 cross-tab scroll memory and further saved-result comparison layout cleanup remain unimplemented,
 lower-priority candidates, not automatically authorized follow-up work.
+
+
+## Information consistency contract — implemented candidate, acceptance pending (2026-11-14)
+
+Use one metric presentation/capability vocabulary in explorer, profile, comparison, guide and
+screening: catalog full name and exact definition/unit, FY/quarter/TTM basis, published comparison
+kind (YoY/QoQ/TTM YoY or percentage points), source and unavailable reason. Display rounding
+never changes raw values or editable thresholds. A PERCENT catalog ratio stays percent; do not
+rename it as a multiple. Separate data availability from registered-condition capability.
+Board adjunct comparisons that lack a screening catalog definition say “상세 비교 전용 · 조건 미지원”.
+Only registered governed catalog metrics can become conditions; never calculate new browser
+conditions or infer a comparison formula. Default explorer eight metrics stay unchanged; expanded
+columns remain explicit ephemeral display selections. Historical screening analysis pins the run's
+publication and period and returns to its original draft/result/selection/scroll context.
+Different metrics get independent axes with visible units and company-consistent colors. Preserve
+existing amount/index100 behavior, exact evidence, missing gaps, source scopes and keyboard/pins.
+
+Comparison starts with the catalog's revenue, operating income, CFO and standardized FCF
+levels when present, keeping their prepared changes paired without a duplicate YoY default
+selection. Every registered metric remains selectable. A historical result-profile session is
+read-only; condition links additionally require matching dataset, publication and financial cutoff.
+The candidate's writer checks passed (Node 138/Python 35/Ruff/diff); independent and final
+browser acceptance remain pending.

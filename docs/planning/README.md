@@ -1,5 +1,11 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 [스크리닝 준비된 변화 조건 v1](../implementation/screening-prepared-changes-20261114.md)은
+수락된 native100 원소스의 승인 read snapshot을 부모로 새 numeric YoY9개와
+순수 비율의 전년 %p18개를 별도 발행·등록하도록 승인받았다. 기존 발행물·
+원래 logical ID·저장 이력과 source qualification은 불변이다. 구현·검증 진행
+단계이며 실제 export/발행/승인·운영은 리드가 별도 수행한다.
+
 2026-11-14 [신규8 native 승인·100개사 합성](../implementation/native-eight-admission-20261114.md)은
 **소스 `4c1ff49303` 독립 검증 PASS·로컬 인수·100개사 LIVE 완료, main 미병합**이다.
 기존92의 연간/고정·최신 분기 관측과 GOOGL 성장률·WDC 최신 분기를 정확히 보존했다.
@@ -7,6 +13,15 @@
 반복하지 않았다. 18765(PID56684)→19076(PID1428674), 최신 동시 UI와 journal/
 보호 파일8개 해시를 보존하고 rollback19074를 유지했다. 아래 이전 운영/병합 상태는
 각 인수 당시 기록이다.
+
+2026-11-14 [정보 일관성](../implementation/information-consistency-20261114.md)은
+코드 `4f59ed55`에서 독립 Node139·Python35·Ruff/diff와 리드의 최종 실제 화면
+검사를 통과해 LOCALLY_ACCEPTED다. 연간 추가 열/정밀 정렬, 고정 범위 전체
+프로필 왕복, 다중 지표와 %p·LEVEL/BOTH, desktop3폭·390px, 실제 QoQ/YoY/TTM
+근거 설명 및 실패/취소·기존 governed 값 보존을 확인했다. 선언된27파일 hash와
+SQLite 무결성을 보존했고 Python/bridge/출판·실제 기록은 변경하지 않았다.
+PR85는 별도 OPEN 작업이다. 이 작업의 원격 PR·CI·main 병합·운영 반영은
+아직 대기이며 리드가 수행한다.
 
 2026-11-14 main 전달 승인: 사용자가 수락된 매출 성장률·WDC 최신 분기 교정의
 검토와 main 병합을 요청했다. 문서만 달라진 main `df694e4a88`을 일반 merge하여
