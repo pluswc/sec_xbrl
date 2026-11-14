@@ -76,7 +76,7 @@ Ruff/diff와 별도 독립 검증, 리드의 실제 desktop/mobile 브라우저�
 | 단계 | 상태 |
 | --- | --- |
 | 승인 | frontend-only 범위 GO (2026-11-14) |
-| 구현 | 최신 main 통합·후보 동결, 작성자 Node138/Python35/Ruff/diff PASS |
+| 구현 | 최신 main 통합·검토 보완 후보 동결, 작성자 Node139/Ruff/diff PASS·불변 API Python35 근거 유지 |
 | 독립 검증 / 로컬 인수 | 대기 |
 | push / PR / CI / main / 운영 | 리드 담당, 이 작업의 전달·반영은 미수행 |
 
@@ -97,3 +97,23 @@ Ruff/diff와 별도 독립 검증, 리드의 실제 desktop/mobile 브라우저�
 보존을 확인했으나 최종 동결 자산의 실제 브라우저와 독립 검증은 다음 단계다.
 최신 main 대비 Python/bridge/producer 파일 차이가 없음을 확인했고, PR85의
 미병합 History 변경이나 새 자료 발행은 이 branch에 포함하지 않았다.
+
+## 독립 사전 검토 보완
+
+`0331864395`의 리드 실제 화면 검사는 기본8/추가92행 정렬/한 회사 조회,
+다중 지표,1440·1920·2560과390px, %p와 LEVEL/BOTH 전환, 고정 발행물
+프로필 왕복, 취소·실패, 기존 GOOGL/WDC/owner 보존에서 PASS했다. 근거는
+`preview-acceptance.json`, `failure-cancel-acceptance.json`,
+`preview-browser-acceptance.json`이다. 최종 보완 자산의 재검증은 별도다.
+
+독립 reviewer가 찾은 설명 누락을 보완했다. 조건 근거의 metricHelp도 공통
+presentation을 사용하며, description이 없는 QoQ/YoY는 공표된 input_contract
+kind와 formula를 설명한다. TTM 금액/비율과 산술 비교의 회계기준 보류 설명을
+유지하고 계산 지표를 회사 보고 항목으로 표시하지 않는다. 새로운 계산이나
+정의 변경은 없다. 비교 차트 제목은 단위를 한 번만 쓰고 MONEY 수준은 ‘금액’으로
+명확히 했다. 실제 renderMetricEvidence의 QoQ/YoY/TTM 회귀를 추가했다.
+
+보완 후 전체 Node **139개**(신규 행동14개 포함), Ruff/diff PASS. 로그는
+`/tmp/information-reviewed-node.log`, `/tmp/information-evidence-node.log`다.
+앞서 통과한 Python35개가 검사한 API/서비스 소스는 이 보완에서 불변이다.
+별도 최종 독립 검증과 로컬 인수·운영·원격 상태는 계속 대기다.
