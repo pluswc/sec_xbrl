@@ -1,5 +1,11 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 main 전달 승인: 사용자가 수락된 매출 성장률·WDC 최신 분기 교정의
+검토와 main 병합을 요청했다. 문서만 달라진 main `df694e4a88`을 일반 merge하여
+양쪽 기록을 보존했다. 아래 LIVE/main 미병합 문구는 병합 전 인수 기록이다.
+최종 병합 여부와 merge SHA는 Git 이력 및 후속 PR 결과로 확인한다.
+실행 UI `74e25fa3d5`·backend `fdacea1ea0`의 불변 checkout과 운영 자료는 유지한다.
+
 2026-11-14(KST) [매출 성장률·최신 실제 분기 교정](../implementation/governed-latest-revenue-delta-20261114.md)은
 **독립 검증·로컬 인수·LIVE 완료, main 미병합**이다. Backend `fdacea1ea0`와
 UI bridge `74e25fa3d5`를 분리해 기존92 projection/기록을 보존했다. GOOGL FY2025
@@ -8,6 +14,31 @@ UI bridge `74e25fa3d5`를 분리해 기존92 projection/기록을 보존했다. 
 준비 확인2026-11-13T16:44:03.333134Z다. 남은23 중8개 financial 준비17실행은
 완료했지만 native qualification과 다른15개 보류를 해결한 것은 아니다.
 아래 이전 확장/후보 상태는 당시 기록이며, 이전92 main 병합은 PR #93에 해당한다.
+
+2026-11-14 동시 main 통합: [PR93](https://github.com/pluswc/sec_xbrl/pull/93)이
+main `3cfe1b79fcdfe62c03cd432e509bcb4f361dfbce`에 병합되어 운영 consumer와
+추가 producer/operator 코드가 이미 포함됐다. PR94 branch는 최신 main을 일반
+merge하여 이를 그대로 보존하며, main 대비 변경은 별도 독립 검증·운영 보존·
+기존 History 한계의 문서 근거로 축소한다. 아래 이전 통합/미병합/CI 상태는
+각 전달 당시 기록이다. 이번 merge의 별도 검토와 PR94 최신 CI는 후속 확인한다.
+
+2026-11-14 원격 전달: 리드가 head `809735272f`를 push하여
+[PR #94](https://github.com/pluswc/sec_xbrl/pull/94)를 열었다. PR은 OPEN·main 미병합이며
+기록 시점 CI는 대기/진행 중이다([run 43453379537](https://github.com/pluswc/sec_xbrl/actions/runs/43453379537)).
+최종 원격 근거는 [PR94 최신 head checks](https://github.com/pluswc/sec_xbrl/pull/94/checks)다.
+아래 push·PR 미수행 문구는 각 인수/전달 당시 기록이며 CI 성공이나 main 병합을
+소급 주장하지 않는다.
+
+2026-11-14 [Nasdaq92 운영 패치 통합](../implementation/nasdaq92-operating-integration-20261114.md)은
+main `cdb8f64`와 수락 운영 소스 `6ea4203b8d`의 제품 차이만 별도 branch에 통합한다.
+제품 `914cfe8a9e`/문서 포함 `41dbd01668`에서 별도 독립 Node122·Python12·Ruff·diff
+PASS 후 리드 LOCALLY_ACCEPTED·push/PR GO다. 전체 pytest는2983통과/38skip/
+기존 main에서도 재현된 cached History 1실패이며 별도 [PR85](https://github.com/pluswc/sec_xbrl/pull/85)는 OPEN이다.
+이번 runtime/자료 변경과 push·PR 실행·CI·main 병합은 미수행이며 원격 전달은 리드가 수행한다.
+[기존 운영 계약](../implementation/nasdaq74-operating-20261113.md)의 로컬 운영 인수는
+이 PR 통합 검증과 별개다. Phase2 PR92는 main `cdb8f64`에 병합됐다.
+[CI 43449405710](https://github.com/pluswc/sec_xbrl/actions/runs/43449405710)도 통과했다.
+아래 PR92 OPEN/미병합 문구는 전달 당시 기록이다.
 
 2026-11-14 main 전달 후보: 92개사 운영 소스에 main `cdb8f64b83`와 실제 사용한
 401 상류 operator·6064 native 경계를 일반 merge했다. 원래 수락 소스 이력과

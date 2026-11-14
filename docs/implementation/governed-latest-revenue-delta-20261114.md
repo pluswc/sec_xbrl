@@ -115,3 +115,14 @@ Rollback backend19070/19072는 유지했다.
 나머지15개에는 원래 DEI와 표지 FY가 달라 Raw를 충실히 보존한 CRWD 및 의존하는
 9개 peer, APP/TER·AEP·PLTR/RKLB의 기존 경계가 포함된다. 이번 인수에서 native/
 source validator·Raw/History를 변경하거나 완료 감사를 반복하지 않았다.
+
+
+## 2026-11-14 main 전달 승인
+
+사용자가 수락된 Alphabet 성장률·WDC 최신 실제 분기와 UI 연결의 검토·main 병합을
+요청했다. 문서만 변경된 main `df694e4a88e5b5aeb7f68ac3590205989bc0b37c`을
+일반 merge하여 양쪽 계획 항목과 Nasdaq92 통합 문서를 보존했다. 위 LIVE 및
+main 미병합 표시는 병합 전 인수 기록이며 최종 병합 결과/merge SHA는 Git 이력과
+후속 PR에서 확인한다. 기존 독립 검증·실제 인수 근거를 재사용하고, 실행 코드·검사
+파일은 문서 인수 커밋 `29ceca2266`과 동일하게 유지한다. UI `74e25fa3d5`와 backend
+`fdacea1ea0`의 불변 운영 checkout·자료·journal·프로세스는 변경하지 않는다.
