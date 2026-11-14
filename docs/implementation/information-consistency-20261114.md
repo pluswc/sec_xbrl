@@ -1,5 +1,10 @@
 # 정보 일관성 — 지표·기간·조회 범위의 연결
 
+2026-11-14 최종 로컬 인수: 코드 기준
+`4f59ed552f8b51fcb626a0929aaccbc115d78d48`에서 독립 검증과 리드의 최종
+실제 브라우저 검사가 PASS했다. 이 문서 완료 commit은 코드 동결과 별도다.
+원격 PR·CI·main 병합과 운영 반영은 아직 대기이며 리드가 담당한다.
+
 2026-11-14 사용자 승인. 최초 기준 main `df694e4a88`에서 별도 branch
 `codex/information-consistency`를 만들었고, 구현 중 PR95가 병합된 최신 main
 `ebdbe938d7`을 일반 merge `27d8397926`로 통합했다. PR85의 History 수정은
@@ -77,8 +82,9 @@ Ruff/diff와 별도 독립 검증, 리드의 실제 desktop/mobile 브라우저�
 | --- | --- |
 | 승인 | frontend-only 범위 GO (2026-11-14) |
 | 구현 | 최신 main 통합·검토 보완 후보 동결, 작성자 Node139/Ruff/diff PASS·불변 API Python35 근거 유지 |
-| 독립 검증 / 로컬 인수 | 대기 |
-| push / PR / CI / main / 운영 | 리드 담당, 이 작업의 전달·반영은 미수행 |
+| 독립 검증 | 별도 reviewer: 코드 `4f59ed55`, Node139/Python35/Ruff/diff PASS |
+| 로컬 인수 | 2026-11-14 리드 LOCALLY_ACCEPTED · 최종 동결 UI 실제 검사 PASS |
+| push / PR / CI / main / 운영 | 리드 담당, 원격 전달·병합·운영 반영은 아직 대기 |
 
 감사 근거는 기존 소스와 선택적 로컬 근거
 `/mnt/c/Users/plusbdw/.codex/visualizations/2026/11/08/01a1bb67-6275-70d2-989e-208966314006/information-audit-20261114/`의
@@ -117,3 +123,28 @@ kind와 formula를 설명한다. TTM 금액/비율과 산술 비교의 회계기
 `/tmp/information-reviewed-node.log`, `/tmp/information-evidence-node.log`다.
 앞서 통과한 Python35개가 검사한 API/서비스 소스는 이 보완에서 불변이다.
 별도 최종 독립 검증과 로컬 인수·운영·원격 상태는 계속 대기다.
+
+## 최종 독립 검증과 로컬 인수
+
+별도 reviewer는 `4f59ed55`에서 Node139개·관련 Python35개·Ruff/diff를 통과하고
+사전 P2 설명 누락의 해결을 확인했다. 이는 작성자 검사와 구분된 검증이다.
+리드는 코드 동결 자산에서 다음 실제 화면 검사를 통과시켜 로컬 인수했다.
+
+- 종합7흐름: 기본8의 추가 조회 없음,92개사 추가 열과 정밀 정렬, 한 회사의
+  고정 FY 조회, 기본4개 다중 지표 비교,1440/1920/2560 배치, PERCENT의 %p 및
+  LEVEL/BOTH 전환·390px 기본 기능, 원래 발행물 프로필 왕복과 상태 복원 PASS.
+- 실제 QoQ/YoY/TTM 조건 근거 설명을 각각 확인했고 page error는0이었다.
+- 앞선 실패·취소 뒤 늦은 응답 차단, GOOGL 성장률·WDC 최신 분기 및 원본
+  owner 보존 검사도 PASS했다. 선언된27개 파일의 전후 hash가 같고 SQLite
+  integrity 검사도 정상이다. 이를 전체 Raw 파일의 전수 검사로 확대해 주장하지 않는다.
+
+근거는 위 `information-consistency-20261114/`의 `candidate-ui-hashes.json`,
+`preview-acceptance.json`, `preview-browser-acceptance.json`,
+`profile-handoff-acceptance.json`, `failure-cancel-acceptance.json`,
+`evidence-descriptions-acceptance.json`, `preservation-before.json`,
+`preservation-after.json`이다. JS SHA256은
+`fd0aed086693779a6b89b71233c141a9d1dd4e11d8e240ed477cf6a69dcfadcd`,
+CSS는 `49ddc386073748f69f9694eeee89b2d5013bf834dd0704c65a9783f53426b651`다.
+Python·bridge·producer·발행물·실제 journal은 이 UI 작업에서 변경하지 않았다.
+PR85는 별도 OPEN 작업이며 포함하지 않았다. 최종 코드 이후 변경은 이 인수
+기록과 계획 인덱스뿐이고, 원격 push/PR/CI/main 병합·운영 반영 완료를 주장하지 않는다.
