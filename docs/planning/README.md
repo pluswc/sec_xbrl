@@ -29,6 +29,10 @@ PASS, 실제 2,700판정·기존89API·보조비교8,800cell·복제본 저장/�
 미수행이며 main `deb074bc49`를 유지한다. 상세 범위/coverage/운영·rollback locator는
 계약의 최종 인수 절에 있다. 아래는 각 이전 작업의 당시 상태 기록이다.
 
+2026-11-14 [남은15 준비 재사용](../implementation/remaining15-recovery-20261114.md)은
+LIVE100을 보존하는 9개사 분리·명시적 준비 승인·109 합성 구현 승인 단계다.
+CRWD 결정과 다른5개 경계는 별도이며 독립 검증·실자료/운영은 아직 수행하지 않았다.
+
 2026-11-14 사용자 요청으로 신규8 native 승인·100개사 운영 소스를 main 전달한다.
 운영 checkout `5a8fe55775`는 유지하고 별도 작업 트리에서 main `deb074bc49`을
 일반 merge했다. 실행 Python/bridge는 수락 소스와 같고 UI·검사·interface는 최신

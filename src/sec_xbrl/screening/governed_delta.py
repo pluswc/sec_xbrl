@@ -366,12 +366,18 @@ def _reader_sources_match(manifest: dict, declaration: dict) -> bool:
     transition = declaration.get("reader_source_transition")
     if transition is None:
         return manifest["implementation_sources"] == current
-    from sec_xbrl.financial_native_source import qualified_consumer_files
+    from sec_xbrl.financial_native_source import (
+        qualified_consumer_files,
+        qualified_preparation_consumer_files,
+    )
 
     receipt = _load(transition)
     fields = {"schema_version", "status", "manifest", "approval", "origin_source_root",
               "origin_implementation_sources", "current_implementation_sources", "consumer_baseline_files"}
-    if (set(receipt) != fields or receipt["schema_version"] != "governed-delta-reader-source-transition-v1"
+    v2 = receipt.get("schema_version") == "governed-delta-reader-source-transition-v2"
+    if v2:
+        fields.add("previous_declaration")
+    if (set(receipt) != fields or receipt["schema_version"] not in {"governed-delta-reader-source-transition-v1", "governed-delta-reader-source-transition-v2"}
             or receipt["status"] != "ROOT_APPROVED_READER_ONLY_SOURCE_TRANSITION"
             or receipt["manifest"] != declaration["manifest"] or receipt["approval"] != declaration["approval"]
             or receipt["origin_implementation_sources"] != manifest["implementation_sources"]
@@ -380,7 +386,29 @@ def _reader_sources_match(manifest: dict, declaration: dict) -> bool:
     origin = _source_hashes(Path(receipt["origin_source_root"]))
     if origin != manifest["implementation_sources"]:
         raise ValueError("governed delta reader accepted origin differs")
-    qualified_consumer_files(receipt["consumer_baseline_files"],
-                             {key: value for key, value in current.items() if key.endswith(".py")})
+    if v2:
+        previous = receipt["previous_declaration"]
+        if (not isinstance(previous, dict) or not {"manifest", "approval"} <= set(previous)
+                or set(previous) - {"manifest", "approval", "reader_source_transition"}
+                or previous["manifest"] != declaration["manifest"] or previous["approval"] != declaration["approval"]):
+            raise ValueError("governed reader previous declaration differs")
+        for pin in previous.values():
+            checked_file(pin)
+    qualifier = qualified_preparation_consumer_files if v2 else qualified_consumer_files
+    qualifier(receipt["consumer_baseline_files"], {key: value for key, value in current.items() if key.endswith(".py")})
     # Only the bounded owner-context consumer bridge may change; its exact bytes are root-pinned above.
     return True
+
+
+def shared_reader_declaration_matches(reader: ScreeningGovernedDeltaReader, previous: dict) -> bool:
+    """Only a separately verified read-only receipt can replace immutable source admission."""
+    if reader._declaration == previous:
+        return True
+    transition = reader._declaration.get("reader_source_transition")
+    if transition is None:
+        return False
+    receipt = _load(transition)
+    return (receipt.get("schema_version") == "governed-delta-reader-source-transition-v2"
+            and receipt.get("previous_declaration") == previous
+            and receipt.get("manifest") == reader._declaration["manifest"]
+            and receipt.get("approval") == reader._declaration["approval"])

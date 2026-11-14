@@ -44,10 +44,17 @@ def _read_pin(pin: dict[str, str]) -> tuple[Path, dict]:
 
 def _open_members(config: dict, shared_readers: tuple = ()) -> list[Any]:
     required = {"schema_version", "dataset_id", "members"}
-    if not isinstance(config, dict) or not required <= set(config) or set(config) - required - {"membership_evidence", "expose_auxiliary_owners", "latest_source_coverage"}:
+    if not isinstance(config, dict) or not required <= set(config) or set(config) - required - {"membership_evidence", "expose_auxiliary_owners", "latest_source_coverage", "retained_unions", "allow_single_member"}:
         raise ValueError("unsupported cohort union configuration")
-    if config["schema_version"] not in {CONFIG_VERSION, CONFIG_VERSION_V2} or not isinstance(config["members"], list) or len(config["members"]) < 2:
+    if config["schema_version"] not in {CONFIG_VERSION, CONFIG_VERSION_V2} or not isinstance(config["members"], list):
+        raise ValueError("cohort union requires explicitly pinned members")
+    single = config.get("allow_single_member") is True
+    if "allow_single_member" in config and (not single or config["schema_version"] != CONFIG_VERSION or len(config["members"]) != 1):
+        raise ValueError("single-cohort alias requires explicit true and exactly one V3 projection")
+    if len(config["members"]) < (1 if single else 2):
         raise ValueError("cohort union requires at least two explicitly pinned members")
+    if "retained_unions" in config and config["schema_version"] != CONFIG_VERSION_V2:
+        raise ValueError("retained union scope requires explicitly typed composition")
     require_string(config["dataset_id"], "cohort union dataset ID")
     if "expose_auxiliary_owners" in config and type(config["expose_auxiliary_owners"]) is not bool:
         raise ValueError("auxiliary owner exposure requires an explicit boolean")
@@ -57,7 +64,10 @@ def _open_members(config: dict, shared_readers: tuple = ()) -> list[Any]:
     for member in config["members"]:
         if config["schema_version"] == CONFIG_VERSION_V2:
             from sec_xbrl.screening.governed_delta import MANIFEST as DELTA_MANIFEST
-            from sec_xbrl.screening.governed_delta import ScreeningGovernedDeltaReader
+            from sec_xbrl.screening.governed_delta import (
+                ScreeningGovernedDeltaReader,
+                shared_reader_declaration_matches,
+            )
             if not isinstance(member, dict) or set(member) != {"kind", "declaration"} or member["kind"] != "GOVERNED_DELTA":
                 raise ValueError("union v2 requires explicitly typed governed delta members")
             declaration = member["declaration"]
@@ -72,7 +82,7 @@ def _open_members(config: dict, shared_readers: tuple = ()) -> list[Any]:
             reader = next((item for item in shared_readers if item.root == path.parent
                            and item._manifest_sha256 == declaration["manifest"]["sha256"]), None)
             if reader is not None:
-                if not isinstance(reader, ScreeningGovernedDeltaReader) or reader._declaration != declaration:
+                if not isinstance(reader, ScreeningGovernedDeltaReader) or not shared_reader_declaration_matches(reader, declaration):
                     raise ValueError("union v2 shared delta declaration differs")
             else:
                 reader = ScreeningGovernedDeltaReader(path.parent, declaration)
@@ -262,6 +272,27 @@ def _compose(config: dict, members: list[ScreeningRuntimeProjection]) -> tuple[d
                     "financial_as_of": ancestor.manifest["financial_as_of"],
                     "dataset_manifest_sha256": ancestor._manifest_sha256},
                     "ciks": sorted(row["cik"] for row in ancestor.companies)})
+        retained = config.get("retained_unions", [])
+        if retained and not config.get("expose_auxiliary_owners"):
+            raise ValueError("retained union requires explicit auxiliary owner exposure")
+        if not isinstance(retained, list):
+            raise ValueError("retained unions must be explicit pins")
+        seen = set()
+        for pin in retained:
+            path, retained_manifest = _read_pin(pin)
+            if pin["sha256"] in seen or retained_manifest.get("schema_version") != VERSION_V2:
+                raise ValueError("retained union declaration is duplicate or incompatible")
+            seen.add(pin["sha256"])
+            prior = ScreeningCohortUnionReader(path.parent, pin, shared_readers=tuple(members))
+            if (prior.manifest["financial_as_of"] != body["financial_as_of"]
+                    or prior.quarterly.manifest["global_quarter_spine"] != spine
+                    or not set(prior._owners) <= set(owners)
+                    or any(prior._owners[cik] is not owners[cik] for cik in prior._owners)
+                    or any(body["auxiliary_owners"][cik] != prior.manifest["auxiliary_owners"][cik] for cik in prior._owners)):
+                raise ValueError("retained union owner/source scope differs")
+            contexts.append({"scope": {"dataset_id": prior.manifest["dataset_id"], "dataset_publication_id": prior.publication_id,
+                "financial_as_of": prior.manifest["financial_as_of"], "dataset_manifest_sha256": prior._manifest_sha256},
+                "ciks": sorted(prior._owners)})
         body["auxiliary_contexts"] = contexts
     guards = _latest_source_coverage(config, owners, next(iter(cutoffs)), spine)
     if "latest_source_coverage" in config:

@@ -1,6 +1,7 @@
 """Exact native producer transition; independent of historical successor packets."""
 from __future__ import annotations
 
+import ast
 import copy
 import hashlib
 from collections.abc import Iterator
@@ -98,6 +99,8 @@ def _inventory(root: Path) -> dict[str, str]:
 
 
 def _source_controls(payload: dict) -> dict[str, dict]:
+    if payload.get("schema_version") in {PREPARATION_VERSION, VERSION_V3}:
+        return _preparation_source_controls(payload)
     if payload.get("schema_version") == VERSION_V2:
         return _source_controls_v2(payload)
     source = payload["source"]
@@ -140,7 +143,10 @@ def _data_controls(payload: dict) -> dict[str, dict]:
         read_statement_metric_evidence,
     )
 
-    producer = _profile(payload)["producer_revision"] if payload.get("schema_version") == VERSION_V2 else PRODUCER
+    v3 = payload.get("schema_version") == VERSION_V3
+    producer = (payload["financial_producer_revision"] if v3 else
+                _profile(payload)["producer_revision"] if payload.get("schema_version") == VERSION_V2 else PRODUCER)
+    preparation = _checked_preparation(payload["preparation"])[0] if v3 else None
     parents = payload["parents"]
     if set(parents) != set(_PARENT_FILES):
         raise ValueError("native four parent roles differ")
@@ -172,10 +178,10 @@ def _data_controls(payload: dict) -> dict[str, dict]:
             or quarter.get("config", {}).get("statement_metric_evidence") != payload["statement_metric_evidence"]):
         raise ValueError("native parent/definition/producer linkage differs")
     quality = read_json(_checked(payload["quality"]))
-    if (quality.get("producer_revision") != producer or quality.get("financial_as_of") != payload["financial_as_of"]
+    if (quality.get("producer_revision") != (PRODUCER if v3 else producer) or quality.get("financial_as_of") != payload["financial_as_of"]
             or identity.get("quality", {}).get("manifest_sha256") != payload["quality"]["sha256"]
             or identity["quality"].get("root") != str(Path(payload["quality"]["path"]).parent)
-            or quality.get("storage_reuse") != payload["storage_reuse"]
+            or quality.get("storage_reuse") != (preparation["parent_storage_reuse"] if v3 else payload["storage_reuse"])
             or identity.get("config", {}).get("storage_reuse") != payload["storage_reuse"]):
         raise ValueError("native quality/storage linkage differs")
     read_statement_metric_evidence(payload["statement_metric_evidence"], payload["financial_as_of"])
@@ -216,7 +222,16 @@ def _data_controls(payload: dict) -> dict[str, dict]:
         raise ValueError("native named routine scope differs")
     for pin in controls.values():
         _checked(pin)
-    if payload.get("schema_version") == VERSION_V2:
+    if v3:
+        prep, prep_controls = _checked_preparation(payload["preparation"])
+        if (identity["config"].get("native_preparation") != payload["preparation"]
+                or prep["source"] != payload["source"] or prep["ciks"] != payload["ciks"]
+                or prep["quality"] != payload["quality"] or prep["storage_reuse"] != payload["storage_reuse"]
+                or prep["financial_producer_revision"] != producer or prep["routines"] != payload["routines"]
+                or payload["statement_metric_evidence"] != read_json(_checked(prep["occurrence_inputs"]))["evidence"]):
+            raise ValueError("final native parents differ from exact preparation scope/producer")
+        controls.update(prep_controls)
+    elif payload.get("schema_version") == VERSION_V2:
         controls.update(_occurrence_controls(payload, quality, identity))
     return controls
 
@@ -251,16 +266,19 @@ def use_native_source(declaration: dict | None, *, config: dict | None = None,
             raise ValueError("native declaration requires explicit packet and ROOT receipt")
         packet_path = _checked(declaration["packet"])
         approval = read_json(_checked(declaration["approval"]))
-        if approval != {"schema_version": (APPROVAL_VERSION_V2 if read_json(packet_path).get("schema_version") == VERSION_V2 else APPROVAL_VERSION), "status": "ROOT_APPROVED_NATIVE_SOURCE_TRANSITION",
+        if approval != {"schema_version": (APPROVAL_VERSION_V3 if read_json(packet_path).get("schema_version") == VERSION_V3 else APPROVAL_VERSION_V2 if read_json(packet_path).get("schema_version") == VERSION_V2 else APPROVAL_VERSION), "status": "ROOT_APPROVED_NATIVE_SOURCE_TRANSITION",
                         "packet": declaration["packet"]}:
             raise ValueError("native ROOT receipt differs")
         payload = read_json(packet_path)
         fields = {"schema_version", "producer_revision", "financial_as_of", "ciks", "parents", "quality",
                   "statement_metric_evidence", "storage_reuse", "source", "routines"}
         v2 = payload.get("schema_version") == VERSION_V2
+        v3 = payload.get("schema_version") == VERSION_V3
         if v2:
             fields |= {"producer_profile", "consumer_baseline_files", "occurrence_inputs"}
-        if (set(payload) != fields or payload.get("schema_version") not in {VERSION, VERSION_V2}
+        if v3:
+            fields |= {"preparation", "financial_producer_revision", "consumer_baseline_files"}
+        if (set(payload) != fields or payload.get("schema_version") not in {VERSION, VERSION_V2, VERSION_V3}
                 or payload["producer_revision"] != (_profile(payload)["producer_revision"] if v2 else PRODUCER)):
             raise ValueError("native packet contract differs")
         controls = {"PACKET": declaration["packet"], "APPROVAL": declaration["approval"],
@@ -316,10 +334,10 @@ def native_assessed_ciks(*, collection_manifest: Path, scope_companies: list | t
     scope = _active()
     if scope is None:
         return None
-    identity = read_json(_checked(scope.payload["parents"]["identity"]))
-    expected = sorted((row["ticker"], row["cik"]) for row in identity["config"]["companies"])
+    config = _assessment_config(scope.payload)
+    expected = sorted((row["ticker"], row["cik"]) for row in config["companies"])
     actual = sorted((row["ticker"], row["cik"]) for row in scope_companies)
-    if (actual != expected or str(collection_manifest) != identity["config"]["collection_manifest"]):
+    if (actual != expected or str(collection_manifest) != config["collection_manifest"]):
         raise ValueError("native status caller collection/company scope differs")
     return tuple(scope.payload["ciks"])
 
@@ -329,16 +347,17 @@ def require_native_assessment(assessed_ciks: tuple[str, ...] | None, *, collecti
     scope = _active()
     if scope is None:
         return
-    identity = read_json(_checked(scope.payload["parents"]["identity"]))
+    config = _assessment_config(scope.payload)
     if (assessed_ciks != tuple(scope.payload["ciks"])
-            or str(collection_manifest) != identity["config"]["collection_manifest"]
+            or str(collection_manifest) != config["collection_manifest"]
             or validation_mode != "financial_sources" or storage_reuse != scope.payload["storage_reuse"]):
         raise ValueError("native status requires its exact explicit assessment subset")
 
 
 def prepare_native_source_packet(*, parents: dict[str, dict], old_source_root: Path,
                                  destination: Path, producer_profile: str | None = None,
-                                 consumer_baseline_files: dict | None = None, occurrence_inputs: dict | None = None) -> Path:
+                                 consumer_baseline_files: dict | None = None, occurrence_inputs: dict | None = None,
+                                 preparation: dict | None = None) -> Path:
     """Write a proposal only; a separate pinned ROOT approval is mandatory."""
     from sec_xbrl.financial_storage_reuse import history_validation_rules
     identity = read_json(_checked(parents["identity"]))
@@ -359,7 +378,14 @@ def prepare_native_source_packet(*, parents: dict[str, dict], old_source_root: P
                "statement_metric_evidence": quarter["config"]["statement_metric_evidence"], "storage_reuse": storage_pin,
                "source": {"old_root": str(old_source_root), "old_files": _inventory(old_source_root),
                           "current_files": _inventory(_SOURCE_ROOT)}, "routines": routines}
-    if producer_profile is not None:
+    if preparation is not None:
+        if producer_profile is not None or consumer_baseline_files is not None or occurrence_inputs is not None:
+            raise ValueError("final native preparation cannot mix older profile contracts")
+        prep, _ = _checked_preparation(preparation)
+        payload.update(schema_version=VERSION_V3, preparation=preparation,
+                       financial_producer_revision=prep["financial_producer_revision"],
+                       consumer_baseline_files=prep["consumer_baseline_files"])
+    elif producer_profile is not None:
         payload.update(schema_version=VERSION_V2, producer_profile=producer_profile,
                        consumer_baseline_files=consumer_baseline_files, occurrence_inputs=occurrence_inputs)
         payload["producer_revision"] = _profile(payload)["producer_revision"]
@@ -464,3 +490,242 @@ def _occurrence_controls(payload: dict, quality: dict, identity: dict) -> dict:
     if actual != set(expected_entries) or set(intakes) != set(payload["ciks"]):
         raise ValueError("native occurrence filing/company coverage differs")
     return controls
+
+
+PREPARATION_VERSION = "financial-native-preparation-v1"
+PREPARATION_APPROVAL = "financial-native-preparation-approval-v1"
+VERSION_V3 = "financial-native-source-v3"
+APPROVAL_VERSION_V3 = "financial-native-source-approval-v3"
+_PREPARATION_BASELINE = "0dc4cbb7a8023e4c8ff0b98cbc69359c7ad343cf8045b255de93ab796f5dfacc"
+_IDENTITY_CORE = "f3a52b12234f2574614b18be7283920ce114d93197a2af863bf83b0f90d1d49c"
+_PREPARATION_CHANGES = frozenset({"financial_native_source.py", "screening/metric_identity.py",
+    "screening/verified_source_closure.py", "screening/governed_delta.py", "screening/cohort_union.py", "screening/service.py"})
+
+
+def qualified_preparation_consumer_files(baseline: dict, current: dict) -> None:
+    if digest_value(baseline) != _PREPARATION_BASELINE or set(baseline) != set(current):
+        raise ValueError("preparation consumer baseline/file scope differs")
+    if {name for name in baseline if baseline[name] != current[name]} - _PREPARATION_CHANGES:
+        raise ValueError("preparation changes an unqualified financial/source module")
+    tree = ast.parse((_SOURCE_ROOT / "screening/metric_identity.py").read_text())
+    excluded = {"publish_generic_metric_identity", "_publish_generic_metric_identity", "_verify_configured_sources",
+                "_verify_configured_sources_inner", "_validate_config"}
+    core = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name not in excluded:
+            core[node.name] = ast.dump(node, include_attributes=False)
+        if isinstance(node, ast.ClassDef):
+            for child in node.body:
+                if isinstance(child, ast.FunctionDef):
+                    core[node.name + "." + child.name] = ast.dump(child, include_attributes=False)
+    if digest_value(core) != _IDENTITY_CORE:
+        raise ValueError("preparation changes identity core selection/period rules")
+
+
+def _preparation_source_controls(payload: dict) -> dict:
+    source = payload["source"]
+    if set(source) != {"old_root", "old_files", "current_files"}:
+        raise ValueError("preparation source fields differ")
+    old_root = Path(source["old_root"])
+    old, current = _inventory(old_root), _inventory(_SOURCE_ROOT)
+    if old != source["old_files"] or digest_value(old) != _ORIGIN_INVENTORY or current != source["current_files"]:
+        raise ValueError("preparation exact401/current source inventory differs")
+    qualified_preparation_consumer_files(payload["consumer_baseline_files"], current)
+    return {f"{kind}:{name}": {"path": str(directory / name), "sha256": digest}
+            for kind, directory, files in (("OLD_SOURCE", old_root, old), ("CURRENT_SOURCE", _SOURCE_ROOT, current))
+            for name, digest in files.items()}
+
+
+def _assessment_config(payload: dict) -> dict:
+    return (payload["identity_request"] if payload["schema_version"] == PREPARATION_VERSION
+            else read_json(_checked(payload["parents"]["identity"]))["config"])
+
+
+def _routine_claims(storage: dict) -> list[dict]:
+    from sec_xbrl.financial_storage_reuse import history_validation_rules
+    claims = []
+    for company in storage["companies"]:
+        for entry in company["histories"]:
+            pins = {name: entry[name] for name in ("acceptance", "previous_validation", "build_manifest", "history_manifest")}
+            prior = read_json(_checked(pins["previous_validation"]))
+            manifest = read_json(_checked(pins["history_manifest"]))
+            claims.append({"report": prior["historical_controls"]["report"], "pins": pins,
+                           "declared": prior["declared_payload_sha256s"], "rules": history_validation_rules(manifest)})
+    return claims
+
+
+def _preparation_controls(payload: dict) -> dict:
+    from sec_xbrl.history_validation import _scope_key, validation_code_identity
+    from sec_xbrl.metric_quality import GenericMetricQualityReader
+
+    required = {"schema_version", "producer_revision", "financial_producer_revision", "financial_as_of", "ciks",
+                "source", "consumer_baseline_files", "identity_request", "quality", "parent_storage_reuse",
+                "storage_reuse", "occurrence_inputs", "selected_occurrences", "routines"}
+    if (set(payload) != required or payload["schema_version"] != PREPARATION_VERSION
+            or payload["producer_revision"] != PRODUCER or len(payload["financial_producer_revision"]) != 40
+            or any(c not in "0123456789abcdef" for c in payload["financial_producer_revision"])):
+        raise ValueError("preparation packet/producer contract differs")
+    controls = _preparation_source_controls(payload)
+    from sec_xbrl.screening.metric_identity import _validate_config
+    request = payload["identity_request"]
+    if _validate_config(request) != request:
+        raise ValueError("preparation identity request is not canonical")
+    companies = sorted(({"ticker": row["ticker"], "cik": row["cik"]} for row in request["companies"]), key=lambda row: row["cik"])
+    if (payload["ciks"] != sorted({row["cik"] for row in companies}) or not payload["ciks"]
+            or "native_preparation" in request or "source_compatibility" in request
+            or request["financial_as_of"] != payload["financial_as_of"]
+            or request.get("annual_coverage_policy") is not None or request["storage_reuse"] != payload["storage_reuse"]):
+        raise ValueError("preparation identity scope differs")
+    quality_path = _checked(payload["quality"])
+    quality = GenericMetricQualityReader(quality_path.parent, manifest_sha256=payload["quality"]["sha256"])
+    q = quality.manifest
+    if (q["producer_revision"] != PRODUCER or q["financial_as_of"] != payload["financial_as_of"]
+            or q["storage_reuse"] != payload["parent_storage_reuse"]
+            or request["quality_root"] != str(quality.root) or request["quality_manifest_sha256"] != payload["quality"]["sha256"]
+            or not {(r["ticker"], r["cik"]) for r in companies} < {(r["ticker"], r["cik"]) for r in q["companies"]}):
+        raise ValueError("preparation requires a strict subset of the exact401 quality proof")
+    controls["PREPARATION_QUALITY"] = payload["quality"]
+    controls["PREPARATION_STORAGE_PARENT"] = payload["parent_storage_reuse"]
+    controls["PREPARATION_STORAGE"] = payload["storage_reuse"]
+    parent_storage = read_json(_checked(payload["parent_storage_reuse"]))
+    storage = read_json(_checked(payload["storage_reuse"]))
+    expected = {**parent_storage, "companies": [row for row in parent_storage["companies"] if row["cik"] in payload["ciks"]]}
+    if storage != expected or sorted(row["cik"] for row in storage["companies"]) != payload["ciks"]:
+        raise ValueError("preparation storage subset changes original proof records")
+    if parent_storage["collection_manifest"]["sha256"] != q["collection_manifest_sha256"] or request["collection_manifest_sha256"] != q["collection_manifest_sha256"]:
+        raise ValueError("preparation collection differs from quality/storage")
+    if storage["collection_manifest"]["path"] != request["collection_manifest"]:
+        raise ValueError("preparation collection path differs")
+    if payload["routines"] != _routine_claims(storage) or len(payload["routines"]) != len(companies):
+        raise ValueError("preparation routine scope differs")
+    for index, claim in enumerate(payload["routines"]):
+        report = read_json(_checked(claim["report"]))
+        history = read_json(_checked(claim["pins"]["history_manifest"]))
+        prior = read_json(_checked(claim["pins"]["previous_validation"]))
+        old_identity = validation_code_identity(sources=tuple(sorted(Path(payload["source"]["old_root"]).rglob("*.py"))), rules=claim["rules"])
+        if (report.get("code_identity") != old_identity or report.get("scope_key") != _scope_key(history)
+                or report.get("manifest_sha256") != claim["pins"]["history_manifest"]["sha256"]
+                or report.get("full_storage_validation") is not False or report.get("semantic_validation") is not False
+                or report.get("validation_level") not in {"ROUTINE_INITIAL", "ROUTINE_CHANGED", "ROUTINE_UNCHANGED"}
+                or prior.get("kind") != "ACCEPTED_CURRENT_ROUTINE_HISTORY"
+                or report.get("result", {}).get("declared_files") != claim["declared"]):
+            raise ValueError("preparation does not reuse an exact unchanged401 routine")
+        for name, pin in {**claim["pins"], "report": claim["report"]}.items():
+            _checked(pin)
+            controls[f"PREPARATION_ROUTINE:{index}:{name}"] = pin
+    def add_pins(value, prefix):
+        if isinstance(value, dict):
+            if isinstance(value.get("path"), str) and isinstance(value.get("sha256"), str):
+                pin = {name: value[name] for name in ("path", "sha256")}
+                _checked(pin)
+                controls[prefix] = pin
+            else:
+                for key, item in value.items():
+                    add_pins(item, prefix + ":" + key)
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                add_pins(item, prefix + ":" + str(index))
+    add_pins(q["evidence_hashes"], "PREPARATION_QUALITY_CONTROL")
+    for name, info in q["files"].items():
+        add_pins({"path": str(quality.root / name), "sha256": info["sha256"]}, "PREPARATION_QUALITY_FILE:" + name)
+    for company in request["companies"]:
+        for role in ("history", "annual_analysis", "quarterly_analysis"):
+            filename = "history_manifest.json" if role == "history" else "analysis_manifest.json"
+            add_pins({"path": str(Path(company[role + "_root"]) / filename), "sha256": company[role + "_manifest_sha256"]},
+                     "PREPARATION_ANALYSIS:" + company["cik"] + ":" + role)
+        if len(company["input_years"]) != 5 or len(company["display_years"]) != 4:
+            raise ValueError("preparation cannot alter the strict annual window")
+    inputs = read_json(_checked(payload["occurrence_inputs"]))
+    controls["PREPARATION_OCCURRENCE_INPUTS"] = payload["occurrence_inputs"]
+    evidence = read_json(_checked(inputs["evidence"]))
+    if inputs["admitted_records"] != 0 or evidence["records"] != [] or evidence["financial_as_of"] != payload["financial_as_of"]:
+        raise ValueError("preparation occurrence proof differs")
+    expected_full = {(row["cik"], row["accession"]) for row in q["filings"]}
+    if {(row["scope"]["cik"], row["scope"]["accession"]) for row in inputs["selected_filings"]} != expected_full or len(inputs["selected_filings"]) != len(expected_full):
+        raise ValueError("preparation occurrence parent coverage differs")
+    selected = [row for row in inputs["selected_filings"] if row["scope"]["cik"] in payload["ciks"]]
+    if selected != payload["selected_occurrences"]:
+        raise ValueError("preparation occurrence subset differs")
+    statuses = {row["cik"]: row for row in q["collection_status"]}
+    for index, row in enumerate(selected):
+        scope = row["scope"]
+        status = statuses[scope["cik"]]
+        intake_pin = {"path": status["intake_manifest_path"], "sha256": status["intake_sha256"]}
+        intake = read_json(_checked(intake_pin))
+        if (scope["entry"] not in intake["filings"] or scope["intake"] != intake_pin
+                or scope["financial_as_of"] != payload["financial_as_of"] or row["admitted_records"] != 0
+                or scope["builder_sha256"] != payload["source"]["old_files"]["metrics/statement_metric_evidence.py"]
+                or read_json(_checked(row["checkpoint"])) != {"input": scope, "records": []}):
+            raise ValueError("preparation occurrence checkpoint does not belong to selected source")
+        controls[f"PREPARATION_OCCURRENCE_CHECKPOINT:{index}"] = row["checkpoint"]
+    add_pins(inputs["evidence"], "PREPARATION_OCCURRENCE_EVIDENCE")
+    return controls
+
+
+def _checked_preparation(declaration: dict) -> tuple[dict, dict]:
+    if not isinstance(declaration, dict) or set(declaration) != {"packet", "approval"}:
+        raise ValueError("preparation requires an explicit packet/root receipt")
+    packet = read_json(_checked(declaration["packet"]))
+    approval = read_json(_checked(declaration["approval"]))
+    if approval != {"schema_version": PREPARATION_APPROVAL, "status": "ROOT_APPROVED_NATIVE_PREPARATION", "packet": declaration["packet"]}:
+        raise ValueError("preparation root receipt differs")
+    return packet, {"PACKET": declaration["packet"], "APPROVAL": declaration["approval"], **_preparation_controls(packet)}
+
+
+@contextmanager
+def use_native_preparation(declaration: dict | None, *, config: dict | None = None) -> Iterator[None]:
+    if declaration is None:
+        active = _ACTIVE.get()
+        token = _ACTIVE.set(None if active is not None and active.payload["schema_version"] == PREPARATION_VERSION else active)
+        try:
+            yield
+        finally:
+            _ACTIVE.reset(token)
+        return
+    payload, controls = _checked_preparation(declaration)
+    if config is not None and {key: value for key, value in config.items() if key != "native_preparation"} != payload["identity_request"]:
+        raise ValueError("preparation identity request differs")
+    scope = _Scope(payload, controls, digest_value([payload, controls]))
+    token = _ACTIVE.set(scope)
+    try:
+        yield
+    finally:
+        _ACTIVE.reset(token)
+
+
+def verify_prepared_quality(reader, *, config: dict, history_hashes: dict) -> None:
+    scope = _active()
+    if scope is None or scope.payload["schema_version"] != PREPARATION_VERSION or config.get("native_preparation") != {"packet": scope.controls["PACKET"], "approval": scope.controls["APPROVAL"]}:
+        raise ValueError("quality subset requires its sealed preparation context")
+    payload = scope.payload
+    q = reader.manifest
+    if (_pin(reader.manifest_path) != payload["quality"]
+            or history_hashes != {row["ticker"]: q["history_manifest_sha256s"][row["ticker"]] for row in config["companies"]}
+            or config.get("prospective_selection") != q.get("prospective_selection")
+            or config.get("history_selection") != q.get("history_selection")):
+        raise ValueError("quality selected source proof differs")
+
+
+def prepare_native_preparation_packet(*, identity_config: dict, old_source_root: Path, consumer_baseline_files: dict,
+                                      occurrence_inputs: dict, financial_producer_revision: str, destination: Path) -> Path:
+    from sec_xbrl.screening.metric_identity import _validate_config
+    config = _validate_config(identity_config)
+    if "native_preparation" in config:
+        raise ValueError("preparation proposal cannot recursively contain itself")
+    quality_pin = _pin(Path(config["quality_root"]) / "generic_metric_quality_manifest.json")
+    quality = read_json(_checked(quality_pin))
+    storage = read_json(_checked(config["storage_reuse"]))
+    inputs = read_json(_checked(occurrence_inputs))
+    ciks = [row["cik"] for row in config["companies"]]
+    payload = {"schema_version": PREPARATION_VERSION, "producer_revision": PRODUCER,
+        "financial_producer_revision": financial_producer_revision, "financial_as_of": config["financial_as_of"], "ciks": ciks,
+        "source": {"old_root": str(old_source_root), "old_files": _inventory(old_source_root), "current_files": _inventory(_SOURCE_ROOT)},
+        "consumer_baseline_files": consumer_baseline_files, "identity_request": config, "quality": quality_pin,
+        "parent_storage_reuse": quality["storage_reuse"], "storage_reuse": config["storage_reuse"],
+        "occurrence_inputs": occurrence_inputs, "selected_occurrences": [row for row in inputs["selected_filings"] if row["scope"]["cik"] in ciks],
+        "routines": _routine_claims(storage)}
+    _preparation_controls(payload)
+    if destination.exists():
+        raise ValueError("preparation proposal destination must be new")
+    write_json(destination, payload)
+    return destination
