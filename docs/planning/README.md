@@ -1,5 +1,13 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 [Common-input main delivery](../implementation/price-common-inputs-20261114.md#main-delivery-handoff--2026-11-14): user now authorizes review/remote delivery/main merge, superseding earlier no-request records. Base245a/product9d78/accepted d6 trees remain unchanged; completed independent/artifact/UI evidence reused, operating58984 and qualified d1e/all20 protected pins preserved. No qualification widening, rebuild, restart or repeated tests. PR/CI/main merge remain pending and Root-owned.
+
+2026-11-14 [Common-input operating connection](../implementation/price-common-inputs-20261114.md#approved-operating-consumer-connection--2026-11-14): source9d78 independently verified, actual profile artifact PASS and ROOT LIVE_ACCEPTED at18765 (Node58984). All109 exact-ticker prices/12 latest direct12m EPS; frozen10/23 quotes for10/25, currencyUNKNOWN, no PER. Qualified Python19078/d1e and all20 protected pins/journal preserved, old14 datasets/21-company functions retained. Private/live UI checks passed; main NOT_MERGED/no merge requested. Earlier pending/no-activation records are historical.
+
+2026-11-14 [Common-input assessment overlay](../implementation/price-common-inputs-20261114.md#approved-follow-up-small-referenced-assessment-overlay--2026-11-14): sourcecc3c9 and actual v2 independently PASS, Root LOCALLY_ACCEPTED. All109 header issuers/128 contexts (46 class-identity contexts);12 latest direct12m EPS (11 positive/LITE negative), only2 latest four-QTD windows with basis unknown. Original common109/all18 protected files preserved. No PER/UI/runtime/main acceptance; earlier pending states are historical.
+
+2026-11-14 [Price/EPS/shares common inputs](../implementation/price-common-inputs-20261114.md): source9540 independent27 PASS; actual109 publication completed (13,549 financial rows/129 quotes/132 securities). Availability counts cover any retained period/scope, not current PER coverage; all109 market TTM remain SHARE_BASIS_UNKNOWN. Protected12 pins/journal unchanged. Root artifact review PASS and first-slice publication/query LOCALLY_ACCEPTED under these limits; no UI/runtime activation or main merge, and no service acceptance claim.
+
 2026-11-14 사용자가109 확장·상세 연결의 main 전달을 승인했다. 별도 branch에서
 원래 financial3fa와 PR98 main `ad877d26be`를 일반 merge해 계획 항목을 모두 보존했다.
 Python130/수락 bridge·최신 main UI는 부모 bytes와 같고 focused Python10·Node9/
