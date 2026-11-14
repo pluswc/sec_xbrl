@@ -1,5 +1,11 @@
 # Price, EPS and shares common inputs — 2026-11-14
 
+Main-delivery authorization (2026-11-14): the user now authorizes review, remote
+delivery and main merge of the accepted common-input/assessment/operating UI scope.
+This supersedes earlier no-merge-request statements; those remain historical.
+PR, required CI and actual main merge are still pending and lead-owned. No merged
+status is inferred from local or operating acceptance.
+
 Latest operating status (2026-11-14): product source `9d78a279de` independently
 verified, profile artifact independently PASS, Root LIVE_ACCEPTED at
 http://127.0.0.1:18765/ (Windows Node PID58984). Original qualified Python
@@ -363,3 +369,26 @@ connection from pinned inputs without issuer branches. Implementation, independe
 verification, artifact acceptance and LIVE acceptance are complete for this scope;
 main is NOT_MERGED and no main merge was requested. No instructions/design-system
 files, source modules, tests, runtime or data were changed by this final doc update.
+
+
+## Main delivery handoff — 2026-11-14
+
+The feature branch is based on main `245a52bc44e16480d99077b3e7bd56252b7d6510`.
+This handoff changes only the contract and planning status. Product source
+`9d78a279de553141bef5c5dab6ee884aec3ed175` stays frozen; source, examples and tests
+are byte-identical to accepted handoff `d6df9aa147a06956778545c1ccce41465a81dee9`.
+Previously completed independent source/artifact reviews and actual UI receipts
+are reused. No prior27/8/7 checks, company audits, projections or operating
+restarts were repeated for this documentation update.
+
+Operating Node PID58984/static bundle, qualified backend19078/source `d1e74d90`,
+accepted publications and all20 protected file pins, including the journal, remain
+unchanged. New market-input modules confer no native/preparation approval on a
+new main source inventory; existing exact source-qualification boundaries remain
+fail-closed. Main code delivery is separate from qualifying any future producer
+or replacing the immutable operating Python checkout.
+
+The tracked operator commands, scope/price contracts and acceptance limits above
+remain the generic handoff. Root owns push, PR, mandatory CI and merge decisions.
+At this freeze those remote stages and main merge are pending; the final merge
+result/SHA must be established by the PR and Git history, not by this record.
