@@ -657,7 +657,7 @@ function profileFiscalPrefix(profile){
 function financialMetricCaption(definition){
   return ["standardized_fcf","quarter_standardized_fcf","ttm_standardized_fcf"].includes(definition.metric_id)?"표준화 FCF":definition.label;
 }
-function renderProfile(){if($("#profile-summary-disclosure"))$("#profile-summary-disclosure").open=false;resetRevenueBreakdowns();const p=S.profile,definitions=p.groups.flatMap(x=>x.metrics.map(y=>y.definition));$("#profile-title").textContent=`${p.company.name||p.company.ticker} 재무 프로필`;$("#profile-intro").innerHTML=`<p><strong>${esc(p.company.ticker)}</strong> · ${esc(p.company.industry||"업종 정보 없음")}</p><p class="muted">재무 기준일 ${compactFinancialCaption(p.financial_as_of)} · ${esc(profileFiscalPrefix(p))}${p.resolved_period?companyFinancialPeriodDisplay(p.resolved_period):compactFinancialCaption(explorerPeriod({actual_period:p.actual_period}))}</p><p class="muted">금액은 백만 USD, 비율은 %로 표시합니다.</p>`;renderCompanyDescription(p.company_description);$("#profile-summary").innerHTML=p.summary.map(x=>`<div class="profile-card"><span>${esc(x.definition.label)} · ${esc(unitLabel(x.definition))}</span>${profileObservationCell(x.observation,x.definition)}</div>`).join("");$("#profile-metric").innerHTML=definitions.map(x=>`<option value="${x.metric_id}">${esc(x.label)}</option>`).join("");$("#profile-metric").value=definitions.some(x=>x.metric_id===S.profileMetric)?S.profileMetric:"revenue";$("#profile-all-metrics").innerHTML=profileMetricLedger(p.groups);const legacy=$("#profile-single-trend");if(legacy)legacy.open=false;else renderProfileTrend()}
+function renderProfile(){if($("#profile-summary-disclosure"))$("#profile-summary-disclosure").open=false;resetRevenueBreakdowns();beginMarketInputProfile();const p=S.profile,definitions=p.groups.flatMap(x=>x.metrics.map(y=>y.definition));$("#profile-title").textContent=`${p.company.name||p.company.ticker} 재무 프로필`;$("#profile-intro").innerHTML=`<p><strong>${esc(p.company.ticker)}</strong> · ${esc(p.company.industry||"업종 정보 없음")}</p><p class="muted">재무 기준일 ${compactFinancialCaption(p.financial_as_of)} · ${esc(profileFiscalPrefix(p))}${p.resolved_period?companyFinancialPeriodDisplay(p.resolved_period):compactFinancialCaption(explorerPeriod({actual_period:p.actual_period}))}</p><p class="muted">재무표·차트 금액은 백만 USD, 비율은 %로 표시합니다.</p>`;renderCompanyDescription(p.company_description);$("#profile-summary").innerHTML=p.summary.map(x=>`<div class="profile-card"><span>${esc(x.definition.label)} · ${esc(unitLabel(x.definition))}</span>${profileObservationCell(x.observation,x.definition)}</div>`).join("");$("#profile-metric").innerHTML=definitions.map(x=>`<option value="${x.metric_id}">${esc(x.label)}</option>`).join("");$("#profile-metric").value=definitions.some(x=>x.metric_id===S.profileMetric)?S.profileMetric:"revenue";$("#profile-all-metrics").innerHTML=profileMetricLedger(p.groups);const legacy=$("#profile-single-trend");if(legacy)legacy.open=false;else renderProfileTrend()}
 
 async function openAnnualProfile(cik,button){const token=++explorerBasis.profileToken,key=explorerContextKey();S.lastFocus=button;const d=S.explorerDataset||S.defaultDataset;const profile=await api(`/api/company-profile?dataset_id=${encodeURIComponent(d.dataset_id)}&dataset_publication_id=${encodeURIComponent(d.publication_id||d.dataset_publication_id)}&cik=${encodeURIComponent(cik)}&${explorerBasis.latestAnnual?"latest=true":`fiscal_year=${S.explorerYear}`}`);if(token!==explorerBasis.profileToken||key!==explorerContextKey())return;explorerBasis.profileBasis="ANNUAL";S.profile=profile;S.profileMetric=explorerBasis.profileMetrics.ANNUAL;profileTrendCaption(false);renderProfile();showCompanyProfile()}
 const comparisonPicker={mounted:false,query:"",category:"",timer:null,token:0};
@@ -1131,7 +1131,7 @@ async function openProfile(cik,button,surfaceError=false,deferShow=false){
   S.profile={company:{...row.company,industry:row.company.sic_description||row.company.industry},financial_as_of:explorerBasis.snapshot.financial_as_of,selected_fiscal_year:row.period?.fiscal_year||explorerBasis.snapshot.calendar_year,actual_period:interimPrimaryObservation(row),latestAnchor:latestExplorerPeriod()?row.period:undefined,summary:interimMetricIds().slice(0,8).map(id=>({definition:explorerMetric(id),observation:preparedExplorerObservation(row.metrics[id])})),groups,series:{}};
   S.profileMetric=explorerBasis.profileMetrics[basis];if(!definitions.some(item=>item.metric_id===S.profileMetric))S.profileMetric=definitions[0].metric_id;
   explorerBasis.profileKey=key;renderProfile();profileTrendCaption(true);$("#profile-metric").value=S.profileMetric;
-  $("#profile-intro").innerHTML=`<p><strong>${esc(row.company.ticker)}</strong> · ${esc(row.company.sic_description||row.company.industry||"업종 정보 없음")}</p><p class="muted">${latestExplorerPeriod()?"회사별 최신":explorerBasis.periods[basis]} ${explorerBasisLabel()} · ${latestExplorerPeriod()?companyFinancialPeriodDisplay(row.period):compactFinancialCaption(interimPeriodCaption(interimPrimaryObservation(row)))}</p><p class="muted">재무 기준일 ${compactFinancialCaption(S.profile.financial_as_of)} · 금액은 백만 USD, 비율은 %입니다.</p>`;
+  $("#profile-intro").innerHTML=`<p><strong>${esc(row.company.ticker)}</strong> · ${esc(row.company.sic_description||row.company.industry||"업종 정보 없음")}</p><p class="muted">${latestExplorerPeriod()?"회사별 최신":explorerBasis.periods[basis]} ${explorerBasisLabel()} · ${latestExplorerPeriod()?companyFinancialPeriodDisplay(row.period):compactFinancialCaption(interimPeriodCaption(interimPrimaryObservation(row)))}</p><p class="muted">재무 기준일 ${compactFinancialCaption(S.profile.financial_as_of)} · 재무표·차트 금액은 백만 USD, 비율은 %입니다.</p>`;
   if(token===explorerBasis.profileToken&&key===explorerContextKey()&&!deferShow)showCompanyProfile()
 }
 async function renderProfileTrend(){
@@ -2973,3 +2973,94 @@ document.addEventListener("scroll",event=>{
 },true);
 window.addEventListener("resize",()=>scheduleTablePresentation());
 scheduleTablePresentation();
+
+
+// Optional pinned current-publication input worksheet; no valuation or history writes.
+const marketProfileState={serial:0,capability:null,cache:new Map()};
+function marketProfileReason(reason){return ({
+  NO_DIRECT_12M_AT_LATEST_FINANCIAL_END:"최신 재무기간과 일치하는 12개월 공시 EPS 없음",
+  NO_ELIGIBLE_FINANCIAL_REPORT:"조회 가능한 재무 공시 없음",
+  AMBIGUOUS_REPORTED_12M:"공시 EPS의 기간·범위를 하나로 정할 수 없음",
+  DIMENSION_IDENTITY_NOT_CONFIRMED:"공시 범위를 확인할 수 없음",
+  NO_OBSERVED_PRICE:"해당 거래일 종가 없음",
+  EXACT_REGISTERED_SECURITY_NOT_UNIQUE:"등록 종목과 일치하는 종가를 하나로 정할 수 없음",
+  AMBIGUOUS_REPORTED_SHARE_VALUE:"같은 기간·범위의 주식 수가 서로 다름",
+  SOURCE_VALUE_MISSING:"공시 값 없음",DIRECT_OBSERVATION_REQUIRED:"직접 공시 값 미준비",
+  UNIT_NOT_COMPATIBLE:"단위 확인 필요",QUALITY_BLOCKED:"자료 검토로 조회 보류",
+  MISSING_DIRECT_QUARTER:"직접 공시된 최근 4개 분기 EPS 부족",
+  NO_DIRECT_QTD_EPS:"직접 공시 분기 EPS 없음",QUARTER_GAP:"분기 기간이 이어지지 않음",
+  SCOPE_SELECTION_REQUIRED:"주식 종류·공시 범위 선택 필요",
+  SHARE_BASIS_UNKNOWN:"분기 간 주식 기준 확인 필요"
+})[reason]||"자료 또는 공시 범위 확인 필요"}
+function marketProfileEligible(dataset,latest,capability,cik){
+  return Boolean(latest&&capability?.configured&&dataset&&/^\d{10}$/u.test(cik||"")&&
+    dataset.dataset_id===capability.dataset_id&&
+    (dataset.publication_id||dataset.dataset_publication_id)===capability.dataset_publication_id&&
+    dataset.financial_as_of===capability.financial_as_of&&
+    dataset.auxiliary_manifest_sha256===capability.dataset_manifest_sha256);
+}
+function validateMarketProfile(data,scope,capability){
+  if(data?.schema_version!=="screening-market-input-profile-v1"||
+    Object.keys(scope).some(key=>data[key]!==scope[key])||
+    data.dataset_manifest_sha256!==capability.dataset_manifest_sha256||
+    !Array.isArray(data.prices)||data.prices.length>1||!Array.isArray(data.other_prices)||
+    !Array.isArray(data.share_candidates)||!data.reported_12m||
+    [...data.prices,...data.other_prices].some(row=>row.security?.cik!==scope.cik||row.basis!=="AS_TRADED_CLOSE"||row.currency!==null||
+      row.requested_date!==scope.financial_as_of||row.trade_date&&row.trade_date>scope.financial_as_of)){
+    throw new Error("선택한 기업 자료와 가격·주당 정보의 범위가 다릅니다.");
+  }
+  return data;
+}
+function marketProfileAmount(value,places=2){return value==null?"—":formatDecimal(value,places)}
+function marketShareLabel(id){return ({outstanding_common_shares_cover:"발행주식수 · 표지 공시",
+  outstanding_common_shares_balance:"발행주식수 · 재무상태표",weighted_average_basic_shares:"가중평균주식수 · 기본",
+  weighted_average_diluted_shares:"가중평균주식수 · 희석"})[id]||"공시 주식 수"}
+function marketSharePeriodLabel(kind){return ({FY:"연간",QTD_3M:"분기",YTD_6M:"6개월 누적",YTD_9M:"9개월 누적",TTM:"최근 12개월",INSTANT:"공시 기준일"})[kind]||"공시 기간"}
+function marketScopeLabel(row){
+  if(!Array.isArray(row.dimensions)||!row.dimensions.length)return "별도 클래스 표시 없음 · 증권 적용 미확인";
+  const text=row.dimensions.map(dim=>Array.isArray(dim)?dim[1]||dim[2]||dim[0]:dim.member_qname||dim.typed_member||"공시 범위").join(" / ");
+  return text.replace(/^[A-Za-z0-9_-]+:/u,"").replace(/Member$/u,"");
+}
+function marketSourceLink(source){return source?.url&&/^https:\/\/www\.sec\.gov\/Archives\/edgar\/data\//u.test(source.url)?
+  `<a href="${esc(source.url)}" target="_blank" rel="noopener noreferrer">공시 원문</a>${source.filed_date?` · 제출 ${esc(compactFinancialDate(source.filed_date))}`:""}`:"공시 출처 확인 필요"}
+function marketProfileMarkup(data){
+  const price=data.prices[0],eps=data.reported_12m;
+  const priceValue=price?.value==null?"—":marketProfileAmount(price.value);
+  const epsValue=eps.status==="AVAILABLE_REPORTED"?marketProfileAmount(eps.value):"—";
+  const priceDate=price?.trade_date?`${compactFinancialDate(price.trade_date)} · ${price.security.ticker} · 통화 미확인`:marketProfileReason(data.price_reason||price?.reason);
+  const epsDate=eps.display_end?`${compactFinancialDate(eps.display_end)} 종료 · ${eps.period_class==="FY"?"연간 직접 공시":"12개월 직접 공시"}`:marketProfileReason(eps.reason);
+  const number=(value,unit)=>`<strong>${value}</strong><span>${unit}</span>`;
+  const shares=data.share_candidates.map(row=>`<tr><th scope="row">${esc(marketShareLabel(row.input_id))}<small>${esc(marketSharePeriodLabel(row.period_class))}</small></th><td>${esc(compactFinancialDate(row.display_end))}<small>${esc(marketScopeLabel(row))}</small></td><td class="numeric" title="${esc(row.value??marketProfileReason(row.reason))}">${row.value==null?"—":marketProfileAmount(row.value,0)} 주${row.value==null?`<small>${esc(marketProfileReason(row.reason))}</small>`:""}</td><td>${marketSourceLink(row.source)}</td></tr>`).join("");
+  const otherPrices=data.other_prices.map(row=>`<li>${esc(row.security.ticker)} · ${marketProfileAmount(row.value)} · ${row.trade_date?esc(compactFinancialDate(row.trade_date)):"거래일 자료 없음"} · 통화 미확인</li>`).join("");
+  return `<div class="market-input-band"><h3>가격·주당 정보</h3><div><span>거래일 기준 종가</span>${number(priceValue,"")}<small>${esc(priceDate)}</small></div><div><span>최근 12개월 공시 EPS</span>${number(epsValue,"USD/주")}<small>${esc(epsDate)}${eps.status==="AVAILABLE_REPORTED"&&eps.positive_for_multiple===false?" · 0 이하 EPS도 공시값 그대로 표시":""}</small></div></div>
+    <details class="market-input-evidence"><summary>주식 수와 근거</summary>
+    <p class="muted">요청 기준 ${esc(compactFinancialDate(data.financial_as_of))}${price?.trade_date?` · 실제 거래일 ${esc(compactFinancialDate(price.trade_date))}${Number.isInteger(price.staleness_calendar_days)?` · ${price.staleness_calendar_days}일 차이`:""}`:""}. 고정된 과거 거래일 자료이며 현재가·자동 갱신 자료가 아닙니다. 가격 통화는 확인되지 않았습니다. EPS와 증권의 적용 범위·주식 기준을 확인하기 전 PER은 제공하지 않습니다.</p>
+    <p>${(eps.sources||[]).map(marketSourceLink).join(" · ")||esc(marketProfileReason(eps.reason))}</p>
+    <div class="market-input-scroll table-wrap"><table class="market-input-table"><thead><tr><th>주식 수 구분</th><th>실제 기간·공시 범위</th><th class="numeric">공시 값</th><th>출처</th></tr></thead><tbody>${shares||'<tr><td colspan="4">직접 공시 주식 수 자료가 없습니다.</td></tr>'}</tbody></table></div>
+    ${otherPrices?`<details><summary>다른 증권의 관측 종가</summary><p class="muted">같은 회사의 다른 클래스·증권을 보존한 목록이며 기본 종목으로 자동 선택하지 않습니다.</p><ul>${otherPrices}</ul></details>`:""}</details>`;
+}
+function beginMarketInputProfile(){
+  let host=$("#profile-market-inputs");
+  if(!host){host=document.createElement("section");host.id="profile-market-inputs";host.className="market-input-section";host.setAttribute("aria-label","가격과 주당 공시 정보");
+    ($("#profile-summary-disclosure")||$("#profile-summary")).after(host)}
+  const serial=++marketProfileState.serial,token=explorerBasis.profileToken,key=explorerContextKey(),profile=S.profile,dataset=explorerDataset();
+  if(!profile||!latestExplorerPeriod()){host.hidden=true;host.innerHTML="";return}
+  const scope={dataset_id:dataset?.dataset_id,dataset_publication_id:dataset?.publication_id||dataset?.dataset_publication_id,
+    financial_as_of:profile.financial_as_of,cik:profile.company.cik};
+  const owns=()=>serial===marketProfileState.serial&&token===explorerBasis.profileToken&&key===explorerContextKey()&&S.profile===profile&&latestExplorerPeriod()&&!$("#company-profile").hidden;
+  host.hidden=false;host.innerHTML='<p class="muted" role="status">가격·주당 정보 조회 중…</p>';
+  marketProfileState.capability??=api("/api/market-inputs").catch(error=>{marketProfileState.capability=null;throw error});
+  marketProfileState.capability.then(capability=>{
+    if(!owns())return null;
+    if(!capability.configured){host.hidden=true;return null}
+    if(!marketProfileEligible({...dataset,financial_as_of:profile.financial_as_of},true,capability,scope.cik)){
+      host.innerHTML='<p class="muted">가격·주당 정보는 준비된 최신 기업 자료에서 조회할 수 있습니다.</p>';return null;
+    }
+    const query=new URLSearchParams(scope).toString();
+    let pending=marketProfileState.cache.get(query);
+    if(!pending){pending=api(`/api/market-inputs?${query}`).then(data=>validateMarketProfile(data,scope,capability));marketProfileState.cache.set(query,pending);pending.catch(()=>marketProfileState.cache.delete(query))}
+    return pending;
+  }).then(data=>{if(data&&owns())host.innerHTML=marketProfileMarkup(data)}).catch(error=>{
+    if(owns())host.innerHTML=`<p class="muted" role="status">가격·주당 정보를 불러오지 못했습니다. ${esc(error.message)}</p>`;
+  });
+}
