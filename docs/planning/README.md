@@ -1,5 +1,20 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 main 전달 승인: 사용자가 수락된 매출 성장률·WDC 최신 분기 교정의
+검토와 main 병합을 요청했다. 문서만 달라진 main `df694e4a88`을 일반 merge하여
+양쪽 기록을 보존했다. 아래 LIVE/main 미병합 문구는 병합 전 인수 기록이다.
+최종 병합 여부와 merge SHA는 Git 이력 및 후속 PR 결과로 확인한다.
+실행 UI `74e25fa3d5`·backend `fdacea1ea0`의 불변 checkout과 운영 자료는 유지한다.
+
+2026-11-14(KST) [매출 성장률·최신 실제 분기 교정](../implementation/governed-latest-revenue-delta-20261114.md)은
+**독립 검증·로컬 인수·LIVE 완료, main 미병합**이다. Backend `fdacea1ea0`와
+UI bridge `74e25fa3d5`를 분리해 기존92 projection/기록을 보존했다. GOOGL FY2025
+성장률15.1%와 WDC 실제2026 Q4 최신 분기/TTM을 제공하며 FY2022는 차원 차이로
+보류한다. 18765(PID47380)→19074(PID1378071), 재무 기준일2026-10-25,
+준비 확인2026-11-13T16:44:03.333134Z다. 남은23 중8개 financial 준비17실행은
+완료했지만 native qualification과 다른15개 보류를 해결한 것은 아니다.
+아래 이전 확장/후보 상태는 당시 기록이며, 이전92 main 병합은 PR #93에 해당한다.
+
 2026-11-14 동시 main 통합: [PR93](https://github.com/pluswc/sec_xbrl/pull/93)이
 main `3cfe1b79fcdfe62c03cd432e509bcb4f361dfbce`에 병합되어 운영 consumer와
 추가 producer/operator 코드가 이미 포함됐다. PR94 branch는 최신 main을 일반
