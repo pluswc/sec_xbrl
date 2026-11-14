@@ -2161,7 +2161,7 @@ function revenueBreakdownValueCells(cell,missingReason,expectedDenominator){
   const present=cell?.value!=null,conflict=cell?.reason==="COMPETING_PREPARED_SCOPE";
   const reason=conflict?"같은 범위의 준비 자료가 일치하지 않습니다.":cell?.reason?revenueGapLabel(cell.reason):missingReason;
   const share=cell?.ratios?.share,yoy=cell?.ratios?.yoy;
-  const denominator=({CONSOLIDATED:"연결 매출",SEGMENT_SUBTOTAL:"부문 소계",FIXED_SCOPE_REPORTED:"같은 공시 범위의 보고 매출"})[share?.denominator];
+  const denominator=({CONSOLIDATED:"연결 매출",SEGMENT_SUBTOTAL:"부문 소계",FIXED_SCOPE_REPORTED:"같은 공시 범위의 보고 매출",DISCLOSED_FIXED_SCOPE_TOTAL:"공시 부문 총매출"})[share?.denominator];
   const priorCaption=yoy?`${yoy.prior_period_start} ~ ${inclusiveEnd(yoy.prior_period_end)}`:"";
   const shareReason=cell?.ratio_hold_reason||cell?.q4_ratio_reviewed?revenueRatioReason(cell,"share"):expectedDenominator?`같은 공시에서 비중을 계산할 수 있는 분모가 확인되지 않았습니다. 기준은 ${expectedDenominator}입니다.`:"연결 매출은 비중 계산의 기준입니다.";
   return `<td>${present?numberMarkup(cell.value,REVENUE_MONEY):revenueRate(null,reason)}</td>
@@ -2210,7 +2210,7 @@ function revenueBoardPoint(line,index,mode){
   const denominator=cell?.ratios?.share?.denominator;
   const denominatorKey=entry=>{
     const type=entry?.cell.ratios?.share?.denominator;
-    return type==="FIXED_SCOPE_REPORTED"?`${type}:${JSON.stringify(line.axes)}`:type==="CONSOLIDATED"?type:type==="SEGMENT_SUBTOTAL"&&line.scope?`${type}:${line.scope}`:null;
+    return type==="FIXED_SCOPE_REPORTED"||type==="DISCLOSED_FIXED_SCOPE_TOTAL"?`${type}:${JSON.stringify(line.axes)}`:type==="CONSOLIDATED"?type:type==="SEGMENT_SUBTOTAL"&&line.scope?`${type}:${line.scope}`:null;
   };
   const sameDenominator=mode!=="share"||denominatorKey(item)&&denominatorKey(item)===denominatorKey(previous);
   const connected=previous?.row===item?.row&&item?.row.mapping_epoch&&!item.row.mapping_review_required&&sameDenominator&&cell?.connect_previous!==false&&previous?.cell.connect_next!==false;
@@ -2223,7 +2223,7 @@ function revenueBoardPoint(line,index,mode){
   const reason=!cell?missingReasons[gap]||REVENUE_GAP_LABELS[gap]||"이 기간에 준비된 자료가 없습니다.":
     mode==="yoy"?revenueRatioReason(cell,"yoy"):
     mode==="share"?revenueRatioReason(cell,"share"):"준비된 매출 값이 없습니다.";
-  const basis=denominator==="FIXED_SCOPE_REPORTED"?"같은 공시 범위의 보고 매출":denominator==="CONSOLIDATED"?"연결 매출":denominator==="SEGMENT_SUBTOTAL"?`부문 소계 · ${revenueScopeLabel(line.scope)}`:"분모 확인 불가";
+  const basis=denominator==="DISCLOSED_FIXED_SCOPE_TOTAL"?"공시 부문 총매출 · 명시 범위 연결 검토":denominator==="FIXED_SCOPE_REPORTED"?"같은 공시 범위의 보고 매출":denominator==="CONSOLIDATED"?"연결 매출":denominator==="SEGMENT_SUBTOTAL"?`부문 소계 · ${revenueScopeLabel(line.scope)}`:"분모 확인 불가";
   return {value:cell?.[metric]??null,connect:Boolean(connected),reason,basis,yoyPolicy:revenueQ4Yoy(cell)?revenueQ4YoyDetail(cell):"같은 공시의 전년 비교값 · 추이의 전년 금액과 다를 수 있습니다.",sources:mode==="yoy"&&revenueQ4Yoy(cell)?[...(cell.sources||[]),...(cell.ratios.yoy.prior_sources||[])]:cell?.sources||[]};
 }
 function revenueBoardLabel(line){

@@ -237,3 +237,48 @@ def test_renamed_member_grant_cannot_change_the_actual_axis(fixture):
     names[(row["cik"], row["source_filing_id"], "raw-axis")] = "fixture:OtherAxis"
     with pytest.raises(ValueError, match="scope correspondence"):
         run(fixture)
+
+
+@pytest.mark.parametrize("permission", ["approved", "absent", "wrong_fact", "one_document"])
+def test_disclosed_fixed_segment_total_requires_every_separate_permission(fixture, permission):
+    from sec_xbrl.analytics.revenue_q4_continuity import review_endpoint
+    review, baseline, _, observations, names = fixture
+    view = baseline["companies"]["0000000001"]["quarterly"]
+    row = view["groups"].pop("products")[0]
+    view["groups"]["segments"] = [row]
+    view["availability"]["segments"] = view["availability"].pop("products")
+    qualifier = {"srt:ConsolidationItemsAxis": "us-gaap:OperatingSegmentsMember"}
+    row.update(axis_members={"us-gaap:StatementBusinessSegmentsAxis": "fixture:SegmentMember", **qualifier}, fixed_axis_members=qualifier)
+    for source in observations[:4]:
+        source["raw_dimension_signature"].append(["qual-axis", "qual-member", None, "EXPLICIT", "false"])
+        source["canonical_dimension_signature"].append(["canonical-qual-axis", "canonical-qual-member", None, "EXPLICIT", "false"])
+        source["dimension_mapping_ids"].append(["qual-axis-map", "qual-member-map"])
+        for identity, name in (("raw-axis", "us-gaap:StatementBusinessSegmentsAxis"), ("raw-member", "fixture:SegmentMember"),
+                               ("qual-axis", "srt:ConsolidationItemsAxis"), ("qual-member", "us-gaap:OperatingSegmentsMember")):
+            names[(source["cik"], source["source_filing_id"], identity)] = name
+    for index, approved in enumerate(review["amount_links"]):
+        approved["annual"] = review_endpoint(observations[index * 2])
+        approved["ytd9"] = review_endpoint(observations[index * 2 + 1])
+    for key in ("projection_grants", "share_grants", "yoy_grants"):
+        review[key][0]["target"]["group"] = "segments"
+    grant = review["share_grants"][0]
+    grant["denominator_relation"] = "DISCLOSED_FIXED_SCOPE_TOTAL_EQUIVALENCE"
+    grant["denominator_source_fact_ids"] = [source["source_fact_id"] for source in observations[-2:]]
+    review["evidence_files"].update({"annual-doc": {"sha256": "1" * 64}, "nine-doc": {"sha256": "2" * 64}})
+    grant["evidence"] = [{"file_id": key, "locator": "explicit segment net revenue parent", "assertion": "reviewed total equivalence"}
+                         for key in ("annual-doc", "nine-doc")]
+    if permission == "absent":
+        del grant["denominator_relation"]
+    elif permission == "wrong_fact":
+        grant["denominator_source_fact_ids"][0] = "foreign"
+    elif permission == "one_document":
+        grant["evidence"] = grant["evidence"][:1]
+    result, companion = run(fixture)
+    cell = result["companies"]["0000000001"]["quarterly"]["groups"]["segments"][0]["cells"][0]
+    assert cell["value"] == "50"
+    if permission == "approved":
+        assert cell["share"] == "25.00", companion["exclusions"]
+        assert cell["ratios"]["share"]["denominator"] == "DISCLOSED_FIXED_SCOPE_TOTAL"
+    else:
+        assert cell["share"] is None
+        assert companion["exclusions"][0]["reason"] == "Q4_SHARE_FIXED_PARENT_SCOPE_MISMATCH"

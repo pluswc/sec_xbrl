@@ -160,3 +160,7 @@ Distinguish absent prepared input from an unresolved scope or a source tag/table
 `공시 태그와 표의 항목 불일치 · 계산 보류` does not mean no disclosure exists.
 Keep original Raw/T1 and accepted amount/source values unchanged. Review evidence grants
 never silently merge labels/epochs or connect unapproved chart edges. Retain the current layout.
+
+An explicitly reviewed `DISCLOSED_FIXED_SCOPE_TOTAL` denominator is named `공시 부문 총매출`.
+It retains its full fixed-scope identity and paired source proof; do not label it as a
+same-filing reported parent or infer permission from component totals adding up.

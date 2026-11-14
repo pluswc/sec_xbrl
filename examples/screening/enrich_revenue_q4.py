@@ -324,15 +324,29 @@ def enrich(review: dict, baseline: dict, old: dict, observations: list[dict], *,
                 return False
         return True
 
+    def disclosed_fixed_total(grant: dict, row: dict, parent: dict, parent_row: dict | None) -> bool:
+        qualifier = {"srt:ConsolidationItemsAxis": "us-gaap:OperatingSegmentsMember"}
+        evidence_hashes = {review["evidence_files"][item["file_id"]].get("sha256") for item in grant["evidence"]}
+        return (grant.get("denominator_relation") == "DISCLOSED_FIXED_SCOPE_TOTAL_EQUIVALENCE"
+            and grant["target"]["group"] == "segments" and row.get("scope") is None
+            and set(row["axis_members"]) == {"us-gaap:StatementBusinessSegmentsAxis", "srt:ConsolidationItemsAxis"}
+            and row["axis_members"].get("srt:ConsolidationItemsAxis") == qualifier["srt:ConsolidationItemsAxis"]
+            and row.get("fixed_axis_members") == qualifier and parent_row is None
+            and grant["denominator"].get("target", {}).get("group") == "totals"
+            and len(parent["source_inputs"]) == 2
+            and grant.get("denominator_source_fact_ids") == [source["source_fact_id"] for source in parent["source_inputs"]]
+            and len(evidence_hashes - {None}) >= 2)
+
     for grant in review["share_grants"]:
         source, row, cell = numerator(grant)
         parent, parent_row = parent_record(grant["denominator"])
+        disclosed_parent = disclosed_fixed_total(grant, row, parent, parent_row)
         reason = None
         if _period(source) != _period(parent) or not _basis([source, parent]):
             reason = "Q4_SHARE_PARENT_PERIOD_OR_BASIS_MISMATCH"
         elif not share_revenue_scope(source, parent):
             reason = "Q4_SHARE_REVENUE_CONCEPT_OR_FILING_MISMATCH"
-        elif row.get("fixed_axis_members") != (parent_row or {}).get("fixed_axis_members") or row.get("scope") and (parent_row is None or parent_row.get("member") != row["scope"]):
+        elif (row.get("fixed_axis_members") != (parent_row or {}).get("fixed_axis_members") and not disclosed_parent) or row.get("scope") and (parent_row is None or parent_row.get("member") != row["scope"]):
             reason = "Q4_SHARE_FIXED_PARENT_SCOPE_MISMATCH"
         elif not row.get("scope") and parent_row is not None:
             reason = "Q4_SHARE_PARENT_SCOPE_MISMATCH"
@@ -346,7 +360,8 @@ def enrich(review: dict, baseline: dict, old: dict, observations: list[dict], *,
         if cell.get("share") is not None:
             raise ValueError("existing non-null ratio must not be replaced")
         cell["share"] = _percentage(source["value_numeric"], parent["value_numeric"], yoy=False)
-        cell.setdefault("ratios", {})["share"] = {"denominator": "SEGMENT_SUBTOTAL" if row.get("scope") else "CONSOLIDATED",
+        cell.setdefault("ratios", {})["share"] = {"denominator": "DISCLOSED_FIXED_SCOPE_TOTAL" if disclosed_parent else "SEGMENT_SUBTOTAL" if row.get("scope") else "CONSOLIDATED",
+            **({"denominator_relation": grant["denominator_relation"], "denominator_source_fact_ids": grant["denominator_source_fact_ids"]} if disclosed_parent else {}),
             "derivation_rule_version": RATIO_RULE, "parent_value": parent["value_numeric"], "basis_assurance": ASSURANCE,
             "source_fact_ids": [item["source_fact_id"] for item in parent["source_inputs"]]}
         ratio_records.append({"kind": "share", "grant": grant, "value": cell["share"], "inputs": [source, parent]})

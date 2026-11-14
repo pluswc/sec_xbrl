@@ -196,3 +196,36 @@ prior 실제 기간과 focusFY·four-leg 호환/불일치, 금액/비율 독립 
 진단 null 한정, unapproved chart edges, 기존 non-null 보존을 포함한다.
 실제 준비·비율 전수 대조·기존224/원자료 보존·109 private/live UI 인수는 리드와
 독립 검증이 별도로 수행한다. 아직 이를 PASS나 전체 회사 지원으로 주장하지 않는다.
+
+## 별도 승인: 공시 부문 총매출의 fixed-scope 동등성
+
+최초 후보 `0eb4b536a4` 동결 뒤 리드와 별도 reviewer가 AMD2025 두 원문 segment
+표의 명시적 parent 구조를 추가 확인했다. 연간 f-512/c-1과 Q3 f-460/c-1은 동일한
+3부문 아래 Total net revenue를 명시하며 All Other는 매출이 아닌 미배분 비용/
+credit 영역이다. 이는 합계 일치만으로 한 추론이 아니라 원문 parent 관계의 별도
+판단이다. 원 OperatingSegments qualifier와 무차원 총계 source는 그대로 둔다.
+
+share grant의 선택형 `denominator_relation: DISCLOSED_FIXED_SCOPE_TOTAL_EQUIVALENCE`와
+`denominator_source_fact_ids: [FY총계FactID,YTD9총계FactID]`를 추가 승인했다.
+정확한 segments target의 StatementBusinessSegmentsAxis+OperatingSegmentsMember
+qualifier, 기존 total target/cell ID/hash, 두 개의 서로 다른 원문 pin과 locator,
+두 parent FactID 순서가 모두 필요하다. 여전히 같은 Q4 실제 기간/CIK/basis,
+paired filing별 원 매출 concept/namespace/unit, 양의 분모와 분자 범위를 검증한다.
+이 grant가 없거나 FactID/원문이 부족하면 fixed-scope 거부는 그대로다.
+다른 제품·지역·scope에 대한 자동 consolidated fallback을 허용하지 않는다.
+
+공개 denominator enum은 `DISCLOSED_FIXED_SCOPE_TOTAL`, 표시명은 **공시 부문 총매출**이다.
+기존 `FIXED_SCOPE_REPORTED`/같은 공시 보고 부모와 구분하고 chart denominator
+identity에도 범위를 유지한다. 금액 승인이나 source QName만으로 이 권한이 생기지 않는다.
+
+리드의 별도 입력 `root-review-approved-v2.json` SHA256은
+`a61d3f2ff61ac992e8ae8e62d46ef8f14b981eac431dfdb1c52a6bb80d79c86f`다.
+v1을 보존하고 정확한 AMD3 share grant만 추가했다(조건부 share219; 나머지
+22 amount/11 projection/17 YoY/hold3 동일). v1 3개사 scope 승인과 기존12개
+cross-concept share 보류는 이 추가 승인과 별개의 판단이며 여전히 유지한다.
+승인 수를 실제 표시 수로 주장하지 않는다. ROOT가 source 독립 검증 후 새 경로에
+발행하고 별도 자료 검증·운영 인수를 수행한다. Writer는 실제 입력을 실행하지 않았다.
+
+후속 자체 검사: Python **81 PASS** (0.11초), 전체 Node **152 PASS** (35.13초),
+Ruff/diff PASS. 명시 관계 승인/누락, 잘못된 parent Fact, 원문 한 개의 부정 fixture와
+별도 공개 분모/hover 범위 검사를 포함한다. 원본 core·legacy revenue policy는 불변이다.
