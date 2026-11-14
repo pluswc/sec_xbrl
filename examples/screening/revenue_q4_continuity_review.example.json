@@ -1,0 +1,15 @@
+{
+  "schema_version": "revenue-q4-continuity-review-v1",
+  "authority": "ROOT",
+  "status": "PROPOSED",
+  "financial_as_of": "2026-10-25",
+  "baseline_asset": {"path": "/absolute/pinned/revenue-breakdowns.json", "sha256": "REPLACE_WITH_64_HEX"},
+  "baseline_companion": {"path": "/absolute/pinned/governed-revenue-q4.json", "sha256": "REPLACE_WITH_64_HEX"},
+  "source_inventory": {"path": "/absolute/pinned/source-inventory50.json", "sha256": "REPLACE_WITH_64_HEX"},
+  "evidence_files": {},
+  "amount_links": [],
+  "projection_grants": [],
+  "share_grants": [],
+  "yoy_grants": [],
+  "hold_grants": []
+}

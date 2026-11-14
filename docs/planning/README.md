@@ -1,5 +1,15 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 [Q4 매출 구성 연결·비율 companion](../implementation/revenue-q4-continuity-20261114.md)은
+**구현·독립 검증·ROOT 로컬/운영 인수 PASS**다. 금융 소스 `76e475f0be`,
+기존 시장 소비자 보존 통합 `7b6cb45f81`을 구분하며 Python86/Node159/Ruff 및
+독립 data-v2 검증을 통과했다. ROOT 승인 v3로 새 금액11/share209/YoY17과
+진단3을 인수했고 기존 3,228개 component 금액·4,910개 비율 및 입력408pins,
+109회사/14datasets/History와 원 SQLite hash를 보존했다. 특수 부모 AMD3/NVDA2는
+개별 승인하고 cross-concept12는 보류했다. frontend18765만 전환해 기존 backend19078과
+시장 profile을 유지했다. main 기준245a이며 원격 push/PR은 미요청·미수행,
+main 미병합이다. 실제 발행/운영 인수는 ROOT가 수행했고 writer는 문서에 근거를 기록했다.
+
 2026-11-14 사용자가109 확장·상세 연결의 main 전달을 승인했다. 별도 branch에서
 원래 financial3fa와 PR98 main `ad877d26be`를 일반 merge해 계획 항목을 모두 보존했다.
 Python130/수락 bridge·최신 main UI는 부모 bytes와 같고 focused Python10·Node9/
@@ -846,3 +856,12 @@ retained held-FD typed journal evidence; previous failed-source evidence remains
 unchanged. See the [dated ownership contract](../implementation/company-history-workflow.md#2026-10-15-sqlite-ownership-repair-after-source-951-fail).
 New writer checks, independent source acceptance and actual execution remain
 separate; actual recovery is pending and financial readiness is not declared.
+
+2026-11-14 추가 검증 후보: 빈 fixed scope와 미지정 scope를 동일하게 처리하고, 고정 범위의 분모는 부모의 전체 축·구성원 및 원문 입력과 정확 대조한다. 신규 비중은 `FIXED_SCOPE_Q4`(같은 Q4 공시 범위의 매출)로 구분한다. 선택 기간에 빈 선택 항목과 미선택 준비 항목이 함께 있으면 `이 기간의 준비 항목 보기` 버튼을 제공한다. 사용자 클릭 전 선택은 불변이며 명시적인 클릭 후에는 해당 기간에 준비된 항목 최대 8개로 선택을 교체한다. 관련 Python 86개 통과; 새 소스 독립 검증 및 실제 v2 발행·운영 인수는 대기 중이다. 기존 published-v1 및 ROOT 승인 v2는 변경하지 않았다.
+
+2026-11-14 Q4 companion의 원격 push/PR 생성이 사용자 승인됐다.
+origin/main `245a52bc44`는 추가 변경이 없어 별도 통합·충돌 해결이 불필요하다.
+시장 소비자를 포함한 인수 제품은 동일하며 금융76e/소비자7b6/data-v2/실제live
+검증 근거를 재사용한다. 자료·store·runtime 재발행이나 변경은 없다.
+ROOT의 push/PR/CI 실행은 대기 중이고 main 병합은 미요청이다.
+위 로컬 전용·원격 미요청 문구는 각 기록 당시 상태로 보존한다.

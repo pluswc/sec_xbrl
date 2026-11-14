@@ -149,3 +149,27 @@ browser acceptance remain pending.
   YoY is unavailable. Old publications retain their detail-only adjunct and labels.
 - No browser calculation or new display layout is introduced. Implementation/independent
   verification and actual publication/acceptance remain separate in the milestone contract.
+
+## Reviewed Q4 revenue companion
+
+Keep reported same-filing YoY distinct from `Q4 전년비 · 연간−9개월 계산`.
+The latter exposes its current/prior Q4 amounts, actual periods, paired input sources,
+comparison-only retrospective presentation when applicable, and arithmetic-only assurance.
+Amount/share/YoY readiness is independent; a missing denominator does not hide a valid amount.
+Distinguish absent prepared input from an unresolved scope or a source tag/table conflict;
+`공시 태그와 표의 항목 불일치 · 계산 보류` does not mean no disclosure exists.
+Keep original Raw/T1 and accepted amount/source values unchanged. Review evidence grants
+never silently merge labels/epochs or connect unapproved chart edges. Retain the current layout.
+
+An explicitly reviewed `DISCLOSED_FIXED_SCOPE_TOTAL` denominator is named `공시 부문 총매출`.
+It retains its full fixed-scope identity and paired source proof; do not label it as a
+same-filing reported parent or infer permission from component totals adding up.
+
+Q4 companion local operating acceptance (2026-11-14): financial source `76e475f0be`,
+consumer integration `7b6cb45f81`; independent checks and ROOT live UI/data acceptance passed.
+Use compact table captions `동일 범위` / `부문 총매출` with exact denominator definitions in
+native title and accessible labels; chart context retains the full definition. A partially
+missing selected period may offer `이 기간의 준비 항목 보기`; only explicit activation replaces
+selection with that period's prepared items. Never silently merge raw scope groups.
+Existing market-input consumers remain present; this does not authorize a new price producer.
+Remote delivery/main merge for this milestone has not been requested or performed.
