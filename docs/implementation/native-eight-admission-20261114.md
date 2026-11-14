@@ -4,7 +4,9 @@
 
 2026-11-14 리드는 기존92 교정 발행물과 모든 개인 기록을 보존하며 이미 준비된
 partial7·ISRG의 실제 생산자 승인을 추가하고 100개사를 합성하도록 승인했다.
-현재는 구현 중이며 독립 검증·실자료 발행·로컬 인수·운영·main 병합은 별도다.
+2026-11-14 현재 **구현·독립 검증 PASS·로컬 인수·100개사 LIVE 완료, main 미병합**이다.
+실행 소스는 `4c1ff493030b592ccbbc44d7251c6bb6798be59e`이며 이 후속 인수 커밋은
+문서만 변경한다. 아래 승인/수락/실행 절차는 최초 계약과 당시 검사 기록이다.
 기준 main은 `ebdbe938d7acef1de2618661934e8e235722e45b`다.
 
 ## 불변 경계
@@ -95,3 +97,33 @@ Private serve는 기존 catalog/projection/union/delta 옵션을 보존하고 �
 5.68초에 PASS했다. 보조자료 owner Node6개와 Ruff·CJS 문법·diff·baseline 불변
 fingerprint도 PASS했다. 이는 합성/소스 검사이며 실제8개사 factory·새 발행·private
 runtime·100 운영 인수를 수행했다는 의미가 아니다. 기존 회사 감사는 반복하지 않았다.
+
+
+## 2026-11-14 로컬 운영 인수
+
+실제8개사의 native combined/projection 네 발행이 각각9.10/3.28/3.79/1.52초에
+PASS했고 최대 RSS는513,132 KiB였다. 앞서 완료한17개 상류 실행과 회사 감사는
+반복하지 않았다. HONA/SPCX의 연간 관측0개를 유지했다.
+
+새100 발행물은 `screening-cohort-union-c69e55ff570fce6fd927f1bb`, manifest SHA256
+`8983258d3b6314feba883dc05d21ef535c2f139f8811bf0e006cad0daa025075`, 위치는
+`data/processed/nasdaq100_20261111/native-eight-admission-20261114/operating-union100`이다.
+기존92의 연간11,408·고정 분기30,576·최신 분기30,617개 관측의 행/값/ID가 정확히
+같았다. GOOGL 성장률15.1%와 WDC2026 Q4/TTM도 보존했다. 재무 기준일은2026-10-25다.
+
+Private100 조건/결과 저장·재열기·CSV가 PASS했다. 실제 journal SHA256
+`3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`와 원래92를
+포함한 보호 파일8개 해시가 같았다. 18765(frontend PID56684)는19076(backend
+PID1428674)으로 연결됐으며 rollback19074를 유지했다. 동시 적용된 최신 UI의
+app `fd0aed086…`/CSS `49ddc386…` bytes를 그대로 보존하고 새 bridge `34de7a5a…`만
+사용했다. 최초 전환은 이전 PID 불일치로 변경 전에 중단했고, 현재 UI로 다시
+준비하여 UI 검사만 수행했다. 데이터/저장 검사는 반복하지 않았다.
+
+ALAB/CRWV/ISRG/SHOP의 기존 주요 재무제표 근거 미준비 지표는 빈값으로 유지한다.
+이번 발행은 없는 값을 추정하거나 남은 다른 보류 원인을 해결한 것이 아니다.
+
+근거는 `work/native-eight-admission-20261114/ops/publication-summary.json`,
+`runtime/composition-acceptance.json`, `runtime/private-uat-acceptance.json`,
+`runtime/root-current-ui-candidate-acceptance.json`과 Windows 시각화 경로
+`native-eight-admission-20261114/live-switch.json`,
+`preview-current-ui-browser-acceptance.json`이다. main 병합은 아직 수행하지 않았다.
