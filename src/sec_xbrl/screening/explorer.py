@@ -117,7 +117,7 @@ def latest_company_period(reader: Any, cik: str, *, quarterly: bool) -> dict[str
         return max(periods, key=lambda row: (row["calendar_year"], row["calendar_quarter"]))
 
     by_year: dict[int, list[dict[str, Any]]] = {}
-    for row in observation_rows(reader, cik=cik):
+    for row in observation_rows(reader, cik=cik, latest=True):
         by_year.setdefault(row["fiscal_year"], []).append(row)
     if not by_year:
         return None

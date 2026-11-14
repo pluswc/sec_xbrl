@@ -140,3 +140,81 @@ def test_monetary_registration_requires_its_catalog_definition_version():
     with pytest.raises(ValueError, match="definition differs"):
         compare_rows([annual(2024)], quarterly=False, parent=parent(), by_id={},
                      catalog={"operating_income": {"definition_version": "other"}})
+
+
+@pytest.mark.parametrize("quarterly", [False, True])
+def test_latest_only_comparison_enables_condition_without_expanding_fixed_view(tmp_path, quarterly):
+    from examples.screening.prepare_screening_changes import publish
+    from sec_xbrl.metrics.quarterly_screening import METRIC_DEFINITIONS as QUARTER
+    from sec_xbrl.metrics.screening import METRIC_DEFINITIONS as ANNUAL
+    from sec_xbrl.screening.common import sha256_file
+    from sec_xbrl.screening.service import ScreeningService
+    from tests.screening.test_read_snapshot import approve, exporter
+
+    company = {"cik": "0000000001", "ticker": "TEST", "name": "Example", "sic_code": None}
+    annual_definitions, quarter_definitions = deepcopy(list(ANNUAL)), deepcopy(list(QUARTER))
+    metric = "quarter_operating_income" if quarterly else "operating_income"
+    next(row for row in (quarter_definitions if quarterly else annual_definitions) if row["metric_id"] == metric)["definition_version"] = "v1"
+    before = quarter(2023, 2, metric) if quarterly else annual(2023)
+    after = {**(quarter(2024, 2, metric) if quarterly else annual(2024)), "value": "150"}
+    if quarterly:
+        for row in (before, after):
+            row.update(calendar_year=row["fiscal_year"], calendar_quarter=2)
+    def period(row):
+        return {key: row[key] for key in ("cik", "fiscal_year", "fiscal_quarter", "calendar_year", "calendar_quarter", "period_start", "period_end", "end_convention") if key in row} | {"bucket_status": "PERIOD_AVAILABLE"}
+    original = SimpleNamespace(companies=[company], company=lambda cik: deepcopy(company),
+        manifest={"dataset_id": "parent", "publication_id": "parent-pub", "financial_as_of": CUTOFF,
+            "fixture_kind": "SYNTHETIC_ERROR_FIXTURE", "sources": {"metadata": {"publication_id": "metadata"}}},
+        _manifest_sha256="a" * 64, metric_definitions=annual_definitions, quarter_definitions=quarter_definitions,
+        observations=[] if quarterly else [before], quarter_observations=[before] if quarterly else [],
+        metric_support=[], quarter_support=[], metadata=[], quarter_period_inventory=[period(before)] if quarterly else [],
+        latest_quarter_periods={company["cik"]: period(after)} if quarterly else {},
+        quarterly=SimpleNamespace(manifest={"global_quarter_spine": [{"calendar_year": 2023, "calendar_quarter": 2}]}),
+        latest_rows=lambda **selection: deepcopy([before, after] if selection["quarterly"] == quarterly else []),
+        verify_all=lambda: {"dataset_id": "parent", "publication_id": "parent-pub", "quarter_observation_count": int(quarterly)})
+    parent_root = tmp_path / "parent"
+    exporter.export_reader(original, parent_root, {"source_revision": "synthetic"})
+    config = tmp_path / "config.json"
+    config.write_bytes(exporter.encoded({"parent_root": str(parent_root), "parent": approve(parent_root), "dataset_id": "new"}))
+    destination = tmp_path / "new"
+    publish({"path": str(config), "sha256": sha256_file(config)}, destination)
+    service = ScreeningService({"new": destination}, tmp_path / "private.sqlite", read_snapshots={"new": approve(destination)})
+    reader = service.datasets["new"]
+    support_rows = reader.quarter_support if quarterly else reader.metric_support
+    registered = next(row for row in support_rows if row["metric_id"] == metric + "_yoy")
+    assert registered["execution_supported"] is True
+    assert registered["available_periods"] == 1 and registered["observed_periods"] == 2
+    assert registered["view_support"]["fixed"]["available_periods"] == 0
+    assert registered["view_support"]["latest"]["available_periods"] == 1
+    assert len(reader.rows(quarterly=quarterly, metric_id=metric + "_yoy")) == 1
+    assert len(reader.latest_rows(quarterly=quarterly, metric_id=metric + "_yoy")) == 2
+    content = {"universe": {"mode": "ALL_PREPARED"},
+        "period_policy": {"mode": "LATEST_COMPANY_QUARTER_V1" if quarterly else "LATEST_COMPANY_ANNUAL_V1",
+                          "availability": service.batch_availability(mode="PREPARED_SIMULATION", dataset_id="new")},
+        "predicates": [{"metric_id": metric + "_yoy", "definition_version": VERSION, "operator": "EQ", "threshold": "50"}],
+        "columns": ["ticker", "aggregate"], "sort": {"column": "ticker", "direction": "ASC"}}
+    service.create_screen("latest-only", content, dataset_id="new")
+    evaluated = service.preview(content, "new")["rows"][0]
+    assert evaluated["predicates"][0]["reason"] == "PREDICATE_MATCHED"
+    assert evaluated["aggregate"] == "PASS", evaluated
+    fixed = deepcopy(content)
+    fixed["period_policy"] = ({"mode": "FIXED_CALENDAR_QUARTER_END", "calendar_year": 2023, "calendar_quarter": 2}
+                              if quarterly else {"mode": "FIXED_FISCAL_YEAR", "fiscal_year": 2023})
+    assert service.preview(fixed, "new")["rows"][0]["aggregate"] == "UNDETERMINED"
+
+
+def test_support_deduplicates_shared_fixed_and_latest_periods():
+    from examples.screening.prepare_screening_changes import support
+    row = {"cik": "0000000001", "metric_id": "operating_income_yoy", "fiscal_year": 2024,
+           "period_class": "FY", "period_start": "2024-01-01", "period_end": "2025-01-01",
+           "availability_status": "AVAILABLE", "unavailable_reason": None}
+    result = support({"cik": row["cik"], "ticker": "TEST"}, [{"metric_id": row["metric_id"]}], [row], [deepcopy(row)])[0]
+    assert result["available_periods"] == result["observed_periods"] == 1
+    assert result["view_support"]["fixed"]["available_periods"] == result["view_support"]["latest"]["available_periods"] == 1
+
+
+
+def test_legacy_annual_reader_without_latest_rows_keeps_anchor_fallback():
+    from sec_xbrl.screening.explorer import latest_company_period
+    reader = SimpleNamespace(observations=[annual(2023), annual(2024)])
+    assert latest_company_period(reader, "0000000001", quarterly=False)["fiscal_year"] == 2024

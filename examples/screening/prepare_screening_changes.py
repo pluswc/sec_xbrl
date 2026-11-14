@@ -104,16 +104,32 @@ def compare_rows(rows: list[dict], *, quarterly: bool, parent: ScreeningReadSnap
     return result
 
 
-def support(company: dict, definitions: list[dict], rows: list[dict]) -> list[dict]:
+def support(company: dict, definitions: list[dict], fixed: list[dict], latest: list[dict]) -> list[dict]:
+    """Execution is available in either view; counts deduplicate shared coordinates."""
+    def coordinate(row: dict) -> tuple:
+        return tuple(row.get(key) for key in ("cik", "metric_id", "fiscal_year", "fiscal_quarter",
+            "calendar_year", "calendar_quarter", "period_class", "period_start", "period_end"))
+
+    def summarize(rows: list[dict]) -> dict:
+        coordinates = defaultdict(list)
+        for row in rows:
+            coordinates[coordinate(row)].append(row)
+        available = sum(any(row["availability_status"] == "AVAILABLE" for row in group)
+                        for group in coordinates.values())
+        reasons = sorted({row["unavailable_reason"] for row in rows if row.get("unavailable_reason")})
+        return {"available_periods": available, "observed_periods": len(coordinates),
+                "reasons": reasons or ([] if available else ["PERIOD_NOT_PREPARED"])}
+
     output = []
     for definition in definitions:
-        present = [row for row in rows if row["metric_id"] == definition["metric_id"]]
-        available = sum(row["availability_status"] == "AVAILABLE" for row in present)
-        reasons = sorted({row["unavailable_reason"] for row in present if row.get("unavailable_reason")})
+        selected = {name: [row for row in rows if row["metric_id"] == definition["metric_id"]]
+                    for name, rows in (("fixed", fixed), ("latest", latest))}
+        combined = summarize(selected["fixed"] + selected["latest"])
+        available = combined["available_periods"]
         output.append({"cik": company["cik"], "ticker": company["ticker"], "metric_id": definition["metric_id"],
             "definition_version": VERSION, "execution_supported": bool(available),
-            "support_status": "AVAILABLE" if available else "UNAVAILABLE", "available_periods": available,
-            "observed_periods": len(present), "reasons": reasons or ([] if available else ["PERIOD_NOT_PREPARED"])})
+            "support_status": "AVAILABLE" if available else "UNAVAILABLE", **combined,
+            "view_support": {name: summarize(rows) for name, rows in selected.items()}})
     return output
 
 
@@ -178,15 +194,17 @@ class PreparedReader(ScreeningReadSnapshot):
         for name, rows in views.items():
             additions = compare_rows(rows, quarterly=name.startswith("quarter"), parent=self.parent, by_id=by_id, catalog=catalog)
             views[name] = rows + additions
-            if not name.endswith("latest"):
-                definitions = self.new_definitions[name == "quarter"]
-                destination = self.quarter_support if name == "quarter" else self.metric_support
-                # Only add once; export visits each company in original order.
-                if not any(row["cik"] == cik and row["metric_id"] in {d["metric_id"] for d in definitions} for row in destination):
-                    destination.extend(support(self.company(cik), definitions, additions))
             counts = Counter((row["metric_id"], row["availability_status"], row.get("unavailable_reason")) for row in additions)
             self.coverage[(cik, name)] = [{"cik": cik, "view": name, "metric_id": key[0], "availability_status": key[1],
                                   "reason": key[2], "period_count": count} for key, count in sorted(counts.items(), key=str)]
+        for quarterly, name in ((False, "annual"), (True, "quarter")):
+            definitions = self.new_definitions[quarterly]
+            destination = self.quarter_support if quarterly else self.metric_support
+            metric_ids = {definition["metric_id"] for definition in definitions}
+            destination[:] = [row for row in destination if row["cik"] != cik or row["metric_id"] not in metric_ids]
+            destination.extend(support(self.company(cik), definitions,
+                [row for row in views[name] if row["metric_id"] in metric_ids],
+                [row for row in views[name + "_latest"] if row["metric_id"] in metric_ids]))
         self._views, self._loaded_cik = views, cik
 
     def rows(self, *, quarterly: bool = False, cik: str | None = None, metric_id: str | None = None,
@@ -215,7 +233,7 @@ class PreparedReader(ScreeningReadSnapshot):
                 "company_count": len(self.companies),
                 "quarter_definition_count": len(self.quarter_definitions),
                 "quarter_observation_count": self.parent.verify_all().get("quarter_observation_count", 0)
-                    + sum(row["observed_periods"] for row in self.quarter_support if row["definition_version"] == VERSION)}
+                    + sum(row["view_support"]["fixed"]["observed_periods"] for row in self.quarter_support if row["definition_version"] == VERSION)}
 
 
 def publish(config_pin: dict, destination: Path) -> Path:

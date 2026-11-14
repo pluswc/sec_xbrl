@@ -78,7 +78,7 @@ TTM gap/duplicate·fixed/latest 구분, 등록/조회/evaluation/threshold/expor
 | --- | --- |
 | 승인 | 2026-11-14 명시 범위 GO |
 | 구현 | 후보 구현 및 자체 검증 완료; 독립 검증 대상 동결 예정 |
-| 실제 export/ROOT 승인/발행 | 리드 수행, 아직 미수행 |
+| 실제 export/ROOT 승인/발행 | 리드가 기존 11개 read snapshot 수락; 새 27개 발행·인수는 대기 |
 | 독립 검증/로컬 인수/운영 | 대기 |
 | 원격 전달 | 이번 새 기능은 미요청·미수행 |
 
@@ -183,3 +183,29 @@ logical ID/pub/manifest SHA와 owner map이 기존 union과 다르면 거부한�
 정확 %p·threshold·정의 버전, 새 catalog 등록→preview→저장→새 service 재열기→
 trace, 기존 aux와 새 scope의 소유자 결속을 확인했다. 실제 원소스 export·ROOT 승인·
 100개사 발행/old50 대조·복제 journal UAT·운영 인수는 아직 미수행이며 리드가 소유한다.
+
+
+## 독립 검토 반환과 support 보정 (2026-11-14)
+
+초기 후보 `d9afd87aa0`는 최신 view에만 유효한 비교가 있는 경우 fixed view만으로
+support를 집계해 조건 등록을 막는 P2가 독립 검토에서 발견되어 동결을 해제했다.
+`metric_support`/`quarter_support`는 이제 `view_support.fixed/latest`별 가용/관측
+건수를 유지하고, aggregate는 같은 금융 기간 좌표를 중복 집계하지 않는다.
+`execution_supported`는 어느 지원 view에서든 유효한 준비값이 있으면 true다.
+고정 행을 최신 행으로 채우지 않으며 고정 관측 건수도 바꾸지 않는다.
+
+연간 최신 anchor가 fixed 행만 읽던 한 줄도 리드 승인에 따라 latest 조회로
+연결했다. `latest_rows`가 없는 기존 reader는 같은 fallback을 유지한다.
+연간·분기 각각 fixed 2023/latest 2023+2024 합성 발행물에서 최신 YoY50의
+조건 생성·평가는 PASS, fixed 2023은 UNDETERMINED임을 검사했다. 공통 기간의
+fixed/latest 중복은 aggregate 한 건으로 집계한다. 회계 eligibility는 변경하지 않는다.
+
+수정 후 관련 Python **150 PASS** (11.29초), Ruff/diff PASS. 기존 Node144
+검사 대상 JS/bridge는 이 수정에서 바뀌지 않았다. exporter와 snapshot reader의
+bytes도 초기 동결과 같아 기존 실제 read snapshot을 다시 export할 필요가 없다.
+새 source/publication은 별도 재검토 대상이다.
+
+리드는 기존 11개 원 publication의 네 view 전체 458,800개 조회 내용·계약 동등성
+대조 후 원본 read snapshot만 별도로 수락했다. 이는 새 27개 정의의 실제 발행이나
+운영 인수를 뜻하지 않으며 새 발행물/운영은 계속 HOLD다. 실제 원본·journal·
+운영 서버는 writer가 변경하지 않았다.
