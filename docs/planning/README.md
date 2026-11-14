@@ -1,5 +1,13 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 사용자가109 확장·상세 연결의 main 전달을 승인했다. 별도 branch에서
+원래 financial3fa와 PR98 main `ad877d26be`를 일반 merge해 계획 항목을 모두 보존했다.
+Python130/수락 bridge·최신 main UI는 부모 bytes와 같고 focused Python10·Node9/
+Ruff/diff가 PASS다. 옛3fa source 승인 자동 상속은 거부하며 새 main financial
+qualification을 주장하지 않는다. LIVE109·기록은 유지했고 독립 검토·PR/CI·병합은
+별도다. [통합 수락 범위](../implementation/prepared-auxiliary-contexts-20261114.md)의
+마지막 절을 따른다. 아래 미병합 상태는 각 전달 당시 기록이다.
+
 2026-11-14 [준비된100·109 보조자료 context](../implementation/prepared-auxiliary-contexts-20261114.md)은
 bridge `1e7d12fb54` 독립 PASS·ROOT 수락, financial `3fa2ae4fe2`의 실제9 준비와
 109/준비 조건27 재사용·private 저장/재열기/trace/CSV 인수를 완료했다. 옛100과

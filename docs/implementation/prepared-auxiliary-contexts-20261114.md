@@ -93,3 +93,27 @@ SHA가 모두 같았다. 실제 journal SHA256은
 남은6개 상태는 위 기록대로다. 특히 CRWD는 두 FY 교정 registry 승인만 있으며
 History/분석 교정을 아직 적용하지 않았다. Main은 `d724c54e24`이고 이번 변경의
 main 병합은 수행하지 않았다. Source `1e7d12fb54`의 독립 수락은 그대로 유지된다.
+
+
+## 2026-11-14 사용자 승인 main 전달 후보
+
+사용자는109 확장과 상세 연결의 검토·main 병합을 요청했다. 운영 작업 트리는
+그대로 두고 별도 `codex/remaining109-main-integration`에서 원래 financial
+`3fa2ae4fe282933eea2d8a505d007c93a7df635a`와 PR98 병합 main
+`ad877d26beef8287199af2f2d84f978e953d6d4f`를 일반 merge했다. 충돌은 계획 등록부의
+추가 항목뿐이었고 양쪽 날짜별 기록을 모두 보존했다. 위 main 미병합/d724 표시는
+당시 운영 인수 기록이며 최종 병합 결과·merge SHA는 후속 PR와 Git 이력으로 확인한다.
+
+통합 Python130개(원래129+read_snapshot)는 각 수락 부모의 bytes 그대로이며,
+bridge/owner 검사는1e7d, UI·guidance는 최신 main 그대로다. 새 source inventory에는
+read_snapshot.py가 추가돼 옛3fa 준비/native·reader source 영수증을 자동 상속하지
+않으며 실제 거부를 확인했다. 기존 v1/v2와 qualification 범위를 넓히지 않았다.
+정확한 재현에는 원래 승인된3fa financial·d1e consumer·1e7d bridge Git refs와
+불변 산출물을 사용한다. 향후 새 main 생산자 qualification은 별도 마일스톤이다.
+
+합성 통합 검사10개가10.41초, owner Node9개가28.12ms에 PASS했다. 정상 승인된
+read snapshot 소비·기존 논리ID, 준비 조건 발행/재열기와 구 native 거부를 확인했다.
+Ruff·diff·부모별 byte inventory도 PASS다. 이는 통합 코드/read consumer의 수락
+근거이며 병합 소스의 financial 생산 승인이 아니다. 완료 회사 감사·전체 pytest·
+자료 발행·LIVE109 재시작·journal 쓰기는 수행하지 않았다. 독립 통합 검증과
+리드 PR/원격 CI/main 병합은 다음 단계다.
