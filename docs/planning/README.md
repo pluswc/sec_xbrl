@@ -1,5 +1,7 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 [Price/EPS/shares common inputs](../implementation/price-common-inputs-20261114.md): isolated implementation and27 focused self-checks PASS; reported inputs remain queryable, explicit-basis direct-QTD market TTM is separate. Independent verification, actual109 publication and local acceptance pending; LIVE109 and legacy rules unchanged.
+
 2026-11-14 사용자가109 확장·상세 연결의 main 전달을 승인했다. 별도 branch에서
 원래 financial3fa와 PR98 main `ad877d26be`를 일반 merge해 계획 항목을 모두 보존했다.
 Python130/수락 bridge·최신 main UI는 부모 bytes와 같고 focused Python10·Node9/
