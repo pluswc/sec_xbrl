@@ -1,5 +1,8 @@
 # 준비된100·109 보조자료 context 보존
 
+2026-11-14 현재 **독립 검증·ROOT 로컬 인수·109 LIVE 완료, main 미병합**이다.
+아래 최초 구현/운영 전 문구는 각 단계 당시 기록이다. 이 후속 커밋은 문서만 변경한다.
+
 2026-11-14 리드는 수락된 준비 조건100과 새109의 매출 구성/성장률 보조자료 범위를
 함께 유지하도록 consumer 전용 확장을 승인했다. 기준은 수락 소스
 `d1e74d90c98838431740c0e16408d8b4d2623543`이며 현재 구현 단계다.
@@ -30,3 +33,61 @@ logical manifest 검증을 모두 재사용한다. 그 결과인 prepared 논리
 검사를 통과했다. 기존7개 경계와 새 두 prepared scope/CIK/proof·pin/승인/owner/
 cutoff/충돌을 확인했다. 독립 검증 전이며 실제109 연결·자료 발행·운영 변경은
 수행하지 않았다. 원래3fa financial 소스와 d1e 수락 작업 트리는 유지했다.
+
+
+## 2026-11-14 실제 자료·private 인수 — 운영 전
+
+Consumer bridge `1e7d12fb549701ee67b543d8b6e51687919ce38b`는 별도 독립 Node9 PASS와
+ROOT source 수락을 완료했다. Financial source `3fa2ae4fe282933eea2d8a505d007c93a7df635a`의
+실제9개사 네 financial 부모·native combined·projection도 수락됐다. 분기8개만
+기존401에서538.7초/최대3.30 GiB에 정정했고, 새 financial4개는60.148초/0.98 GiB,
+combined/projection은33.382/9.098초였다. 기존 quality/Raw/History 감사는 반복하지 않았다.
+
+기준109 발행물은 `screening-cohort-union-ce87f864397594d8ac8319e4`, 원래 manifest
+SHA256 `9734d74e127338ab790a73597b95a4aa1b4210c14561c9f1af5fab1ee0955e11`이다.
+새109 consumer read export는20.218초/736,400 KiB였으며, 원래100개 회사 payload의
+100/100 SHA가 같았다. 원본을 바꾸지 않는 hardlink 재사용으로826,486,784 physical
+bytes를 절약했다. 원래12개 snapshot과 준비된100 발행물은 다시 export/publish하지 않았다.
+
+수락된 d1e producer의 준비 조건27개를 그대로 재사용한 prepared109는
+`screening-prepared-changes-62a6bbe37d79543efd2bc7f1`이며102.133초/1,588,892 KiB였다.
+원래100개사의 네 view·상세 값/관측ID/이유/계보가 같고, 전체109 owner manifest
+metadata만 새 범위를 반영했다. 실제 새 계산 정책이나 빈값 채우기는 없다.
+
+Private API는14 datasets/109개사·연간41/분기59 정의와 저장·재열기·trace·CSV가
+PASS했다. 옛21개사 저장 결과2개의 trace/CSV 포함6개 경로도 같았다. Windows
+private18885에서 CEG 연간/분기/TTM·AAPL과 비교, 준비된100/109 양쪽 보조자료의
+동일 payload를 확인했다. 실제 journal은 바꾸지 않았으며 이 시점 LIVE 전환은 대기다.
+근거는 `work/remaining15-recovery-20261114/runtime/composition-acceptance.json`과
+`runtime/prepared-changes109/`의 source 승인·private 인수 자료다.
+
+남은6개사는 별도다. CRWD는 승인된 두 FY registry와 원래22개 공시를 보존하며
+후속 focus 교정/History 준비가 남았다. APP/TER는 optional inline ID 없는21개
+source locator 경계, PLTR/RKLB는 확인된 유일한 genuine instance의 ZIP entrypoint,
+AEP는 미완료 History timeout 경계다. CEG/EXC 최신 연간 매출의
+PRIMARY_STATEMENT_EVIDENCE_MISSING, CPRT의 REQUIRED_ITEM_NOT_IN_PREPARED_DATA는
+기존 이유 그대로 빈값이며 추정하거나 backfill하지 않았다. Main 병합은 별도다.
+
+
+## 2026-11-14 실제109 운영 인수
+
+리드가 실제 전환과 브라우저 인수를 완료했다. 18765(frontend PID23088)는
+19078(backend PID1477655)로 연결된다. Consumer Python·앱·스타일은 수락된 d1e
+그대로이며 bridge만 `1e7d12fb54`/SHA256
+`025bce8bb3e1f361a575b96c1bc445fb4ca5a5391a8fd062f5b2c0ac3afb3150`다.
+실제 CMCSA profile과 발행된 변화 조건27개 pair, JS 오류0을 확인했다.
+Prepared109 publication은 `screening-prepared-changes-62a6bbe37d79543efd2bc7f1`,
+재무 기준일은 원래2026-10-25이며 새 수집일로 바꾸지 않았다.
+
+기존12개 dataset status·실제 History API가 정확히 같고 보호한 원래 파일12개
+SHA가 모두 같았다. 실제 journal SHA256은
+`3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`로 유지했다.
+이 인수는 private 복제본 저장 검사를 재실행하거나 실제 개인 기록을 쓰지 않았다.
+이전 준비된100 backend19079는 rollback으로 보존한다.
+
+실제 근거는 `runtime/prepared-changes109/root-live-acceptance.json`과 Windows
+`remaining15-recovery-20261114/current-feature-integration/`의 `live-switch.json`,
+`live-smoke.json`, `live-109-cmcsa.png`, `private-ui-acceptance.json` 및 화면2개다.
+남은6개 상태는 위 기록대로다. 특히 CRWD는 두 FY 교정 registry 승인만 있으며
+History/분석 교정을 아직 적용하지 않았다. Main은 `d724c54e24`이고 이번 변경의
+main 병합은 수행하지 않았다. Source `1e7d12fb54`의 독립 수락은 그대로 유지된다.

@@ -1,8 +1,12 @@
 # 계획 등록부 — 단일 진입점
 
 2026-11-14 [준비된100·109 보조자료 context](../implementation/prepared-auxiliary-contexts-20261114.md)은
-consumer 전용 구현 승인 단계다. 정확한 각 부모·snapshot·승인과 owner 부분집합을
-검증하며 기존 단일 CLI·financial/backend·운영 자료는 유지한다. 독립/운영 수락은 별도다.
+bridge `1e7d12fb54` 독립 PASS·ROOT 수락, financial `3fa2ae4fe2`의 실제9 준비와
+109/준비 조건27 재사용·private 저장/재열기/trace/CSV 인수를 완료했다. 옛100과
+21개사 기록·보조자료를 보존했고 **109 LIVE 완료·main 미병합**이다. 18765(PID23088)→
+19078(PID1477655), consumer Python/UI d1e와 bridge1e7d를 분리 유지했다. 기존12개
+status/History와 보호 파일12개·journal 해시가 같다. 재무 기준일은2026-10-25다.
+남은6개 원인과 정당한 미준비 지표는 계약에 명시했다. 아래 최초 단계는 당시 기록이다.
 
 2026-11-14 원격 전달 승인: 사용자가 준비된 변화 조건의 push·PR을 승인했다.
 별도 branch에서 [PR97](https://github.com/pluswc/sec_xbrl/pull/97)이 포함된 최신
