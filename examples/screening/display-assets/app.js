@@ -3008,7 +3008,7 @@ function marketProfileMarkup(data){
     <details class="market-input-evidence"><summary>주식 수와 근거</summary>
     <p class="muted">요청 기준 ${esc(compactFinancialDate(data.financial_as_of))}${price?.trade_date?` · 실제 거래일 ${esc(compactFinancialDate(price.trade_date))}${Number.isInteger(price.staleness_calendar_days)?` · ${price.staleness_calendar_days}일 차이`:""}`:""}. 고정된 과거 거래일 자료이며 현재가·자동 갱신 자료가 아닙니다. 가격 통화는 확인되지 않았습니다. EPS와 증권의 적용 범위·주식 기준을 확인하기 전 PER은 제공하지 않습니다.</p>
     <p>${(eps.sources||[]).map(marketSourceLink).join(" · ")||esc(marketProfileReason(eps.reason))}</p>
-    <div class="market-input-scroll"><table class="market-input-table"><thead><tr><th>주식 수 구분</th><th>실제 기간·공시 범위</th><th class="numeric">공시 값</th><th>출처</th></tr></thead><tbody>${shares||'<tr><td colspan="4">직접 공시 주식 수 자료가 없습니다.</td></tr>'}</tbody></table></div>
+    <div class="market-input-scroll table-wrap"><table class="market-input-table"><thead><tr><th>주식 수 구분</th><th>실제 기간·공시 범위</th><th class="numeric">공시 값</th><th>출처</th></tr></thead><tbody>${shares||'<tr><td colspan="4">직접 공시 주식 수 자료가 없습니다.</td></tr>'}</tbody></table></div>
     ${otherPrices?`<details><summary>다른 증권의 관측 종가</summary><p class="muted">같은 회사의 다른 클래스·증권을 보존한 목록이며 기본 종목으로 자동 선택하지 않습니다.</p><ul>${otherPrices}</ul></details>`:""}</details>`;
 }
 function beginMarketInputProfile(){

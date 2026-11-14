@@ -44,3 +44,10 @@ test("late market responses cannot repaint a switched or closed company",async()
  pending[0]({schema_version:"screening-market-input-profile-v1",...scope,cik,...company()});await new Promise(resolve=>setImmediate(resolve));assert.doesNotMatch(view.host.innerHTML,/최근 12개월 공시 EPS/);
  view.profileHost.hidden=true;pending[1]({schema_version:"screening-market-input-profile-v1",...scope,cik:"0000000002",...company(),prices:[]});await new Promise(resolve=>setImmediate(resolve));assert.doesNotMatch(view.host.innerHTML,/최근 12개월 공시 EPS/);
 });
+
+
+test("market share table retains the shared numeric viewport wrapper",()=>{
+ const {functions:f}=ui();
+ const markup=f.marketProfileMarkup({...scope,cik,...company()});
+ assert.match(markup,/<div class="market-input-scroll table-wrap"><table class="market-input-table">/);
+});
