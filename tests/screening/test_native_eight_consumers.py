@@ -142,6 +142,9 @@ def test_reader_source_transition_is_exact_per_artifact_and_does_not_grant_produ
         delta.ScreeningGovernedDeltaReader(root, declaration, parent=parent)
     baseline = {key: value for key, value in origin_sources.items() if key.endswith(".py")}
     monkeypatch.setattr(native, "_CONSUMER_BASELINE_INVENTORY", native.digest_value(baseline))
+    # Keep the synthetic source receipt internally consistent without changing real pins.
+    monkeypatch.setattr(native, "_PARTIAL_CONSUMER_FILES",
+                        {name: baseline[name] for name in native._PARTIAL_CONSUMER_FILES})
     receipt = tmp_path / "reader-only.json"
     body = {"schema_version": "governed-delta-reader-source-transition-v1", "status": "ROOT_APPROVED_READER_ONLY_SOURCE_TRANSITION",
             "manifest": declaration["manifest"], "approval": declaration["approval"], "origin_source_root": str(tmp_path),

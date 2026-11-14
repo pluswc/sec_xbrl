@@ -28,6 +28,9 @@ def _v2(tmp_path, monkeypatch, name):
     monkeypatch.setattr(native, "_PRODUCER_PROFILES", profiles)
     baseline = old["source"]["current_files"]
     monkeypatch.setattr(native, "_CONSUMER_BASELINE_INVENTORY", digest_value(baseline))
+    # This fixture models its own exact accepted consumer, not production's old qualification.
+    monkeypatch.setattr(native, "_PARTIAL_CONSUMER_FILES",
+                        {name: baseline[name] for name in native._PARTIAL_CONSUMER_FILES})
     plan = tmp_path / "occurrence-plan.json"
     write_json(plan, {"scope": old["ciks"]})
     selected = []
@@ -113,3 +116,10 @@ def test_named_profile_rejects_unknown_mixed_parent_and_borrowed_empty_inputs(tm
     body["occurrence_inputs"] = _pin(inputs)
     with pytest.raises(ValueError, match="inventory"):
         native._data_controls(body)
+
+
+
+def test_real_current_inventory_does_not_inherit_legacy_consumer_qualification():
+    current = native._inventory(Path(native.__file__).parent)
+    with pytest.raises(ValueError, match="acceptance baseline inventory differs"):
+        native.qualified_consumer_files(current, current)

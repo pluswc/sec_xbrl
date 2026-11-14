@@ -710,7 +710,20 @@ def _capture_prospective_inputs(collector: _Collector, config: dict, *, prefix: 
     return SimpleNamespace(companies=manifest["companies"], controls=manifest["controls"], storage_reuse=storage)
 
 
-def _discover_identity(
+def _discover_identity(collector: _Collector, config_path: Path, config: dict[str, Any], *,
+                       prefix: str, config_already_added: bool = False) -> None:
+    from sec_xbrl.financial_native_source import native_controls, use_native_preparation
+    with use_native_preparation(config.get("native_preparation"), config=config):
+        if "native_preparation" in config:
+            controls, roots = native_controls()
+            for name, pin in controls.items():
+                _add_declaration_file(collector, pin, f"{prefix}_PREPARATION:{name}")
+            for index, root in enumerate(roots):
+                collector.pattern_inventory(root, f"{prefix}_PREPARATION_SOURCE:{index}", ("**/*.py",))
+        return _discover_identity_inner(collector, config_path, config, prefix=prefix, config_already_added=config_already_added)
+
+
+def _discover_identity_inner(
     collector: _Collector,
     config_path: Path,
     config: dict[str, Any],
@@ -781,7 +794,8 @@ def _discover_identity(
         build_path = company_root / "build_manifest.json"
         if build_path.exists():
             build = collector.json(build_path, f"{prefix}_STATUS_BUILD:{ticker}")
-            _add_status_history(collector, build, f"{prefix}_STATUS_HISTORY:{ticker}")
+            if "native_preparation" not in config or (ticker, str(row.get("cik"))) in scoped:
+                _add_status_history(collector, build, f"{prefix}_STATUS_HISTORY:{ticker}")
         elif (ticker, str(row.get("cik"))) in scoped and not (prospective and ticker in prospective.companies):
             raise ValueError(f"{ticker}: scoped source closure build is missing")
 

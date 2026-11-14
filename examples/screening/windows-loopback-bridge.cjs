@@ -61,6 +61,8 @@ function parseArgs(argv) {
     "--financial-growth-sha256",
     "--history-worker",
     "--journal-store",
+    "--prepared-changes-contexts",
+    "--prepared-changes-contexts-sha256",
     "--prepared-changes-snapshot",
     "--prepared-changes-snapshot-sha256",
     "--prepared-changes-verification",
@@ -144,7 +146,14 @@ function parseArgs(argv) {
     preparedChanges = Object.fromEntries(preparedNames.map(name => [name === "snapshot" ? "manifest" : name,
       {path:text(`--prepared-changes-${name}`), sha256:text(`--prepared-changes-${name}-sha256`)}]));
   }
+  const hasPreparedContexts = Object.hasOwn(values, "--prepared-changes-contexts");
+  if (hasPreparedContexts !== Object.hasOwn(values, "--prepared-changes-contexts-sha256") ||
+      (hasPreparedContexts && (!hasAuxiliaryUnion || hasPrepared || !path.isAbsolute(text("--prepared-changes-contexts")) ||
+        !/^[0-9a-f]{64}$/u.test(text("--prepared-changes-contexts-sha256"))))) {
+    throw new Error("prepared contexts requires exclusive exact list pins and an auxiliary union");
+  }
   return {
+    ...(hasPreparedContexts ? {preparedChangesContexts:{path:text("--prepared-changes-contexts"),sha256:text("--prepared-changes-contexts-sha256")}} : {}),
     ...(preparedChanges ? {preparedChanges} : {}),
     auxiliaryUnion: hasAuxiliaryUnion ? text("--auxiliary-union") : null,
     auxiliaryUnionSha256: hasAuxiliaryUnion ? text("--auxiliary-union-sha256") : null,
@@ -449,6 +458,42 @@ function bindPreparedAuxiliary(auxiliary, declaration) {
   const contextCiks = [...(auxiliary.contextCiks || [[...auxiliary.owners.keys()]]), [...auxiliary.owners.keys()]];
   return {...auxiliary, scopes, contextCiks};
 }
+function bindPreparedAuxiliaryContexts(auxiliary, pin) {
+  if (!auxiliary) throw new Error("prepared contexts requires an explicit main auxiliary union");
+  const list = loadPinnedJson(pin.path, pin.sha256, "prepared contexts");
+  if (!list || Object.keys(list).sort().join(",") !== "contexts,schema_version" ||
+      list.schema_version !== "prepared-auxiliary-contexts-v1" || !Array.isArray(list.contexts) || !list.contexts.length) {
+    throw new Error("invalid prepared contexts list");
+  }
+  const scopes = [...(auxiliary.scopes || [auxiliary.scope])];
+  const contextCiks = [...(auxiliary.contextCiks || [[...auxiliary.owners.keys()]])];
+  const identity = scope => JSON.stringify([scope.dataset_id, scope.dataset_publication_id, scope.financial_as_of]);
+  const seen = new Set();
+  for (const scope of scopes) {
+    if (seen.has(identity(scope))) throw new Error("prepared context collides with an existing request scope");
+    seen.add(identity(scope));
+  }
+  for (const entry of list.contexts) {
+    if (!entry || Object.keys(entry).sort().join(",") !== "approval,parent,snapshot,verification" ||
+        [entry.parent,entry.snapshot,entry.verification,entry.approval].some(value => !value ||
+          Object.keys(value).sort().join(",") !== "path,sha256")) {
+      throw new Error("invalid prepared context declaration");
+    }
+    const parent = loadAuxiliaryUnion(entry.parent.path, entry.parent.sha256);
+    if (parent.scope.financial_as_of !== auxiliary.scope.financial_as_of ||
+        [...parent.owners].some(([cik, owner]) => !sameAssetScope(owner, auxiliary.owners.get(cik)))) {
+      throw new Error("prepared parent differs from main cutoff/owner subset");
+    }
+    const bound = bindPreparedAuxiliary(parent, {manifest:entry.snapshot,verification:entry.verification,approval:entry.approval});
+    const scope = bound.scopes.at(-1);
+    if (seen.has(identity(scope))) throw new Error("prepared context collides with an existing request scope");
+    seen.add(identity(scope));
+    scopes.push(scope);
+    contextCiks.push([...parent.owners.keys()]);
+  }
+  return {...auxiliary, scopes, contextCiks};
+}
+
 function sameAssetScope(left, right) {
   return ["dataset_id","dataset_publication_id","financial_as_of","dataset_manifest_sha256"].every(key => left?.[key] === right?.[key]);
 }
@@ -573,6 +618,7 @@ function historyGuardRequired(method, route) {
 }
 
 function startBridge(options) {
+  if (options.preparedChanges && options.preparedChangesContexts) throw new Error("prepared contexts and single snapshot are mutually exclusive");
   // Both files must load before listening or starting the relay. HTTP never names a file.
   const bundle = options.assetsRoot ? loadDisplayAssets(options.assetsRoot) : null;
   const breakdowns = options.revenueBreakdowns
@@ -580,6 +626,7 @@ function startBridge(options) {
   const growth = options.financialGrowth ? loadFinancialGrowth(options.financialGrowth, options.financialGrowthSha256) : null;
   let auxiliary = options.auxiliaryUnion ? loadAuxiliaryUnion(options.auxiliaryUnion, options.auxiliaryUnionSha256, options.auxiliaryUnionParent || null) : null;
   if (options.preparedChanges) auxiliary = bindPreparedAuxiliary(auxiliary, options.preparedChanges);
+  if (options.preparedChangesContexts) auxiliary = bindPreparedAuxiliaryContexts(auxiliary, options.preparedChangesContexts);
   const relay = childProcess.spawn(
     options.wsl,
     [
@@ -806,4 +853,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { bindPreparedAuxiliary, loadAuxiliaryUnion, allowedPath, parseArgs, startBridge, loadDisplayAssets, loadRevenueBreakdowns, serveRevenueBreakdowns, loadFinancialGrowth, serveFinancialGrowth, startHistoryWorker, historyGuardRequired };
+module.exports = { bindPreparedAuxiliaryContexts, bindPreparedAuxiliary, loadAuxiliaryUnion, allowedPath, parseArgs, startBridge, loadDisplayAssets, loadRevenueBreakdowns, serveRevenueBreakdowns, loadFinancialGrowth, serveFinancialGrowth, startHistoryWorker, historyGuardRequired };

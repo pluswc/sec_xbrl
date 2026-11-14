@@ -1,5 +1,21 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 사용자가109 확장·상세 연결의 main 전달을 승인했다. 별도 branch에서
+원래 financial3fa와 PR98 main `ad877d26be`를 일반 merge해 계획 항목을 모두 보존했다.
+Python130/수락 bridge·최신 main UI는 부모 bytes와 같고 focused Python10·Node9/
+Ruff/diff가 PASS다. 옛3fa source 승인 자동 상속은 거부하며 새 main financial
+qualification을 주장하지 않는다. LIVE109·기록은 유지했고 독립 검토·PR/CI·병합은
+별도다. [통합 수락 범위](../implementation/prepared-auxiliary-contexts-20261114.md)의
+마지막 절을 따른다. 아래 미병합 상태는 각 전달 당시 기록이다.
+
+2026-11-14 [준비된100·109 보조자료 context](../implementation/prepared-auxiliary-contexts-20261114.md)은
+bridge `1e7d12fb54` 독립 PASS·ROOT 수락, financial `3fa2ae4fe2`의 실제9 준비와
+109/준비 조건27 재사용·private 저장/재열기/trace/CSV 인수를 완료했다. 옛100과
+21개사 기록·보조자료를 보존했고 **109 LIVE 완료·main 미병합**이다. 18765(PID23088)→
+19078(PID1477655), consumer Python/UI d1e와 bridge1e7d를 분리 유지했다. 기존12개
+status/History와 보호 파일12개·journal 해시가 같다. 재무 기준일은2026-10-25다.
+남은6개 원인과 정당한 미준비 지표는 계약에 명시했다. 아래 최초 단계는 당시 기록이다.
+
 2026-11-14 원격 전달 승인: 사용자가 준비된 변화 조건의 push·PR을 승인했다.
 별도 branch에서 [PR97](https://github.com/pluswc/sec_xbrl/pull/97)이 포함된 최신
 `origin/main d724c54e24257af9600a6427f83dcea792bea738`을 일반 merge했다.
@@ -20,6 +36,10 @@ PASS, 실제 2,700판정·기존89API·보조비교8,800cell·복제본 저장/�
 환경 arelle 실패; journal 환경 재검1PASS). 원격 push·PR·CI·main 병합은 미요청·
 미수행이며 main `deb074bc49`를 유지한다. 상세 범위/coverage/운영·rollback locator는
 계약의 최종 인수 절에 있다. 아래는 각 이전 작업의 당시 상태 기록이다.
+
+2026-11-14 [남은15 준비 재사용](../implementation/remaining15-recovery-20261114.md)은
+LIVE100을 보존하는 9개사 분리·명시적 준비 승인·109 합성 구현 승인 단계다.
+CRWD 결정과 다른5개 경계는 별도이며 독립 검증·실자료/운영은 아직 수행하지 않았다.
 
 2026-11-14 사용자 요청으로 신규8 native 승인·100개사 운영 소스를 main 전달한다.
 운영 checkout `5a8fe55775`는 유지하고 별도 작업 트리에서 main `deb074bc49`을
