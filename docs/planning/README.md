@@ -1,6 +1,6 @@
 # 계획 등록부 — 단일 진입점
 
-2026-11-14 [Price/EPS/shares common inputs](../implementation/price-common-inputs-20261114.md): isolated implementation and27 focused self-checks PASS; reported inputs remain queryable, explicit-basis direct-QTD market TTM is separate. Independent verification, actual109 publication and local acceptance pending; LIVE109 and legacy rules unchanged.
+2026-11-14 [Price/EPS/shares common inputs](../implementation/price-common-inputs-20261114.md): source9540 independent27 PASS; actual109 publication completed (13,549 financial rows/129 quotes/132 securities). Availability counts cover any retained period/scope, not current PER coverage; all109 market TTM remain SHARE_BASIS_UNKNOWN. Protected12 pins/journal unchanged. Root artifact review PASS and first-slice publication/query LOCALLY_ACCEPTED under these limits; no UI/runtime activation or main merge, and no service acceptance claim.
 
 2026-11-14 사용자가109 확장·상세 연결의 main 전달을 승인했다. 별도 branch에서
 원래 financial3fa와 PR98 main `ad877d26be`를 일반 merge해 계획 항목을 모두 보존했다.

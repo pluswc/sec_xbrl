@@ -1,7 +1,11 @@
 # Price, EPS and shares common inputs — 2026-11-14
 
-Status: IMPLEMENTED on the isolated milestone branch; independent review,
-actual publication and local acceptance are separate pending steps. No UI migration,
+Status (2026-11-14): source `9540f559703cf7643310a6051a07f6efd1506956`
+IMPLEMENTED and independently verified (27 tests PASS); actual109 publication
+completed; artifact review PASS and first-slice publication/query LOCALLY_ACCEPTED
+by Root under the limitations below. No UI/runtime activation or
+main merge has been performed. Earlier implementation-stage statements below
+remain the dated scope and writer self-check record. No UI migration,
 main merge, live service or journal changes are authorized by this milestone.
 
 The publication projects already governed Analysis VALUE cells for all registered
@@ -83,3 +87,41 @@ conflicts/gaps/future evidence/unit/class rejection and content mutation. No act
 109 publication, completed company audit, price rescan or runtime change was run
 by the writer. Root supplies the pinned CanonicalQuery export and exact109
 analysis/intake configuration for the separately reviewed real build.
+
+## Actual109 publication handoff — 2026-11-14
+
+Independent source verification passed all27 focused tests on `9540f55970`.
+Root completed the actual build from retained inputs without repeating company
+collection, History or completed audits. Publication
+`screening-market-input-14060399dfa51f22f38e364d` is stored at
+`data/processed/market_inputs/20261114_common109/market_input_manifest.json`,
+SHA256 `a1b1c8c3e29c92e5fdb2aaf1534dd4024a847b72b31936131f5df5899322ee58`.
+It contains109 issuers,13,549 financial input rows,129 observed quotes and132
+securities. Build elapsed110.75s, peak RSS2,861,240KiB, output40,342,758 bytes.
+The optional local receipt is
+`work/price-common-inputs-20261114/ops/publication/acceptance.json`; this tracked
+contract records the scope and limitations independently of that receipt.
+
+Available EPS106, weighted-average shares108, cover shares109 and balance-sheet
+shares99 count issuers with any retained period/scope. They do not establish
+current-period PER coverage or a class-specific security/EPS association. All109
+market TTM results remain unavailable with `SHARE_BASIS_UNKNOWN`: no explicit
+share-basis declarations were supplied. Annual-minus-YTD EPS remains forbidden;
+reported inputs are still independently queryable.
+
+All12 protected input pins, including the original journal, were unchanged.
+There was no UI activation, service restart, runtime migration or main merge.
+Backend19078 refused HTTP connections in the current environment, so this
+handoff makes no operating-service acceptance claim. Root artifact review passed the exact manifest and all five content hashes/counts,
+public queries and an AAPL Raw-lineage spot check. Root LOCALLY_ACCEPTED this
+first-slice publication/query contract under the stated limitations. This does not
+constitute UI, service or main acceptance; later consumer integration remains a
+separate decision.
+
+Generic query usage (substitute an actual registered CIK; no ticker-specific rule):
+
+```sh
+PYTHONPATH=SOURCE/src PYTHON SOURCE/examples/screening/prepare_market_inputs.py query \
+  --manifest PUBLICATION/market_input_manifest.json --sha256 MANIFEST_SHA \
+  --cik REGISTERED_CIK --input-id reported_eps_diluted_total
+```
