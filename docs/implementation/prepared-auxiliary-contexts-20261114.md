@@ -117,3 +117,11 @@ Ruff·diff·부모별 byte inventory도 PASS다. 이는 통합 코드/read consu
 근거이며 병합 소스의 financial 생산 승인이 아니다. 완료 회사 감사·전체 pytest·
 자료 발행·LIVE109 재시작·journal 쓰기는 수행하지 않았다. 독립 통합 검증과
 리드 PR/원격 CI/main 병합은 다음 단계다.
+
+PR99 첫 CI의4개 실패는 합성 legacy-v2 fixture가 현재 source map/baseline을
+사용하면서 과거 partial-window 기대 해시만 유지한 불일치였다. 실제 거부 guard가
+정상 동작한 것이며 production 승인 범위는 바꾸지 않았다. 두 fixture에서 기존
+named 해시 key만 합성 baseline에 결속하고, 실제 현재 inventory가 옛 승인을
+상속하지 못하는 무패치 음성 검사를 추가했다. 관련 두 파일6개 검사는6.03초에
+PASS했고 Ruff/diff도 통과했다. src/examples는 통합 후보 `dd1d762f9a`와 byte 동일하다.
+후속 독립 검토·원격 CI·main 결과는 리드가 별도로 확인한다.
