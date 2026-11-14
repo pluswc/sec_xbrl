@@ -237,3 +237,76 @@ Optional local evidence: `work/price-common-inputs-20261114/basis-review/overlay
 and `coverage109.csv`; the tracked contract records the authoritative limits.
 The generic `assess` then `assessment-query` commands above apply to new registered
 filers with pinned inputs; there are no issuer exceptions.
+
+## Approved operating consumer connection — 2026-11-14
+
+The user approved operating activation, using only the price project identified
+in the requested supplier chat. The supplier confirmed the recommended
+`broad-price-oct2026-20261108-r1` delivery, SDK v0.5.1
+`24f0b87160f793871f3dfea8faaf43092b1905d7`, external contract1.1.1.
+Root verified its package tree `c561a3c9a19c5c08567924516c2458fe6802215c`
+equals the already archived exporter package. The existing CanonicalQuery export
+and exact delivery/price/security pins are reused, with no new price scan/query.
+CanonicalQuery and supplier delivery verification remain required on a future
+adoption/replacement, not on each profile request. No provider/scraper replacement
+or price-basis calculation is introduced.
+
+The lightweight offline profile asset references the accepted common109 and
+assessment v2 and an exactly pinned prepared dataset manifest (or its read snapshot).
+For a read snapshot it checks the logical digest and uses the embedded original
+prepared identity; it does not open a financial reader factory or grant a source
+qualification. The prepared parent's manifest pin, cutoff and issuer set must
+match the common-input parent. This connection preserves the qualified operating
+Python and its existing snapshot/catalog/history routes.
+
+The optional bridge flags `--market-inputs FILE --market-inputs-sha256 SHA`
+serve only a startup-hash-verified `screening-market-input-profile-v1` asset.
+`GET /api/market-inputs` reports capability; company GET requires exactly
+`dataset_id`, `dataset_publication_id`, `financial_as_of`, `cik`. No auxiliary-owner
+fallback, old21 publication, extra fixed/historical period or mismatched scope can
+borrow current quotes. The default bridge invocation remains compatible.
+
+The latest-company profile adds a compact worksheet band: trading-day close and
+latest directly reported12m EPS, with actual dates. Detailed shares/source candidates
+remain in a closed native disclosure, grouped by their governed prepared full-scope
+series and period class with latest actual dates. Conflicting values retain an
+unavailable reason; no class or recast winner is invented. The initial price is the
+unique exact configured CIK+ticker security only; other classes/securities remain
+explicit additional candidates. No first supplier row is selected automatically.
+
+The10/25 financial request uses the observed10/23 as-traded close, with an explicit
+2-calendar-day difference. It is a frozen historical observation, not today's or
+an automatically updated price. Price currency remains UNKNOWN because the supplier
+contract has no currency field. EPS remains USD/share and shares remain shares;
+financial table/chart million-USD captions are narrowed accordingly. Price dates
+are unchanged; inclusive financial display ends are projected from known exclusive
+ends upstream. Negative EPS is visible without a positive-PER claim. There are no
+valuation formulas, factor reapplications, new charts or screening conditions.
+
+Requests bind company, selected publication, latest/fixed context and request token.
+Closing/switching the profile invalidates late success/error rendering. Loading,
+missing and error states preserve existing financial detail and saved history.
+The existing paper/slate/annotation-blue worksheet tokens and tabular numerals are
+reused; no layout system, guidance file or operating-source approval is changed.
+
+Operator recipe (actual root-owned projection/preview/cutover requires frozen-source
+independent acceptance; writer has not run an actual data job):
+
+```sh
+PYTHONPATH=SOURCE/src PYTHON SOURCE/examples/screening/prepare_market_input_profile.py \
+  --assessment ASSESSMENT/market_input_assessment_manifest.json --assessment-sha256 ASSESSMENT_SHA \
+  --dataset APPROVED_DATASET_MANIFEST --dataset-sha256 DATASET_SHA --output NEW_PROFILE_ASSET.json
+```
+
+Copy that exact asset to the bridge host and add its two flags to the otherwise
+retained invocation. Root owns runtime recovery, original/cloned journal checks,
+private browser acceptance, current-UI preservation and guarded live cutover.
+Implementation/source verification, actual asset acceptance, operating acceptance
+and main merge remain separate; no main merge is requested in this milestone.
+
+Operating consumer source self-check: new Python projection3 and Node route/UI4
+tests PASS. Two affected existing checks passed (protected financial/persistence
+handlers and legacy owner dispatch); other tests were filtered out. JavaScript
+syntax, targeted Ruff and diff checks passed. No prior27/overlay9/company audit
+or real-data projection was rerun by the writer. Frozen-source independent review
+and root-operated asset/private/live acceptance remain pending.

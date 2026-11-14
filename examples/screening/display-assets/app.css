@@ -716,3 +716,18 @@ g.board-item-active .board-line { stroke-width: 4; }
 #comparison-analysis-grid.multi-comparison-ready{grid-template-columns:minmax(0,1fr)}.comparison-multi-board{min-width:0;grid-column:1/-1}.comparison-multi-heading{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}.comparison-multi-heading h3{font-size:18px;margin:8px 0}.comparison-multi-heading label{display:flex;align-items:center;gap:8px}.comparison-multi-heading select{width:auto}.comparison-multi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:12px}.comparison-multi-grid .financial-board-card{min-width:0;padding:12px}.comparison-multi-grid .financial-board-plot{min-width:0;position:relative}.comparison-multi-grid .board-plot-canvas{overflow-x:auto;max-width:100%}.comparison-multi-grid .board-plot-canvas svg{min-width:360px;width:100%;display:block}.comparison-multi-grid h4{min-height:40px}.comparison-multi-grid h5{min-height:36px;font-size:13px;margin:8px 0 0}.comparison-multi-grid .board-near-legend{min-height:32px;margin:0}.comparison-multi-readout{font-size:13px;min-height:148px;line-height:1.5}.comparison-multi-readout ul{list-style:none;margin:4px 0;padding:0}.comparison-multi-readout li{padding:4px 0;border-bottom:1px solid var(--line)}.comparison-multi-readout small{display:block;color:var(--slate)}.comparison-multi-grid pre{max-width:100%;max-height:240px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}#comparison-legacy-view>summary{cursor:pointer;color:var(--blue);padding:8px 0}#comparison-board-status{font-size:13px;color:var(--slate)}
 @media(min-width:1800px){.comparison-multi-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}@media(max-width:760px){#explorer-column-options,.column-picker-controls{grid-template-columns:minmax(0,1fr)}.comparison-multi-grid{grid-template-columns:minmax(0,1fr)}.comparison-multi-heading{align-items:start}.comparison-multi-readout{min-height:0}}
 #explorer-column-picker{grid-column:1/-1;max-width:1100px;width:100%}@media(min-width:1200px){#explorer-column-options{grid-template-columns:repeat(3,minmax(0,1fr));max-height:280px}}@media(min-width:1800px){#explorer-column-options{grid-template-columns:repeat(4,minmax(0,1fr))}}
+
+/* Current-publication market inputs: a compact worksheet band, evidence on demand. */
+.market-input-section{margin:8px 0;color:var(--ink);min-width:0}
+.market-input-band{display:flex;align-items:center;gap:8px 24px;flex-wrap:wrap;border-top:1px solid var(--line);padding:8px 0}
+.market-input-band h3{font-size:14px;margin:0;font-weight:600}
+.market-input-band>div{display:grid;grid-template-columns:auto auto;gap:0 8px;align-items:baseline}
+.market-input-band>div>span:first-child{font-size:11px;color:var(--slate);grid-column:1/-1}
+.market-input-band strong{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
+.market-input-band small{font-size:11px;color:var(--slate);grid-column:1/-1}
+.market-input-evidence{font-size:14px}.market-input-evidence>summary{font-size:11px;color:var(--blue);cursor:pointer}
+.market-input-scroll{overflow:auto;max-width:100%}.market-input-table{width:100%;border-collapse:collapse;font-size:14px}
+.market-input-table th,.market-input-table td{padding:8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.market-input-table .numeric{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.market-input-table small{display:block;font-size:11px;color:var(--slate);white-space:normal;overflow-wrap:anywhere}
+@media(max-width:760px){.market-input-band{gap:8px 16px}.market-input-band h3{flex-basis:100%}.market-input-table{min-width:560px}}

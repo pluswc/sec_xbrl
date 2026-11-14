@@ -59,6 +59,8 @@ function parseArgs(argv) {
     "--revenue-breakdowns-sha256",
     "--financial-growth",
     "--financial-growth-sha256",
+    "--market-inputs",
+    "--market-inputs-sha256",
     "--history-worker",
     "--journal-store",
     "--prepared-changes-contexts",
@@ -117,6 +119,12 @@ function parseArgs(argv) {
         !/^[0-9a-f]{64}$/u.test(text("--revenue-breakdowns-sha256"))))) {
     throw new Error("revenue breakdowns require an absolute asset path and SHA-256 pin");
   }
+  const hasMarketInputs = Object.hasOwn(values, "--market-inputs");
+  if (hasMarketInputs !== Object.hasOwn(values, "--market-inputs-sha256") ||
+      (hasMarketInputs && (!path.isAbsolute(text("--market-inputs")) ||
+        !/^[0-9a-f]{64}$/u.test(text("--market-inputs-sha256"))))) {
+    throw new Error("market inputs require an absolute asset path and SHA-256 pin");
+  }
   const hasGrowth = Object.hasOwn(values, "--financial-growth");
   if (hasGrowth !== Object.hasOwn(values, "--financial-growth-sha256") ||
       (hasGrowth && (!path.isAbsolute(text("--financial-growth")) ||
@@ -160,6 +168,8 @@ function parseArgs(argv) {
     ...(hasAuxiliaryParent ? {auxiliaryUnionParent:{path:text("--auxiliary-union-parent"),sha256:text("--auxiliary-union-parent-sha256")}} : {}),
     revenueBreakdowns: hasBreakdowns ? text("--revenue-breakdowns") : null,
     revenueBreakdownsSha256: hasBreakdowns ? text("--revenue-breakdowns-sha256") : null,
+    marketInputs: hasMarketInputs ? text("--market-inputs") : null,
+    marketInputsSha256: hasMarketInputs ? text("--market-inputs-sha256") : null,
     financialGrowth: hasGrowth ? text("--financial-growth") : null,
     financialGrowthSha256: hasGrowth ? text("--financial-growth-sha256") : null,
     historyWorker: values["--history-worker"] || null,
@@ -287,7 +297,7 @@ function loadProfileAsset(file, digest, label, schema, validate, maxCompanyBytes
     if (!/^\d{10}$/u.test(cik) || !company || typeof company !== "object" || Array.isArray(company)) {
       throw new Error(`invalid ${label} company scope`);
     }
-    const body = Buffer.from(JSON.stringify({ ...project(company), ...scope, cik }), "utf8");
+    const body = Buffer.from(JSON.stringify({ ...project(company, cik), ...scope, cik }), "utf8");
     if (body.length > maxCompanyBytes) throw new Error(`${label} company exceeds response limit`);
     byCik.set(cik, body);
   }
@@ -494,6 +504,42 @@ function bindPreparedAuxiliaryContexts(auxiliary, pin) {
   return {...auxiliary, scopes, contextCiks};
 }
 
+function loadMarketInputs(file, digest) {
+  const numeric = value => value === null || typeof value === "number" && Number.isFinite(value) ||
+    typeof value === "string" && /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/u.test(value);
+  const day = value => /^\d{4}-\d{2}-\d{2}$/u.test(value || "");
+  return loadProfileAsset(file, digest, "market inputs", "screening-market-input-profile-v1", payload => (company, cik) => {
+    if (!company || typeof company.registered_ticker !== "string" ||
+        !Array.isArray(company.prices) || company.prices.length > 1 || !Array.isArray(company.other_prices) ||
+        !Array.isArray(company.share_candidates) || !Array.isArray(company.header_links) ||
+        !company.reported_12m || !numeric(company.reported_12m.value) ||
+        !payload.source_pins?.common?.sha256 || !payload.source_pins?.assessment?.sha256 ||
+        payload.price_provenance?.realtime !== false || payload.price_provenance?.automatic_update !== false) {
+      throw new Error("invalid market input company contract");
+    }
+    for (const price of [...company.prices,...company.other_prices]) {
+      if (!price.security || price.security.cik !== cik || !numeric(price.value) ||
+          price.currency !== null || price.basis !== "AS_TRADED_CLOSE" ||
+          price.requested_date !== payload.financial_as_of ||
+          price.trade_date !== null && (!day(price.trade_date) || price.trade_date > payload.financial_as_of) ||
+          company.prices.includes(price) && price.security.ticker !== company.registered_ticker) {
+        throw new Error("invalid market price identity/date/basis");
+      }
+    }
+    if (company.share_candidates.some(row => !numeric(row.value) || !day(row.display_end) || row.display_end > payload.financial_as_of)) {
+      throw new Error("invalid reported share input");
+    }
+    return company;
+  });
+}
+function serveMarketInputs(bundle, request, response) {
+  if (request.method === "GET" && request.url === "/api/market-inputs") {
+    writeJson(response, 200, {configured:Boolean(bundle),...bundle?.scope});
+    return;
+  }
+  return serveProfileAsset(bundle, request, response, "가격·주당 정보");
+}
+
 function sameAssetScope(left, right) {
   return ["dataset_id","dataset_publication_id","financial_as_of","dataset_manifest_sha256"].every(key => left?.[key] === right?.[key]);
 }
@@ -623,6 +669,7 @@ function startBridge(options) {
   const bundle = options.assetsRoot ? loadDisplayAssets(options.assetsRoot) : null;
   const breakdowns = options.revenueBreakdowns
     ? loadRevenueBreakdowns(options.revenueBreakdowns, options.revenueBreakdownsSha256) : null;
+  const marketInputs = options.marketInputs ? loadMarketInputs(options.marketInputs, options.marketInputsSha256) : null;
   const growth = options.financialGrowth ? loadFinancialGrowth(options.financialGrowth, options.financialGrowthSha256) : null;
   let auxiliary = options.auxiliaryUnion ? loadAuxiliaryUnion(options.auxiliaryUnion, options.auxiliaryUnionSha256, options.auxiliaryUnionParent || null) : null;
   if (options.preparedChanges) auxiliary = bindPreparedAuxiliary(auxiliary, options.preparedChanges);
@@ -732,6 +779,11 @@ function startBridge(options) {
     const requestPath = (request.url || "").split("?", 1)[0];
     if (requestPath === "/api/revenue-breakdowns") {
       serveRevenueBreakdowns(breakdowns, request, response, auxiliary);
+      request.resume();
+      return;
+    }
+    if (requestPath === "/api/market-inputs") {
+      serveMarketInputs(marketInputs, request, response);
       request.resume();
       return;
     }
@@ -853,4 +905,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { bindPreparedAuxiliaryContexts, bindPreparedAuxiliary, loadAuxiliaryUnion, allowedPath, parseArgs, startBridge, loadDisplayAssets, loadRevenueBreakdowns, serveRevenueBreakdowns, loadFinancialGrowth, serveFinancialGrowth, startHistoryWorker, historyGuardRequired };
+module.exports = { loadMarketInputs, serveMarketInputs, bindPreparedAuxiliaryContexts, bindPreparedAuxiliary, loadAuxiliaryUnion, allowedPath, parseArgs, startBridge, loadDisplayAssets, loadRevenueBreakdowns, serveRevenueBreakdowns, loadFinancialGrowth, serveFinancialGrowth, startHistoryWorker, historyGuardRequired };
