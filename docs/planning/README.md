@@ -1,5 +1,19 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 사용자 요청으로 신규8 native 승인·100개사 운영 소스를 main 전달한다.
+운영 checkout `5a8fe55775`는 유지하고 별도 작업 트리에서 main `deb074bc49`을
+일반 merge했다. 실행 Python/bridge는 수락 소스와 같고 UI·검사·interface는 최신
+main을 보존한다. 아래 미병합 표시는 당시 인수 기록이며 최종 병합 결과/merge SHA는
+후속 PR와 Git 이력으로 확인한다. 이 통합에서 운영·자료·journal을 변경하지 않는다.
+
+2026-11-14 [신규8 native 승인·100개사 합성](../implementation/native-eight-admission-20261114.md)은
+**소스 `4c1ff49303` 독립 검증 PASS·로컬 인수·100개사 LIVE 완료, main 미병합**이다.
+기존92의 연간/고정·최신 분기 관측과 GOOGL 성장률·WDC 최신 분기를 정확히 보존했다.
+실제8 native 네 발행과 private 저장/재열기/CSV를 확인했으며 완료 상류17실행은
+반복하지 않았다. 18765(PID56684)→19076(PID1428674), 최신 동시 UI와 journal/
+보호 파일8개 해시를 보존하고 rollback19074를 유지했다. 아래 이전 운영/병합 상태는
+각 인수 당시 기록이다.
+
 2026-11-14 [정보 일관성](../implementation/information-consistency-20261114.md)은
 코드 `4f59ed55`에서 독립 Node139·Python35·Ruff/diff와 리드의 최종 실제 화면
 검사를 통과해 LOCALLY_ACCEPTED다. 연간 추가 열/정밀 정렬, 고정 범위 전체

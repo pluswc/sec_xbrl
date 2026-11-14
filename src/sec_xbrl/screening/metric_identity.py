@@ -55,6 +55,7 @@ SOURCE_KIND = "GENERIC_METRIC_IDENTITY_ATTESTATION"
 QUALITY_SCOPE = "RAW_TRANSFORM_SOURCE_CONFORMANCE_ONLY"
 MANIFEST_NAME = "generic_metric_identity_manifest.json"
 ANNUAL_VIEW = "LATEST_REPORTED"
+ANNUAL_COVERAGE_POLICY = "available-annual-baselines-v1"
 ANNUAL_BALANCE_SCOPE = {
     "included": True,
     "rule_version": "annual-exact-year-end-instant-v1",
@@ -395,7 +396,7 @@ def _verify_configured_sources(config: dict[str, Any]) -> dict[str, Any]:
             "quality_rules": copy.deepcopy(quality.manifest.get("rule_versions", {})),
             "history": sorted({row["history"]["version"] for row in company_sources}),
             "annual_analysis": sorted(
-                {row["annual_analysis"]["version"] for row in company_sources}
+                {row["annual_analysis"]["version"] for row in company_sources if row["annual_analysis"]["version"] is not None}
             ),
             "quarterly_analysis": sorted(
                 {row["quarterly_analysis"]["version"] for row in company_sources}
@@ -442,7 +443,12 @@ def _verify_company_sources(
         storage_entry=(storage_history(storage_reuse, ticker, history_manifest)
             or storage_history(prospective.storage_reuse if prospective else None, ticker, history_manifest)))
 
-    annual = _verify_analysis(
+    coverage = company.get("annual_coverage")
+    if coverage is not None:
+        available_years = _available_history_years(history, ticker)
+        if company["input_years"] != available_years[-5:]:
+            raise ValueError(f"{ticker}: declared annual coverage differs from prepared History")
+    annual = (_no_annual_source(history_sha) if coverage is not None and not company["input_years"] else _verify_analysis(
         company["annual_analysis_root"],
         company["annual_analysis_manifest_sha256"],
         ticker=ticker,
@@ -452,7 +458,7 @@ def _verify_company_sources(
         history_sha=history_sha,
         period_mode="ANNUAL",
         input_years=company["input_years"],
-    )
+    ))
     quarterly = _verify_analysis(
         company["quarterly_analysis_root"],
         company["quarterly_analysis_manifest_sha256"],
@@ -467,6 +473,8 @@ def _verify_company_sources(
     if equivalent:
         from sec_xbrl.prospective_selection import verify_reselected_analysis
         for mode,key in (("ANNUAL","annual_analysis_root"),("QUARTERLY","quarterly_analysis_root")):
+            if mode == "ANNUAL" and coverage is not None and not company["input_years"]:
+                continue
             verify_reselected_analysis(Path(company[key]),selection=prospective,ticker=ticker,period_mode=mode)
     return {
         "ticker": ticker,
@@ -491,6 +499,39 @@ def _verify_company_sources(
         },
         "annual_analysis": annual,
         "quarterly_analysis": quarterly,
+        **({"annual_coverage": copy.deepcopy(coverage)} if coverage is not None else {}),
+    }
+
+
+def annual_coverage(input_years: list[int], display_years: list[int]) -> dict[str, Any]:
+    return {
+        "policy_version": ANNUAL_COVERAGE_POLICY,
+        "requested_input_fiscal_years": 5, "requested_display_fiscal_years": 4,
+        "available_input_years": list(input_years), "available_display_years": list(display_years),
+        "status": "AVAILABLE" if input_years else "NO_ANNUAL_BASELINE",
+    }
+
+
+def _available_history_years(history: HistoryPublicationReader, ticker: str) -> list[int]:
+    tables = [table for table in history.manifest["tables"]
+              if (table["ticker"], table["view"], table["period_class"]) == (ticker, ANNUAL_VIEW, "FY")]
+    if len(tables) > 1:
+        raise ValueError("partial annual coverage requires one unambiguous FY table")
+    years = sorted({row["fiscal_year"] for table in tables for row in history._records(table["files"]["columns"])
+                    if row.get("column_status") == "AVAILABLE"})
+    filings = [filing for company in history.manifest["plan"]["companies"] if company["ticker"] == ticker
+               for filing in company["filings"]]
+    baselines = any(row["form"] in {"10-K", "10-K/A"} for row in filings)
+    if bool(years) != baselines:
+        raise ValueError("annual baseline filing and prepared FY coverage disagree")
+    return years
+
+
+def _no_annual_source(history_sha: str) -> dict[str, Any]:
+    return {
+        "status": "UNAVAILABLE", "reason": "NO_ANNUAL_BASELINE", "period_mode": "ANNUAL",
+        "root": None, "manifest_sha256": None, "publication_id": None, "version": None,
+        "history_manifest_sha256": history_sha, "declared_files": {},
     }
 
 
@@ -566,6 +607,9 @@ def _validate_config(value: Any) -> dict[str, Any]:
         raise ValueError("unsupported generic metric identity config")
     if value.get("source_kind") != SOURCE_KIND:
         raise ValueError("generic metric identity config requires an explicit source kind")
+    coverage_policy = value.get("annual_coverage_policy")
+    if coverage_policy is not None and coverage_policy != ANNUAL_COVERAGE_POLICY:
+        raise ValueError("unsupported explicit annual coverage policy")
     financial_as_of = require_string(value.get("financial_as_of"), "financial_as_of")
     date.fromisoformat(financial_as_of)
     metadata_observation_cutoff = _timestamp(
@@ -584,24 +628,34 @@ def _validate_config(value: Any) -> dict[str, Any]:
     for index, row in enumerate(raw_companies):
         if not isinstance(row, dict):
             raise TypeError("generic metric identity company must be an object")
-        input_years = _years(row.get("input_years"), f"companies[{index}].input_years", 5)
-        display_years = _years(row.get("display_years"), f"companies[{index}].display_years", 4)
+        years = _available_years if coverage_policy is not None else _years
+        input_years = years(row.get("input_years"), f"companies[{index}].input_years", 5)
+        display_years = years(row.get("display_years"), f"companies[{index}].display_years", 4)
         if display_years != input_years[-4:]:
             raise ValueError("display_years must be the latest four input_years")
-        companies.append(
-            {
+        empty = coverage_policy is not None and not input_years
+        if empty and (row.get("annual_analysis_root") is not None or row.get("annual_analysis_manifest_sha256") is not None):
+            raise ValueError("zero annual coverage cannot declare an annual analysis parent")
+        normalized_company = {
                 "ticker": require_ticker(row.get("ticker"), f"companies[{index}].ticker"),
                 "cik": require_cik(row.get("cik"), f"companies[{index}].cik"),
                 "input_years": input_years,
                 "display_years": display_years,
                 "history_root": require_string(row.get("history_root"), "history_root"),
                 "history_manifest_sha256": _sha(row.get("history_manifest_sha256"), "history SHA"),
-                "annual_analysis_root": require_string(row.get("annual_analysis_root"), "annual analysis root"),
-                "annual_analysis_manifest_sha256": _sha(row.get("annual_analysis_manifest_sha256"), "annual analysis SHA"),
+                "annual_analysis_root": None if empty else require_string(row.get("annual_analysis_root"), "annual analysis root"),
+                "annual_analysis_manifest_sha256": None if empty else _sha(row.get("annual_analysis_manifest_sha256"), "annual analysis SHA"),
                 "quarterly_analysis_root": require_string(row.get("quarterly_analysis_root"), "quarterly analysis root"),
                 "quarterly_analysis_manifest_sha256": _sha(row.get("quarterly_analysis_manifest_sha256"), "quarterly analysis SHA"),
-            }
-        )
+        }
+        if coverage_policy is not None:
+            coverage = annual_coverage(input_years, display_years)
+            if "annual_coverage" in row and row["annual_coverage"] != coverage:
+                raise ValueError("annual coverage declaration differs from actual year window")
+            normalized_company["annual_coverage"] = coverage
+        elif "annual_coverage" in row:
+            raise ValueError("annual coverage requires an explicit versioned policy")
+        companies.append(normalized_company)
     companies.sort(key=lambda row: row["cik"])
     if len({row["ticker"] for row in companies}) != len(companies) or len(
         {row["cik"] for row in companies}
@@ -627,6 +681,8 @@ def _validate_config(value: Any) -> dict[str, Any]:
         "quality_manifest_sha256": _sha(value.get("quality_manifest_sha256"), "quality manifest SHA"),
         "companies": companies,
     }
+    if coverage_policy is not None:
+        normalized["annual_coverage_policy"] = coverage_policy
     if "source_compatibility" in value:
         normalized["source_compatibility"] = selection_declaration(value["source_compatibility"])
     if "prospective_selection" in value:
@@ -683,6 +739,13 @@ def _quarter_spine(financial_as_of: str) -> list[dict[str, int]]:
         absolute = year * 4 + quarter - 1 - offset
         result.append({"calendar_year": absolute // 4, "calendar_quarter": absolute % 4 + 1})
     return result
+
+
+def _available_years(value: Any, field: str, count: int) -> list[int]:
+    if (not isinstance(value, list) or len(value) > count or any(type(year) is not int for year in value)
+        or value != sorted(set(value))):
+        raise ValueError(f"{field} must contain at most {count} actual ordered unique fiscal years")
+    return list(value)
 
 
 def _years(value: Any, field: str, count: int) -> list[int]:

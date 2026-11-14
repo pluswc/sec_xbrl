@@ -100,3 +100,19 @@ test("governed delta preserves exact parent ownership and rejects relabelled own
   assert.throws(()=>bridge.loadAuxiliaryUnion(file,write(tampered),{path:f.file,sha256:f.digest}),/pin/);
   assert.throws(()=>bridge.loadAuxiliaryUnion(file,write(manifest)),/host parent/);
 });
+
+test("typed union preserves exact ancestor auxiliary scope and CIK boundaries",t=>{
+  const f=fixture(t),manifest={...f.manifest,schema_version:"screening-cohort-union-v2",dataset_id:"composed100",
+    publication_id:"composed100-publication",auxiliary_contexts:[{scope:{dataset_id:"approved92",dataset_publication_id:"approved92-publication",
+      financial_as_of:source.financial_as_of,dataset_manifest_sha256:"3".repeat(64)},ciks:[cik]}]};
+  const digest=f.write(manifest),owner=bridge.loadAuxiliaryUnion(f.file,digest);
+  const requested={dataset_id:"approved92",dataset_publication_id:"approved92-publication",financial_as_of:source.financial_as_of,cik};
+  const ancestor=growth(f.bundle,owner,requested);assert.equal(ancestor.status,200);
+  assert.deepEqual(ancestor.body.data,f.data);assert.equal(ancestor.body.owner_proof.union_manifest_sha256,"3".repeat(64));
+  const composed=growth(f.bundle,owner,{...requested,dataset_id:"composed100",dataset_publication_id:"composed100-publication"});
+  assert.equal(composed.status,200);assert.equal(composed.body.owner_proof.union_manifest_sha256,digest);
+  assert.deepEqual(growth(f.bundle,owner).body.owner_contexts[1].available_ciks,[cik]);
+  assert.equal(growth(f.bundle,owner,{...requested,cik:newCik}).status,409);
+  const invalid=structuredClone(manifest);invalid.auxiliary_contexts[0].ciks=["9999999999"];
+  assert.throws(()=>bridge.loadAuxiliaryUnion(f.file,f.write(invalid)),/ancestor scope/);
+});

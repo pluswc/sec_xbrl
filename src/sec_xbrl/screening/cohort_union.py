@@ -24,6 +24,8 @@ from sec_xbrl.screening.runtime_projection import ScreeningRuntimeProjection
 
 CONFIG_VERSION = "screening-cohort-union-config-v1"
 VERSION = "screening-cohort-union-v1"
+CONFIG_VERSION_V2 = "screening-cohort-union-config-v2"
+VERSION_V2 = "screening-cohort-union-v2"
 MANIFEST = "screening_cohort_union_manifest.json"
 
 
@@ -40,11 +42,11 @@ def _read_pin(pin: dict[str, str]) -> tuple[Path, dict]:
     return path, value
 
 
-def _open_members(config: dict) -> list[ScreeningRuntimeProjection]:
+def _open_members(config: dict, shared_readers: tuple = ()) -> list[Any]:
     required = {"schema_version", "dataset_id", "members"}
     if not isinstance(config, dict) or not required <= set(config) or set(config) - required - {"membership_evidence", "expose_auxiliary_owners", "latest_source_coverage"}:
         raise ValueError("unsupported cohort union configuration")
-    if config["schema_version"] != CONFIG_VERSION or not isinstance(config["members"], list) or len(config["members"]) < 2:
+    if config["schema_version"] not in {CONFIG_VERSION, CONFIG_VERSION_V2} or not isinstance(config["members"], list) or len(config["members"]) < 2:
         raise ValueError("cohort union requires at least two explicitly pinned members")
     require_string(config["dataset_id"], "cohort union dataset ID")
     if "expose_auxiliary_owners" in config and type(config["expose_auxiliary_owners"]) is not bool:
@@ -53,6 +55,29 @@ def _open_members(config: dict) -> list[ScreeningRuntimeProjection]:
         _read_pin(config["membership_evidence"])
     members = []
     for member in config["members"]:
+        if config["schema_version"] == CONFIG_VERSION_V2:
+            from sec_xbrl.screening.governed_delta import MANIFEST as DELTA_MANIFEST
+            from sec_xbrl.screening.governed_delta import ScreeningGovernedDeltaReader
+            if not isinstance(member, dict) or set(member) != {"kind", "declaration"} or member["kind"] != "GOVERNED_DELTA":
+                raise ValueError("union v2 requires explicitly typed governed delta members")
+            declaration = member["declaration"]
+            if (not isinstance(declaration, dict) or not {"manifest", "approval"} <= set(declaration)
+                    or set(declaration) - {"manifest", "approval", "reader_source_transition"}):
+                raise ValueError("union v2 delta declaration differs")
+            path, manifest = _read_pin(declaration["manifest"])
+            if path.name != DELTA_MANIFEST:
+                raise ValueError("union v2 member manifest differs")
+            for pin in declaration.values():
+                _read_pin(pin)
+            reader = next((item for item in shared_readers if item.root == path.parent
+                           and item._manifest_sha256 == declaration["manifest"]["sha256"]), None)
+            if reader is not None:
+                if not isinstance(reader, ScreeningGovernedDeltaReader) or reader._declaration != declaration:
+                    raise ValueError("union v2 shared delta declaration differs")
+            else:
+                reader = ScreeningGovernedDeltaReader(path.parent, declaration)
+            members.append(reader)
+            continue
         if not isinstance(member, dict) or set(member) != {"dataset_manifest", "projection"}:
             raise ValueError("cohort union member requires source and projection pins")
         path, manifest = _read_pin(member["dataset_manifest"])
@@ -197,6 +222,10 @@ def _compose(config: dict, members: list[ScreeningRuntimeProjection]) -> tuple[d
                 raise ValueError("cohort union prepared CIK is owned by more than one parent")
             owners[cik] = member
             companies.append(copy.deepcopy(company))
+    if config["schema_version"] == CONFIG_VERSION_V2 and any(
+            set(member.manifest.get("auxiliary_owners", {})) != {row["cik"] for row in member.companies}
+            for member in members):
+        raise ValueError("union v2 requires complete published member auxiliary ownership")
     annual = _definitions(members, "metric_definitions")
     quarterly = _definitions(members, "quarter_definitions")
     metadata_sources = [member.manifest["sources"]["metadata"] for member in members]
@@ -205,7 +234,7 @@ def _compose(config: dict, members: list[ScreeningRuntimeProjection]) -> tuple[d
         "publication_id": "cohort-metadata-" + digest_value(metadata_sources)[:24],
     }
     body = {
-        "schema_version": VERSION, "dataset_id": config["dataset_id"], "config": copy.deepcopy(config),
+        "schema_version": (VERSION_V2 if config["schema_version"] == CONFIG_VERSION_V2 else VERSION), "dataset_id": config["dataset_id"], "config": copy.deepcopy(config),
         "financial_as_of": next(iter(cutoffs)), "fixture_kind": next(iter(kinds)),
         "sources": {"metadata": metadata}, "versions": {"cohort_publication_ids": [member.publication_id for member in members]},
         "configured_ciks": sorted(owners), "metric_definitions": annual, "quarter_definitions": quarterly,
@@ -213,10 +242,27 @@ def _compose(config: dict, members: list[ScreeningRuntimeProjection]) -> tuple[d
     }
     if config.get("expose_auxiliary_owners"):
         body["auxiliary_owners"] = {
-            cik: {"dataset_id": owner.manifest["dataset_id"], "dataset_publication_id": owner.publication_id,
-                  "financial_as_of": owner.manifest["financial_as_of"], "dataset_manifest_sha256": owner._manifest_sha256}
+            cik: (copy.deepcopy(owner.manifest["auxiliary_owners"][cik]) if config["schema_version"] == CONFIG_VERSION_V2 else
+                  {"dataset_id": owner.manifest["dataset_id"], "dataset_publication_id": owner.publication_id,
+                   "financial_as_of": owner.manifest["financial_as_of"], "dataset_manifest_sha256": owner._manifest_sha256})
             for cik, owner in sorted(owners.items())
         }
+    if config["schema_version"] == CONFIG_VERSION_V2:
+        if "latest_source_coverage" in config:
+            raise ValueError("union v2 inherits only already-published latest source coverage")
+        body["latest_company_periods"] = {cik: copy.deepcopy(row) for member in members
+                                         for cik, row in member.latest_quarter_periods.items()}
+        body["latest_source_period_guards"] = {cik: copy.deepcopy(row) for member in members
+                                              for cik, row in member.latest_source_period_guards.items()}
+        contexts = []
+        for member in members:
+            for ancestor in (member, member.parent):
+                contexts.append({"scope": {"dataset_id": ancestor.manifest["dataset_id"],
+                    "dataset_publication_id": ancestor.publication_id,
+                    "financial_as_of": ancestor.manifest["financial_as_of"],
+                    "dataset_manifest_sha256": ancestor._manifest_sha256},
+                    "ciks": sorted(row["cik"] for row in ancestor.companies)})
+        body["auxiliary_contexts"] = contexts
     guards = _latest_source_coverage(config, owners, next(iter(cutoffs)), spine)
     if "latest_source_coverage" in config:
         body["latest_source_period_guards"] = guards
@@ -254,12 +300,12 @@ def publish_cohort_union(config_path: Path | str, destination: Path | str) -> Pa
 class ScreeningCohortUnionReader:
     """Route core and exact detail by the unique prepared owner of each CIK."""
 
-    def __init__(self, root: Path | str, pin: dict[str, str]) -> None:
+    def __init__(self, root: Path | str, pin: dict[str, str], *, shared_readers: tuple = ()) -> None:
         self.root = real_directory(Path(root), "cohort union")
         path, manifest = _read_pin(pin)
-        if path != self.root / MANIFEST or manifest.get("schema_version") != VERSION:
+        if path != self.root / MANIFEST or manifest.get("schema_version") not in {VERSION, VERSION_V2}:
             raise ValueError("cohort union pin differs from configured root or schema")
-        self._members = _open_members(manifest["config"])
+        self._members = _open_members(manifest["config"], shared_readers)
         expected, metadata = _compose(manifest["config"], self._members)
         if expected != manifest:
             raise ValueError("cohort union declaration differs from its exact parents")
@@ -270,6 +316,7 @@ class ScreeningCohortUnionReader:
         self.metadata = metadata["metadata"]
         self._owners = metadata["owners"]
         self.latest_source_period_guards = manifest.get("latest_source_period_guards", {})
+        self.latest_quarter_periods = manifest.get("latest_company_periods", {})
         self.metric_definitions = metadata["metric_definitions"]
         self.quarter_definitions = metadata["quarter_definitions"]
         self.quarterly = SimpleNamespace(manifest={"global_quarter_spine": manifest["global_quarter_spine"]})
@@ -282,6 +329,12 @@ class ScreeningCohortUnionReader:
             owner = self._owners.get(cik)
             return owner.rows(**selection) if owner is not None else []
         return [row for member in self._members for row in member.rows(**selection)]
+
+    def latest_rows(self, **selection: Any) -> list[dict]:
+        from sec_xbrl.screening.runtime_projection import observation_rows
+        cik = selection.get("cik")
+        members = [self._owners[cik]] if cik in self._owners else ([] if cik is not None else self._members)
+        return [row for member in members for row in observation_rows(member, latest=True, **selection)]
 
     def hydrate(self, row: dict, *, quarterly: bool = False) -> dict:
         return self._owners[row["cik"]].hydrate(row, quarterly=quarterly)

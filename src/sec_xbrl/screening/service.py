@@ -184,12 +184,18 @@ class ScreeningService:
             raise ValueError("governed delta is outside the catalog or overlaps another declaration")
         self.datasets: dict[str, ScreeningReader] = {}
         self.explorers: dict[str, ScreeningExplorer] = {}
+        pending = {}
         with self._compatibility_scope(), _share_v3_readers() as loaded:
             for dataset_id, root in datasets.items():
                 if dataset_id in deltas:
+                    pending[dataset_id] = ("delta", json.loads(Path(deltas[dataset_id]["manifest"]["path"]).read_bytes()))
                     continue
                 dataset_id = require_string(dataset_id, "dataset catalog ID")
                 if dataset_id in unions:
+                    data = json.loads(Path(unions[dataset_id]["path"]).read_bytes())
+                    if data.get("schema_version") == "screening-cohort-union-v2":
+                        pending[dataset_id] = ("union", data)
+                        continue
                     reader = ScreeningCohortUnionReader(root, unions[dataset_id])
                 elif dataset_id in projections:
                     reader = ScreeningRuntimeProjection(root, projections[dataset_id])
@@ -200,18 +206,26 @@ class ScreeningService:
                 self.datasets[dataset_id] = reader
                 if isinstance(reader, (ScreeningDatasetV2Reader, ScreeningDatasetV3Reader)):
                     self.explorers[dataset_id] = ScreeningExplorer(reader)
-        for dataset_id, declaration in deltas.items():
-            data = json.loads(Path(declaration["manifest"]["path"]).read_bytes())
-            parent_pin = data["parent"]
-            parent = next((reader for reader in self.datasets.values()
-                           if getattr(reader, "_manifest_sha256", None) == parent_pin["sha256"]
-                           and reader.root == Path(parent_pin["path"]).parent), None)
-            if parent is None:
-                raise ValueError("governed delta requires its exact shared parent in the catalog")
-            reader = ScreeningGovernedDeltaReader(datasets[dataset_id], declaration, parent=parent)
-            if reader.manifest["dataset_id"] != dataset_id:
-                raise ValueError("governed delta catalog identity differs")
-            self.datasets[dataset_id] = reader
+        while pending:
+            progressed = False
+            for dataset_id, (kind, data) in list(pending.items()):
+                pins = ([data["parent"]] if kind == "delta" else
+                        [member["declaration"]["manifest"] for member in data["config"]["members"]])
+                parents = [next((reader for reader in self.datasets.values()
+                                 if getattr(reader, "_manifest_sha256", None) == pin["sha256"]
+                                 and reader.root == Path(pin["path"]).parent), None) for pin in pins]
+                if any(parent is None for parent in parents):
+                    continue
+                reader = (ScreeningGovernedDeltaReader(datasets[dataset_id], deltas[dataset_id], parent=parents[0])
+                          if kind == "delta" else ScreeningCohortUnionReader(
+                              datasets[dataset_id], unions[dataset_id], shared_readers=tuple(parents)))
+                if reader.manifest["dataset_id"] != dataset_id:
+                    raise ValueError("composed dataset catalog identity differs")
+                self.datasets[dataset_id] = reader
+                del pending[dataset_id]
+                progressed = True
+            if not progressed:
+                raise ValueError("composed dataset requires its exact acyclic shared parents in the catalog")
         self.datasets = {key: self.datasets[key] for key in datasets}
         self.batch_registrations, self.batch_sessions = _batch_evidence(batch_evidence, self.datasets)
         if company_descriptions is not None:
