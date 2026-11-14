@@ -282,3 +282,57 @@ def test_disclosed_fixed_segment_total_requires_every_separate_permission(fixtur
     else:
         assert cell["share"] is None
         assert companion["exclusions"][0]["reason"] == "Q4_SHARE_FIXED_PARENT_SCOPE_MISMATCH"
+
+
+def test_publish_uses_real_pinned_parquet_loader_and_name_maps(fixture, tmp_path):
+    import json
+
+    import polars as pl
+
+    from examples.screening.enrich_revenue_q4 import publish
+    from sec_xbrl.screening.common import sha256_file
+
+    review, baseline, old, observations, names = fixture
+    baseline["schema_version"] = "screening-revenue-breakdowns-v1"
+    def json_pin(name, value):
+        path = tmp_path / name
+        path.write_text(json.dumps(value))
+        return {"path": str(path), "sha256": sha256_file(path)}
+    def parquet_pin(name, rows):
+        path = tmp_path / name
+        pl.DataFrame(rows).write_parquet(path)
+        return {"path": str(path), "sha256": sha256_file(path)}
+    source = {"analysis": json_pin("analysis.json", {}),
+              "history": json_pin("history.json", {"input_fingerprint": "accepted-fixture"}),
+              "t1_manifest": json_pin("t1-manifest.json", {"run_fingerprint": "accepted-fixture"}),
+              "t2_manifest": json_pin("t2-manifest.json", {})}
+    mappings = [{"cik": cik, "source_filing_id": filing, "source_raw_concept_id": raw, "source_qname": qname}
+                for (cik, filing, raw), qname in names.items()]
+    source["t1_files"] = {"reported_period_observation": parquet_pin("observations.parquet", observations),
+        "company_axis_map": parquet_pin("axes.parquet", [row for row in mappings if row["source_raw_concept_id"] == "raw-axis"]),
+        "company_member_map": parquet_pin("members.parquet", [row for row in mappings if row["source_raw_concept_id"] == "raw-member"]),
+        "company_concept_map": parquet_pin("concepts.parquet", [{"source_qname": "us-gaap:Revenues"}])}
+    baseline["companies"]["0000000001"]["quarterly"]["ratio_evidence"] = {
+        "history_manifest_sha256": source["history"]["sha256"],
+        "reported_panel_manifest_sha256": source["t1_manifest"]["sha256"],
+        "reported_observations_sha256": source["t1_files"]["reported_period_observation"]["sha256"]}
+    review["baseline_asset"] = json_pin("baseline.json", baseline)
+    review["baseline_companion"] = json_pin("old-companion.json", old)
+    review["source_inventory"] = json_pin("inventory.json", {"0000000001": source})
+    review["evidence_files"] = {"disclosure": json_pin("disclosure.json", {"reviewed": True})}
+    review_pin = json_pin("review.json", review)
+    outputs = tmp_path / "real-asset.json", tmp_path / "real-companion.json"
+    result = publish(review_pin, *outputs)
+    assert result["derived_count"] == 2 and result["ratio_count"] == 2
+    asset = json.loads(outputs[0].read_bytes())
+    cell = asset["companies"]["0000000001"]["quarterly"]["groups"]["products"][0]["cells"][0]
+    assert cell["value"] == "50" and cell["share"] == "25.00" and cell["yoy"] is not None
+    companion = json.loads(outputs[1].read_bytes())
+    assert any(pin["sha256"] == source["t1_files"]["reported_period_observation"]["sha256"] for pin in companion["input_pins"])
+    # An edited on-disk observation must be rejected before any new output is installed.
+    changed = deepcopy(observations)
+    changed[0]["value_numeric"] = "999"
+    pl.DataFrame(changed).write_parquet(source["t1_files"]["reported_period_observation"]["path"])
+    with pytest.raises(ValueError, match="pin"):
+        publish(review_pin, tmp_path / "tampered-asset.json", tmp_path / "tampered-companion.json")
+    assert not (tmp_path / "tampered-asset.json").exists()

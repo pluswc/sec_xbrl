@@ -229,3 +229,21 @@ cross-concept share 보류는 이 추가 승인과 별개의 판단이며 여전
 후속 자체 검사: Python **81 PASS** (0.11초), 전체 Node **152 PASS** (35.13초),
 Ruff/diff PASS. 명시 관계 승인/누락, 잘못된 parent Fact, 원문 한 개의 부정 fixture와
 별도 공개 분모/hover 범위 검사를 포함한다. 원본 core·legacy revenue policy는 불변이다.
+
+## 독립 검토 P1 반환과 실제 loader 경로 보정
+
+`bfe3effd1b`의 독립 검토에서 `_load_sources`가 계산한 name map을 반환하지 않고
+관측 목록만 반환해 `publish()`의 tuple unpack이 실패하는 P1을 확인했다.
+초기 publisher fixture는 loader를 대체해 이 결함을 검출하지 못했다. 실제 발행은
+아직 실행되지 않았으며 원 자료/운영에 영향은 없었다.
+
+반환 형식과 annotation을 `(observations, scope_names)`로 고쳤다. 추가 회귀는
+loader를 대체하지 않고 임시 관측·axis/member/concept Parquet와 정확한 inventory/
+manifest/evidence pins를 통해 `publish()`의 새 asset·companion 출력까지 실행한다.
+디스크 관측을 변조하면 새 출력 설치 전에 거부하는 것도 확인한다. 합성 파일만
+사용했고 실제 ROOT 승인 입력으로 발행하거나 원파일을 수정하지 않았다.
+
+수정 후 관련 Python **82 PASS** (0.15초), 전체 Node **152 PASS** (35.13초),
+Ruff/diff PASS다. 추가 blocker가 없다는 독립 검토 반환을 수신했으며, 이 수정
+SHA 자체의 독립 재검은 별도로 필요하다. Source/schema/회계 grant의 의미나
+실제 승인 v2의 bytes는 바꾸지 않았다.

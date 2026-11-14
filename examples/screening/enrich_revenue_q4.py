@@ -67,7 +67,7 @@ def _evidence(grant: dict, files: dict) -> None:
         raise ValueError("review grant lacks exact registered disclosure evidence")
 
 
-def _load_sources(review: dict, baseline: dict, consumed: list[dict]) -> list[dict]:
+def _load_sources(review: dict, baseline: dict, consumed: list[dict]) -> tuple[list[dict], dict[tuple[str, str, str], str]]:
     inventory = json.loads(_pin(review["source_inventory"]))
     ciks = {link["cik"] for link in review["amount_links"]}
     ciks.update(grant["target"]["cik"] for key in ("projection_grants", "share_grants", "yoy_grants", "hold_grants") for grant in review.get(key, []))
@@ -98,7 +98,7 @@ def _load_sources(review: dict, baseline: dict, consumed: list[dict]) -> list[di
             & pl.col("period_class").is_in(["FY", "YTD_9M", "QTD_3M"])
         ).collect()
         rows.extend(frame.to_dicts())
-    return rows
+    return rows, names
 
 
 def _review_source(row: dict, cik: str, cutoff: str) -> dict | None:
