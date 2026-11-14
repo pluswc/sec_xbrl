@@ -79,7 +79,7 @@ test("latest result period is a distinct role while fixed-period metrics and hid
 test("native result value titles retain full names, precision, units and actual dates or missing reasons",()=>{
   const {cell,S}=harness();
   const value=cell({observation:{value:"9007199254740993.123",period_start:"2024-01-01",period_end:"2025-01-01"}},S.catalog[0]);
-  assert.match(value,/매출 · 9,007,199,255 백만 달러 · 실제 기간 2024-01-01 ~ 2024-12-31 · 공표값 9007199254740993.123 USD/);
+  assert.match(value,/매출 · 9,007,199,255 백만 USD · 실제 기간 2024-01-01 ~ 2024-12-31 · 공표값 9007199254740993.123 USD/);
   assert.match(value,/aria-label="매출/);
   const missing=cell({reason:"QUALITY_BLOCKED",observation:{value:null,period_end:"2025-01-01"}},{...S.catalog[1],label:'full <source> "label"'});
   assert.match(missing,/full &lt;source&gt; &quot;label&quot;.*자료 품질 확인이 필요합니다/s);
