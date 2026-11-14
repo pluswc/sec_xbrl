@@ -1,5 +1,9 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 [준비된100·109 보조자료 context](../implementation/prepared-auxiliary-contexts-20261114.md)은
+consumer 전용 구현 승인 단계다. 정확한 각 부모·snapshot·승인과 owner 부분집합을
+검증하며 기존 단일 CLI·financial/backend·운영 자료는 유지한다. 독립/운영 수락은 별도다.
+
 2026-11-14 원격 전달 승인: 사용자가 준비된 변화 조건의 push·PR을 승인했다.
 별도 branch에서 [PR97](https://github.com/pluswc/sec_xbrl/pull/97)이 포함된 최신
 `origin/main d724c54e24257af9600a6427f83dcea792bea738`을 일반 merge했다.

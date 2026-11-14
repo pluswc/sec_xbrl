@@ -141,3 +141,76 @@ test("prepared publication binds separate ROOT approval to exact original union 
   const missing=declared();delete missing.approval;assert.throws(()=>bridge.bindPreparedAuxiliary(f.owner,missing));
   assert.throws(()=>bridge.bindPreparedAuxiliary(null,declared()),/explicit original union/);
 });
+
+function preparedContextFixture(t){
+  const f=fixture(t),third="0000000003";
+  const stable=value=>JSON.stringify(value,(_,item)=>item&&typeof item==="object"&&!Array.isArray(item)?Object.fromEntries(Object.keys(item).sort().map(key=>[key,item[key]])):item);
+  const hash=value=>crypto.createHash("sha256").update(stable(value)).digest("hex");
+  const write=(name,value)=>{const file=path.join(f.root,name);fs.writeFileSync(file,stable(value));return{path:file,sha256:hash(value)}};
+  const main={...f.manifest,schema_version:"screening-cohort-union-v2",dataset_id:"base109",publication_id:"base109-publication",
+    configured_ciks:[cik,newCik,third],auxiliary_contexts:[],auxiliary_owners:{[cik]:source,[newCik]:source,[third]:source}};
+  const mainPin=write("main109.json",main),owner=bridge.loadAuxiliaryUnion(mainPin.path,mainPin.sha256);
+  const parent={...main,schema_version:"screening-cohort-union-v1",dataset_id:"base100",publication_id:"base100-publication",
+    configured_ciks:[cik,newCik],auxiliary_owners:{[cik]:source,[newCik]:source}};
+  const parentPin=write("parent100.json",parent);
+  function entry(name,parentManifest,parentPin,change=()=>{}){
+    const manifest={schema_version:"screening-prepared-changes-v1",dataset_id:name,publication_id:name+"-publication",financial_as_of:parentManifest.financial_as_of,
+      parent_dataset_id:parentManifest.dataset_id,parent_publication_id:parentManifest.publication_id,parent_manifest_sha256:parentPin.sha256,
+      parent_logical_sha256:"8".repeat(64),configured_ciks:parentManifest.configured_ciks,auxiliary_owners:parentManifest.auxiliary_owners};change(manifest);
+    const snapshot={schema_version:"screening-read-snapshot-v1",reader_version:"screening-read-snapshot-v1",logical_sha256:"9".repeat(64),origin:{kind:"screening-prepared-changes-v1"},properties:{original_manifest:manifest,original_manifest_sha256:hash(manifest)}};
+    const snapshotPin=write(name+"-snapshot.json",snapshot);
+    const verification=write(name+"-verification.json",{schema_version:"screening-read-export-verification-v1",verified:true,manifest_sha256:snapshotPin.sha256,logical_sha256:snapshot.logical_sha256,origin:snapshot.origin});
+    const approval=write(name+"-approval.json",{schema_version:"screening-read-snapshot-root-approval-v1",authority:"ROOT",approved:true,reader_version:snapshot.reader_version,manifest_sha256:snapshotPin.sha256,verification_sha256:verification.sha256,logical_sha256:snapshot.logical_sha256,origin:snapshot.origin});
+    return{parent:parentPin,snapshot:snapshotPin,verification,approval};
+  }
+  const first=entry("prepared100",parent,parentPin),second=entry("prepared109",main,mainPin);
+  const list=contexts=>write("contexts.json",{schema_version:"prepared-auxiliary-contexts-v1",contexts});
+  const bundle={...f.bundle,byCik:new Map([cik,newCik,third].map(id=>[id,Buffer.from(stable({...f.data,cik:id}))]))};
+  return{...f,third,write,hash,main,mainPin,parent,parentPin,owner,entry,first,second,list,bundle};
+}
+
+test("multiple prepared contexts preserve100 and109 scopes, proofs and legacy payload bytes",t=>{
+  const f=preparedContextFixture(t),pin=f.list([f.first,f.second]);
+  const bound=bridge.bindPreparedAuxiliaryContexts(f.owner,pin);
+  assert.equal(f.owner.scopes.length,1); // Binding does not mutate the existing context.
+  for(const [name,entry] of [["prepared100",f.first],["prepared109",f.second]]){
+    const result=growth(f.bundle,bound,{dataset_id:name,dataset_publication_id:name+"-publication",financial_as_of:source.financial_as_of,cik});
+    assert.equal(result.status,200);assert.deepEqual(result.body.data,JSON.parse(f.bundle.byCik.get(cik)));
+    const snapshot=JSON.parse(fs.readFileSync(entry.snapshot.path));
+    assert.equal(result.body.owner_proof.union_manifest_sha256,snapshot.properties.original_manifest_sha256);
+    assert.deepEqual(result.body.source_scope,source);
+  }
+  const contexts=growth(f.bundle,bound).body.owner_contexts;
+  assert.deepEqual(contexts[1].available_ciks,[cik,newCik]);assert.deepEqual(contexts[2].available_ciks,[cik,newCik,f.third]);
+  assert.equal(growth(f.bundle,bound,{dataset_id:"prepared100",dataset_publication_id:"prepared100-publication",financial_as_of:source.financial_as_of,cik:f.third}).status,409);
+  assert.equal(growth(f.bundle,bound,{dataset_id:"prepared109",dataset_publication_id:"prepared109-publication",financial_as_of:source.financial_as_of,cik:f.third}).status,200);
+  const legacy=growth(f.bundle,bound,{dataset_id:source.dataset_id,dataset_publication_id:source.dataset_publication_id,financial_as_of:source.financial_as_of,cik});
+  assert.deepEqual(legacy.raw,f.bundle.byCik.get(cik));
+});
+
+test("prepared context lists reject tamper, parent mismatch, owner/cutoff drift and scope collisions",t=>{
+  const f=preparedContextFixture(t);
+  assert.throws(()=>bridge.bindPreparedAuxiliaryContexts(f.owner,{...f.list([f.first]),sha256:"0".repeat(64)}),/pin/);
+  assert.throws(()=>bridge.bindPreparedAuxiliaryContexts(f.owner,f.list([{...f.first,parent:{...f.parentPin,sha256:"0".repeat(64)}}])),/pin/);
+  const approval=JSON.parse(fs.readFileSync(f.first.approval.path));approval.approved=false;
+  assert.throws(()=>bridge.bindPreparedAuxiliaryContexts(f.owner,f.list([{...f.first,approval:f.write("bad-approval.json",approval)}])),/exact approved parent/);
+  const ownerDrift=structuredClone(f.parent);ownerDrift.auxiliary_owners[cik].dataset_publication_id="foreign";
+  const ownerPin=f.write("owner-drift.json",ownerDrift);
+  assert.throws(()=>bridge.bindPreparedAuxiliaryContexts(f.owner,f.list([f.entry("owner-drift",ownerDrift,ownerPin)])),/owner subset/);
+  const cutoff=structuredClone(f.parent);cutoff.financial_as_of="2026-11-01";
+  for(const owner of Object.values(cutoff.auxiliary_owners))owner.financial_as_of=cutoff.financial_as_of;
+  const cutoffPin=f.write("cutoff.json",cutoff);
+  assert.throws(()=>bridge.bindPreparedAuxiliaryContexts(f.owner,f.list([f.entry("cutoff",cutoff,cutoffPin)])),/cutoff/);
+  assert.throws(()=>bridge.bindPreparedAuxiliaryContexts(f.owner,f.list([f.first,f.first])),/collides/);
+  const collision=f.entry("collision",f.main,f.mainPin,x=>{x.dataset_id=f.main.dataset_id;x.publication_id=f.main.publication_id});
+  assert.throws(()=>bridge.bindPreparedAuxiliaryContexts(f.owner,f.list([collision])),/collides/);
+  assert.throws(()=>bridge.bindPreparedAuxiliaryContexts(f.owner,f.list([])),/invalid/);
+  assert.throws(()=>bridge.bindPreparedAuxiliaryContexts(f.owner,f.list([{...f.first,unexpected:true}])) ,/invalid/);
+  const base=["--distribution","fixture","--linux-python","/python","--source-root","/src","--backend-port","19070","--frontend-port","19065","--auxiliary-union",f.mainPin.path,"--auxiliary-union-sha256",f.mainPin.sha256];
+  const pin=f.list([f.first,f.second]),args=[...base,"--prepared-changes-contexts",pin.path,"--prepared-changes-contexts-sha256",pin.sha256];
+  assert.deepEqual(bridge.parseArgs(args).preparedChangesContexts,pin);
+  assert.throws(()=>bridge.parseArgs([...base,"--prepared-changes-contexts",pin.path]),/prepared contexts/);
+  assert.throws(()=>bridge.parseArgs([...args,"--prepared-changes-snapshot",f.first.snapshot.path,"--prepared-changes-snapshot-sha256",f.first.snapshot.sha256,
+    "--prepared-changes-verification",f.first.verification.path,"--prepared-changes-verification-sha256",f.first.verification.sha256,
+    "--prepared-changes-approval",f.first.approval.path,"--prepared-changes-approval-sha256",f.first.approval.sha256]),/exclusive/);
+});
