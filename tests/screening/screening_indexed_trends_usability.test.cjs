@@ -40,7 +40,7 @@ test("no common positive or failed-company base visibly falls back to actual AMO
     const view=h.buildCompanyTrendDisplay(raw,"INDEX100");assert.equal(view.effectiveScale,"AMOUNT");assert.match(view.reason,/공통 기간/);
   }
   h.get("#comparison-panel").hidden=false;h.trend.model=model(["0","0","0","0"]);h.setCompanyTrendScale("INDEX100");
-  assert.equal(h.get("#comparison-trend-scale").value,"AMOUNT");assert.match(h.get("#comparison-trend-base").textContent,/실제 금액/);assert.match(h.get("#comparison-trend-chart").innerHTML,/단위 백만 달러/);
+  assert.equal(h.get("#comparison-trend-scale").value,"AMOUNT");assert.match(h.get("#comparison-trend-base").textContent,/실제 금액/);assert.match(h.get("#comparison-trend-chart").innerHTML,/단위 백만 USD/);
 });
 
 test("AMOUNT→INDEX→AMOUNT is raw-identical and fetch-free, with zero/100 reference labels",()=>{

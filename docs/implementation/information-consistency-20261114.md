@@ -1,72 +1,99 @@
 # 정보 일관성 — 지표·기간·조회 범위의 연결
 
-2026-11-14 사용자 승인, 기준 main `df694e4a88`, 격리 branch
-`codex/information-consistency`. PR85의 History 수정은 OPEN 별도이며 포함하지 않는다.
-단일 writer/독립 reviewer와 기존 승인 구현 fallback을 유지한다. 리드는
-frontend-only 기존 API 재사용 범위를 승인했고 원격/운영 작업은 리드가 담당한다.
+2026-11-14 사용자 승인. 최초 기준 main `df694e4a88`에서 별도 branch
+`codex/information-consistency`를 만들었고, 구현 중 PR95가 병합된 최신 main
+`ebdbe938d7`을 일반 merge `27d8397926`로 통합했다. PR85의 History 수정은
+별도 OPEN 작업이며 포함하지 않는다. 단일 writer와 독립 reviewer, 기존 승인
+구현 fallback을 유지한다. 원격 전달과 운영 배포는 리드가 담당한다.
 
-## 설계 checkpoint와 공통 계약
+## 설계 기준
 
-투자자는 같은 지표를 탐색·상세·비교·조건에서 같은 의미로 읽고 원래 발행물로
-되돌아가야 한다. paper/ink/slate/blue/amber와 기존 근접 원장/14px 수치·native
-제어를 유지한다. 공통 metric presentation helper에 정확한 catalog 이름/단위/
-FY·분기·TTM/비교 종류/출처/미준비와 capability를 모은다. 조회 가능, 조건 등록
-가능, 상세 비교 전용을 구분한다. PERCENT/%p/RATIO를 이름만으로 바꾸지 않는다.
-현재 current_ratio는 catalog PERCENT이므로 배수로 재표기하지 않는다.
+투자자는 탐색·상세·비교·조건에서 같은 지표의 의미를 일관되게 읽고 원래
+발행물로 돌아갈 수 있어야 한다. paper/ink/slate/blue/amber, 근접한 원장 행,
+14px 수치와 native 제어를 유지한다. 공통 helper에 정확한 catalog 이름·단위,
+연간/분기/TTM, 비교 종류, 출처, 미준비 사유와 조건 등록 가능 여부를 모은다.
 
-## 승인 구현 범위
+단위와 비교 의미는 정의를 따른다. MONEY는 백만 USD, PERCENT는 %, 실제
+RATIO는 배수로 표시하며 원래 십진 문자열과 편집 기준값을 바꾸지 않는다.
+current_ratio는 현재 catalog의 PERCENT 정의를 유지한다. TTM의 공통 명칭은
+‘최근 12개월(TTM)’이며 마진 자체를 네 분기 비율의 합계라고 표현하지 않는다.
+연간 YoY와 분기 전년 동기를 구분하고, 기말 금액은 ‘기말잔액 YoY · 전년 같은
+기준시점’으로 표시한다. QoQ/YoY 지표 자체의 준비된 변화는 ‘QoQ의 전년 동기
+변화(%p)’처럼 성장률의 변화임을 명시한다. 실제 RATIO에 %p를 적용하지 않는다.
 
-1. 연간 catalog 전체 선택·정렬: 기본8/프리셋 유지, 추가 선택열만 기존
-   company-comparison API의2~4 CIK batch로 읽는다. 0행은0호출, 잔여1은분할
-   재분배/단일 결과는 같은 scope company-profile로 읽는다. 동시성·cache는
-   dataset/publication/cutoff/period/latest/CIK/definition에 결속한다. 기본8의
-   추가 요청은0이다. 숫자 정렬은 기존 exact decimal/null-last helper만 재사용한다.
-2. 스크리닝 결과에서 전체 프로필: run의 dataset/publication/period/resolved
-   anchor를 고정한 ephemeral analysis session. 기존 screening draft/run/선택/
-   scroll과 원래 explorer context를 보존하고 돌아가기/취소/오류/늦은응답을
-   검증한다. 저장 이력의 고정 발행물 대신 현재 자료로 fallback하지 않는다.
-3. 2~4기업 비교: catalog 그룹/다중 지표 선택과 metric별 수준+준비된 변화
-   패널. 기존 금액/index100과 비교표/기업선택을 보존한다. 서로 다른 단위를
-   한 축에 합치지 않는다. PERCENT의 준비된 변화는%p, 금액의 준비된 비교는
-   정의된YoY/QoQ/TTM YoY로 표시한다. 일반%에서변화율을 새로 계산하지 않는다.
-4. 상세 adjunct growth는 기존 governed 발행물만 소비한다. 카탈로그에 등록되지
-   않은 항목은 '상세 비교 전용 · 조건 미지원'이며 브라우저 조건 계산/새 지표
-   등록/새 발행은 하지 않는다. 등록된 공개growth만 원래조건 경로로 연결한다.
-   screening의 QUARTERLY 값은 그대로 두고 분기·TTM 항목 구분을 명확히 한다.
+## 구현 범위와 경계
 
-허용은 app.js/css·관련 Node/표시검사·system.md·이 계약/planning이다. Python/
-bridge/producer와 Raw/Derived/journal/발행물은 변경하지 않는다. 운영 governed
-artifact는 전체Pythonhash에 결속되어 있으므로 source guard 완화/회계patch
-전체복사/재발행 없이 운영app의최신scope UI26줄만 선택 보존한다. 운영은별도
-PID47380/backend19074이며 writer가재시작/배포하지 않는다.
+1. 연간 전체 지표 선택·정렬: 기본 8개와 프리셋을 유지한다. 추가 선택 열만
+   기존 company-comparison API의 2~4 CIK batch로 읽는다. 남은 한 회사는
+   batch를 재분배하고, 검색 결과가 한 회사이면 같은 범위의 company-profile을
+   사용한다. 0행은 0호출이며 기본 8개도 추가 요청이 없다. 동시성은 최대
+   세 batch로 제한하고, cache는 dataset/publication/cutoff/기간/CIK/정의에
+   결속한다. 최신 관측은 각 원래 탐색 행의 실제 기간까지 검증한다. 정렬은
+   기존 정확한 decimal/null-last helper를 재사용한다. 조회 오류를 재무적
+   미준비 값으로 만들거나 조용히 다른 정렬 결과와 섞지 않는다.
+2. 스크리닝 결과에서 전체 프로필: 실행 결과의 dataset/publication/기간과
+   resolved anchor를 고정한 임시 분석 세션을 사용한다. 원래 조건 draft, 실행,
+   선택, 검색, 정렬, 지표 선택과 scroll을 보존한다. 분기·TTM 혼합은 공통
+   종료 분기를 사용하며 TTM만 선택한 결과는 TTM으로 연다. 과거 offset 정책의
+   관측 기간이 서로 다르거나 불명확하면 전체 프로필 연결을 거부하고 기존
+   조건 근거를 유지한다. 원래 발행물이 없으면 최신 자료로 대신 열지 않는다.
+   취소·닫기·뒤로 가기 이후 늦은 성공이나 오류는 화면을 다시 열지 않는다.
+3. 2~4기업 비교: catalog 분류와 다중 지표 선택을 유지하고 최대 8개 지표의
+   수준·준비된 변화 패널을 제공한다. 기본 비교는 매출·영업이익·CFO·표준화 FCF를
+   선택해 금액과 준비된 변화를 가까이 두고 기본 화면의 성장률 중복 선택을 줄인다.
+   이는 연간 탐색의 기본 8개를 바꾸지 않으며, 성장률 자체도 전체 catalog에서
+   명시적으로 선택할 수 있다. 더 많은 선택은 비교표에서 계속 접근한다.
+   지표별 독립 축과 기업별 같은 색을 사용하며, 기존 단일 금액/index100 보기는
+   native details에 유지한다. 수준/수준+변화 전환은 다시 조회하지 않는다.
+   기존 공개 성장률을 우선 사용하고 다른 변화는 이미 발행된 adjunct만 읽는다.
+   원값·실제 기간·출처와 부호 전환 상태, missing gap, 키보드·고정 설명을 보존한다.
+4. 조건 기능: 등록된 catalog 지표만 원래 조건 경로로 연결한다. adjunct의
+   별도 비교 값에는 ‘상세 비교 전용 · 조건 미지원’을 표시한다. 새 지표 정의,
+   브라우저 조건 계산, 비율의 임의 성장률 계산이나 재발행을 하지 않는다.
+   조건 select의 QUARTERLY 값은 유지하고 화면 명칭을 ‘분기·TTM’으로 명확히 한다.
 
-## 수락과 상태
+Python/bridge/producer, Raw/Derived 발행물과 journal은 변경하지 않는다.
+운영 governed artifact가 전체 Python hash와 정확히 결속되므로 source guard를
+완화하거나 새 source로 재발행하지 않는다. 운영의 최신 범위 UI 패치 26줄은
+main PR95에 포함됐으며 이번 화면 변경의 기반으로 보존한다. main의 해당
+Python/bridge/producer와 검사는 그대로 유지한다. writer는 운영을 재시작하지 않는다.
 
-Node 전체와 새 행동검사(공통명/단위/capability,31열·추가fetch0·batch1/0·cache/
-실패/stale·정밀sort,screening fixed/latest/historical handoff/복귀,복수metric
-MONEY/PERCENT/부족growth·missinggap·index100)를 실행하고 Ruff 및 적절표시
-pytest를 수행한다. root가 실제 prepared data의 desktop/mobile/표시정확성과
-기존기능/History hash를 확인하며 별도 reviewer가 동결소스를 읽기전용검증한다.
-실제source/발행물추가정책이필요하면구현전에상향보고한다.
+## 검증·상태
+
+새 행동 검사에는 단위·capability, batch 0/1/5/9, 기본 8개 추가 요청 0, 실제
+기간 불일치 거부, stale 응답, 큰 십진 정렬과 null-last, 과거 기간·TTM 판정,
+프로필 취소/실패/성공과 복귀, nested 상태 격리, 조건 추가 거부 시 기존 실행
+보존, catalog PERCENT/INSTANT 비교와 cache, missing growth 렌더를 포함한다.
+초기 기존 Node 122개에 신규 검사를 추가했고 최신 main 통합 뒤 전체 Node
+136개가 통과했다. 최종 표시 단위와 비교 기본값 정리 후 전체 Node **138개**(신규 행동13개 포함),
+관련 Python **35개**가 통과했다. `ruff check .`와 `git diff --check`도 통과했다.
+Node 로그는 `/tmp/information-freeze-node.log`, 새 행동 검사는
+`/tmp/information-new5-node.log`, Python은 `/tmp/information-python.log`다.
+Ruff/diff와 별도 독립 검증, 리드의 실제 desktop/mobile 브라우저·History 보존
+인수는 각각 구분한다. 중간 비교 화면의 없는 관측 날짜 접근은 안전하게 처리하고
+원래 actualPeriod helper는 바꾸지 않았다.
 
 | 단계 | 상태 |
 | --- | --- |
-| 승인 | frontend-only 명시 범위 GO (2026-11-14) |
-| 구현 | 진행 |
+| 승인 | frontend-only 범위 GO (2026-11-14) |
+| 구현 | 최신 main 통합·후보 동결, 작성자 Node138/Python35/Ruff/diff PASS |
 | 독립 검증 / 로컬 인수 | 대기 |
-| push / PR / CI / main / 운영 | 리드 담당, 이번작업 미수행 |
+| push / PR / CI / main / 운영 | 리드 담당, 이 작업의 전달·반영은 미수행 |
 
-감사근거는 기존source 및 선택적
+감사 근거는 기존 소스와 선택적 로컬 근거
 `/mnt/c/Users/plusbdw/.codex/visualizations/2026/11/08/01a1bb67-6275-70d2-989e-208966314006/information-audit-20261114/`의
-`audit.json`/`parity.json`이다. 감사 당시 연간31/분기42는 현재publication의
-실제수이며 지원회사/지표의고정한계가아니다.
+`audit.json`/`parity.json`이다. 감사 당시 연간31개/분기42개는 그 발행물의 실제
+개수이며 회사나 지표의 고정 지원 한계가 아니다. 신규 실제 화면 검증은 같은
+상위 폴더의 `information-consistency-20261114/`에 별도로 기록한다.
 
-## 최신 main 통합
+추가 조건 버튼은 현재 조건의 dataset/publication/cutoff를 모두 확인한다. 과거
+실행 결과에서 연 전체 프로필 세션은 조회 전용이며, 기존 결과로 돌아가 조건을
+명시적으로 편집하도록 안내한다. 비교표의 없는 관측은 빈 기간으로 처리하고
+그 상태의 최초 렌더와 재렌더를 회귀 검사한다. 연간 지표 picker는 넓은 grid의
+전체 폭을 사용하고 desktop에서는 3~4열, 좁은 화면에서는 내부 스크롤로 유지한다.
 
-구현 중 main은 PR95를 포함한 `ebdbe938d7`로 전진했다. 일반 merge로 모든
-governed Python/bridge/producer와 검사를 그대로 보존한다. 운영과 main의
-최신-scope UI26줄은 이제 공통 기반이며 이번 변경은 그 위의 frontend 표시와
-읽기 전용 API 재사용뿐이다. Python/bridge를 이 작업에서 편집하거나 guard를
-완화하지 않는다. 최초 중간 비교 화면의 missing growth 날짜 caption은 입력
-관측이 없는 상태로 안전하게 표시하도록 보완하며 정확한 actualPeriod helper는
-변경하지 않는다.
+이 자체 검사는 새 코드의 로컬 인수나 운영 적용을 의미하지 않는다. root의 중간
+사본에서는 추가 열 정렬·한 회사 조회·프로필 왕복과 기존 GOOGL/WDC/원본 owner
+보존을 확인했으나 최종 동결 자산의 실제 브라우저와 독립 검증은 다음 단계다.
+최신 main 대비 Python/bridge/producer 파일 차이가 없음을 확인했고, PR85의
+미병합 History 변경이나 새 자료 발행은 이 branch에 포함하지 않았다.

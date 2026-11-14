@@ -4,8 +4,9 @@ Current locally accepted phase 2 source: `745bc76e3a4721de8d7734eb534ac0afc7cba2
 (2026-11-13). Independent Node 116/Ruff/diff and lead exact-bundle preview/live-browser
 acceptance passed. The effective CSS viewport checks below are complete; actual browser zoom
 was not verified. Phase 1 is merged in main `0a89d5cf` through PR91 (CI 43427104449 passed).
-Phase 2 is locally accepted and operating on its separate branch; push/PR/CI/main incorporation
-have not been performed.
+Phase 2 is merged through PR92; governed latest-period/revenue UI scope fixes are now in
+main PR95 (`ebdbe938d7`). The information-consistency frontend candidate below is implemented
+on its separate branch; its independent verification, acceptance and deployment are pending.
 The source dataset determines company/metric counts; examples such as 21 or 50 companies are
 fixtures and never the supported-company boundary.
 
@@ -114,7 +115,7 @@ cross-tab scroll memory and further saved-result comparison layout cleanup remai
 lower-priority candidates, not automatically authorized follow-up work.
 
 
-## Information consistency contract — approved, implementation pending (2026-11-14)
+## Information consistency contract — implemented candidate, acceptance pending (2026-11-14)
 
 Use one metric presentation/capability vocabulary in explorer, profile, comparison, guide and
 screening: catalog full name and exact definition/unit, FY/quarter/TTM basis, published comparison
@@ -128,3 +129,10 @@ columns remain explicit ephemeral display selections. Historical screening analy
 publication and period and returns to its original draft/result/selection/scroll context.
 Different metrics get independent axes with visible units and company-consistent colors. Preserve
 existing amount/index100 behavior, exact evidence, missing gaps, source scopes and keyboard/pins.
+
+Comparison starts with the catalog's revenue, operating income, CFO and standardized FCF
+levels when present, keeping their prepared changes paired without a duplicate YoY default
+selection. Every registered metric remains selectable. A historical result-profile session is
+read-only; condition links additionally require matching dataset, publication and financial cutoff.
+The candidate's writer checks passed (Node 138/Python 35/Ruff/diff); independent and final
+browser acceptance remain pending.

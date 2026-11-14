@@ -2,7 +2,8 @@
 
 2026-11-14 [정보 일관성](../implementation/information-consistency-20261114.md)은
 기존 governed API만 재사용하는 지표 표현·연간 전체열·스크리닝 고정범위 프로필·
-복수기업 다중지표 비교를 승인받아 구현 중이다. Python/bridge/출판·실제기록은
+복수기업 다중지표 비교의 후보 구현을 마쳤다. 최신 main PR95를 일반 merge했고
+작성자 Node138·Python35·Ruff/diff가 통과했다. 독립 검증과 최종 인수는 대기다. Python/bridge/출판·실제기록은
 불변이며 운영전용 latest-scope UI patch를 보존한다. PR85는 별도 OPEN 작업이다.
 검증·로컬인수·원격·운영 상태는 아직 대기다.
 
