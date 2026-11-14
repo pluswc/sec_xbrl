@@ -125,3 +125,64 @@ PYTHONPATH=SOURCE/src PYTHON SOURCE/examples/screening/prepare_market_inputs.py 
   --manifest PUBLICATION/market_input_manifest.json --sha256 MANIFEST_SHA \
   --cik REGISTERED_CIK --input-id reported_eps_diluted_total
 ```
+
+## Approved follow-up: small referenced assessment overlay — 2026-11-14
+
+The original109 `SHARE_BASIS_UNKNOWN` results were an early declaration check,
+not109 detected stock splits or errors. Preserve the original publication and
+four-direct-quarter rule v1 unchanged. This follow-up separates financial EPS
+period availability from security/EPS applicability and price/share-basis approval.
+
+`reported_eps_diluted_12m_latest_v1` references already AVAILABLE_REPORTED diluted
+EPS for a directly reported FY or explicitly classified TTM interval ending at the
+latest eligible **financial report end**, determined from the pinned intake, not
+from the latest EPS row. Actual exclusive boundaries and USD/share units must
+match. Negative EPS is valid financial data, with positivity for multiples a
+separate field. Stale FY, future filings, conflicting same-period values and
+unresolved competing filing selections remain unavailable; there is no annual
+fallback or annual-minus-YTD calculation. Equivalent appearances within one exact
+filing/context/period/full scope/unit/value consolidate all original references.
+
+Four-QTD diagnostics first expose missing direct quarters, gaps, conflicts and
+unit/full-scope differences, then report missing share-basis evidence. Distinct
+canonical EPS scopes receive separate diagnostics; they are not mislabeled as
+conflicting duplicate facts or assigned a winner. Dimension identity uses exact
+namespace+QName, preserving original Raw IDs. Neither custom class names nor
+versioned custom namespaces are fuzzily equated. These diagnostics do not bypass
+legacy v1 declarations or publish an unapproved EPS sum.
+
+Security identity projects only the targeted retained header facts TradingSymbol,
+Security12bTitle and SecurityExchangeName from the original cover-source snapshots.
+CIK must match both filing and normalized SEC context entity, and ticker must
+match the supplier identity exactly. Preserve every matching context, including
+stock and note/bond contexts sharing one symbol. An exact reported class identity
+is distinct from EPS applicability and split review. Full EPS/header dimensional
+scope is required even for a class-match diagnostic; empty EPS dimensions and
+singleton issuers never imply class applicability. Custom member instrument kind
+remains UNKNOWN unless separately proven. No valuation ratio is published.
+
+The overlay pins the existing common-input manifest and writes only small
+assessments plus targeted source pins. Parent financial/price payloads, Raw,
+History, journal and prior rules are not reprojected or rewritten. Targeted Raw
+row caches are cleared per issuer while immutable pins remain. The overlay reader
+delegates original input queries to the parent and exposes `assessment.reported_12m`
+and `four_quarter_diagnostic` beside untouched legacy `derived_inputs`.
+
+```sh
+PYTHONPATH=SOURCE/src PYTHON SOURCE/examples/screening/prepare_market_inputs.py assess \
+  --parent COMMON/market_input_manifest.json --parent-sha256 COMMON_SHA --output NEW_OVERLAY
+PYTHONPATH=SOURCE/src PYTHON SOURCE/examples/screening/prepare_market_inputs.py assessment-query \
+  --manifest NEW_OVERLAY/market_input_assessment_manifest.json --sha256 OVERLAY_SHA --cik REGISTERED_CIK
+```
+
+This is the approved isolated implementation scope. Independent source review,
+actual109 overlay publication and local acceptance are subsequent separate steps;
+no UI/runtime/main activation is part of this follow-up.
+
+Overlay IMPLEMENTED on the isolated branch: eight new focused synthetic tests
+passed, covering latest-anchor/stale/future/negative12m, equivalent and conflicting
+references, exact canonical scope, per-class quarterly diagnostics, same-symbol
+stock/bond headers and context CIK, append-only overlay/parent delegation and
+tamper rejection. Targeted Ruff/diff passed. Prior27 checks are reused; legacy
+market_inputs/four-quarter v1 code is unchanged. Writer ran no actual109 overlay
+publisher or data job. Independent review and real overlay acceptance remain pending.

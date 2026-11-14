@@ -1,5 +1,7 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-14 [Common-input assessment overlay](../implementation/price-common-inputs-20261114.md#approved-follow-up-small-referenced-assessment-overlay--2026-11-14): approved implementation separates latest financial12m EPS availability, four-QTD diagnostics and exact reported header class identity from valuation/share-basis approval. Original common109 publication/rule/data remain unchanged; independent review and actual overlay acceptance pending.
+
 2026-11-14 [Price/EPS/shares common inputs](../implementation/price-common-inputs-20261114.md): source9540 independent27 PASS; actual109 publication completed (13,549 financial rows/129 quotes/132 securities). Availability counts cover any retained period/scope, not current PER coverage; all109 market TTM remain SHARE_BASIS_UNKNOWN. Protected12 pins/journal unchanged. Root artifact review PASS and first-slice publication/query LOCALLY_ACCEPTED under these limits; no UI/runtime activation or main merge, and no service acceptance claim.
 
 2026-11-14 사용자가109 확장·상세 연결의 main 전달을 승인했다. 별도 branch에서

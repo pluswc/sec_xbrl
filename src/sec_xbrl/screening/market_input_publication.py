@@ -352,3 +352,131 @@ class MarketInputReader:
     def verify_all(self) -> None:
         for name in self.manifest["files"]:
             self._read(name)
+
+
+ASSESSMENT_SCHEMA = "screening-market-input-assessment-v1"
+
+
+def publish_market_input_assessment(parent_pin: dict, output: str | Path) -> dict:
+    """Small overlay: reference the completed common inputs, project no prices/EPS again."""
+    from sec_xbrl.metrics.market_input_assessment import RawAssessmentTables, assess_company
+
+    reader = MarketInputReader(parent_pin["path"], parent_pin["sha256"])
+    observations = reader._read("financial_inputs")
+    securities = reader._read("securities")
+    grouped = {}
+    for row in observations:
+        grouped.setdefault(row["cik"], []).append(row)
+    tables = RawAssessmentTables()
+    assessments = []
+    for company in reader.manifest["companies"]:
+        intake_pin = company.get("intake")
+        if intake_pin is None:
+            raise ValueError("assessment requires an explicitly pinned issuer intake")
+        assessments.append(
+            assess_company(
+                grouped.get(company["cik"], []),
+                securities,
+                cik=company["cik"],
+                financial_as_of=reader.manifest["financial_as_of"],
+                intake_pin=intake_pin,
+                tables=tables,
+            )
+        )
+        tables.cache.clear()  # Keep immutable pins; do not retain109 issuers' Raw rows.
+    destination = Path(output).absolute()
+    if destination.exists():
+        raise FileExistsError("append-only assessment destination already exists")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".partial-market-assessment-", dir=destination.parent))
+    try:
+        content = _write_json(staging / "assessments.json", assessments)
+        manifest = {
+            "schema_version": ASSESSMENT_SCHEMA,
+            "parent": parent_pin,
+            "parent_publication_id": reader.manifest["publication_id"],
+            "financial_as_of": reader.manifest["financial_as_of"],
+            "companies": [c["cik"] for c in reader.manifest["companies"]],
+            "content": content,
+            "targeted_source_tables": sorted(tables.pins.values(), key=lambda p: p["path"]),
+            "intakes": [c["intake"] for c in reader.manifest["companies"]],
+            "counts": {
+                "companies": len(assessments),
+                "reported_12m_available": sum(
+                    a["reported_12m"]["status"] == "AVAILABLE_REPORTED" for a in assessments
+                ),
+                "four_direct_quarters_present": sum(
+                    a["four_quarter_diagnostic"]["financial_input_status"]
+                    == "FOUR_DIRECT_QUARTERS_PRESENT"
+                    for a in assessments
+                ),
+                "header_links": sum(len(a["security_header_links"]) for a in assessments),
+            },
+            "producer": {
+                "assessment_sha256": hashlib.sha256(
+                    Path(assess_company.__code__.co_filename).read_bytes()
+                ).hexdigest(),
+                "publication_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            },
+        }
+        for source in tables.pins.values():
+            if hashlib.sha256(Path(source["path"]).read_bytes()).hexdigest() != source["sha256"]:
+                raise ValueError("targeted source changed before assessment publication")
+        for pin in manifest["intakes"] + [parent_pin]:
+            pinned_json(pin)
+        manifest["publication_id"] = "screening-market-assessment-" + identity(manifest)[:24]
+        manifest["prepared_at"] = datetime.now(UTC).isoformat()
+        _write_json(staging / "market_input_assessment_manifest.json", manifest)
+        MarketInputAssessmentReader(
+            staging / "market_input_assessment_manifest.json", identity(manifest)
+        )._assessments()
+        os.rename(staging, destination)
+        return {
+            "path": str(destination / "market_input_assessment_manifest.json"),
+            "sha256": identity(manifest),
+            "publication_id": manifest["publication_id"],
+            "counts": manifest["counts"],
+        }
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+
+class MarketInputAssessmentReader:
+    """Read new assessments beside unchanged parent observations and legacy rule results."""
+
+    def __init__(self, manifest_path: str | Path, sha256: str):
+        self.pin = {"path": str(Path(manifest_path).absolute()), "sha256": sha256}
+        self.manifest = pinned_json(self.pin)
+        if self.manifest.get("schema_version") != ASSESSMENT_SCHEMA:
+            raise ValueError("unsupported market-input assessment")
+        self.root = Path(self.pin["path"]).parent
+        parent = self.manifest["parent"]
+        self.parent = MarketInputReader(parent["path"], parent["sha256"])
+        if (
+            self.parent.manifest["publication_id"] != self.manifest["parent_publication_id"]
+            or self.parent.manifest["financial_as_of"] != self.manifest["financial_as_of"]
+            or set(self.manifest["companies"])
+            != {c["cik"] for c in self.parent.manifest["companies"]}
+        ):
+            raise ValueError("assessment parent scope mismatch")
+
+    def _assessments(self) -> list[dict]:
+        pinned_json(self.pin)
+        pinned_json(self.manifest["parent"])
+        ref = self.manifest["content"]
+        if Path(ref["path"]).name != ref["path"]:
+            raise ValueError("assessment content escapes publication")
+        return pinned_json({"path": str(self.root / ref["path"]), "sha256": ref["sha256"]})
+
+    def query(self, cik: str, input_id: str | None = None) -> dict:
+        result = self.parent.query(cik, input_id)
+        assessments = [a for a in self._assessments() if a["cik"] == cik]
+        if len(assessments) != 1:
+            raise ValueError("assessment issuer identity is ambiguous")
+        return {
+            **result,
+            "assessment_publication_id": self.manifest["publication_id"],
+            "assessment_prepared_at": self.manifest["prepared_at"],
+            "assessment": assessments[0],
+        }
