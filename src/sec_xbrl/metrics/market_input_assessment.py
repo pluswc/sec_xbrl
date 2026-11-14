@@ -466,40 +466,67 @@ def assess_company(
             copied["canonical_dimensions"] = None
         enriched.append(copied)
     headers = []
-    seen = set()
-    for row in rows:
-        if row["input_id"] != "outstanding_common_shares_cover":
+    header_entries = [
+        e for e in entries.values() if e["filing"]["form"] in {"10-K", "10-Q", "10-K/A", "10-Q/A"}
+    ]
+    latest_filed = max((e["filing"]["filed_date"] for e in header_entries), default=None)
+    retained_cover_sources = {
+        r["source"]["raw_manifest"]["path"]: r["source"]
+        for r in rows
+        if r["input_id"] == "outstanding_common_shares_cover" and r["source"].get("raw_manifest")
+    }
+    for entry in header_entries:
+        ref = entry["filing"]
+        if ref["filed_date"] != latest_filed:
             continue
-        source = row["source"]
-        if not source.get("raw_manifest") or source["raw_manifest"]["path"] in seen:
-            continue
-        seen.add(source["raw_manifest"]["path"])
-        manifest = pinned_json(source["raw_manifest"])
-        if manifest["cik"] != cik or manifest["accession"] not in entries:
-            raise ValueError("cover source outside exact issuer/intake")
-        root = Path(source["raw_manifest"]["path"]).parent
-        pins = source["raw_tables"]
-        filings = tables.records(root, "filing", pins["filing"])
+        root = Path(entry["source_run"]) / "snapshots" / cik / ref["accession"].replace("-", "")
+        manifest_path = root / "layer1_manifest.json"
+        retained = retained_cover_sources.get(str(manifest_path), {})
+        manifest_pin = retained.get("raw_manifest") or {
+            "path": str(manifest_path),
+            "sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        }
+        manifest = pinned_json(manifest_pin)
+        if manifest["cik"] != cik or manifest["accession"] != ref["accession"]:
+            raise ValueError("header source outside exact issuer/intake")
+        pins = retained.get("raw_tables", {})
+        filings = tables.records(root, "filing", pins.get("filing"))
         if (
             len(filings) != 1
-            or filings[0]["cik"] != cik
-            or filings[0]["accession"] != manifest["accession"]
+            or any(
+                filings[0].get(k) != ref.get(k) for k in ("cik", "accession", "filed_date", "form")
+            )
+            or manifest.get("form") != ref["form"]
         ):
             raise ValueError("header filing identity mismatch")
         filing = filings[0]
-        if filing["filed_date"] > financial_as_of:
-            raise ValueError("future header filing")
         concepts = {
-            r["raw_concept_id"]: r for r in tables.records(root, "concept", pins["concept"])
+            r["raw_concept_id"]: r for r in tables.records(root, "concept", pins.get("concept"))
+        }
+        facts = tables.records(root, "fact", pins.get("fact"))
+        contexts = {
+            r["context_id"]: r for r in tables.records(root, "context", pins.get("context"))
+        }
+        dimensions = tables.records(root, "dimension_fact", pins.get("dimension_fact"))
+        source = {
+            "intake": intake_pin,
+            "raw_manifest": manifest_pin,
+            "raw_tables": {
+                name: tables.pins[str(root / (name + ".parquet"))]
+                for name in ("filing", "concept", "fact", "context", "dimension_fact")
+            },
+            "source_filing_id": filing["filing_id"],
+            "accession": ref["accession"],
+            "selection": "LATEST_ELIGIBLE_FILING_ALL_SAME_DAY",
         }
         links = link_security_headers(
             cik=cik,
             securities=securities,
             filing=filing,
             concepts=concepts,
-            facts=tables.records(root, "fact", pins["fact"]),
-            contexts={r["context_id"]: r for r in tables.records(root, "context", pins["context"])},
-            dimensions=tables.records(root, "dimension_fact", pins["dimension_fact"]),
+            facts=facts,
+            contexts=contexts,
+            dimensions=dimensions,
             source=source,
         )
         for link in links:

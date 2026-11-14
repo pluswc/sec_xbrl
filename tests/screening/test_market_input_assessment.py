@@ -367,3 +367,79 @@ def test_header_common_class_member_exact_namespace_and_ambiguous_title():
         ]
         == "HEADER_MATCH_CLASS_UNCONFIRMED"
     )
+
+
+def test_analytical_cover_still_discovers_latest_intake_headers_and_preserves_same_day(tmp_path):
+    import polars as pl
+
+    cik = "0000000001"
+    concepts, facts, contexts, dims = header_fixture()
+    entries = []
+    for ordinal, filed in [
+        (1, "2026-10-20"),
+        (2, "2026-10-20"),
+        (3, "2026-09-01"),
+        (4, "2026-11-01"),
+    ]:
+        accession = f"0000000001-26-{ordinal:06d}"
+        root = tmp_path / "snapshots" / cik / accession.replace("-", "")
+        root.mkdir(parents=True)
+        pin(root / "layer1_manifest.json", {"cik": cik, "accession": accession, "form": "10-Q"})
+        filing = {
+            "cik": cik,
+            "accession": accession,
+            "filed_date": filed,
+            "form": "10-Q",
+            "filing_id": "filing",
+            "report_date": "2026-09-30",
+        }
+        records = {
+            "filing": [filing],
+            "concept": [dict(c, raw_concept_id=k) for k, c in concepts.items()],
+            "fact": facts,
+            "context": [dict(c, context_id=k) for k, c in contexts.items()],
+            "dimension_fact": dims,
+        }
+        for name, rows in records.items():
+            pl.DataFrame(rows).write_parquet(root / (name + ".parquet"))
+        entries.append({"filing": filing, "status": "REUSED", "source_run": str(tmp_path)})
+    intake = pin(tmp_path / "intake.json", {"filings": entries})
+    analytical_cover = {
+        "cik": cik,
+        "input_id": "outstanding_common_shares_cover",
+        "source": {"analysis_manifest": {"path": "prepared-only"}},
+        "status": "AVAILABLE_REPORTED",
+    }
+    tables = assess.RawAssessmentTables()
+    result = assess.assess_company(
+        [analytical_cover],
+        [{"cik": cik, "ticker": "SAME", "security_id": "US:SAME"}],
+        cik=cik,
+        financial_as_of="2026-10-25",
+        intake_pin=intake,
+        tables=tables,
+    )
+    assert len(result["security_header_links"]) == 4  # Two contexts in each latest same-day filing.
+    assert {r["source"]["accession"] for r in result["security_header_links"]} == {
+        "0000000001-26-000001",
+        "0000000001-26-000002",
+    }
+    assert len(tables.pins) == 10
+    assert all(
+        r["source"]["raw_manifest"] and len(r["source"]["raw_tables"]) == 5
+        for r in result["security_header_links"]
+    )
+    # The same chosen filing must still honor an existing parent cover-table pin.
+    link = result["security_header_links"][0]
+    bad_source = copy.deepcopy(link["source"])
+    bad_source["raw_tables"]["fact"]["sha256"] = "0" * 64
+    raw_cover = dict(analytical_cover, source=bad_source)
+    with pytest.raises(ValueError, match="parent pin"):
+        assess.assess_company(
+            [raw_cover],
+            [{"cik": cik, "ticker": "SAME", "security_id": "US:SAME"}],
+            cik=cik,
+            financial_as_of="2026-10-25",
+            intake_pin=intake,
+            tables=assess.RawAssessmentTables(),
+        )

@@ -186,3 +186,17 @@ stock/bond headers and context CIK, append-only overlay/parent delegation and
 tamper rejection. Targeted Ruff/diff passed. Prior27 checks are reused; legacy
 market_inputs/four-quarter v1 code is unchanged. Writer ran no actual109 overlay
 publisher or data job. Independent review and real overlay acceptance remain pending.
+
+### Header routing correction before actual overlay acceptance
+
+The first unaccepted actual overlay v1 exposed an artificial gap for22 issuers:
+their cover shares already existed in Analytical cells, so those parent rows did
+not contain Raw-fallback manifest fields. Header discovery now independently uses
+the exact intake's latest eligible10-K/Q(/A) filed day and retains every same-day
+filing. It derives each retained snapshot path and verifies Raw manifest/filing
+identity, reusing parent cover-table pins for the same selected filing when
+present; otherwise it establishes targeted header-table pins. Financial analysis,
+Raw source values and overlay v1 remain unchanged. The new Analytical-cover-only
+regression also checks same-day preservation, future/older filing exclusion and
+parent-pin tamper rejection. Nine affected overlay tests passed; no actual overlay
+publication or prior company audits were run by the writer.
