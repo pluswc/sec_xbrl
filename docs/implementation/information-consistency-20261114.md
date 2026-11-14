@@ -60,3 +60,13 @@ pytest를 수행한다. root가 실제 prepared data의 desktop/mobile/표시정
 `/mnt/c/Users/plusbdw/.codex/visualizations/2026/11/08/01a1bb67-6275-70d2-989e-208966314006/information-audit-20261114/`의
 `audit.json`/`parity.json`이다. 감사 당시 연간31/분기42는 현재publication의
 실제수이며 지원회사/지표의고정한계가아니다.
+
+## 최신 main 통합
+
+구현 중 main은 PR95를 포함한 `ebdbe938d7`로 전진했다. 일반 merge로 모든
+governed Python/bridge/producer와 검사를 그대로 보존한다. 운영과 main의
+최신-scope UI26줄은 이제 공통 기반이며 이번 변경은 그 위의 frontend 표시와
+읽기 전용 API 재사용뿐이다. Python/bridge를 이 작업에서 편집하거나 guard를
+완화하지 않는다. 최초 중간 비교 화면의 missing growth 날짜 caption은 입력
+관측이 없는 상태로 안전하게 표시하도록 보완하며 정확한 actualPeriod helper는
+변경하지 않는다.

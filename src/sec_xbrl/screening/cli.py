@@ -26,6 +26,8 @@ from sec_xbrl.screening.dataset_v2 import (
     publish_screening_dataset_v2,
 )
 from sec_xbrl.screening.dataset_v3 import publish_screening_dataset_v3
+from sec_xbrl.screening.governed_delta import MANIFEST as DELTA_MANIFEST
+from sec_xbrl.screening.governed_delta import publish_governed_delta
 from sec_xbrl.screening.metric_identity import publish_generic_metric_identity
 from sec_xbrl.screening.runtime_projection import (
     ScreeningRuntimeProjection,
@@ -74,6 +76,9 @@ def _parser() -> argparse.ArgumentParser:
     union = commands.add_parser("cohort-union", help="publish an explicitly pinned same-cutoff cohort union")
     union.add_argument("--config", type=Path, required=True)
     union.add_argument("--destination", type=Path, required=True)
+    delta = commands.add_parser("governed-delta", help="prepare a pinned governed correction candidate")
+    delta.add_argument("--config", type=Path, required=True)
+    delta.add_argument("--destination", type=Path, required=True)
     descriptions = commands.add_parser(
         "descriptions-prepare", help="publish governed Korean company-description text"
     )
@@ -92,6 +97,7 @@ def _parser() -> argparse.ArgumentParser:
     server = commands.add_parser("serve", help="start the loopback dashboard")
     server.add_argument("--catalog", type=Path, required=True)
     server.add_argument("--source-compatibility", nargs=2, metavar=("PATH", "SHA256"))
+    server.add_argument("--governed-delta", action="append", nargs=5, metavar=("DATASET_ID", "PATH", "SHA256", "APPROVAL_PATH", "APPROVAL_SHA256"))
     server.add_argument("--cohort-union", action="append", nargs=3, metavar=("DATASET_ID", "PATH", "SHA256"))
     server.add_argument("--runtime-projection", action="append", nargs=3, metavar=("DATASET_ID", "PATH", "SHA256"))
     server.add_argument("--batch-availability", nargs=2, metavar=("PATH", "SHA256"))
@@ -143,6 +149,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "cohort-union":
         root = publish_cohort_union(args.config, args.destination)
         _print({"manifest": str(root / COHORT_MANIFEST), "manifest_sha256": sha256_file(root / COHORT_MANIFEST)})
+    elif args.command == "governed-delta":
+        root = publish_governed_delta(args.config, args.destination)
+        _print({"manifest": str(root / DELTA_MANIFEST), "manifest_sha256": sha256_file(root / DELTA_MANIFEST)})
     elif args.command == "descriptions-prepare":
         if args.dry_run:
             result = review_company_description_plan(args.plan, args.dataset)
@@ -171,6 +180,14 @@ def main(argv: list[str] | None = None) -> int:
         options: dict[str, Any] = {}
         projections = _runtime_pins(args.runtime_projection, catalog)
         unions = _runtime_pins(args.cohort_union, catalog)
+        deltas = {}
+        for key, path, digest, approval, approval_digest in args.governed_delta or []:
+            if key in deltas or key not in catalog:
+                raise ValueError("governed delta declaration is duplicated or outside catalog")
+            deltas[key] = {"manifest": {"path": path, "sha256": digest},
+                           "approval": {"path": approval, "sha256": approval_digest}}
+        if deltas:
+            options["governed_deltas"] = deltas
         if set(unions) & set(projections):
             raise ValueError("dataset cannot declare both a runtime projection and cohort union")
         if unions:

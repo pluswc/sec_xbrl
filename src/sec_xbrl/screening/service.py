@@ -34,6 +34,7 @@ from sec_xbrl.screening.explorer import (
     latest_period_observation,
     public_copy,
 )
+from sec_xbrl.screening.governed_delta import ScreeningGovernedDeltaReader
 from sec_xbrl.screening.runtime_projection import (
     ScreeningRuntimeProjection,
     compact_observation,
@@ -42,7 +43,7 @@ from sec_xbrl.screening.runtime_projection import (
 )
 from sec_xbrl.screening.store import ScreeningStore
 
-ScreeningReader = ScreeningDatasetReader | ScreeningDatasetV2Reader | ScreeningDatasetV3Reader | ScreeningRuntimeProjection | ScreeningCohortUnionReader
+ScreeningReader = ScreeningDatasetReader | ScreeningDatasetV2Reader | ScreeningDatasetV3Reader | ScreeningRuntimeProjection | ScreeningCohortUnionReader | ScreeningGovernedDeltaReader
 
 ENGINE_VERSION = "screening-executor-v1"
 EXPORT_VERSION = "screen-run-export-v1"
@@ -167,6 +168,7 @@ class ScreeningService:
         batch_evidence: dict[str, Any] | None = None,
         runtime_projections: dict[str, dict[str, str]] | None = None,
         cohort_unions: dict[str, dict[str, str]] | None = None,
+        governed_deltas: dict[str, dict] | None = None,
     ) -> None:
         if not isinstance(datasets, dict) or not datasets:
             raise ValueError("at least one screening dataset is required")
@@ -177,10 +179,15 @@ class ScreeningService:
         unions = {} if cohort_unions is None else cohort_unions
         if not isinstance(unions, dict) or not set(unions) <= set(datasets) or set(unions) & set(projections):
             raise ValueError("cohort union is outside the catalog or overlaps a projection declaration")
+        deltas = {} if governed_deltas is None else governed_deltas
+        if not isinstance(deltas, dict) or not set(deltas) <= set(datasets) or set(deltas) & (set(unions) | set(projections)):
+            raise ValueError("governed delta is outside the catalog or overlaps another declaration")
         self.datasets: dict[str, ScreeningReader] = {}
         self.explorers: dict[str, ScreeningExplorer] = {}
         with self._compatibility_scope(), _share_v3_readers() as loaded:
             for dataset_id, root in datasets.items():
+                if dataset_id in deltas:
+                    continue
                 dataset_id = require_string(dataset_id, "dataset catalog ID")
                 if dataset_id in unions:
                     reader = ScreeningCohortUnionReader(root, unions[dataset_id])
@@ -193,6 +200,19 @@ class ScreeningService:
                 self.datasets[dataset_id] = reader
                 if isinstance(reader, (ScreeningDatasetV2Reader, ScreeningDatasetV3Reader)):
                     self.explorers[dataset_id] = ScreeningExplorer(reader)
+        for dataset_id, declaration in deltas.items():
+            data = json.loads(Path(declaration["manifest"]["path"]).read_bytes())
+            parent_pin = data["parent"]
+            parent = next((reader for reader in self.datasets.values()
+                           if getattr(reader, "_manifest_sha256", None) == parent_pin["sha256"]
+                           and reader.root == Path(parent_pin["path"]).parent), None)
+            if parent is None:
+                raise ValueError("governed delta requires its exact shared parent in the catalog")
+            reader = ScreeningGovernedDeltaReader(datasets[dataset_id], declaration, parent=parent)
+            if reader.manifest["dataset_id"] != dataset_id:
+                raise ValueError("governed delta catalog identity differs")
+            self.datasets[dataset_id] = reader
+        self.datasets = {key: self.datasets[key] for key in datasets}
         self.batch_registrations, self.batch_sessions = _batch_evidence(batch_evidence, self.datasets)
         if company_descriptions is not None:
             bound = self.datasets.get(company_descriptions.dataset_id)
@@ -397,6 +417,12 @@ class ScreeningService:
         return {
             "spine": json.loads(canonical_json(reader.quarterly.manifest["global_quarter_spine"])),
             "rows": json.loads(canonical_json(rows)),
+            **({"latest_company_periods": {"schema_version": "screening-latest-company-periods-v1",
+                "dataset_id": reader.manifest["dataset_id"], "dataset_publication_id": reader.publication_id,
+                "financial_as_of": reader.manifest["financial_as_of"],
+                "records": public_copy([row for row in reader.latest_quarter_periods.values()
+                                         if cik is None or row["cik"] == cik])}}
+               if getattr(reader, "latest_quarter_periods", None) else {}),
         }
 
     def quarter_series(
@@ -407,7 +433,7 @@ class ScreeningService:
         metric_id = require_string(metric_id, "metric_id")
         if type(limit) is not int or not 1 <= limit <= 8:
             raise ValueError("quarter series limit must be one to eight")
-        rows = observation_rows(reader, quarterly=True, cik=cik, metric_id=metric_id)
+        rows = observation_rows(reader, quarterly=True, cik=cik, metric_id=metric_id, latest=latest)
         if not rows:
             raise ValueError("quarter series is not prepared")
         rows.sort(key=lambda row: (row["calendar_year"], row["calendar_quarter"]))
@@ -452,7 +478,7 @@ class ScreeningService:
             row_year = period["calendar_year"] if prepared else None
             row_quarter = period["calendar_quarter"] if prepared else None
             matched = observation_rows(
-                reader, quarterly=True, cik=company["cik"], year=row_year, quarter=row_quarter,
+                reader, quarterly=True, cik=company["cik"], year=row_year, quarter=row_quarter, latest=latest,
             ) if prepared else []
             observations = {}
             for row in matched:
@@ -525,7 +551,7 @@ class ScreeningService:
             row_year = period["calendar_year"] if latest else calendar_year
             row_quarter = period["calendar_quarter"] if latest else calendar_quarter
             matches = observation_rows(
-                reader, quarterly=True, cik=cik, metric_id=metric_id, year=row_year, quarter=row_quarter,
+                reader, quarterly=True, cik=cik, metric_id=metric_id, year=row_year, quarter=row_quarter, latest=latest,
             ) if row_year is not None and row_quarter is not None else []
             if len(matches) != 1:
                 raise ValueError("quarter comparison cell is not unique")
@@ -1098,16 +1124,16 @@ class ScreeningService:
     def _explorer(self, dataset_id: str) -> ScreeningExplorer:
         dataset_id = require_string(dataset_id, "dataset_id")
         reader = self._dataset(dataset_id)
-        if dataset_id not in self.explorers and isinstance(reader, (ScreeningRuntimeProjection, ScreeningCohortUnionReader)):
+        if dataset_id not in self.explorers and isinstance(reader, (ScreeningRuntimeProjection, ScreeningCohortUnionReader, ScreeningGovernedDeltaReader)):
             self.explorers[dataset_id] = ScreeningExplorer(reader)
         try:
             return self.explorers[dataset_id]
         except KeyError as exc:
             raise ValueError("company explorer requires a v2 screening dataset") from exc
 
-    def _quarter_dataset(self, dataset_id: str) -> ScreeningDatasetV3Reader | ScreeningRuntimeProjection | ScreeningCohortUnionReader:
+    def _quarter_dataset(self, dataset_id: str) -> ScreeningDatasetV3Reader | ScreeningRuntimeProjection | ScreeningCohortUnionReader | ScreeningGovernedDeltaReader:
         reader = self._dataset(dataset_id)
-        if not isinstance(reader, (ScreeningDatasetV3Reader, ScreeningRuntimeProjection, ScreeningCohortUnionReader)):
+        if not isinstance(reader, (ScreeningDatasetV3Reader, ScreeningRuntimeProjection, ScreeningCohortUnionReader, ScreeningGovernedDeltaReader)):
             raise TypeError("quarterly analysis requires a v3 screening dataset")
         return reader
 
@@ -1209,7 +1235,7 @@ class ScreeningService:
                 predicate["metric_id"],
                 policy,
                 definition_version=predicate["definition_version"],
-                include_evidence=include_evidence,
+                include_evidence=include_evidence, include_latest=latest,
             )
             if latest:
                 observation = latest_period_observation(
@@ -1265,13 +1291,14 @@ def _find_observation(
     *,
     definition_version: str | None = None,
     include_evidence: bool = True,
+    include_latest: bool = False,
 ) -> dict[str, Any] | None:
     quarterly = policy["mode"] == "FIXED_CALENDAR_QUARTER_END"
     fixed_year = policy["mode"] == "FIXED_FISCAL_YEAR"
     year = policy["calendar_year"] if quarterly else policy["fiscal_year"] if fixed_year else None
     rows = observation_rows(
         reader, quarterly=quarterly, cik=cik, metric_id=metric_id, year=year,
-        quarter=policy["calendar_quarter"] if quarterly else None,
+        quarter=policy["calendar_quarter"] if quarterly else None, latest=include_latest,
     )
     if definition_version is not None:
         rows = [
