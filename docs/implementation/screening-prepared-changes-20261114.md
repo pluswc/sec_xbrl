@@ -1,5 +1,22 @@
 # 스크리닝 준비된 변화 조건 v1
 
+## 원격 전달 승인·최신 main 통합 (2026-11-14)
+
+사용자가 수락된 기능의 **push·PR**을 승인했다. 이 branch에 PR97 native100 병합을
+포함한 `origin/main d724c54e24257af9600a6427f83dcea792bea738`을 일반 merge했다.
+준비된 변화 제품 bytes는 문서 인수 동결 `62e36392f83692ecf26055073188931046dfd085`와
+동일하며 새 회계 연산/정의/reader guard를 추가하지 않는다. main의
+`test_universe50_history_recovery_ops.py` polling 보정은 그대로 보존한다.
+기존 source/artifact pin과 실제 자료·화면 인수는 같은 제품 bytes에 적용되므로
+재발행이나 runtime 재시작을 수행하지 않는다.
+
+원격 전달 승인과 최종 인수/병합은 별개다. 통합 독립 검증·리드 push/PR 생성·
+원격 CI는 대기이며 PR 번호는 아직 없다. 준비된 변화 기능은 main에 병합하지 않았다.
+아래 원격 미요청/당시 main SHA는 앞선 로컬 인수 당시 기록이다.
+통합 후 Node146/Python151(기존 관련150+상류 polling1)/Ruff/diff 검사를 통과했다.
+`src`, `examples`, `.interface-design/system.md`, `tests/screening`은 `62e36392f8`과
+Git diff가 비어 있다. 상류 unit test는 origin/main과 정확히 같다.
+
 2026-11-14 승인. 기존 native100 소스 `5a8fe55775`를 보존한 별도 branch
 `codex/screening-prepared-changes`에 main `deb074bc49`를 일반 merge한다.
 단일 writer·별도 독립 reviewer와 기존 승인 모델 fallback을 유지한다. PR85
@@ -82,7 +99,7 @@ TTM gap/duplicate·fixed/latest 구분, 등록/조회/evaluation/threshold/expor
 | 독립 검증 | INDEPENDENTLY_VERIFIED: Node146/Python150/Ruff 및 아래 범위 PASS |
 | 로컬 인수 | LOCALLY_ACCEPTED: 리드, 2026-11-14 |
 | 운영 | 18765 실제 화면 인수 PASS; 아래 PID/rollback 기록 참조 |
-| 원격 전달/main | push·PR·CI·main 병합 미요청·미수행; main `deb074bc49` 유지 |
+| 원격 전달/main | 2026-11-14 push·PR 승인; 최신 main `d724c54e24` 통합 검증 완료, 리드 push/PR·CI·기능 main 병합 대기 |
 
 ## 구현 경계와 재현 인터페이스
 

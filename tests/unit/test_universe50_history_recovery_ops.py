@@ -2034,6 +2034,12 @@ def test_real_validator_child_dies_after_abrupt_parent_exit(tmp_path):
     import signal
     import time
 
+    def child_alive(child_pid):
+        try:
+            return Path(f"/proc/{child_pid}/stat").read_text().split()[2] != "Z"
+        except FileNotFoundError:
+            return False
+
     pid_file = tmp_path / "validator.pid"
     child = f"\nfrom pathlib import Path\nimport os, time\nPath({str(pid_file)!r}).write_text(str(os.getpid()))\ntime.sleep(60)\n"
     parent_script = (
@@ -2052,8 +2058,7 @@ def test_real_validator_child_dies_after_abrupt_parent_exit(tmp_path):
         parent.wait(timeout=5)
         end = time.monotonic() + 5
         while time.monotonic() < end:
-            stat = Path(f"/proc/{pid}/stat")
-            if not stat.exists() or stat.read_text().split()[2] == "Z":
+            if not child_alive(pid):
                 break
             time.sleep(0.02)
         else:
@@ -2062,9 +2067,8 @@ def test_real_validator_child_dies_after_abrupt_parent_exit(tmp_path):
         if parent.poll() is None:
             parent.kill()
             parent.wait(timeout=5)
-        if (
-            pid
-            and Path(f"/proc/{pid}/stat").exists()
-            and Path(f"/proc/{pid}/stat").read_text().split()[2] != "Z"
-        ):
-            os.kill(pid, signal.SIGKILL)
+        if pid and child_alive(pid):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
