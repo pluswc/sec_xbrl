@@ -75,7 +75,8 @@ PRIMARY_STATEMENT_EVIDENCE_MISSING, CPRT의 REQUIRED_ITEM_NOT_IN_PREPARED_DATA�
 19078(backend PID1477655)로 연결된다. Consumer Python·앱·스타일은 수락된 d1e
 그대로이며 bridge만 `1e7d12fb54`/SHA256
 `025bce8bb3e1f361a575b96c1bc445fb4ca5a5391a8fd062f5b2c0ac3afb3150`다.
-실제 CMCSA profile과 발행된 변화 조건27개 pair, JS 오류0을 확인했다.
+변화 조건27개 정의를 유지하고, 운영 CMCSA 화면에서 영업이익·영업현금흐름
+전년비 연결을 확인했다. 운영에서 확인한 pair는 이 두 개이며 JS 오류는0이었다.
 Prepared109 publication은 `screening-prepared-changes-62a6bbe37d79543efd2bc7f1`,
 재무 기준일은 원래2026-10-25이며 새 수집일로 바꾸지 않았다.
 
@@ -83,7 +84,8 @@ Prepared109 publication은 `screening-prepared-changes-62a6bbe37d79543efd2bc7f1`
 SHA가 모두 같았다. 실제 journal SHA256은
 `3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`로 유지했다.
 이 인수는 private 복제본 저장 검사를 재실행하거나 실제 개인 기록을 쓰지 않았다.
-이전 준비된100 backend19079는 rollback으로 보존한다.
+이전 준비된100 backend19079는 rollback으로 보존한다. 리드가 소유 private
+19077/19080·Windows18885를 정리했고 LIVE18765/19078과 rollback19079를 유지했다.
 
 실제 근거는 `runtime/prepared-changes109/root-live-acceptance.json`과 Windows
 `remaining15-recovery-20261114/current-feature-integration/`의 `live-switch.json`,
