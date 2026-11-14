@@ -321,3 +321,14 @@ published-v2를 함께 참조한다. `live-switch.json`과 `original-process.jso
 `operator-bad-sha.stderr`에 보존했고 제품 결함으로 분류하지 않는다.
 작업용 private frontend들은 ROOT가 종료했다. 기존 backend·원 자료·store 쓰기는
 없었으며 이 보존 확인을 전체 Raw 아카이브 재검증으로 확대 해석하지 않는다.
+
+## 원격 전달 승인 — 2026-11-14
+
+사용자가 이 Q4 개선의 push와 PR 생성을 승인했다. ROOT fetch 확인 시
+origin/main은 `245a52bc44`로 추가 변경이 없고, 이 브랜치는 뒤처진 커밋 없이
+7개 커밋 앞서 있어 별도 main 통합이나 충돌 해결이 필요하지 않았다.
+시장 소비자를 포함한 제품 bytes는 기존 실제 운영 인수 소스와 같으며 자료,
+store, runtime을 재발행하거나 변경하지 않는다. 기존 금융 소스 `76e475f0be`,
+소비자 `7b6cb45f81`, 독립 data-v2 및 실제 live 인수 근거를 그대로 재사용한다.
+이 문서 갱신은 원격 전달 상태만 바꾼다. 앞 절의 미요청 문구는 당시 기록이다.
+원격 push·PR 생성·CI 확인은 ROOT 실행 대기이며 main 병합은 요청되지 않았다.
