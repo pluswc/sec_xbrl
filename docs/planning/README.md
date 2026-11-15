@@ -1,5 +1,11 @@
 # 계획 등록부 — 단일 진입점
 
+2026-11-16 [가격 관련 지표 전체 GOAL 인계](price-related-metrics-goal-handoff-20261116.md)를 추가했다.
+이번 변경은 문서·새 세션 프롬프트만이며 코드/GOAL/운영 실행 승인이 아니다.
+가격·EPS·주식 수 PR101은 main `1b0a4f26d1`에 MERGED, 필수 CI43606365273은
+3,118 PASS/46 SKIP이다. 아래 PR/CI/main 대기 문구는 당시 기록으로 보존한다.
+현재 인계 기준 main은 PR100도 포함한 `004b621acc`이며 기존 Q4 UI·운영·기록을 보존한다.
+
 2026-11-14 [Q4 매출 구성 연결·비율 companion](../implementation/revenue-q4-continuity-20261114.md)은
 **구현·독립 검증·ROOT 로컬/운영 인수 PASS**다. 금융 소스 `76e475f0be`,
 기존 시장 소비자 보존 통합 `7b6cb45f81`을 구분하며 Python86/Node159/Ruff 및
