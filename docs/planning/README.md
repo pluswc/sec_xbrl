@@ -1,3 +1,5 @@
+2026-11-16 [가격 관련 지표 실행 계약](../implementation/price-related-metrics-20261116.md): 사용자가 H0–H5 구현·검사·독립 검증·운영·PR/CI/main 전달을 승인했다. 단일 Sol writer 구현 중이며 독립/운영/main 인수는 별도다. 이전 문서 전용 상태는 당시 기록이다.
+
 # 계획 등록부 — 단일 진입점
 
 2026-11-16 [가격 관련 지표 전체 GOAL 인계](price-related-metrics-goal-handoff-20261116.md)를 추가했다.
