@@ -59,6 +59,10 @@ function parseArgs(argv) {
     "--revenue-breakdowns-sha256",
     "--financial-growth",
     "--financial-growth-sha256",
+    "--price-metrics-manifest",
+    "--price-metrics-sha256",
+    "--price-metrics-journal",
+    "--price-source-root",
     "--market-inputs",
     "--market-inputs-sha256",
     "--history-worker",
@@ -125,6 +129,13 @@ function parseArgs(argv) {
         !/^[0-9a-f]{64}$/u.test(text("--market-inputs-sha256"))))) {
     throw new Error("market inputs require an absolute asset path and SHA-256 pin");
   }
+  const priceNames = ["--price-metrics-manifest", "--price-metrics-sha256", "--price-metrics-journal", "--price-source-root"];
+  const hasPriceMetrics = priceNames.some(key => Object.hasOwn(values, key));
+  if (hasPriceMetrics && (priceNames.some(key => !Object.hasOwn(values,key)) ||
+      !/^[0-9a-f]{64}$/u.test(text("--price-metrics-sha256")) ||
+      priceNames.filter(key=>key!=="--price-metrics-sha256").some(key=>!text(key).startsWith("/") || text(key).split("/").some(p=>p==="."||p==="..")))) {
+    throw new Error("price metrics require exact Linux source, manifest/hash and separate journal paths");
+  }
   const hasGrowth = Object.hasOwn(values, "--financial-growth");
   if (hasGrowth !== Object.hasOwn(values, "--financial-growth-sha256") ||
       (hasGrowth && (!path.isAbsolute(text("--financial-growth")) ||
@@ -168,6 +179,7 @@ function parseArgs(argv) {
     ...(hasAuxiliaryParent ? {auxiliaryUnionParent:{path:text("--auxiliary-union-parent"),sha256:text("--auxiliary-union-parent-sha256")}} : {}),
     revenueBreakdowns: hasBreakdowns ? text("--revenue-breakdowns") : null,
     revenueBreakdownsSha256: hasBreakdowns ? text("--revenue-breakdowns-sha256") : null,
+    ...(hasPriceMetrics ? {priceMetrics:{manifest:text("--price-metrics-manifest"),sha256:text("--price-metrics-sha256"),journal:text("--price-metrics-journal"),sourceRoot:text("--price-source-root")}} : {}),
     marketInputs: hasMarketInputs ? text("--market-inputs") : null,
     marketInputsSha256: hasMarketInputs ? text("--market-inputs-sha256") : null,
     financialGrowth: hasGrowth ? text("--financial-growth") : null,
@@ -607,11 +619,16 @@ function serveProfileAsset(bundle, request, response, label, auxiliary = null) {
 }
 
 // A separate child owns lifecycle state. Its failures never terminate the financial relay.
-function startHistoryWorker(options) {
-  const child = childProcess.spawn(options.wsl, [
+function startHistoryWorker(options, priceMetrics = false) {
+  const childArgs = priceMetrics ? [
+    "-d", options.distribution, "--exec", "/usr/bin/env", `PYTHONPATH=${options.priceMetrics.sourceRoot}`,
+    options.linuxPython, `${path.posix.dirname(options.priceMetrics.sourceRoot)}/examples/screening/price_metrics_worker.py`,
+    "--manifest", options.priceMetrics.manifest, "--sha256", options.priceMetrics.sha256, "--journal", options.priceMetrics.journal,
+  ] : [
     "-d", options.distribution, "--exec", "/usr/bin/env", `PYTHONPATH=${options.sourceRoot}`,
     options.linuxPython, options.historyWorker, "--journal-store", options.journalStore,
-  ], { stdio: ["pipe", "pipe", "inherit"], windowsHide: true });
+  ];
+  const child = childProcess.spawn(options.wsl, childArgs, { stdio: ["pipe", "pipe", "inherit"], windowsHide: true });
   const pending = new Map();
   let sequence = 0, dead = false;
   const failAll = () => {
@@ -684,6 +701,7 @@ function startBridge(options) {
     { stdio: ["pipe", "pipe", "inherit"], windowsHide: true },
   );
   const history = options.historyWorker ? startHistoryWorker(options) : null;
+  const priceMetrics = options.priceMetrics ? startHistoryWorker(options, true) : null;
   const pending = new Map();
   let nextId = 1;
   let stopping = false;
@@ -835,6 +853,13 @@ function startBridge(options) {
         body_base64: Buffer.concat(chunks).toString("base64"),
       };
       const route = (request.url || "").split("?", 1)[0];
+      if (route === "/api/price-metrics" || route.startsWith("/api/price-metrics/")) {
+        if (!priceMetrics) { writeJson(response, method === "GET" && route === "/api/price-metrics" ? 200 : 503,
+          {configured:false,error:"가격 지표 자료가 준비되지 않았습니다."}); return; }
+        try { const result = await priceMetrics.request(message); writeJson(response,result.status,result.body); }
+        catch (error) { writeJson(response,error.status||503,{error:"가격 지표 연결을 사용할 수 없습니다."}); }
+        return;
+      }
       const historyNamespace = route === "/api/history" || route.startsWith("/api/history/");
       const listKey = method === "GET" ? ({ "/api/screen-revisions": "revisions", "/api/runs": "runs", "/api/decisions": "decisions" })[route] : null;
       if (historyNamespace && !history) {
@@ -891,10 +916,11 @@ function startBridge(options) {
     server.close();
     relay.kill();
     history?.stop();
+    priceMetrics?.stop();
   };
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
-  return { relay, server, history };
+  return { relay, server, history, priceMetrics };
 }
 
 if (require.main === module) {
