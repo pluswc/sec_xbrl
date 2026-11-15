@@ -1,5 +1,12 @@
 # Price-related metrics — execution contract, 2026-11-16
 
+**Current dated status (2026-11-16):** all requested families are IMPLEMENTED at
+`67cc011c269d023a32c51c8fe10e24b7c2f43a8f`; separate Sol verification PASS;
+ROOT LOCALLY_ACCEPTED and LIVE operating acceptance for the frozen source/data
+are complete. H5 fresh capture permission, PR, required CI`test` and main merge
+remain PENDING. The GOAL is not complete. Earlier pending and FAIL records below
+retain their original stage; the final acceptance section records the current state.
+
 ## Authority and status
 
 The user has explicitly authorized H0–H5 implementation, tests, separate read-only
@@ -231,7 +238,8 @@ node tests/screening/screening_revenue_q4_continuity.test.cjs
 ```
 
 Focused Python65PASS; new Node6PASS, existing market/Q4 Node source checks PASS;
-Ruff and JavaScript syntax PASS. Actual browser/independent verdict remains pending.
+Ruff and JavaScript syntax PASS. Actual browser/independent verdicts were pending at that initial self-check
+handoff; the final dated acceptance below supersedes that stage.
 The initial JSON real publication is a **development numeric smoke only**, not a
 runtime candidate; a compact final artifact must come from frozen source and pass
 independent review. Full remote CI remains separate; required context is `test`.
@@ -295,9 +303,10 @@ port18887 and separate pricejournal are prepared; original backend19078 and all
 old pins remain in the configs. Root's legacy-backend mutation restriction above
 still applies. Staging receipt and commands are review artifacts, not activation.
 
-Source commit freeze, independent verification, actual UI/local/operating
-acceptance, PR/CI and main merge remain separate pending states. H5 fresh capture
-still awaits user permission; no whole-goal complete claim.
+At this artifact handoff, source freeze, independent verification and actual
+UI/local/operating acceptance were still pending; their completed states are
+recorded separately in the final acceptance below. PR/CI/main and H5 fresh capture
+permission remain pending. No whole-goal complete claim.
 
 ## Evidence correction after independent FAIL — 2026-11-16
 
@@ -348,12 +357,119 @@ Historical PBR evidence resolves754daily multiples,754quotes and26financial inpu
 in a measured0.11seconds. Separate source-A/source-B tests verify original values,
 definitions and quote after restart; client mutations, unknown/cross-result
 contexts and source tampering reject. Saved band evidence also survives an active definition
-change while new incompatible band computation correctly rejects. Independent recheck and corrected actual UI
-acceptance remain pending. The earlier private preview was preliminary only;
-Root stopped its owned private process and preserved the original journal.
+change while new incompatible band computation correctly rejects. Independent
+recheck and corrected actual UI acceptance were pending at the correction handoff;
+the final dated acceptance below records their completion. The earlier private
+preview was preliminary only; Root stopped its owned private process and
+preserved the original journal.
 
 The corrected create-only runtime bundle/configs are under the current Windows
 visualization root's `price-metrics-evidence-fix-stage`, with fresh private
 legacy/price journal paths under `private-preview-evidence-fix`. The live price
 journal remains the dedicated new operating path. The existing v3 artifact and
 old backend/financial/Q4/profile pins are reused; staging starts/stops nothing.
+
+## Independent, local and live acceptance — 2026-11-16
+
+The lead accepted the exact frozen implementation and unchanged v3 publication
+after separate read-only Sol recheck and actual private/live browser verification.
+The writer performed no activation. Keep these delivered states separate:
+
+| State | Target and evidence | Result |
+| --- | --- | --- |
+| IMPLEMENTED | `67cc011c269d023a32c51c8fe10e24b7c2f43a8f`; all28definitions and all requested metric families | Complete |
+| INDEPENDENTLY_VERIFIED | Separate Sol recheck of that SHA:69Python/20Node, Ruff/syntax/diff PASS; original545-file/math/PIT checks reused after unchanged-pin confirmation | PASS |
+| LOCALLY_ACCEPTED | ROOT acceptance dated2026-11-16, exact source and v3data | Complete |
+| LIVE frozen-source/data acceptance | ROOT switched only frontend18765; actual price/evidence/save/reopen and preserved old consumers checked | Complete |
+| H5 new-source capture/refresh | Bounded official AAPL/MSFT fresh capture still awaits user permission after automatic-review rejection | PENDING |
+| Remote PR / required CI`test` / main merge | Not performed at this acceptance record | PENDING / PENDING / PENDING |
+| Whole GOAL | Fresh-source dependency and remote delivery remain | NOT_COMPLETE |
+
+The independently verified v3 manifest remains
+`1fc3fcfaf96ec6960ac2f8f778ba280bdad001bb9b9e8eb19ec8b470394c400a`;
+publication`screening-price-metrics-c267c806a18e973734393915`.
+The correction recheck report SHA256 is
+`e09f67c1fc2b8252f070087a77f3ebbc1996f4d7290ef1039214cb0f478c5959`.
+ROOT operating receipt SHA256 is
+`f70d199ac7eae8f6185c180e1c9f158916c23d85e7348149d9598d359bd95d81`.
+Optional detailed report/receipt locators are
+`/tmp/price-metrics-independent-recheck-67cc011.md` and
+`work/price-related-metrics-20261116/evidence/root-operating-acceptance.json`.
+Their absence does not remove the scope, counts, constraints and acceptance states
+recorded here. Existing PR101 fullCI3,118PASS/46SKIP is baseline evidence only,
+not a new whole-repository CI result for this implementation.
+
+### Exact availability in the accepted live common query
+
+The109-company universe has2,834latest observations across26latest definitions:
+1,079AVAILABLE/1,755UNAVAILABLE. Fixed scenarios are separate from those counts.
+All28definitions and every family are implemented. Availability is scoped input
+and qualification status, never a substitute for an unimplemented engine.
+
+| Family / metric | Available accepted observations |
+| --- | --- |
+| Price returns1/5/21sessions |109/109 each |
+| Price returns63/126/252sessions |108/109,104/109,101/109 respectively |
+| Volatility20/60/252sessions |109/109,108/109,101/109 respectively |
+| Latest / previous20 relative volume |109/109 |
+| Common market cap, PER, PBR, PBR/BPS, P/S, earnings yield, standardized FCF yield, EV, EV/Revenue, EV/operating EBITDA proxy | Each1/109, exact approved MSFT scope |
+| Fixed PER / fixed PBR scenarios | Each3available MSFT scenarios;6default band rows total |
+| Historical PBR / historical PBR-by-BPS | Each754/754MSFT sessions under approved filed-day diagnostic policy |
+| Historical PER, P/S, EV/Revenue, EV/operating EBITDA proxy | MSFT62/754eligible sessions, below252minimum; unavailable with reason |
+
+For the other108issuers, valuation/common-share/currency/split/issuer-scope
+bindings have not been approved. This is a governed applicability limitation;
+it is not a finding that the underlying SEC Raw data does not exist. Their
+historical missing intervals remain explicit. No company-specific absence is
+presented as a missing implementation. Strict session gaps/window lengths remain
+visible for the price metrics with less than109available observations.
+
+Historical754-session coverage is a **filed-day point-in-time diagnostic**.
+Actual historical system readiness remains unknown and backtest eligibility is
+false. The scalar is median(P50); it is not a percentile rank or current multiple.
+The accepted quote is2026-10-23 for requested display day2026-11-16,24calendar
+days stale; financial cutoff2026-10-25; automatic update=false. Live activation
+does not convert those fixed inputs into current prices or complete H5.
+
+### Actual operating scope and preservation
+
+At acceptance, frontend`http://127.0.0.1:18765/` ran NodePID52088, replacing the
+observed original frontendPID40460. These are dated process observations, not
+future process-identity assumptions. The new price worker uses source`67cc011c26`
+and a separate operating price journal. Qualified financial source remains
+`d1e74d90c98838431740c0e16408d8b4d2623543`, backend19078. Original financial,
+Q4/revenue, market profile and auxiliary asset pins remain unchanged.
+
+All14prior datasets,109companies, history version8 and trash count8 are preserved.
+The original journal SHA256 remains
+`3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`.
+No original journal restoration/replacement, Raw mutation or financial rebuild
+occurred. No synthetic test save was written to the live price journal; live
+verification was read-only. Actual explicit saves/reopens/notes were exercised
+only in the dedicated private price journal. The private legacy-backend mutation
+restriction was enforced; a copied history-worker journal never implied a cloned
+backend.
+
+Corrected private18887 (observedPID47296) passed actual custom PER11.25/PBR2.25
+evidence and exact quote, two-sided PER conditions, explicit condition plus
+band-result and memo saves, original-source reopening/export, and cold-service
+restart followed by saved-scenario evidence. ROOT checked four Q4 cases against
+the original live view and obtained exact equality. Existing market verification
+covered4APIcases and3profiles, fixed-year scope and the shares table.
+
+Post-switch live checks confirmed11selected numeric values,6default bands,
+252-session series and unchanged market/history behavior. Layout checks at
+1920×1080,1440×900,2560×1440,1280×720,960×600 and390×844 had no horizontal
+page overflow. These were effective CSS viewport checks; actual browser zoom
+was not tested. The accepted probe setup awaited the requested observation ID,
+used the final documented compact Q4 caption, paired the old immutable market
+case with a current-session decision-date/status/history snapshot, and supplied
+the same-Origin header for manual read-only POSTs.
+
+Detailed private/live evidence and screenshots are under the current Windows
+visualization root. The accepted live-activation receipt SHA256 is
+`5fc47d6b601f6c9abb84a82b0eccf51f0e49ebf0be289aacef391c49e97e6acc`.
+The independent/local/live results above apply to source`67cc011c26`; a later
+**documentation-only** acceptance commit preserves all source/test/data bytes and
+requires only independent document-delta/code-byte-equality review before remote
+delivery. No completed source/data/browser checks are repeated for that commit.
