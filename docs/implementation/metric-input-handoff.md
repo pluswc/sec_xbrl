@@ -55,3 +55,12 @@ definitions.
 The atomic publisher rejects calculated-value fields in either dataset.  A
 future Derived Metrics-plane process is responsible for formula versions,
 calculation, and durable `derived_metric` records.
+
+## Separate market-input consumer publication (2026-11-14)
+
+The [price/EPS/shares common-input contract](price-common-inputs-20261114.md)
+adds a separately named Derived-plane market TTM from four directly reported
+compatible QTD diluted EPS observations with explicit class/share-basis evidence.
+It does not change this handoff's DIRECT_OBSERVATION_ONLY EPS/WAVG rule, derive
+Q4 EPS, or replace an annual reported EPS input. Raw cover-share candidates remain
+explicitly as-filed candidates rather than newly selected EPS observations.

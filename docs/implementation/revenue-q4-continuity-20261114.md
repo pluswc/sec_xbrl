@@ -332,3 +332,28 @@ store, runtime을 재발행하거나 변경하지 않는다. 기존 금융 소�
 소비자 `7b6cb45f81`, 독립 data-v2 및 실제 live 인수 근거를 그대로 재사용한다.
 이 문서 갱신은 원격 전달 상태만 바꾼다. 앞 절의 미요청 문구는 당시 기록이다.
 원격 push·PR 생성·CI 확인은 ROOT 실행 대기이며 main 병합은 요청되지 않았다.
+
+## PR100 최신 main 통합 승인 — 2026-11-16
+
+사용자는 PR100의 원격 main 병합과 local main 동기화 및 후속 CI·실제 화면·자료
+보존 검증을 승인했다. ROOT가 fetch한 `origin/main 1b0a4f26d1`(PR101 가격
+producer 통합)을 이 격리 브랜치에 일반 merge했다. planning의 양쪽 유효 기록은
+모두 보존했고 제품 의미나 guard를 변경하지 않았다. main의 가격 producer 코드와
+테스트는 main 변경 그대로 수용한다. 기존 금융 source의 Python 파일 bytes와
+인수 UI 3파일은 동일하다. 새 Python 모듈로 namespace 집합이 증가하는 사실은
+기존 발행물 qualification의 자동 상속을 뜻하지 않는다. 기존 published-v2의
+133개 구현 pins는 원래 경로·내용을 그대로 유지하며 재발행하지 않는다.
+
+이 절은 병합 전 준비 상태다. branch push·PR100 원격 병합·local main 동기화·
+운영 확인은 ROOT의 후속 단계이며 여기서 수행하지 않았다. Raw/실제 asset/
+native qualification/journal/runtime도 변경하지 않았다. 이전 14일의 원격
+미요청·main 미병합 기록은 당시 상태로 보존한다.
+
+최신 main 통합 자체 검증: Q4 86개와 main 시장 producer 관련 30개를 함께 실행해
+Python **116 PASS**(1.60초), 전체 Node **159 PASS**(35.17초), Ruff/diff PASS다.
+기존 src Python 131개 및 enrich/prepare 2개의 경로·내용은 금융76e와 같고,
+UI SHA는 JS `b06d2decf8299841fc10e03529dbcd7834753a9158ebafe9adc35e1f5f630999`,
+CSS `42810fda18d8b2cb700fc3d22d875a39c91686410357e942cc3e467b2fc65ca1`,
+bridge `c5560a7f2aecff43fe4494e1f3218a197a7045c54ee71b20cfeb0b7bd0074960`로
+기존 인수와 동일하다. 로그는 `/tmp/revenue-q4-main-python.log` 및
+`/tmp/revenue-q4-main-node.log`다. 이 merge freeze의 독립 검증은 아직 대기다.

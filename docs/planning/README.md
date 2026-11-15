@@ -10,6 +10,14 @@
 시장 profile을 유지했다. main 기준245a이며 원격 push/PR은 미요청·미수행,
 main 미병합이다. 실제 발행/운영 인수는 ROOT가 수행했고 writer는 문서에 근거를 기록했다.
 
+2026-11-14 [Common-input main delivery](../implementation/price-common-inputs-20261114.md#main-delivery-handoff--2026-11-14): user now authorizes review/remote delivery/main merge, superseding earlier no-request records. Base245a/product9d78/accepted d6 trees remain unchanged; completed independent/artifact/UI evidence reused, operating58984 and qualified d1e/all20 protected pins preserved. No qualification widening, rebuild, restart or repeated tests. PR/CI/main merge remain pending and Root-owned.
+
+2026-11-14 [Common-input operating connection](../implementation/price-common-inputs-20261114.md#approved-operating-consumer-connection--2026-11-14): source9d78 independently verified, actual profile artifact PASS and ROOT LIVE_ACCEPTED at18765 (Node58984). All109 exact-ticker prices/12 latest direct12m EPS; frozen10/23 quotes for10/25, currencyUNKNOWN, no PER. Qualified Python19078/d1e and all20 protected pins/journal preserved, old14 datasets/21-company functions retained. Private/live UI checks passed; main NOT_MERGED/no merge requested. Earlier pending/no-activation records are historical.
+
+2026-11-14 [Common-input assessment overlay](../implementation/price-common-inputs-20261114.md#approved-follow-up-small-referenced-assessment-overlay--2026-11-14): sourcecc3c9 and actual v2 independently PASS, Root LOCALLY_ACCEPTED. All109 header issuers/128 contexts (46 class-identity contexts);12 latest direct12m EPS (11 positive/LITE negative), only2 latest four-QTD windows with basis unknown. Original common109/all18 protected files preserved. No PER/UI/runtime/main acceptance; earlier pending states are historical.
+
+2026-11-14 [Price/EPS/shares common inputs](../implementation/price-common-inputs-20261114.md): source9540 independent27 PASS; actual109 publication completed (13,549 financial rows/129 quotes/132 securities). Availability counts cover any retained period/scope, not current PER coverage; all109 market TTM remain SHARE_BASIS_UNKNOWN. Protected12 pins/journal unchanged. Root artifact review PASS and first-slice publication/query LOCALLY_ACCEPTED under these limits; no UI/runtime activation or main merge, and no service acceptance claim.
+
 2026-11-14 사용자가109 확장·상세 연결의 main 전달을 승인했다. 별도 branch에서
 원래 financial3fa와 PR98 main `ad877d26be`를 일반 merge해 계획 항목을 모두 보존했다.
 Python130/수락 bridge·최신 main UI는 부모 bytes와 같고 focused Python10·Node9/
@@ -865,3 +873,10 @@ origin/main `245a52bc44`는 추가 변경이 없어 별도 통합·충돌 해결
 검증 근거를 재사용한다. 자료·store·runtime 재발행이나 변경은 없다.
 ROOT의 push/PR/CI 실행은 대기 중이고 main 병합은 미요청이다.
 위 로컬 전용·원격 미요청 문구는 각 기록 당시 상태로 보존한다.
+
+2026-11-16 사용자가 PR100 main 병합·local main 동기화와 후속 검증을 승인했다.
+Q4 격리 브랜치에 최신 main `1b0a4f26d1`(PR101)을 일반 merge하고 양쪽 계획
+기록을 보존했다. 기존 Q4 Python bytes/133개 구현 pins와 인수 UI는 유지한다.
+추가 가격 모듈은 main 변경이며 기존 qualification 자동 상속을 주장하지 않는다.
+자료·journal·runtime 재발행/변경 없이 자체 검사·독립 검증을 거쳐 ROOT가
+push·원격 병합·local main 동기화·운영 검증을 이어간다. 아직 그 후속 실행 전이다.
