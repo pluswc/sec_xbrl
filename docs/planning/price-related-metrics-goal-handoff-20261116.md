@@ -46,7 +46,7 @@ DCF, 실시간 피드, 주문·매매 엔진, 대규모 새 기업 확장은 이
 | 가격 수익률 | 미국 거래일1/5/21/63/126/252개 전 대비 `split_adj_close` 변화. 배당 포함 total return이 아님 |
 | 연율화 변동성 | 20/60/252거래일. 단순/로그 수익률, 표본 기준, 연율화252 가정은 H0에서 확정 |
 | 상대 거래량 | 최근 거래량 / 이전20거래일 기준 거래량. 최근의 의미·당일 제외 평균·완료 세션 기준을 확정; true-split 호환 volume만 사용 |
-| 시가총액 | 같은 시점 가격 × 실제 유통/발행 common shares. common 종류별 가격·수량·권리 범위를 확인; WAVG 대체 금지 |
+| 시가총액 | 같은 시점 가격 × 자기주식을 제외한 보통주 shares outstanding. free-float·WAVG가 아니며 자기주식 차감 전 issued shares와도 구분. common 종류별 가격·수량·권리 범위 확인 |
 | PER | `P / diluted EPS12m`; 클래스·통화·분할/공시 EPS 기준 정렬. EPS≤0은 PER 미준비와 이유, 음수 EPS 자체는 보존 |
 | PBR | common market cap / common equity 또는 `P / BPS` 경로를 명시적으로 분리. BPS는 일치하는 실제 common shares, WAVG 아님 |
 | P/S | common market cap / TTM revenue. 회사 전체 매출과 common 가격·클래스 범위의 결합 근거 필요 |
@@ -62,6 +62,7 @@ forward-fill, 결측일 건너뛰기로 N세션을 만들지 않는다. 각 창�
 과거 PER 전체에 현재 EPS를 끼워 넣지 않는다. filed-day 가정과 실제 historical ready 증거,
 기존 lag0 미국 세션 정책을 구분하며 ready 미확인은 백테스트 적격 인증이 아니다.
 모든 비율은 단위·통화·분모0/결측/음수 정책을 버전 정의에 명시한다. UI에서 회계 계산하지 않는다.
+가격·거래량은 일별 as-of, 재무 입력은 실제 재무기간·회계연도 grain으로 분리한다. 가격을 FY에 강제로 맞추거나 현재 EPS를 모든 과거 날짜에 적용하지 않는다.
 
 정책 참고: [CFA Institute의 price/enterprise-value multiples 설명](https://www.cfainstitute.org/insights/professional-learning/refresher-readings/2026/market-based-valuation-price-enterprise-value-multiples).
 가격/EV 배수, 비양수 EPS의 E/P와 PER 차이, historical EPS 시점, common equity/BPS를
@@ -158,7 +159,8 @@ publication 재열기·pin tamper, UI 비동기 전환·미준비 설명, 저장
 승인 guard 범위 확대는 먼저 설명하고 확인하되, 독립적으로 가능한 작업은 계속해줘.
 
 먼저 AGENTS.md, delivery-workflow와 인계의 관련 계약만 읽고 현재 main/작업 상태 및
-운영·저장 기록의 최신 metadata를 좁게 확인해줘. 이전 PID/저장 hash를 현재 사실로 보거나
+운영·저장 기록의 최신 metadata를 좁게 확인해줘. AGENTS.md·지침·스킬 파일은 수정하지 마.
+이전 PID/저장 hash를 현재 사실로 보거나
 동시 작업·Q4 UI·새 기록을 덮어쓰지 마. 그 다음 create_goal로 명확한 구현 목표를 시작해줘.
 요청하지 않은 token_budget은 설정하지 마. 문서·계획만 만들고 목표를 완료 처리하지 마.
 
@@ -177,6 +179,8 @@ EPS direct-only와 FY−9개월 EPS 차감 금지는 유지하고, 새 추정은
 회사별 미준비는 사유로 남겨도 되지만 계열 미구현을 결측으로 위장해 완료하지 마.
 계열 전체가 공급자 입력/정책 때문에 불가능하면 의존성을 구체적으로 질문하고 다른 계열은 진행해줘.
 공통 계약 확정 후에만 최소 Sol 병렬 작업을 고려하고 같은 파일 writer는 하나로 유지해줘.
+필요한 구현자와 별도 독립 검토자는 실제 사용 가능한 Sol만 사용하고 기본 Astra로 대체하지 마.
+Sol을 사용할 수 없으면 먼저 알려줘. 독립 검토자는 구현 소스를 수정하지 않아야 해.
 완료 수집·회사 감사·기존 모든 검사를 반복하지 말고 변경/실제 이상에 필요한 검사만 해줘.
 마지막에 계열별 구현·실자료 가용성·보류, source/발행물 pin·검사·운영/main 결과를 구분해 보고해줘.
 ```
