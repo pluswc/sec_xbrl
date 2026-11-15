@@ -298,3 +298,62 @@ still applies. Staging receipt and commands are review artifacts, not activation
 Source commit freeze, independent verification, actual UI/local/operating
 acceptance, PR/CI and main merge remain separate pending states. H5 fresh capture
 still awaits user permission; no whole-goal complete claim.
+
+## Evidence correction after independent FAIL — 2026-11-16
+
+The separate Sol review of frozen`16931be929` found two release-blocking evidence
+paths: arbitrary user band IDs were absent from stored publication files, and
+saved-A evidence was incorrectly routed through active-readerB. Numeric engines,
+all545v3files, all10actual MSFT valuations, all price families and point-in-time
+historical arithmetic passed that review. No live activation followed the FAIL.
+
+The correction is limited to the existing reader/service/UI/test seam. Results
+now receive an opaque backend-owned evidence context. It binds the original
+verified reader and permitted observation IDs; the bounded16-context cache stores
+only backend-computed or hash-verified saved scenario rows. The client cannot
+submit a calculated value, source path, publication pin or arbitrary row as evidence.
+Static current-publication evidence retains its original read-only API contract.
+Unknown/expired tokens and cross-result IDs reject rather than falling back to
+another publication. A result can be reopened/requeried to get a fresh context.
+
+Explicit save payloads retain their exact original numeric/source hashes and
+contain no ephemeral context token. Reopening after a service restart verifies
+the original publication and save, then mints a new transport context for that
+original reader. Definitions/company captions and all evidence stay with the
+saved source, even when current publicationB differs. New active queries switch
+back explicitly. The UI rejects late evidence from old source/result contexts
+and earlier clicks within the same result.
+
+User multiples11.25/2.25 resolve through their exact backend-generated scenario
+rows, including their EPS/BPS and exact quoted numerator. Regular valuation
+evidence resolves the single price observation ID/date/security through the
+shared pinned batch. Historical P50 evidence resolves its actual daily multiple
+IDs, their prices and financial inputs. No source values are reconstructed in
+the browser. The historical operating-proxy label remains explicit for its exact
+v1definition; diagnostic coverage remains distinct from readiness certification.
+
+The v3 publication pin`1fc3fcfa…c400a` is **reused unchanged**. Its producer evidence
+remains the original`16931be929` computation; this correction changes no registry,
+formula, input policy, source input, daily value, percentile or saved schema.
+Reading retained artifacts does not demand that the current reader file hash equal
+the old producer hash. New materialization still enforces its own source freeze.
+No supplier verification, batch scan, financial rebuild or price calculation was
+repeated for the evidence correction.
+
+Correction checks: focused Python69PASS; new price Node9PASS plus existing
+market5/Q4sixPASS (20Node checks combined), Ruff/JavaScript syntax/diff PASS.
+Real unchanged-v3 custom bands resolve201.9375 and134.0205668506799515282078901306045
+with the exact524.510009765625 quote and one approved EPS/BPS input each.
+Historical PBR evidence resolves754daily multiples,754quotes and26financial inputs
+in a measured0.11seconds. Separate source-A/source-B tests verify original values,
+definitions and quote after restart; client mutations, unknown/cross-result
+contexts and source tampering reject. Saved band evidence also survives an active definition
+change while new incompatible band computation correctly rejects. Independent recheck and corrected actual UI
+acceptance remain pending. The earlier private preview was preliminary only;
+Root stopped its owned private process and preserved the original journal.
+
+The corrected create-only runtime bundle/configs are under the current Windows
+visualization root's `price-metrics-evidence-fix-stage`, with fresh private
+legacy/price journal paths under `private-preview-evidence-fix`. The live price
+journal remains the dedicated new operating path. The existing v3 artifact and
+old backend/financial/Q4/profile pins are reused; staging starts/stops nothing.

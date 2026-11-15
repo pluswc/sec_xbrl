@@ -329,21 +329,50 @@ class PriceMetricReader:
                 if row["observation_id"] == observation_id]
         if not rows:
             raise KeyError(observation_id)
+        return self._expand_evidence(rows[0])
+
+    def _expand_evidence(self, row: dict) -> dict:
+        """Expand a stored row or a service-owned verified scenario, never client values."""
+        pinned_json(self.pin)
         source = self._source(self.manifest["source_pins"]["financial_inputs"])
-        ids = {leg.get("observation_id") for leg in rows[0]["input_lineage"]}
-        price_inputs = []
-        expected = []
-        for leg in rows[0]["input_lineage"]:
+        lineage = list(row["input_lineage"])
+        historical_inputs = []
+        if row["metric_id"].startswith("historical_"):
+            referenced = {leg.get("observation_id") for leg in lineage}
+            historical_inputs = [r for r in self._read_rows(row["cik"], "historical") if r["observation_id"] in referenced]
+            if {r["observation_id"] for r in historical_inputs} != referenced:
+                raise ValueError("historical multiple input identity differs")
+            lineage = [leg for r in historical_inputs for leg in r["input_lineage"]]
+        ids = {leg.get("observation_id") for leg in lineage}
+        price_inputs, expected = {}, set()
+        batch = None
+        price_by_id = None
+        for leg in lineage:
             if leg.get("source_ref") == "price_batch":
-                batch = self._source(self.manifest["source_pins"]["price_batch"])
-                price_inputs = [p for p in batch["prices"] if p["security_id"] == leg["security_id"]
-                                and leg["start_session"] <= p["trade_date"] <= leg["end_session"]]
+                batch = batch or self._source(self.manifest["source_pins"]["price_batch"])
+                for price in batch["prices"]:
+                    if price["security_id"] == leg["security_id"] and leg["start_session"] <= price["trade_date"] <= leg["end_session"]:
+                        price_inputs[price["observation_id"]] = price
                 calendar = self._source(self.manifest["source_pins"]["sessions"])
-                expected = [d for d in calendar["sessions"] if leg["start_session"] <= d <= leg["end_session"]]
-        return {"row": rows[0], "financial_inputs": [r for r in source["observations"] if r["observation_id"] in ids],
-                "price_inputs": price_inputs, "expected_sessions": expected,
+                expected.update(d for d in calendar["sessions"] if leg["start_session"] <= d <= leg["end_session"])
+            elif leg.get("input_role") == "as_traded_close" and leg.get("observation_id"):
+                batch = batch or self._source(self.manifest["source_pins"]["price_batch"])
+                if price_by_id is None:
+                    price_by_id = {p["observation_id"]: p for p in batch["prices"]}
+                    if len(price_by_id) != len(batch["prices"]):
+                        raise ValueError("ambiguous quoted price observation identity")
+                price = price_by_id.get(leg["observation_id"])
+                if price is None or price["security_id"] != leg.get("security_id") or price["trade_date"] != leg.get("trade_date"):
+                    raise ValueError("exact quoted numerator identity differs from pinned shared batch")
+                price_inputs[price["observation_id"]] = price
+                expected.add(price["trade_date"])
+        return {"row": copy.deepcopy(row), "publication_id": self.manifest["publication_id"],
+                "publication_pin": self.pin, "definitions": self.manifest["definitions"],
+                "financial_inputs": [r for r in source["observations"] if r["observation_id"] in ids],
+                "price_inputs": sorted(price_inputs.values(), key=lambda p: (p["trade_date"], p["security_id"])),
+                "expected_sessions": sorted(expected), "historical_multiple_inputs": historical_inputs,
                 "compatibility_grant": next((g for g in source["compatibility_grants"]
-                    if identity(g) == rows[0].get("compatibility_grant_id")), None),
+                    if identity(g) == row.get("compatibility_grant_id")), None),
                 "source_pins": self.manifest["source_pins"], "ev_policy": self.manifest["ev_policy"]}
 
     def verify_all(self) -> None:

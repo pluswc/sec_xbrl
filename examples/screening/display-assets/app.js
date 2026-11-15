@@ -3066,7 +3066,7 @@ function beginMarketInputProfile(){
 }
 
 // Prepared daily price worksheet. Accounting and immutable saves live in the worker.
-const priceWorksheet={capability:null,serial:0,result:null,operation:null,request:null,dirty:true,selected:new Set(),readonly:false};
+const priceWorksheet={capability:null,serial:0,result:null,operation:null,request:null,dirty:true,selected:new Set(),readonly:false,evidenceContext:null,evidenceSerial:0,definitionContext:null,companyContext:null};
 function priceReason(code){return ({
  PRICE_SESSION_GAP:"필요한 거래일의 가격이 빠져 있습니다",INSUFFICIENT_VERIFIED_SESSION_HISTORY:"검증된 거래일 이력이 부족합니다",
  PRICE_CURRENCY_UNKNOWN:"가격 통화 근거가 없습니다",CLASS_CURRENCY_SPLIT_COMPATIBILITY_NOT_APPROVED:"주식 종류·통화·분할 기준 확인이 필요합니다",
@@ -3091,7 +3091,7 @@ function priceValue(row){
  const amount=row.unit==="CURRENCY"?shiftDecimal(row.value,-6):row.value;
  return `${row.scalar_statistic==="P50_MEDIAN"?"중앙값(P50) ":""}${formatDecimal(amount,row.unit==="CURRENCY"?0:2)}${row.unit==="PERCENT"?"%":row.unit==="MULTIPLE"?"배":row.unit==="CURRENCY"?` 백만 ${esc(row.currency||"통화 미확인")}`:row.currency?` ${esc(row.currency)}/주`:""}`;
 }
-function priceInvalidate(){priceWorksheet.serial++;priceWorksheet.dirty=true;priceWorksheet.readonly=false;$("#price-save-result").disabled=true;$("#price-draft-state").textContent="조건이 바뀌었습니다 · 표시된 결과는 이전 실행입니다"}
+function priceInvalidate(){priceWorksheet.serial++;priceWorksheet.evidenceContext=null;$("#price-evidence").hidden=true;priceWorksheet.dirty=true;priceWorksheet.readonly=false;$("#price-save-result").disabled=true;$("#price-draft-state").textContent="조건이 바뀌었습니다 · 표시된 결과는 이전 실행입니다"}
 function priceMetricIds(){return [...$("#price-metrics").selectedOptions].map(o=>o.value)}
 function priceCompanyIds(){return [...priceWorksheet.selected]}
 function priceConditions(){return $$("#price-conditions .price-condition").map(row=>({metric_id:row.querySelector("select").value,operator:row.querySelectorAll("select")[1].value,value:row.querySelector("input").value}))}
@@ -3103,10 +3103,11 @@ function priceAddCondition(metric="per",operator="lte",value="30"){
  row.querySelector("button").onclick=()=>{row.remove();priceInvalidate()};row.addEventListener("input",priceInvalidate);row.addEventListener("change",priceInvalidate);
  $("#price-conditions").append(row);
 }
+function priceDefinitionLabel(definition,id){return id==="historical_ev_ebitda_percentiles_3y"&&definition?.definition_version===`price-related-metrics-v1:${id}`?"과거3년 EV/영업이익+D&A proxy 분포":definition?.label||id}
 function priceRowsMarkup(result){
- const defs=result.definitions||priceWorksheet.capability.definitions,companies=new Map(priceWorksheet.capability.companies.map(c=>[c.cik,c.ticker]));
- if(result.results)return `<table><thead><tr><th>기업</th><th>판정</th><th>조건 · 실제 값과 미준비 이유</th></tr></thead><tbody>${result.results.map(row=>`<tr><th>${esc(row.ticker)}</th><td>${esc(({PASS:"충족",FAIL:"미충족",UNAVAILABLE:"확인 필요"})[row.status])}</td><td>${row.conditions.map(c=>`${esc(defs[c.metric_id]?.label||c.metric_id)} ${esc(c.operator)} ${esc(c.value)} · ${c.status==="UNAVAILABLE"?esc(priceReason(c.reason)):esc(c.value_observed)}`).join("<br>")}</td></tr>`).join("")}</tbody></table>`;
- return `<table><thead><tr><th>기업 · 실제 거래일</th><th>지표 · 단위</th><th class="numeric">준비된 값</th><th>기간·조건</th></tr></thead><tbody>${(result.rows||[]).map(row=>`<tr><th>${esc(companies.get(row.cik)||row.cik)}<small>${esc(compactFinancialDate(row.as_of))}</small></th><td title="${esc(row.definition_version)}">${esc(defs[row.metric_id]?.label||row.metric_id)} <button class="quiet price-evidence-trigger" type="button" data-price-evidence="${esc(row.observation_id)}" data-price-cik="${row.cik}">근거</button></td><td class="numeric" title="${esc(row.value??row.reason)}">${priceValue(row)}</td><td>${row.user_multiple?`${esc(row.user_multiple)}배 · 사용자 고정 시나리오`:row.expected_sessions!==undefined?`${row.valid_sessions}/${row.expected_sessions}거래일 · ${row.diagnostic?"제출일 가정 진단 · 백테스트 부적격":row.status==="AVAILABLE"?"준비 시점 검증 표본":"준비 시점 확인 필요 · 미준비"}`:row.share_measurement_date?`주식 수 측정 ${esc(compactFinancialDate(row.share_measurement_date))}`:row.window_sessions?`${row.window_sessions}거래일 창`:"재무기간은 입력 근거에서 확인"}${row.percentiles&&Object.keys(row.percentiles).length?`<small>10/25/50/75/90%: ${Object.values(row.percentiles).map(v=>formatDecimal(v,2)).join(" / ")}</small>`:""}</td></tr>`).join("")||'<tr><td colspan="4" class="empty">선택한 범위의 준비된 관측이 없습니다.</td></tr>'}</tbody></table>`
+ const defs=priceWorksheet.definitionContext||result.definitions||priceWorksheet.capability.definitions,companies=new Map((priceWorksheet.companyContext||priceWorksheet.capability.companies).map(c=>[c.cik,c.ticker]));
+ if(result.results)return `<table><thead><tr><th>기업</th><th>판정</th><th>조건 · 실제 값과 미준비 이유</th></tr></thead><tbody>${result.results.map(row=>`<tr><th>${esc(row.ticker)}</th><td>${esc(({PASS:"충족",FAIL:"미충족",UNAVAILABLE:"확인 필요"})[row.status])}</td><td>${row.conditions.map(c=>`${esc(priceDefinitionLabel(defs[c.metric_id],c.metric_id))} ${esc(c.operator)} ${esc(c.value)} · ${c.status==="UNAVAILABLE"?esc(priceReason(c.reason)):esc(c.value_observed)}`).join("<br>")}</td></tr>`).join("")}</tbody></table>`;
+ return `<table><thead><tr><th>기업 · 실제 거래일</th><th>지표 · 단위</th><th class="numeric">준비된 값</th><th>기간·조건</th></tr></thead><tbody>${(result.rows||[]).map(row=>`<tr><th>${esc(companies.get(row.cik)||row.cik)}<small>${esc(compactFinancialDate(row.as_of))}</small></th><td title="${esc(row.definition_version)}">${esc(priceDefinitionLabel(defs[row.metric_id],row.metric_id))} <button class="quiet price-evidence-trigger" type="button" data-price-evidence="${esc(row.observation_id)}" data-price-cik="${row.cik}">근거</button></td><td class="numeric" title="${esc(row.value??row.reason)}">${priceValue(row)}</td><td>${row.user_multiple?`${esc(row.user_multiple)}배 · 사용자 고정 시나리오`:row.expected_sessions!==undefined?`${row.valid_sessions}/${row.expected_sessions}거래일 · ${row.diagnostic?"제출일 가정 진단 · 준비 시점 미확인 · 백테스트 부적격":row.status==="AVAILABLE"?"준비 시점 검증 표본":"준비 시점 확인 필요 · 미준비"}`:row.share_measurement_date?`주식 수 측정 ${esc(compactFinancialDate(row.share_measurement_date))}`:row.window_sessions?`${row.window_sessions}거래일 창`:"재무기간은 입력 근거에서 확인"}${row.percentiles&&Object.keys(row.percentiles).length?`<small>10/25/50/75/90%: ${Object.values(row.percentiles).map(v=>formatDecimal(v,2)).join(" / ")}</small>`:""}</td></tr>`).join("")||'<tr><td colspan="4" class="empty">선택한 범위의 준비된 관측이 없습니다.</td></tr>'}</tbody></table>`
 }
 function priceSeriesPlot(rows){
  if(!rows?.length)return "";
@@ -3115,14 +3116,18 @@ function priceSeriesPlot(rows){
  const vals=valid.map(r=>Number(r.value)),lo=Math.min(...vals),hi=Math.max(...vals),span=hi-lo||1;
  const points=series.map((r,i)=>r.status==="AVAILABLE"?{x:48+i*824/Math.max(1,series.length-1),y:160-(Number(r.value)-lo)/span*116}:null);
  const lines=points.slice(1).map((p,i)=>p&&points[i]?`<line x1="${points[i].x}" y1="${points[i].y}" x2="${p.x}" y2="${p.y}"/>`:"").join("");
- return `<svg class="price-series-plot" viewBox="0 0 920 206" role="img" aria-label="첫 선택 지표의 실제 거래일 흐름. 미준비 거래일을 연결하지 않습니다."><text x="48" y="22">${esc(priceWorksheet.capability.definitions[first.metric_id]?.label||first.metric_id)} · ${esc(first.unit)}</text><g class="price-chart-line">${lines}</g><text x="48" y="194">${esc(compactFinancialDate(series[0].as_of))}</text><text x="776" y="194">${esc(compactFinancialDate(series.at(-1).as_of))}</text><text x="2" y="48">${formatDecimal(hi,1)}</text><text x="2" y="164">${formatDecimal(lo,1)}</text></svg>`
+ return `<svg class="price-series-plot" viewBox="0 0 920 206" role="img" aria-label="첫 선택 지표의 실제 거래일 흐름. 미준비 거래일을 연결하지 않습니다."><text x="48" y="22">${esc(priceDefinitionLabel((priceWorksheet.definitionContext||priceWorksheet.capability.definitions)[first.metric_id],first.metric_id))} · ${esc(first.unit)}</text><g class="price-chart-line">${lines}</g><text x="48" y="194">${esc(compactFinancialDate(series[0].as_of))}</text><text x="776" y="194">${esc(compactFinancialDate(series.at(-1).as_of))}</text><text x="2" y="48">${formatDecimal(hi,1)}</text><text x="2" y="164">${formatDecimal(lo,1)}</text></svg>`
 }
-function priceDisplayResult(result,caption="시험 실행 결과"){
- priceWorksheet.result=result;const missing=(result.unavailable_ranges||[]).map(r=>`<p class="muted">${esc(priceWorksheet.capability.companies.find(c=>c.cik===r.cik)?.ticker||r.cik)} · ${esc(compactFinancialDate(r.start))}–${esc(compactFinancialDate(r.end))} · ${r.expected_sessions}거래일 재무 배수: ${esc(priceReason(r.reason))}</p>`).join("");$("#price-query-result").innerHTML=(result.mode==="series"?priceSeriesPlot(result.rows):"")+priceRowsMarkup(result)+(result.mode==="series"||result.mode==="historical"?missing:"");
+function priceDisplayResult(result,caption="시험 실행 결과",context={}){
+ priceWorksheet.evidenceContext=context.evidence_context||result.evidence_context||null;
+ priceWorksheet.definitionContext=context.definition_context||result.definitions||priceWorksheet.capability.definitions;
+ priceWorksheet.companyContext=context.company_context||priceWorksheet.capability.companies;
+ $("#price-evidence").hidden=true;
+ priceWorksheet.result=result;const missing=(result.unavailable_ranges||[]).map(r=>`<p class="muted">${esc(priceWorksheet.companyContext.find(c=>c.cik===r.cik)?.ticker||r.cik)} · ${esc(compactFinancialDate(r.start))}–${esc(compactFinancialDate(r.end))} · ${r.expected_sessions}거래일 재무 배수: ${esc(priceReason(r.reason))}</p>`).join("");$("#price-query-result").innerHTML=(result.mode==="series"?priceSeriesPlot(result.rows):"")+priceRowsMarkup(result)+(result.mode==="series"||result.mode==="historical"?missing:"");
  $("#price-draft-state").textContent=caption;$("#price-save-result").disabled=priceWorksheet.readonly;$("#price-export").disabled=false;
 }
 async function priceExecute(operation,request){
- const token=++priceWorksheet.serial;priceWorksheet.dirty=true;priceWorksheet.readonly=false;$("#price-save-result").disabled=true;
+ const token=++priceWorksheet.serial;priceWorksheet.evidenceContext=null;$("#price-evidence").hidden=true;priceWorksheet.dirty=true;priceWorksheet.readonly=false;$("#price-save-result").disabled=true;
  $("#price-feedback").textContent="준비된 가격 지표 조회 중…";
  try{const result=await pricePost(operation,request);if(token!==priceWorksheet.serial)return;
  priceWorksheet.operation=operation;priceWorksheet.request=request;priceWorksheet.dirty=false;
@@ -3145,21 +3150,25 @@ async function priceSave(kind){
  await priceLoadSaves();$("#price-feedback").textContent=kind==="CONDITION"?"조건과 원 자료를 저장했습니다.":"결과·메모·원 자료를 저장했습니다.";
 }
 async function priceReopen(id){
- const token=++priceWorksheet.serial;const saved=await api(`/api/price-metrics/saves/${encodeURIComponent(id)}`);if(token!==priceWorksheet.serial)return;
+ const token=++priceWorksheet.serial;priceWorksheet.evidenceContext=null;$("#price-evidence").hidden=true;const saved=await api(`/api/price-metrics/saves/${encodeURIComponent(id)}`);if(token!==priceWorksheet.serial)return;
  priceWorksheet.readonly=true;priceWorksheet.dirty=false;priceWorksheet.operation=saved.operation;priceWorksheet.request=saved.request;
  $("#price-save-title").value=saved.title;$("#price-note").value=saved.note;
- priceDisplayResult(saved.result||saved.original_condition_preview,`저장 당시 자료로 열었습니다 · ${saved.publication_id} · 읽기 전용`);
+ priceDisplayResult(saved.result||saved.original_condition_preview,`저장 당시 자료로 열었습니다 · ${saved.publication_id} · 읽기 전용`,saved);
  $("#price-feedback").textContent="저장 당시 발행물·정의·원천 pin을 확인했습니다. 새 조회를 실행하면 현재 자료를 사용합니다.";
 }
 function priceInputLabel(role){return ({common_shares:"실제 보통주 발행주식수 · 자기주식 제외",diluted_eps_12m:"직접 공시 희석 EPS12개월",common_equity:"보통주 자본",book_value_per_common_share:"보통주당 장부가치 BPS",revenue_12m:"최근12개월 매출",standardized_fcf_12m:"표준화 FCF12개월",interest_debt:"이자부채 · 금융리스 포함",preferred_equity:"우선주 자본",nci:"비지배지분",cash_equivalents:"현금 및 현금성자산",operating_income_12m:"영업이익12개월",depreciation_amortization_12m:"영업이익에 포함된 D&A12개월"})[role]||role}
 async function priceShowEvidence(cik,observation_id){
- const token=priceWorksheet.serial,data=await pricePost("evidence",{cik,observation_id});if(token!==priceWorksheet.serial)return;
- const defs=priceWorksheet.capability.definitions,rows=data.financial_inputs||[],host=$("#price-evidence");host.hidden=false;host.open=true;
- $("#price-evidence-content").innerHTML=`<h3>${esc(defs[data.row.metric_id]?.label||data.row.metric_id)}</h3><p>${esc(defs[data.row.metric_id]?.formula||"")}</p><div class="table-wrap"><table><thead><tr><th>입력</th><th>정확한 값 · 단위</th><th>실제 재무기간</th><th>알려진 날 · 평가 기준</th></tr></thead><tbody>${rows.map(r=>`<tr><th>${esc(priceInputLabel(r.role))}</th><td>${esc(r.value)} ${esc(r.currency||r.unit_kind)}${r.unit_kind==="currency/share"?"/주":""}</td><td>${r.period_start?esc(compactFinancialDate(r.period_start))+"–":""}${esc(compactFinancialDate(inclusiveEnd(r.period_end)))}</td><td>${esc(compactFinancialDate(r.known_on))}${r.valuation_basis?`<small>${r.valuation_basis==="REVIEWED_BOOK_CAPITAL_RESIDUAL_ZERO"?"전체 자본 대사로 검토한 0 · 백만 USD 정밀도":r.valuation_basis==="REPORTED_CARRYING_VALUE"?"공시 장부금액":"명시된 시장 평가금액"}</small>`:""}</td></tr>`).join("")||'<tr><td colspan="4">가격·거래량 창은 아래 거래일 근거를 참조합니다.</td></tr>'}</tbody></table></div>${data.expected_sessions?.length?`<p>필요 거래일 ${data.expected_sessions.length}개 · 실제 입력 ${data.price_inputs.length}개 · 미준비 세션을 채우지 않습니다.</p>`:""}<details><summary>정의 버전·원천·선택 입력 상세</summary><pre>${esc(JSON.stringify(data,null,2))}</pre></details>`;
+ const token=priceWorksheet.serial,evidenceContext=priceWorksheet.evidenceContext,result=priceWorksheet.result,evidenceSerial=++priceWorksheet.evidenceSerial;
+ if(!evidenceContext)throw new Error("근거를 조회하려면 결과를 다시 열거나 조회해 주세요.");
+ const data=await pricePost("evidence",{cik,observation_id,evidence_context:evidenceContext});
+ if(token!==priceWorksheet.serial||evidenceContext!==priceWorksheet.evidenceContext||result!==priceWorksheet.result||evidenceSerial!==priceWorksheet.evidenceSerial)return;
+ if(data.evidence_context!==evidenceContext||data.publication_id!==result.publication_id)throw new Error("선택한 결과와 근거의 원 자료가 다릅니다.");
+ const defs=data.definitions,rows=data.financial_inputs||[],host=$("#price-evidence");host.hidden=false;host.open=true;
+ $("#price-evidence-content").innerHTML=`<h3>${esc(priceDefinitionLabel(defs[data.row.metric_id],data.row.metric_id))}</h3><p>${esc(defs[data.row.metric_id]?.formula||"")}</p>${data.price_inputs?.length===1?`<p>실제 거래일 종가 <strong title="${esc(data.price_inputs[0].as_traded_close)}">${formatDecimal(data.price_inputs[0].as_traded_close,2)} ${esc(data.price_inputs[0].currency||"")}</strong> · ${esc(compactFinancialDate(data.price_inputs[0].trade_date))}</p>`:""}<div class="table-wrap"><table><thead><tr><th>입력</th><th>정확한 값 · 단위</th><th>실제 재무기간</th><th>알려진 날 · 평가 기준</th></tr></thead><tbody>${rows.map(r=>`<tr><th>${esc(priceInputLabel(r.role))}</th><td>${esc(r.value)} ${esc(r.currency||r.unit_kind)}${r.unit_kind==="currency/share"?"/주":""}</td><td>${r.period_start?esc(compactFinancialDate(r.period_start))+"–":""}${esc(compactFinancialDate(inclusiveEnd(r.period_end)))}</td><td>${esc(compactFinancialDate(r.known_on))}${r.valuation_basis?`<small>${r.valuation_basis==="REVIEWED_BOOK_CAPITAL_RESIDUAL_ZERO"?"전체 자본 대사로 검토한 0 · 백만 USD 정밀도":r.valuation_basis==="REPORTED_CARRYING_VALUE"?"공시 장부금액":"명시된 시장 평가금액"}</small>`:""}</td></tr>`).join("")||'<tr><td colspan="4">가격·거래량 창은 아래 거래일 근거를 참조합니다.</td></tr>'}</tbody></table></div>${data.expected_sessions?.length?`<p>필요 거래일 ${data.expected_sessions.length}개 · 실제 입력 ${data.price_inputs.length}개 · 미준비 세션을 채우지 않습니다.</p>`:""}<details><summary>정의 버전·원천·선택 입력 상세</summary><pre>${esc(JSON.stringify(data,null,2))}</pre></details>`;
 }
 
 function priceExport(){
- const data={schema_version:"price-worksheet-export-v1",operation:priceWorksheet.operation,request:priceWorksheet.request,result:priceWorksheet.result,note:$("#price-note").value};
+ const data={schema_version:"price-worksheet-export-v1",operation:priceWorksheet.operation,request:priceWorksheet.request,result:priceWorksheet.result,definition_context:priceWorksheet.definitionContext,note:$("#price-note").value};
  const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));const a=document.createElement("a");a.href=url;a.download="price-worksheet.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),0);
 }
 async function beginPriceWorksheet(){
@@ -3167,9 +3176,9 @@ async function beginPriceWorksheet(){
  $("#price-feedback").textContent="가격 지표 발행물 연결 중…";
  const cap=await api("/api/price-metrics");if(!cap.configured){$("#price-feedback").textContent="가격 지표 발행물이 연결되지 않았습니다.";return}
  priceWorksheet.capability=cap;$("#price-context").textContent=`요청 ${compactFinancialDate(cap.requested_as_of)} · 실제 거래일 ${compactFinancialDate(cap.price_as_of)} · ${cap.staleness_calendar_days}일 차이 · 고정 자료 / 자동 갱신 아님`;
- $("#price-metrics").innerHTML=Object.values(cap.definitions).filter(d=>d.family!=="FIXED_BAND").map(d=>`<option value="${esc(d.metric_id)}"${["price_return_21s","price_volatility_20s","per","pbr"].includes(d.metric_id)?" selected":""}>${esc(d.label)} (${esc(d.unit)})</option>`).join("");
+ $("#price-metrics").innerHTML=Object.values(cap.definitions).filter(d=>d.family!=="FIXED_BAND").map(d=>`<option value="${esc(d.metric_id)}"${["price_return_21s","price_volatility_20s","per","pbr"].includes(d.metric_id)?" selected":""}>${esc(priceDefinitionLabel(d,d.metric_id))} (${esc(d.unit)})</option>`).join("");
  $("#price-companies").innerHTML=cap.companies.map(c=>`<label><input type="checkbox" value="${c.cik}"> ${esc(c.ticker)}</label>`).join("");
- $("#price-definitions").innerHTML=Object.values(cap.definitions).map(d=>`<details><summary>${esc(d.label)} · ${esc(d.unit)}</summary><p>${esc(d.formula)}</p><small>${esc(d.definition_version)}</small><pre>${esc(JSON.stringify(d.policy,null,2))}</pre></details>`).join("");
+ $("#price-definitions").innerHTML=Object.values(cap.definitions).map(d=>`<details><summary>${esc(priceDefinitionLabel(d,d.metric_id))} · ${esc(d.unit)}</summary><p>${esc(d.formula)}</p><small>${esc(d.definition_version)}</small><pre>${esc(JSON.stringify(d.policy,null,2))}</pre></details>`).join("");
  $("#price-policy").textContent="가격은 배당을 제외한 분할조정 수익률입니다. 시가총액은 최근 공시된 자기주식 제외 보통주 수 기반이며 실제 일별 주식 수 측정값은 아닙니다. EV의 차입금에는 금융리스가 한 번 포함되고 운용리스는 제외됩니다. 우선주·비지배지분은 명시 금액 또는 검토된 0만 사용합니다. EV/영업이익+D&A는 영업 EBITDA proxy이며 통상 EBITDA와 구분합니다. 재무 입력의 실제 기간·평가 기준은 근거에서 확인하세요.";
  priceAddCondition();$("#price-feedback").textContent="";await priceLoadSaves();await priceQuery("latest");
 }

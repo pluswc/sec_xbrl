@@ -1,8 +1,10 @@
 """Price worksheet operations and explicit immutable saves, separate from old journal."""
 from __future__ import annotations
 
+import copy
 import json
 import sqlite3
+from collections import OrderedDict
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -15,6 +17,7 @@ from sec_xbrl.screening.price_metric_publication import PriceMetricReader
 class PriceMetricService:
     def __init__(self, reader: PriceMetricReader, journal_path: str | Path):
         self.reader = reader
+        self._evidence_contexts: OrderedDict[str, dict] = OrderedDict()
         self.path = Path(journal_path)
         if not self.path.is_absolute() or any(p.is_symlink() for p in (self.path, *self.path.parents)):
             raise ValueError("price journal requires an absolute non-symlink path")
@@ -35,29 +38,71 @@ class PriceMetricService:
                 "publication_pin": self.reader.pin, "automatic_update": False,
                 "ev_policy": m["ev_policy"], "series_start": m["series_start"]}
 
+    def _register_evidence_context(self, reader: PriceMetricReader, operation: str,
+                                   result: dict) -> str:
+        rows = result.get("rows", [])
+        allowed = {(row["cik"], row["observation_id"]) for row in rows}
+        for company in result.get("results", []):
+            allowed.update((company["cik"], c["observation_id"]) for c in company["conditions"] if c.get("observation_id"))
+        token = "price-evidence-" + uuid4().hex
+        self._evidence_contexts[token] = {
+            "reader": reader, "allowed": allowed,
+            # Only backend-computed or hash-verified saved scenarios reach here.
+            # A client supplies the opaque token/ID, never a calculated row.
+            "scenario_rows": {(row["cik"], row["observation_id"]): copy.deepcopy(row)
+                              for row in rows} if operation == "bands" else {},
+        }
+        while len(self._evidence_contexts) > 16:
+            self._evidence_contexts.popitem(last=False)
+        return token
+
     def execute(self, operation: str, request: dict) -> dict:
         if not isinstance(request, dict):
             raise TypeError("object request required")
-        if operation == "query":
-            return self.reader.query(**request)
-        if operation == "screen":
-            return self.reader.screen(**request)
         if operation == "evidence":
-            return self.reader.evidence(**request)
+            if set(request) - {"cik", "observation_id", "evidence_context"}:
+                raise ValueError("evidence accepts only a verified result context and observation identity")
+            token = request.get("evidence_context")
+            if token is None:
+                # Retain the original read-only current-publication query contract.
+                return self.reader.evidence(request["cik"], request["observation_id"])
+            context = self._evidence_contexts.get(token)
+            key = (request["cik"], request["observation_id"])
+            if context is None or key not in context["allowed"]:
+                raise ValueError("evidence context expired or observation is outside its verified result")
+            self._evidence_contexts.move_to_end(token)
+            reader = context["reader"]
+            if key in context["scenario_rows"]:
+                reader.verify_sources()
+                result = reader._expand_evidence(context["scenario_rows"][key])
+            else:
+                result = reader.evidence(*key)
+            return {**result, "evidence_context": token}
+        result = self._evaluate(self.reader, operation, request)
+        return {**result, "evidence_context": self._register_evidence_context(self.reader, operation, result)}
+
+    def _evaluate(self, reader: PriceMetricReader, operation: str, request: dict) -> dict:
+        if not isinstance(request, dict):
+            raise TypeError("object request required")
+        if operation == "query":
+            return reader.query(**request)
+        if operation == "screen":
+            return reader.screen(**request)
         if operation == "bands":
             if set(request) != {"cik", "multiples"}:
                 raise ValueError("band request requires company and exact user multiples")
             if set(request["multiples"]) - {"per", "pbr"} or any(not isinstance(v, list) or len(v) > 12 for v in request["multiples"].values()):
                 raise ValueError("bounded PER/PBR user multiples required")
-            if any(self.reader.manifest["definitions"].get(mid, {}).get("definition_version") != REGISTRY[mid]["definition_version"]
+            if any(reader.manifest["definitions"].get(mid, {}).get("definition_version") != REGISTRY[mid]["definition_version"]
                    for mid in ("per", "pbr_bps", "fixed_per_band", "fixed_pbr_band")):
                 raise ValueError("new band calculation requires compatible declared definition versions")
-            query = self.reader.query(ciks=[request["cik"]], metric_ids=["per", "pbr_bps"], include_lineage=True)
-            source = self.reader._source(self.reader.manifest["source_pins"]["financial_inputs"])
+            query = reader.query(ciks=[request["cik"]], metric_ids=["per", "pbr_bps"], include_lineage=True)
+            source = reader._source(reader.manifest["source_pins"]["financial_inputs"])
             by_id = {r["observation_id"]: r for r in source["observations"]}
             for row in query["rows"]:
                 row["input_lineage"] = [{**by_id.get(leg.get("observation_id"), {}), **leg} for leg in row["input_lineage"]]
             return {**query, "mode": "bands", "multiples": request["multiples"],
+                    "definitions": {mid: reader.manifest["definitions"][mid] for mid in ("fixed_per_band", "fixed_pbr_band")},
                     "rows": fixed_multiple_bands(query["rows"], request["multiples"])}
         raise ValueError("unsupported price operation")
 
@@ -68,7 +113,7 @@ class PriceMetricService:
             raise ValueError("only worksheet conditions/results may be saved")
         if kind == "CONDITION" and operation != "screen":
             raise ValueError("condition save requires a screening request")
-        result = self.execute(operation, request)
+        result = self._evaluate(self.reader, operation, request)
         self.reader.verify_sources()
         payload = {"schema_version": "price-metric-save-v1", "kind": kind, "operation": operation,
             "request": request, "result": result if kind == "RESULT" else None,
@@ -106,8 +151,11 @@ class PriceMetricService:
                 reader.query(**payload["request"])
             else:
                 reader.query(ciks=payload["request"].get("ciks") or ([payload["request"]["cik"]] if "cik" in payload["request"] else None))
+        context = self._register_evidence_context(reader, payload["operation"], payload["result"] or preview)
         return {"id": key, "created_at": created, **payload, "reopened_original": True,
-                "original_context_readonly": True, "original_condition_preview": preview}
+                "original_context_readonly": True, "original_condition_preview": preview,
+                "evidence_context": context, "definition_context": reader.manifest["definitions"],
+                "company_context": reader.manifest["companies"]}
 
     def saves(self) -> list[dict]:
         with sqlite3.connect(self.path) as con:

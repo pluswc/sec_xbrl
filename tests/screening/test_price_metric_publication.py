@@ -210,3 +210,86 @@ def test_historical_distribution_is_not_implicitly_screened_as_current_multiple(
     reader, _, _ = publication(tmp_path)
     with pytest.raises(ValueError, match="not screening scalars"):
         reader.screen([{"metric_id": "historical_per_percentiles_3y", "operator": "lte", "value": "30"}])
+
+
+def test_custom_backend_bands_resolve_exact_scenario_and_quote_evidence(tmp_path):
+    reader, _, _ = publication(tmp_path)
+    service = PriceMetricService(reader, tmp_path / "price.sqlite")
+    result = service.execute("bands", {"cik": "0000000001", "multiples": {"per": ["11.25"], "pbr": ["2.25"]}})
+    assert [row["value"] for row in result["rows"]] == ["22.50", "45.00"]
+    assert set(result["definitions"]) == {"fixed_per_band", "fixed_pbr_band"}
+    expected = {"fixed_per_band": "diluted_eps_12m", "fixed_pbr_band": "book_value_per_common_share"}
+    for row in result["rows"]:
+        request = {"cik": row["cik"], "observation_id": row["observation_id"], "evidence_context": result["evidence_context"]}
+        evidence = service.execute("evidence", request)
+        assert evidence["row"] == row
+        assert evidence["row"]["user_multiple"] in {"11.25", "2.25"}
+        assert evidence["publication_pin"] == reader.pin
+        assert evidence["financial_inputs"][0]["role"] == expected[row["metric_id"]]
+        assert len(evidence["price_inputs"]) == 1
+        assert evidence["price_inputs"][0]["as_traded_close"] == "100"
+        assert evidence["price_inputs"][0]["trade_date"] == "2026-10-23"
+        row["value"] = "999999"  # Caller mutations cannot alter trusted scenario evidence.
+        assert service.execute("evidence", request)["row"]["value"] != "999999"
+        with pytest.raises(ValueError, match="only a verified result"):
+            service.execute("evidence", {**request, "value": "999999"})
+        with pytest.raises(ValueError, match="context expired"):
+            service.execute("evidence", {**request, "evidence_context": "unknown-token"})
+
+
+def test_saved_query_and_custom_bands_keep_original_evidence_after_restart_and_active_switch(tmp_path):
+    a, _, _ = publication(tmp_path, "a", "100")
+    journal = tmp_path / "price.sqlite"
+    original = PriceMetricService(a, journal)
+    query = original.save(kind="RESULT", operation="query", request={"metric_ids": ["per"]}, title="A query")
+    bands = original.save(kind="RESULT", operation="bands", request={"cik": "0000000001", "multiples": {"per": ["11.25"], "pbr": ["2.25"]}}, title="A bands")
+    assert "evidence_context" not in query["result"] and "evidence_context" not in bands["result"]
+    old_context = original.reopen(query["id"])["evidence_context"]
+    b, _, _ = publication(tmp_path, "b", "200")
+    switched = PriceMetricService(b, journal)
+    for saved in (query, bands):
+        reopened = switched.reopen(saved["id"])
+        assert reopened["result"] == saved["result"]
+        assert reopened["evidence_context"] != old_context
+        assert reopened["definition_context"] == a.manifest["definitions"]
+        for row in reopened["result"]["rows"]:
+            evidence = switched.execute("evidence", {"cik": row["cik"], "observation_id": row["observation_id"], "evidence_context": reopened["evidence_context"]})
+            assert evidence["publication_pin"] == a.pin
+            assert evidence["definitions"] == a.manifest["definitions"]
+            assert evidence["row"]["value"] == row["value"]
+            assert evidence["price_inputs"][0]["as_traded_close"] == "100"
+            assert evidence["price_inputs"][0]["as_traded_close"] != "200"
+    with pytest.raises(ValueError, match="context expired"):
+        switched.execute("evidence", {"cik": "0000000001", "observation_id": query["result"]["rows"][0]["observation_id"], "evidence_context": old_context})
+
+
+def test_evidence_context_cannot_cross_observations_or_hide_source_tampering(tmp_path):
+    reader, config, _ = publication(tmp_path)
+    service = PriceMetricService(reader, tmp_path / "price.sqlite")
+    result = service.execute("query", {"metric_ids": ["per"]})
+    other = reader.query(metric_ids=["pbr"])["rows"][0]
+    with pytest.raises(ValueError, match="outside its verified result"):
+        service.execute("evidence", {"cik": other["cik"], "observation_id": other["observation_id"], "evidence_context": result["evidence_context"]})
+    row = result["rows"][0]
+    Path(config["price_batch"]["path"]).write_text("{}")
+    with pytest.raises(ValueError, match="hash"):
+        service.execute("evidence", {"cik": row["cik"], "observation_id": row["observation_id"], "evidence_context": result["evidence_context"]})
+
+
+def test_saved_band_evidence_uses_original_definition_without_new_calculation(tmp_path, monkeypatch):
+    from sec_xbrl.metrics.price_related import REGISTRY
+
+    reader, _, _ = publication(tmp_path)
+    journal = tmp_path / "price.sqlite"
+    old = PriceMetricService(reader, journal)
+    saved = old.save(kind="RESULT", operation="bands", request={"cik": "0000000001", "multiples": {"per": ["11.25"]}}, title="old definition")
+    monkeypatch.setitem(REGISTRY["fixed_per_band"], "definition_version", "future-band-definition-v2")
+    restarted = PriceMetricService(reader, journal)
+    with pytest.raises(ValueError, match="compatible declared definition"):
+        restarted.execute("bands", saved["request"])
+    reopened = restarted.reopen(saved["id"])
+    row = reopened["result"]["rows"][0]
+    evidence = restarted.execute("evidence", {"cik": row["cik"], "observation_id": row["observation_id"], "evidence_context": reopened["evidence_context"]})
+    assert evidence["row"]["value"] == "22.50"
+    assert evidence["definitions"]["fixed_per_band"]["definition_version"] == row["definition_version"]
+    assert evidence["definitions"]["fixed_per_band"]["definition_version"] != "future-band-definition-v2"
