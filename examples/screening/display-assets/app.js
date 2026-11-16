@@ -3075,6 +3075,7 @@ function priceContextText(context){
 }
 function priceFinancialCaption(result,row){
  const definition=(result.definitions||priceWorksheet.definitionContext||{})[row.metric_id];if(!["VALUATION","FIXED_BAND"].includes(definition?.family))return "";
+ const priceAsOf=result.price_as_of||priceWorksheet.sourceContext?.price_as_of;if(!priceAsOf||row.as_of!==priceAsOf)return "";
  const ready=(result.company_financial_readiness||priceWorksheet.sourceContext?.company_financial_readiness||{})[row.cik];
  return ready?`<small>재무기간 말 ${esc(compactFinancialDate(ready.financial_report_date))} · 공시 선택 기준 ${esc(compactFinancialDate(ready.source_selection_as_of))} · 재무 확인 ${esc(compactFinancialDate(ready.verified_through))}</small>`:"";
 }

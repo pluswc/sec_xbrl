@@ -99,12 +99,28 @@ test("company financial dates distinguish verified-through, selection and the le
  const {f,host}=fixture();
  const data={...result(),price_as_of:"2026-11-13",requested_as_of:"2026-11-16",staleness_calendar_days:3,dataset_scope:scope,
   definitions:{per:{label:"PER",family:"VALUATION"}},company_financial_readiness:{"0000000001":{financial_report_date:"2026-09-30",financial_anchor:"2026-10-01",source_selection_as_of:"2026-10-25",verified_through:"2026-11-13"}}};
+ data.rows[0].as_of="2026-11-13";
  f.priceDisplayResult(data);
  assert.match(host("#price-context").textContent,/가격 기준 2026-11-13 · 기업별 재무 확인 2026-11-13 \(기존 금융 화면 2026-10-25\)/);
  assert.match(host("#price-query-result").innerHTML,/재무기간 말 2026-09-30 · 공시 선택 기준 2026-10-25 · 재무 확인 2026-11-13/);
  assert.doesNotMatch(host("#price-query-result").innerHTML,/재무기간 말 2026-10-01/);
  data.definitions.per.family="PRICE_RETURN";f.priceDisplayResult(data);
  assert.doesNotMatch(host("#price-query-result").innerHTML,/재무기간 말/);
+});
+
+test("past valuation series rows keep their own evidence dates without the current anchor caption",()=>{
+ const {f}=fixture();
+ const data={...result("29.22"),mode:"series",price_as_of:"2026-11-13",definitions:{per:{label:"PER",family:"VALUATION"}},
+  company_financial_readiness:{"0000000001":{financial_report_date:"2026-09-30",source_selection_as_of:"2026-11-13",verified_through:"2026-11-13"}}};
+ const past={...data.rows[0],as_of:"2026-10-23",share_measurement_date:"2026-06-30"};
+ const oldMarkup=f.priceRowsMarkup({...data,rows:[past]});
+ assert.match(oldMarkup,/주식 수 측정 2026-06-30/);
+ assert.doesNotMatch(oldMarkup,/재무기간 말 2026-09-30|공시 선택 기준|재무 확인/);
+ const current={...past,as_of:"2026-11-13",share_measurement_date:"2026-09-30",status:"UNAVAILABLE",value:null,reason:"FINANCIAL_INPUT_NOT_BOUND"};
+ assert.match(f.priceRowsMarkup({...data,rows:[current]}),/재무기간 말 2026-09-30/);
+ const withoutShareDate={...past};delete withoutShareDate.share_measurement_date;
+ assert.match(f.priceRowsMarkup({...data,rows:[withoutShareDate]}),/재무기간은 입력 근거에서 확인/);
+ assert.doesNotMatch(f.priceRowsMarkup({...data,rows:[withoutShareDate]}),/재무기간 말 2026-09-30/);
 });
 
 test("reopened source dates never inherit active newer company readiness",async()=>{
