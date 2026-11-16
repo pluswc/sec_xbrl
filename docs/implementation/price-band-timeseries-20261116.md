@@ -222,3 +222,21 @@ No push, PR, remote CI or main merge was performed or requested. Main remains
 `75ac14efb8`. Any later remote delivery requires a separate authorized decision; this local
 and operating acceptance does not imply main delivery. The final documentation commit is
 separately frozen for read-only verification of this status and unchanged product bytes.
+
+
+## Static ledger CSS refinement — 2026-11-16, pending revalidation
+
+The accepted product183a and final documentation95735429e8 above describe their exact
+accepted states. A later actual operating chart capture exposed global sidebar styles
+(`aside` height100vh/stacking/overflow) leaking into the static timeline readout, stretching
+the paired-chart layout to1096px despite roughly760px of actual content. This small CSS
+refinement explicitly resets readout height:auto, max-height:none, min-height:0,
+z-index:auto and overflow:visible. Numerical rules, source inputs, journals and product
+calculation logic are unchanged. A focused CSS regression asserts the static-ledger resets;
+actual1920/1440browser geometry and unchanged cursor/evidence behavior require ROOT's
+independent revalidation before the refinement gains local/operating acceptance. Writer
+performs no runtime activation. The prior accepted183a runtime remains the baseline until
+ROOT explicitly adopts this new frozen candidate.
+
+Refinement checks:22 price Node tests, app JavaScript syntax and diff checks passed.
+Python/Ruff were not repeated because no Python or numerical source changed.

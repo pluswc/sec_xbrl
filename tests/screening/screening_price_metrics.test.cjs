@@ -228,3 +228,12 @@ test("successful explicit timeline scrolls analysis into view and provides condi
  await f.priceExecute("timeline",{cik:"1"});
  assert.equal(scrolls,1);assert.match(host("#price-query-result").innerHTML,/href="#price-timeline-controls"/);
 });
+
+
+test("static timeline ledger resets inherited full-height sidebar and stacking rules",()=>{
+ const css=fs.readFileSync(path.join(__dirname,"../../examples/screening/display-assets/app.css"),"utf8");
+ const ledger=css.match(/\.timeline-layout \.timeline-readout\{([^}]+)\}/u)?.[1];
+ assert(ledger);
+ for(const property of ["position:static", "height:auto", "max-height:none", "min-height:0", "z-index:auto", "overflow:visible"])
+  assert(ledger.split(";").includes(property),property);
+});
