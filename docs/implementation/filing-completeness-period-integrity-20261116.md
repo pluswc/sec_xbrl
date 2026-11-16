@@ -216,3 +216,25 @@ unchanged, with no new integration required at this handoff. Push, separate PR
 creation and CI are still pending ROOT execution. Main merge was not requested
 or performed. Earlier pending/FAIL records above are retained as historical
 stages; the final accepted implementation is explicitly `b713c765f6`.
+
+## PR105 CI test-contract follow-up — 2026-11-16
+
+ROOT created PR105. Its full CI run `43784564289` reported 3 failed / 3,251 passed /
+46 skipped (301.64 seconds), with Ruff passing. The three failures coupled tests
+to the former *default* v7: one extractor-version assertion and two legacy source-
+binding positive-chain cases. They are not corrected by extending any producer
+or source-admission guard. The transform test now names the distinct current v8
+extractor; the positive chains explicitly use retained approved v7 and mixed
+v6/v7 snapshots independently of the current default. A new behavioral negative
+checks that default v8 has no legacy governed profile, fails governed duration
+admission and cannot create a source-index publication. Existing unknown-v8
+rejection remains covered.
+
+Only these two test files and this status documentation change. All `src/` and
+`examples/` bytes remain identical to accepted financial/parser source `b713c765f6`;
+actual IBM/STX/COST and preservation evidence therefore remains applicable without
+rerunning private preparation. The original 279 related tests plus both updated
+files pass **826 tests** (5.07 seconds); Ruff/diff pass. Log:
+`/tmp/filing-p0-ci-regression.log`. This is not a claim that the full CI now passes:
+independent test-change review, ROOT push and the next PR105 head checks remain
+pending. Main merge/live activation remain outside the approved scope.

@@ -315,8 +315,9 @@ def test_sec_english_duration_consumes_valid_ordered_whole_input(
     assert FunctionIxt.ixtNamespaceFunctions[SEC_TRANSFORM_NAMESPACE]["durwordsen"](source) == expected
 
 
-def test_metadata_transform_coverage_has_distinct_immutable_layer1_parser_version() -> None:
-    assert Layer1Extractor.parser_version == "m2-layer1-v7"
+def test_complete_inline_parser_has_distinct_version_from_retained_transform_profile() -> None:
+    assert Layer1Extractor.parser_version == "m2-layer1-v8"
+    assert Layer1Extractor.parser_version != "m2-layer1-v7"
 
 
 @pytest.mark.parametrize(
