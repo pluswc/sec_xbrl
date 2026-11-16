@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import os
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -21,6 +22,15 @@ from sec_xbrl.metrics.reported_quarter_eps import (
 )
 from sec_xbrl.screening.price_metric_publication import PriceMetricReader, publish_price_metrics
 from sec_xbrl.screening.price_metric_service import PriceMetricService
+
+FIXTURE_EVALUATION_AT = datetime(2026, 11, 16, 12, tzinfo=UTC)
+
+
+@pytest.fixture(autouse=True)
+def fixture_evaluation_clock(monkeypatch):
+    # Replay this fixture's declared evaluation, independent of the CI wall clock.
+    # Product preparation still records its actual clock; no stored data is changed.
+    monkeypatch.setattr("sec_xbrl.metrics.reported_quarter_eps._now", lambda: FIXTURE_EVALUATION_AT)
 
 
 def pin(path, value):
@@ -244,9 +254,7 @@ def current_publication(tmp_path):
 
 
 def artifact_time():
-    from datetime import UTC, datetime
-
-    return datetime.now(UTC).isoformat()
+    return FIXTURE_EVALUATION_AT.isoformat()
 
 
 def test_current_snapshot_is_distinct_from_daily_history_and_fy_capital_unchanged(tmp_path):
@@ -315,11 +323,17 @@ def test_exact_policy_and_aware_future_ready_guards(tmp_path, field, value):
 
 
 @pytest.mark.skipif(not os.environ.get("SEC_XBRL_EPS_TTM_CACHED_CONFIG"), reason="explicit cached ROOT inputs only")
-def test_cached_exact_three_company_and_hon_reverse_split_boundary():
+def test_cached_exact_three_company_and_hon_reverse_split_boundary(monkeypatch):
     from sec_xbrl.metrics.market_inputs import pinned_json
+    from sec_xbrl.metrics.reported_quarter_eps import aware
 
     config = {"path": os.environ["SEC_XBRL_EPS_TTM_CACHED_CONFIG"], "sha256": os.environ["SEC_XBRL_EPS_TTM_CACHED_SHA256"]}
-    artifact = prepare_ttm(config)
+    # This is a test-only replay at the exact declaration's recorded approval
+    # time, not a new assertion about actual operational preparation readiness.
+    recorded_at = pinned_json(pinned_json(config)["approval"])["approved_at"]
+    monkeypatch.setattr("sec_xbrl.metrics.reported_quarter_eps._now", lambda: aware(recorded_at))
+    artifact = prepare_ttm(config, _recorded_at=recorded_at)
+    assert artifact["prepared_at"] == recorded_at
     assert {r["ticker"]: r["value"] for r in artifact["observations"]} == {"MSFT": "19.16", "NVDA": "7.91", "ABBV": "5.81"}
     assert len(artifact["reported_quarter_sources"]) == 12
     hon = next(h for h in artifact["holds"] if h["ticker"] == "HON")
