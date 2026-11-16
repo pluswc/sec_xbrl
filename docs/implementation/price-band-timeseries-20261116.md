@@ -154,3 +154,20 @@ an operating runtime. Historical meaning, cross-company equivalence and raw sour
 remain governed by the [analytical model](../architecture/analytical-data-model.md),
 [price contract](price-related-metrics-20261116.md) and
 [company-readiness contract](company-valuation-readiness-20261116.md).
+
+
+## Independent finding correction — distribution identity
+
+The initial frozen candidate `4d288152d7ae6b708f5ecd2fcd8209dfe6cf80f5` was not accepted:
+independent review found that new252-session distribution identities omitted company,
+security and metric. Empty same-day windows could consequently share an observation ID
+across companies or PER/BPS. The correction includes explicit `cik`, `security_id` and
+`metric_id` in the output before hashing. Numerical, window, readiness and original3y
+policies remain unchanged. Regression covers two companies × two metrics with empty
+same-day windows, an additional security scope, distinct IDs across scopes and deterministic
+same-request output. The corrected candidate requires a new frozen SHA and independent
+review; no runtime acceptance or main delivery is inferred from this correction.
+
+Correction checks:49 focused Python tests,21 worksheet Node tests, Ruff, app JavaScript
+syntax and diff checks passed. The earlier13 history checks were not repeated because this
+correction changes only distribution identity, its regression and this contract.

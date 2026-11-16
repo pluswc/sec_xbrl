@@ -55,6 +55,7 @@ def rolling_distribution(rows: list[dict], *, as_of: str, multiple: str,
                 lo = int(index)
                 quantiles[q] = str(values[lo] + (values[min(lo + 1, 251)] - values[lo]) * (index - lo))
     result = {"definition_version": DEFINITION["definition_version"], "as_of": as_of,
+        "cik": cik, "security_id": security_id, "metric_id": multiple,
         "status": "AVAILABLE" if eligible else "UNAVAILABLE",
         "reason": None if eligible else "HISTORICAL_252_SESSION_COVERAGE_INCOMPLETE" if not full else "INSUFFICIENT_ELIGIBLE_HISTORY_252_SESSIONS",
         "percentiles": quantiles, "window_start": expected[0] if expected else None,

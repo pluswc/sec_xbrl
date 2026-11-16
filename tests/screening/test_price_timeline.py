@@ -132,3 +132,23 @@ def test_cached_timeline_still_checks_original_historical_artifact(tmp_path):
     artifact.write_bytes(artifact.read_bytes()+b"x")
     with pytest.raises(ValueError, match="artifact hash"):
         service.execute("timeline", request)
+
+
+def test_empty_distribution_identity_is_deterministic_and_scoped_to_company_security_metric():
+    calendar, _ = sample()
+    scopes = [(cik, security, metric) for cik, security in (("1", "S1"), ("2", "S2"))
+              for metric in ("per", "pbr_bps")]
+    scopes.append(("1", "S1-other-class", "per"))
+    ids = set()
+    for cik, security, metric in scopes:
+        kwargs = {"as_of": calendar["sessions"][-1], "multiple": metric, "cik": cik,
+            "security_id": security, "session_source": calendar,
+            "source_coverage": {"start": calendar["coverage_start"], "end": calendar["coverage_end"]},
+            "readiness_policy": "READY_ONLY"}
+        result = rolling_distribution([], **kwargs)
+        assert result == rolling_distribution([], **kwargs)
+        assert result["status"] == "UNAVAILABLE"
+        assert result["input_lineage"] == []
+        assert (result["cik"], result["security_id"], result["metric_id"]) == (cik, security, metric)
+        ids.add(result["observation_id"])
+    assert len(ids) == len(scopes)
