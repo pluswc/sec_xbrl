@@ -227,3 +227,29 @@ def bind_financial_inputs(candidates: list[dict], declarations: list[dict]) -> l
         record["observation_id"] = "price-financial-input-" + identity(record)
         output.append(record)
     return output
+
+
+def augment_reported_quarter_eps(derivation_pin: dict) -> dict:
+    """Add exact governed EPS to current grants without rewriting retained inputs."""
+    from sec_xbrl.metrics.reported_quarter_eps import validated_ttm_rows, verify_ttm
+
+    artifact = verify_ttm(derivation_pin)
+    plan = pinned_json(pinned_json(artifact["config"])["plan"])
+    import copy
+
+    bundle = copy.deepcopy(pinned_json(plan["base_financial_bundle"]))
+    existing_ids = {r["observation_id"] for r in bundle["observations"]}
+    for row in artifact["observations"]:
+        if row["observation_id"] in existing_ids:
+            raise ValueError("quarter EPS augmentation cannot replace an existing observation")
+        grants = [g for g in bundle["compatibility_grants"] if g["cik"] == row["cik"]
+                  and g["financial_anchor"] == row["period_end"]]
+        if len(grants) != 1 or grants[0]["input_ids"].get("diluted_eps_12m"):
+            raise ValueError("quarter EPS cannot replace an existing direct latest denominator")
+        grants[0]["input_ids"]["diluted_eps_12m"] = row["observation_id"]
+        grants[0]["evidence_pins"].append(derivation_pin)
+        bundle["observations"].append(row)
+    bundle["reported_quarter_derivation"] = derivation_pin
+    bundle["current_eps_diagnostics"] = artifact["holds"]
+    validated_ttm_rows(bundle)
+    return bundle

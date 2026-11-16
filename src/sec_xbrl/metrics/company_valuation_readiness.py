@@ -394,6 +394,9 @@ def validated_company_readiness(bundle: dict) -> dict[str, dict]:
     Old bundles have no override. Historical readers use their immutable values
     without reinterpreting this producer qualification under future source code.
     """
+    from sec_xbrl.metrics.reported_quarter_eps import validated_ttm_rows
+
+    quarter_eps = validated_ttm_rows(bundle)
     if not bundle.get("company_readiness"):
         return {}
     result = {}
@@ -415,6 +418,10 @@ def validated_company_readiness(bundle: dict) -> dict[str, dict]:
                 continue
             if row.get("known_on", "9999") > baseline:
                 raise ValueError("reuse observation became known after source selection")
+            if row.get("observation_id") in quarter_eps:
+                # This role has a separately replayed approved multi-filing chain.
+                # It does not qualify any other role or historical system readiness.
+                continue
             refs = [r["source"] for r in row.get("source_refs", []) if r.get("source")]
             if (not refs and not row.get("evidenced_zero")
                 or any(r.get("analysis_manifest") not in approved_sources for r in refs)):

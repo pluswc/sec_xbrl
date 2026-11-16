@@ -214,6 +214,19 @@ def derive_market_eps_ttm(
     observations: list[dict], *, cik: str, financial_as_of: str, declaration: dict | None = None
 ) -> dict:
     """A declaration binds four existing input IDs; it cannot manufacture EPS."""
+    return _derive_market_eps_ttm_core(observations, cik=cik, financial_as_of=financial_as_of,
+                                       declaration=declaration)
+
+
+def _derive_market_eps_ttm_core(
+    observations: list[dict], *, cik: str, financial_as_of: str, declaration: dict | None,
+    reviewed_scope_keys: dict[str, str] | None = None, basis_as_of: str | None = None,
+) -> dict:
+    """Shared mechanics; only the exact-receipt adapter admits reviewed scope keys.
+
+    The public v1 caller supplies neither override. Original observations and
+    physical dimensions are never changed by either calculation path.
+    """
     result = {
         "cik": cik,
         "input_id": TTM_RULE,
@@ -241,7 +254,7 @@ def derive_market_eps_ttm(
         return reject("CLASS_OR_BASIS_NOT_CONFIRMED")
     if not declaration.get("available_on") or date.fromisoformat(
         declaration["available_on"]
-    ) > date.fromisoformat(financial_as_of):
+    ) > date.fromisoformat(basis_as_of or financial_as_of):
         return reject("BASIS_EVIDENCE_AFTER_CUTOFF")
     ids = declaration.get("observation_ids", [])
     if len(ids) != 4 or len(set(ids)) != 4:
@@ -265,6 +278,10 @@ def derive_market_eps_ttm(
     scopes = {
         encoded([r.get("dimensions"), r.get("raw_dimensions"), r.get("unit")]) for r in matches
     }
+    if reviewed_scope_keys is not None:
+        if set(reviewed_scope_keys) != set(ids) or any(not key for key in reviewed_scope_keys.values()):
+            return reject("SCOPE_OR_UNIT_NOT_COMPATIBLE")
+        scopes = set(reviewed_scope_keys.values())
     if any(
         not _unit(
             {"unit_numerator_measures": r["unit"][0], "unit_denominator_measures": r["unit"][1]},
