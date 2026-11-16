@@ -20,6 +20,7 @@ from pathlib import Path
 
 import polars as pl
 
+from sec_xbrl.metrics.company_valuation_readiness import validated_company_readiness
 from sec_xbrl.metrics.market_inputs import encoded, finite, identity, pinned_json
 from sec_xbrl.metrics.price_related import (
     REGISTRY,
@@ -110,6 +111,7 @@ def publish_price_metrics(config_pin: dict, output: str | Path) -> dict:
     if source.get("schema_version") != "price-financial-input-bundle-v1":
         raise ValueError("typed financial input bundle required")
     grants, observations = source["compatibility_grants"], source["observations"]
+    readiness = validated_company_readiness(source)
     for grant in grants:
         if not grant.get("evidence_pins"):
             raise ValueError("compatibility grant requires actual evidence pins")
@@ -171,7 +173,7 @@ def publish_price_metrics(config_pin: dict, output: str | Path) -> dict:
                     anchor = max(anchors, key=lambda a: (a["period_end"], a["known_on"]))["period_end"] if anchors else None
                     vals = calculate_valuation_metrics(by_day.get(day), financial[cik], grant,
                         cik=cik, security_id=sid, as_of=day, ev_policy=config.get("ev_policy"), financial_anchor=anchor,
-                        financial_as_of=source.get("financial_as_of")) if has_grants or day == selected else []
+                        financial_as_of=readiness.get(cik, {}).get("verified_through", source.get("financial_as_of"))) if has_grants or day == selected else []
                     history.extend(_compact(row, config["price_batch"]) for row in vals
                                    if row["metric_id"] in {"per", "pbr", "pbr_bps", "price_sales", "ev_revenue", "ev_ebitda"})
                     if day in series_day_set:
@@ -208,6 +210,8 @@ def publish_price_metrics(config_pin: dict, output: str | Path) -> dict:
             "series_start": config["series_start"], "historical_start": config["historical_start"],
             "counts": dict(counts), "automatic_update": False,
             "producer": {"publication_sha256": SOURCE_SHA256_PUBLICATION, "metrics_sha256": SOURCE_SHA256}}
+        if readiness:
+            manifest["company_financial_readiness"] = readiness
         for pin in [config_pin, *manifest["source_pins"].values()]:
             pinned_json(pin)
         if any(hashlib.sha256(path.read_bytes()).hexdigest() != sha for path, sha in producer_sources.items()):
@@ -288,6 +292,9 @@ class PriceMetricReader:
                 "requested_as_of": self.manifest["requested_as_of"], "price_as_of": self.manifest["price_as_of"],
                 "staleness_calendar_days": self.manifest["staleness_calendar_days"], "mode": mode,
                 "definitions": {mid: d for mid, d in self.manifest["definitions"].items() if metric_ids is None or mid in metric_ids},
+                **({"dataset_scope": self.manifest["dataset_scope"],
+                    "company_financial_readiness": {cik: r for cik, r in self.manifest["company_financial_readiness"].items() if cik in selected}}
+                   if "company_financial_readiness" in self.manifest else {}),
                 "rows": rows, "unavailable_ranges": [r for cik in selected for r in self._read_rows(cik, "coverage")
                     if metric_ids is None or set(metric_ids) & set(r["metric_ids"])]}
 

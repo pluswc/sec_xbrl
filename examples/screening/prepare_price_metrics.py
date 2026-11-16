@@ -11,6 +11,7 @@ import json
 from datetime import date, timedelta
 from pathlib import Path
 
+from sec_xbrl.metrics.company_valuation_readiness import validated_company_readiness
 from sec_xbrl.metrics.market_inputs import encoded, pinned_json
 from sec_xbrl.metrics.price_batch import canonical_price_batch
 from sec_xbrl.metrics.price_financial_inputs import (
@@ -38,6 +39,10 @@ def bind_bundle(config_pin: dict) -> dict:
     cutoff = config["financial_as_of"]
     date.fromisoformat(cutoff)
     observations, grants = [], []
+    candidate_groups = {}
+    for row in candidates:
+        candidate_groups.setdefault(row["observation_id"], []).append(row)
+    approved_pool_cache = {}
     for binding in config["bindings"]:
         receipt = pinned_json(binding["approval"])
         if (receipt.get("schema_version") != "price-metrics-root-binding-acceptance-v1"
@@ -58,6 +63,28 @@ def bind_bundle(config_pin: dict) -> dict:
             raise ValueError("unsupported exact binding proposal")
         if declared != approved or not approved:
             raise ValueError("declaration differs from exact approved proposal")
+        if "source_role_proofs" in proposal:
+            source_pins = proposal.get("source_pins", {}).get("candidate_pins", [])
+            if not source_pins:
+                raise ValueError("exact source proof requires pinned candidate pools")
+            approved_pools = []
+            for pin in source_pins:
+                key = (pin["path"], pin["sha256"])
+                if key not in approved_pool_cache:
+                    pool = pinned_json(pin)
+                    index = {}
+                    for row in pool["candidates"] if isinstance(pool, dict) else pool:
+                        oid = row["observation_id"]
+                        if oid in index and index[oid] != row:
+                            raise ValueError("conflicting approved candidate pool identities")
+                        index[oid] = row
+                    approved_pool_cache[key] = index
+                approved_pools.append(approved_pool_cache[key])
+            for oid in {oid for d in approved for oid in d.get("candidate_ids", [])}:
+                exact = [pool[oid] for pool in approved_pools if oid in pool]
+                if (len(candidate_groups.get(oid, [])) != 1 or not exact
+                    or any(candidate_groups[oid][0] != row for row in exact)):
+                    raise ValueError("flat candidate differs from exact approved source pool row")
         g = binding["compatibility_grant"]
         first = approved[0]
         if any(any(d.get(k) != first.get(k) for k in ("cik", "currency", "scope_id", "stock_class_id", "split_basis_id", "known_on", "period_end")) for d in approved):
@@ -92,13 +119,17 @@ def bind_bundle(config_pin: dict) -> dict:
     if len({row["observation_id"] for row in observations}) != len(observations):
         raise ValueError("duplicate typed input bindings")
     anchors = pinned_json(config["financial_anchors"])
-    return {"schema_version": "price-financial-input-bundle-v1",
+    bundle = {"schema_version": "price-financial-input-bundle-v1",
             "producer": {"script_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                          "binding_rule_sha256": hashlib.sha256(Path(bind_financial_inputs.__code__.co_filename).read_bytes()).hexdigest()},
             "observations": observations,
             "compatibility_grants": grants, "financial_anchors": anchors, "financial_as_of": cutoff,
             "source_pins": {"binding_config": config_pin, "candidate_pins": config["candidate_pins"],
                             "financial_anchors": config["financial_anchors"]}}
+    if config.get("company_readiness"):
+        bundle["company_readiness"] = config["company_readiness"]
+        validated_company_readiness(bundle)
+    return bundle
 
 
 def financial_anchors(common_pin: dict) -> list[dict]:

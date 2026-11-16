@@ -3066,7 +3066,18 @@ function beginMarketInputProfile(){
 }
 
 // Prepared daily price worksheet. Accounting and immutable saves live in the worker.
-const priceWorksheet={capability:null,serial:0,result:null,operation:null,request:null,dirty:true,selected:new Set(),readonly:false,evidenceContext:null,evidenceSerial:0,definitionContext:null,companyContext:null};
+const priceWorksheet={capability:null,serial:0,result:null,operation:null,request:null,dirty:true,selected:new Set(),readonly:false,evidenceContext:null,evidenceSerial:0,definitionContext:null,companyContext:null,sourceContext:null};
+function priceContextText(context){
+ const dates=[...new Set(Object.values(context.company_financial_readiness||{}).map(r=>r.verified_through))],baseline=context.dataset_scope?.financial_as_of;
+ if(!dates.length)return `요청 ${compactFinancialDate(context.requested_as_of)} · 실제 거래일 ${compactFinancialDate(context.price_as_of)} · ${context.staleness_calendar_days}일 차이 · 고정 자료 / 자동 갱신 아님`;
+ const financial=dates.length?` · 기업별 재무 확인 ${dates.length===1?compactFinancialDate(dates[0]):"기업마다 다름"}${baseline?` (기존 금융 화면 ${compactFinancialDate(baseline)})`:""}`:"";
+ return `가격 기준 ${compactFinancialDate(context.price_as_of)}${financial} · 요청 ${compactFinancialDate(context.requested_as_of)} · ${context.staleness_calendar_days}일 차이 · 고정 자료 / 자동 갱신 아님`;
+}
+function priceFinancialCaption(result,row){
+ const definition=(result.definitions||priceWorksheet.definitionContext||{})[row.metric_id];if(!["VALUATION","FIXED_BAND"].includes(definition?.family))return "";
+ const ready=(result.company_financial_readiness||priceWorksheet.sourceContext?.company_financial_readiness||{})[row.cik];
+ return ready?`<small>재무기간 말 ${esc(compactFinancialDate(ready.financial_report_date))} · 공시 선택 기준 ${esc(compactFinancialDate(ready.source_selection_as_of))} · 재무 확인 ${esc(compactFinancialDate(ready.verified_through))}</small>`:"";
+}
 function priceReason(code){return ({
  PRICE_SESSION_GAP:"필요한 거래일의 가격이 빠져 있습니다",INSUFFICIENT_VERIFIED_SESSION_HISTORY:"검증된 거래일 이력이 부족합니다",
  PRICE_CURRENCY_UNKNOWN:"가격 통화 근거가 없습니다",CLASS_CURRENCY_SPLIT_COMPATIBILITY_NOT_APPROVED:"주식 종류·통화·분할 기준 확인이 필요합니다",
@@ -3107,7 +3118,7 @@ function priceDefinitionLabel(definition,id){return id==="historical_ev_ebitda_p
 function priceRowsMarkup(result){
  const defs=priceWorksheet.definitionContext||result.definitions||priceWorksheet.capability.definitions,companies=new Map((priceWorksheet.companyContext||priceWorksheet.capability.companies).map(c=>[c.cik,c.ticker]));
  if(result.results)return `<table><thead><tr><th>기업</th><th>판정</th><th>조건 · 실제 값과 미준비 이유</th></tr></thead><tbody>${result.results.map(row=>`<tr><th>${esc(row.ticker)}</th><td>${esc(({PASS:"충족",FAIL:"미충족",UNAVAILABLE:"확인 필요"})[row.status])}</td><td>${row.conditions.map(c=>`${esc(priceDefinitionLabel(defs[c.metric_id],c.metric_id))} ${esc(c.operator)} ${esc(c.value)} · ${c.status==="UNAVAILABLE"?esc(priceReason(c.reason)):esc(c.value_observed)}`).join("<br>")}</td></tr>`).join("")}</tbody></table>`;
- return `<table><thead><tr><th>기업 · 실제 거래일</th><th>지표 · 단위</th><th class="numeric">준비된 값</th><th>기간·조건</th></tr></thead><tbody>${(result.rows||[]).map(row=>`<tr><th>${esc(companies.get(row.cik)||row.cik)}<small>${esc(compactFinancialDate(row.as_of))}</small></th><td title="${esc(row.definition_version)}">${esc(priceDefinitionLabel(defs[row.metric_id],row.metric_id))} <button class="quiet price-evidence-trigger" type="button" data-price-evidence="${esc(row.observation_id)}" data-price-cik="${row.cik}">근거</button></td><td class="numeric" title="${esc(row.value??row.reason)}">${priceValue(row)}</td><td>${row.user_multiple?`${esc(row.user_multiple)}배 · 사용자 고정 시나리오`:row.expected_sessions!==undefined?`${row.valid_sessions}/${row.expected_sessions}거래일 · ${row.diagnostic?"제출일 가정 진단 · 준비 시점 미확인 · 백테스트 부적격":row.status==="AVAILABLE"?"준비 시점 검증 표본":"준비 시점 확인 필요 · 미준비"}`:row.share_measurement_date?`주식 수 측정 ${esc(compactFinancialDate(row.share_measurement_date))}`:row.window_sessions?`${row.window_sessions}거래일 창`:"재무기간은 입력 근거에서 확인"}${row.percentiles&&Object.keys(row.percentiles).length?`<small>10/25/50/75/90%: ${Object.values(row.percentiles).map(v=>formatDecimal(v,2)).join(" / ")}</small>`:""}</td></tr>`).join("")||'<tr><td colspan="4" class="empty">선택한 범위의 준비된 관측이 없습니다.</td></tr>'}</tbody></table>`
+ return `<table><thead><tr><th>기업 · 실제 거래일</th><th>지표 · 단위</th><th class="numeric">준비된 값</th><th>기간·조건</th></tr></thead><tbody>${(result.rows||[]).map(row=>`<tr><th>${esc(companies.get(row.cik)||row.cik)}<small>${esc(compactFinancialDate(row.as_of))}</small></th><td title="${esc(row.definition_version)}">${esc(priceDefinitionLabel(defs[row.metric_id],row.metric_id))} <button class="quiet price-evidence-trigger" type="button" data-price-evidence="${esc(row.observation_id)}" data-price-cik="${row.cik}">근거</button></td><td class="numeric" title="${esc(row.value??row.reason)}">${priceValue(row)}</td><td>${row.user_multiple?`${esc(row.user_multiple)}배 · 사용자 고정 시나리오`:row.expected_sessions!==undefined?`${row.valid_sessions}/${row.expected_sessions}거래일 · ${row.diagnostic?"제출일 가정 진단 · 준비 시점 미확인 · 백테스트 부적격":row.status==="AVAILABLE"?"준비 시점 검증 표본":"준비 시점 확인 필요 · 미준비"}`:row.share_measurement_date?`주식 수 측정 ${esc(compactFinancialDate(row.share_measurement_date))}`:row.window_sessions?`${row.window_sessions}거래일 창`:"재무기간은 입력 근거에서 확인"}${priceFinancialCaption(result,row)}${row.percentiles&&Object.keys(row.percentiles).length?`<small>10/25/50/75/90%: ${Object.values(row.percentiles).map(v=>formatDecimal(v,2)).join(" / ")}</small>`:""}</td></tr>`).join("")||'<tr><td colspan="4" class="empty">선택한 범위의 준비된 관측이 없습니다.</td></tr>'}</tbody></table>`
 }
 function priceSeriesPlot(rows){
  if(!rows?.length)return "";
@@ -3119,6 +3130,9 @@ function priceSeriesPlot(rows){
  return `<svg class="price-series-plot" viewBox="0 0 920 206" role="img" aria-label="첫 선택 지표의 실제 거래일 흐름. 미준비 거래일을 연결하지 않습니다."><text x="48" y="22">${esc(priceDefinitionLabel((priceWorksheet.definitionContext||priceWorksheet.capability.definitions)[first.metric_id],first.metric_id))} · ${esc(first.unit)}</text><g class="price-chart-line">${lines}</g><text x="48" y="194">${esc(compactFinancialDate(series[0].as_of))}</text><text x="776" y="194">${esc(compactFinancialDate(series.at(-1).as_of))}</text><text x="2" y="48">${formatDecimal(hi,1)}</text><text x="2" y="164">${formatDecimal(lo,1)}</text></svg>`
 }
 function priceDisplayResult(result,caption="시험 실행 결과",context={}){
+ const source=context.source_context||result;
+ priceWorksheet.sourceContext=Object.fromEntries(["requested_as_of","price_as_of","staleness_calendar_days","dataset_scope","company_financial_readiness"].filter(key=>key in source).map(key=>[key,source[key]]));
+ if(priceWorksheet.sourceContext.price_as_of)$("#price-context").textContent=priceContextText(priceWorksheet.sourceContext);
  priceWorksheet.evidenceContext=context.evidence_context||result.evidence_context||null;
  priceWorksheet.definitionContext=context.definition_context||result.definitions||priceWorksheet.capability.definitions;
  priceWorksheet.companyContext=context.company_context||priceWorksheet.capability.companies;
@@ -3168,14 +3182,14 @@ async function priceShowEvidence(cik,observation_id){
 }
 
 function priceExport(){
- const data={schema_version:"price-worksheet-export-v1",operation:priceWorksheet.operation,request:priceWorksheet.request,result:priceWorksheet.result,definition_context:priceWorksheet.definitionContext,note:$("#price-note").value};
+ const data={schema_version:"price-worksheet-export-v1",operation:priceWorksheet.operation,request:priceWorksheet.request,result:priceWorksheet.result,definition_context:priceWorksheet.definitionContext,...(priceWorksheet.sourceContext?.company_financial_readiness?{source_context:priceWorksheet.sourceContext}:{}),note:$("#price-note").value};
  const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));const a=document.createElement("a");a.href=url;a.download="price-worksheet.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),0);
 }
 async function beginPriceWorksheet(){
  if(priceWorksheet.capability)return;
  $("#price-feedback").textContent="가격 지표 발행물 연결 중…";
  const cap=await api("/api/price-metrics");if(!cap.configured){$("#price-feedback").textContent="가격 지표 발행물이 연결되지 않았습니다.";return}
- priceWorksheet.capability=cap;$("#price-context").textContent=`요청 ${compactFinancialDate(cap.requested_as_of)} · 실제 거래일 ${compactFinancialDate(cap.price_as_of)} · ${cap.staleness_calendar_days}일 차이 · 고정 자료 / 자동 갱신 아님`;
+ priceWorksheet.capability=cap;$("#price-context").textContent=priceContextText(cap);
  $("#price-metrics").innerHTML=Object.values(cap.definitions).filter(d=>d.family!=="FIXED_BAND").map(d=>`<option value="${esc(d.metric_id)}"${["price_return_21s","price_volatility_20s","per","pbr"].includes(d.metric_id)?" selected":""}>${esc(priceDefinitionLabel(d,d.metric_id))} (${esc(d.unit)})</option>`).join("");
  $("#price-companies").innerHTML=cap.companies.map(c=>`<label><input type="checkbox" value="${c.cik}"> ${esc(c.ticker)}</label>`).join("");
  $("#price-definitions").innerHTML=Object.values(cap.definitions).map(d=>`<details><summary>${esc(priceDefinitionLabel(d,d.metric_id))} · ${esc(d.unit)}</summary><p>${esc(d.formula)}</p><small>${esc(d.definition_version)}</small><pre>${esc(JSON.stringify(d.policy,null,2))}</pre></details>`).join("");

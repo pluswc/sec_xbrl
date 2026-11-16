@@ -36,6 +36,7 @@ class PriceMetricService:
         return {"configured": True, **{key: m[key] for key in ("publication_id", "requested_as_of", "price_as_of",
                 "staleness_calendar_days", "definitions", "companies", "dataset_scope", "historical_readiness_policy")},
                 "publication_pin": self.reader.pin, "automatic_update": False,
+                **({"company_financial_readiness": m["company_financial_readiness"]} if "company_financial_readiness" in m else {}),
                 "ev_policy": m["ev_policy"], "series_start": m["series_start"]}
 
     def _register_evidence_context(self, reader: PriceMetricReader, operation: str,
@@ -155,6 +156,8 @@ class PriceMetricService:
         return {"id": key, "created_at": created, **payload, "reopened_original": True,
                 "original_context_readonly": True, "original_condition_preview": preview,
                 "evidence_context": context, "definition_context": reader.manifest["definitions"],
+                **({"source_context": {k: reader.manifest[k] for k in ("requested_as_of", "price_as_of", "staleness_calendar_days", "dataset_scope", "company_financial_readiness")}}
+                   if "company_financial_readiness" in reader.manifest else {}),
                 "company_context": reader.manifest["companies"]}
 
     def saves(self) -> list[dict]:

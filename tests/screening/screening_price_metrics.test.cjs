@@ -11,7 +11,7 @@ function fixture(extra={}){
   S:{explorerSelected:new Set()},explorerDataset:()=>({...scope,publication_id:scope.dataset_publication_id,auxiliary_manifest_sha256:scope.dataset_manifest_sha256}),
   ...extra};
  const formatting=source.slice(source.indexOf("function formatDecimal("),source.indexOf("function displayValue("));
- const f=vm.runInNewContext(formatting+snippet+"\n({state:priceWorksheet,priceExecute,priceInvalidate,priceValue,priceSave,priceReopen,priceQuery,priceScopeMatchesCurrent,priceRowsMarkup,priceShowEvidence,priceDisplayResult,priceDefinitionLabel})",env);
+ const f=vm.runInNewContext(formatting+snippet+"\n({state:priceWorksheet,priceExecute,priceInvalidate,priceValue,priceSave,priceReopen,priceQuery,priceScopeMatchesCurrent,priceRowsMarkup,priceShowEvidence,priceDisplayResult,priceDefinitionLabel,priceExport})",env);
  f.state.capability={definitions:{per:{metric_id:"per",label:"PER",unit:"MULTIPLE"}},companies:[{cik:"0000000001",ticker:"ONE"}],dataset_scope:scope};
  return {f,host};
 }
@@ -93,4 +93,42 @@ test("latest evidence click owns the panel and source mismatches fail visibly",a
  assert.match(host("#price-evidence-content").innerHTML,/Second selection/);assert.doesNotMatch(host("#price-evidence-content").innerHTML,/First stale/);
  const mismatch=f.priceShowEvidence("0000000001","bad");pending[2]({...payload("Wrong source"),publication_id:"B"});await assert.rejects(()=>mismatch,/원 자료가 다릅니다/);
  assert.match(f.priceDefinitionLabel({label:"EV_EBITDA",definition_version:"price-related-metrics-v1:historical_ev_ebitda_percentiles_3y"},"historical_ev_ebitda_percentiles_3y"),/영업이익\+D&A proxy/);
+});
+
+test("company financial dates distinguish verified-through, selection and the legacy view",()=>{
+ const {f,host}=fixture();
+ const data={...result(),price_as_of:"2026-11-13",requested_as_of:"2026-11-16",staleness_calendar_days:3,dataset_scope:scope,
+  definitions:{per:{label:"PER",family:"VALUATION"}},company_financial_readiness:{"0000000001":{financial_report_date:"2026-09-30",financial_anchor:"2026-10-01",source_selection_as_of:"2026-10-25",verified_through:"2026-11-13"}}};
+ f.priceDisplayResult(data);
+ assert.match(host("#price-context").textContent,/가격 기준 2026-11-13 · 기업별 재무 확인 2026-11-13 \(기존 금융 화면 2026-10-25\)/);
+ assert.match(host("#price-query-result").innerHTML,/재무기간 말 2026-09-30 · 공시 선택 기준 2026-10-25 · 재무 확인 2026-11-13/);
+ assert.doesNotMatch(host("#price-query-result").innerHTML,/재무기간 말 2026-10-01/);
+ data.definitions.per.family="PRICE_RETURN";f.priceDisplayResult(data);
+ assert.doesNotMatch(host("#price-query-result").innerHTML,/재무기간 말/);
+});
+
+test("reopened source dates never inherit active newer company readiness",async()=>{
+ const saved={kind:"RESULT",operation:"query",request:{metric_ids:["per"]},title:"Old",note:"original",publication_id:"A",
+  result:{...result("10","A"),price_as_of:"2026-10-23",requested_as_of:"2026-11-16",staleness_calendar_days:24}};
+ const {f,host}=fixture({api:async()=>saved});
+ f.state.capability.company_financial_readiness={"0000000001":{verified_through:"2026-11-13",financial_report_date:"2026-09-30",source_selection_as_of:"2026-11-13"}};
+ await f.priceReopen("saved-A");
+ assert.match(host("#price-context").textContent,/실제 거래일 2026-10-23/);
+ assert.doesNotMatch(host("#price-context").textContent,/기업별 재무 확인 2026-11-13/);
+ assert.doesNotMatch(host("#price-query-result").innerHTML,/재무 확인 2026-11-13/);
+});
+
+test("old export schema stays exact while only new readiness publications add source context",()=>{
+ let exported;
+ const {f,host}=fixture({Blob:class {constructor(parts){exported=JSON.parse(parts.join(""))}},
+  URL:{createObjectURL:()=>"blob:local",revokeObjectURL:()=>{}},document:{createElement:()=>({click(){}})}});
+ const old=result("10","A");f.state.operation="query";f.state.request={metric_ids:["per"]};host("#price-note").value="memo";
+ f.priceDisplayResult(old);f.priceExport();
+ assert.equal(JSON.stringify(exported),JSON.stringify({schema_version:"price-worksheet-export-v1",operation:"query",request:{metric_ids:["per"]},result:old,definition_context:old.definitions,note:"memo"}));
+ const fresh={...result("20","B"),price_as_of:"2026-11-13",requested_as_of:"2026-11-16",staleness_calendar_days:3,
+  company_financial_readiness:{"0000000001":{source_selection_as_of:"2026-10-25",verified_through:"2026-11-13"}}};
+ f.priceDisplayResult(fresh);f.priceExport();
+ assert.equal(exported.source_context.price_as_of,"2026-11-13");
+ assert.equal(exported.source_context.company_financial_readiness["0000000001"].source_selection_as_of,"2026-10-25");
+ assert(!("rows" in exported.source_context));
 });
