@@ -11,7 +11,7 @@ function fixture(extra={}){
   S:{explorerSelected:new Set()},explorerDataset:()=>({...scope,publication_id:scope.dataset_publication_id,auxiliary_manifest_sha256:scope.dataset_manifest_sha256}),
   ...extra};
  const formatting=source.slice(source.indexOf("function formatDecimal("),source.indexOf("function displayValue("));
- const f=vm.runInNewContext(formatting+snippet+"\n({state:priceWorksheet,priceExecute,priceInvalidate,priceValue,priceSave,priceReopen,priceQuery,priceScopeMatchesCurrent,priceRowsMarkup,priceShowEvidence,priceDisplayResult,priceDefinitionLabel,priceExport,priceTimelineMarkup,priceTimelineReadout,priceTimelineQuery,priceTimelineBind})",env);
+ const f=vm.runInNewContext(formatting+snippet+"\n({state:priceWorksheet,priceExecute,priceInvalidate,priceValue,priceSave,priceReopen,priceQuery,priceScopeMatchesCurrent,priceRowsMarkup,priceShowEvidence,priceDisplayResult,priceDefinitionLabel,priceExport,priceTimelineMarkup,priceTimelineReadout,priceTimelineQuery,priceTimelineBind,priceTimelineInsightMarkup,priceTimelineCoverageMarkup,priceLoadTimelineCoverage})",env);
  f.state.capability={definitions:{per:{metric_id:"per",label:"PER",unit:"MULTIPLE"}},companies:[{cik:"0000000001",ticker:"ONE"}],dataset_scope:scope};
  return {f,host};
 }
@@ -271,4 +271,43 @@ test("reopened current EPS evidence preserves original evaluation, four direct s
  assert.match(host("#price-evidence-content").innerHTML,/공식 실적표 · GAAP 희석 EPS/);assert.match(host("#price-evidence-content").innerHTML,/4.81/);
  assert.match(host("#price-evidence-content").innerHTML,/분기 EPS의 주당 기준이 다릅니다/);assert.match(host("#price-evidence-content").innerHTML,/2025-10-01–2026-01-01/);
  f.priceExport();assert.equal(exported.source_context.current_eps_evaluation.evaluation_as_of,"2026-11-16");
+});
+
+
+function interpretedTimeline(){
+ const result=timelineResult();result.interpretation_definition="price-timeline-interpretation-v1";
+ result.points.forEach(p=>p.interpretation={ratio_value:"8.27",position:{status:"AVAILABLE",equal_quantiles:[],lower_quantile:"0.5",upper_quantile:"0.75",median_relation:"ABOVE",central_50_relation:"INSIDE"},samples:{valid:252,expected:252,required:252,missing_expected:0,minimum_shortfall:0,complete_window_coverage:true},bands:{status:"AVAILABLE",denominator_role:"BPS",denominator:{value:"5"},assumptions:["2","8"],equal_multiples:[],lower:{multiple:"2",price:"10"},upper:{multiple:"8",price:"40"}}});
+ return result;
+}
+
+test("interpretation strip formats governed bucket and fixed scenario without numeric classification",()=>{
+ const {f}=fixture();const p=interpretedTimeline().points[0],html=f.priceTimelineInsightMarkup(p);
+ assert.match(html,/8.27배/);assert.match(html,/중앙값보다 높음/);assert.match(html,/중간50% 범위 안/);assert.match(html,/P50–P75/);
+ assert.match(html,/2배–8배 가정 가격 사이/);assert.match(html,/유효 252\/252거래일/);assert.doesNotMatch(html,/0개 부족/);
+ p.interpretation.position={status:"UNAVAILABLE",reason:"HISTORICAL_CALENDAR_OR_SOURCE_COVERAGE_INCOMPLETE"};p.interpretation.samples.complete_window_coverage=false;
+ const missing=f.priceTimelineInsightMarkup(p);assert.match(missing,/최소 252표본 충족/);assert.match(missing,/원천·거래일 기간 미충족/);assert.doesNotMatch(missing,/0개 부족/);
+});
+
+test("legacy timeline rendering and export preserve original snapshot without newer interpretation",()=>{
+ let exported;const {f}=fixture({Blob:class {constructor(parts){exported=JSON.parse(parts.join(""))}},URL:{createObjectURL:()=>"blob:x",revokeObjectURL:()=>{}},document:{createElement:()=>({click(){}})}});
+ const original=timelineResult(),before=JSON.stringify(original);f.state.operation="timeline";f.state.request={cik:"1"};
+ f.priceDisplayResult(original);f.priceTimelineReadout(0);f.priceExport();
+ assert.equal(JSON.stringify(exported.result),before);assert.equal(JSON.stringify(original),before);
+ assert.match(f.priceTimelineInsightMarkup(original.points[0]),/저장 당시 해석 요약 없음/);
+ assert.match(f.priceTimelineCoverageMarkup(original,0),/저장 당시 기업 범위 집계 없음/);
+});
+
+test("late coverage never repaints a changed result and cursor movement makes no requests",async()=>{
+ let resolve,calls=0;const {f,host}=fixture({api:()=>{calls++;return new Promise(r=>resolve=r)}});
+ const result=interpretedTimeline();f.state.result=result;f.state.evidenceContext="A";f.state.serial=3;
+ const pending=f.priceLoadTimelineCoverage(result,3);f.priceTimelineReadout(1);assert.equal(calls,1);
+ f.priceInvalidate();resolve({publication_id:"pinned",evidence_context:"A",dates:[]});await pending;
+ assert.equal(f.state.timelineCoverage,undefined);assert.doesNotMatch(host("#price-timeline-coverage").textContent,/전체 109/);
+});
+
+test("new saved timeline reloads coverage using original evidence context after source switch",async()=>{
+ const calls=[],original=interpretedTimeline();original.publication_id="OLD";
+ const {f,host}=fixture({api:async(url,options)=>{calls.push([url,options&&JSON.parse(options.body)]);return options?{publication_id:"OLD",evidence_context:"old-token",selectable_companies:2,any_ratio_companies:1,any_distribution_companies:1,dates:original.points.map(p=>({as_of:p.as_of,ratio_companies:1,distribution_companies:1}))}:{kind:"RESULT",operation:"timeline",request:{cik:"1"},title:"original",note:"memo",publication_id:"OLD",result:original,evidence_context:"old-token",source_context:{price_as_of:"2026-01-03"}}}});
+ f.state.capability.publication_id="NEW";await f.priceReopen("old-save");await new Promise(r=>setImmediate(r));
+ assert.equal(calls[1][1].evidence_context,"old-token");assert.match(host("#price-timeline-coverage").textContent,/전체 2/);assert.equal(f.state.result.publication_id,"OLD");
 });

@@ -233,3 +233,23 @@ Writer checks158PythonPASS/1explicitcachedSKIP and48NodePASS; integrated indepen
 ROOT acceptance, push/PR and remote CI remain pending. Existing operating runtime/data/
 journals/main are untouched. Prior no-remote records remain historical; no main merge or
 runtime activation is included in the new authorization. See [the current delivery contract](../docs/implementation/price-band-timeseries-20261116.md#authorized-remote-delivery-and-pr107-integration--2026-11-16).
+
+
+## Timeline interpretation strip — approved implementation candidate (2026-11-17)
+
+Use one cursor-linked text strip above paired plots,14px reading text/4px rhythm and existing
+blue-soft/ink/slate tokens. Primary line: selected date and multiple, median relation and
+quantile bucket/central50 relation supplied by metrics. Secondary: close-price bracket among
+positive user assumptions and actual EPS12m/BPS meaning. Valid state shows concise valid/
+expected samples; gap state separates required minimum from full source/calendar coverage.
+Detailed definitions and aggregate missing date/reason ranges use native disclosures.
+No percentile-rank invention, fair-value or buy/sell badge. Preserve272px adjacent ledger.
+
+A compact scope line distinguishes selectable companies, any historical ratio chart in the
+view, selected-date band inputs and eligible selected-window distributions. Load verified
+coverage asynchronously once per result scope and use its date table on cursor changes.
+Saved results use original evidence contexts; old snapshots without new metadata show an
+explicit absent-at-save caption and never acquire current calculations or mutated exports.
+Writer checks95PythonPASS/1cachedSKIP and52NodePASS; independent review and ROOT actual
+1920/1440/local operating acceptance remain pending. New work has no remote/main delivery.
+See [the interpretation contract](../docs/implementation/price-timeline-insights-20261117.md).
