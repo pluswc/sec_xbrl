@@ -10,9 +10,12 @@
 
 초기 CV0 계약/기계 목록을 ROOT가 수락한 뒤 **CV1 재사용 자격·후보 추출과 CV2 회사별
 최신성/신규 준비 자격 접점 구현**을 승인했다. 각 회사의 실제 재사용/새 준비 자격과
-회계 역할은 별도 ROOT exact receipt가 필요하다. 아래 현재 표는 ROOT가 받은 실제 준비/
-역할 승인을 반영한다. producer는 writer 자체 검사 뒤 ROOT 동결을 앞두고 있으며 writer는
-발행·수집·운영·commit/push를 실행하지 않는다. 작업 기준은 main
+회계 역할은 별도 ROOT exact receipt가 필요하다. 현재는 소스 `41f02a63a4f5bde464a32003896e06be7bd69ab9`와
+최종 v2의 **별도 Sol 독립 PASS·ROOT 로컬/운영 인수 완료** 상태다. 실가치 조회는86회사,
+PER9회사/PBR75회사이며 [109회사 읽기표](company-valuation-availability-20261116.md)에
+실제 값·원 선택일·보류 사유를 기록했다. PR/필수 CI `test`/main 병합은 이 인수 기록 시점
+아직 미수행이다. 아래 초기 proposal/v1 기록은 당시 상태이며 최종 결과와 구분한다.
+작업 기준은 main
 `365cce90f8a4b016dcc2574ab50042531c309df5` (PR104 포함), branch
 `codex/company-valuation-readiness`, 전용 worktree
 `work/company-valuation-readiness-20261116/source`다. 이전 구현/운영 worktree는 보존한다.
@@ -22,7 +25,7 @@ main 병합을 구분한다. ROOT는 회계·클래스·검토된0·분할·최�
 수집과 운영/원격 전달을 소유한다. 사용 가능한 GPT-6.1 Sol 단일 writer가 허용된
 소스/문서/테스트를 수정하며, 독립 Sol은 별도 읽기 전용 역할이다. 추가 구현자는 만들지 않는다.
 
-## 측정 baseline과 입력
+## 착수 시점 baseline과 입력
 
 | 구분 | 기존 상태 |
 | --- | --- |
@@ -66,10 +69,10 @@ main 병합을 구분한다. ROOT는 회계·클래스·검토된0·분할·최�
 | 단계 | 산출물·수락 조건 | 현재 상태 |
 | --- | --- | --- |
 | CV0 읽기 전용 조사 |공통 입력 및 선택 Analytical metadata로 회사별 역할 후보/기간/차원/단위/결측·정책 의존성 목록; 정책/후속 범위를 ROOT에 제안 |109회사 조사/후속 범위 ROOT 수락, 추가 기업 조사 종료 |
-| CV1 기존 준비 재사용 |exact 후보 IDs/보고 사실/기간 및 class/currency/split/scope 근거를 binding/grant로 연결; 실제 값과 보류 사유 측정 |44회사 전체 투영 및 원문 검토 후 신규 준비와 합쳐83회사 current 역할 선언 ROOT exact 수락; 실발행 수치 측정 전 |
+| CV1 기존 준비 재사용 |exact 후보 IDs/보고 사실/기간 및 class/currency/split/scope 근거를 binding/grant로 연결; 실제 값과 보류 사유 측정 |최종87회사 current binding; CRM book-only를 제외한86회사 실제 가치 지표, PER/PBR 중 하나 이상76회사. PER9/PBR75 실제 검증 |
 | CV2 가격일에 맞는 재무 준비 |필요한 공시/준비·소스 자격 검증 후 새 as-of/anchor 확인; 숫자만 cutoff 수정하지 않음 |42회사 source25 재사용+65회사 신규 filing source13+2회사 기존 Raw 재준비 source13,109회사 exact readiness ROOT 수락 |
-| CV3 실제 소비자 경로 |불변 별도 발행물과 기존 공통 reader/스크리닝/비교/시계열/밴드/근거·명시 저장/원본 재열기; API/UI에서 대상 기업 실제 값 검증 |접점 구현/자체 합성 검사 완료; 실109 발행·API/UI·저장 인수는 ROOT 동결 후 수행 예정 |
-| CV4 전달 |별도 Sol 독립 PASS, ROOT 로컬/운영 인수·보존 확인, PR/필수 CI/main 실제 결과를 분리 기록 |이번 producer의 독립 검증·로컬/운영 인수·PR/필수 CI `test`·main 모두 미수행 |
+| CV3 실제 소비자 경로 |불변 별도 발행물과 기존 공통 reader/스크리닝/비교/시계열/밴드/근거·명시 저장/원본 재열기; API/UI에서 대상 기업 실제 값 검증 |최종v2 2834행의 실제 HTTP/reader 동등, 실제 기업 화면·비교·과거기간·old3/new2 사적 저장/원본 재열기·export·cold restart PASS |
+| CV4 전달 |별도 Sol 독립 PASS, ROOT 로컬/운영 인수·보존 확인, PR/필수 CI/main 실제 결과를 분리 기록 |별도 Sol 최종 PASS 및 ROOT 로컬/18765 운영 인수 완료. PR/필수 CI `test`/main은 별도 원격 전달 미수행 |
 
 최종 cohort/회사별 수치 목표는 CV0 근거 뒤 ROOT가 확정한다. 자료가 준비된 기업까지
 모두 보류하거나 MSFT 하나의 기존 값만 재확인한 것으로 확대 완료를 선언하지 않는다.
@@ -269,7 +272,7 @@ config는 준비된 cohort에서 고른 tickers를 지정한다. 전용 worktree
   projector의 제한/허용 QName, 승인된 bundle/publisher/service metadata 접점과 관련 검사 및
   새 work 폴더의 create-only proposal이다. writer의 network·운영·원격·commit/push는 금지다.
 
-## Producer 동결 전 확정 계약 — 2026-11-16
+## Producer 동결 전 확정 계약 — 2026-11-16 v1 역사 기록
 
 ROOT의 최신성/역할 검토로 current83회사 역할 선언을 수락했다. 이는 엔진에서 수치가
 실제로 나오는 회사 수나 이번 운영 인수를 뜻하지 않는다. 전체109회사 가격은 별도 새
@@ -374,3 +377,98 @@ Raw/회계 수치 전체를 대체하지 않는다. 소스 선언·상태·제�
 | `remaining6-binding-acceptance-v1/manifest.json` |`317794af95ba310a42cb64ec3822e2bb782c826e759566c5266616f3f1c60024` |
 | `ev2-binding-acceptance-v2/manifest.json` |`782b933d327da6255818259c67647ae0312e096282229c782e8ab32e690e0540` |
 | `ibm-binding-acceptance-v1/manifest.json` |`98741b000a51d0be21c0481aa1f564a254806bc9ed7db09b564f75023f2c263c` |
+
+## 최종 v2 독립·로컬·운영 인수 — 2026-11-16
+
+이 절은 앞선83회사/v1·미발행·인수 대기 기록 이후의 실제 상태다. 소스는
+`41f02a63a4f5bde464a32003896e06be7bd69ab9`로 동결했다. Python producer는 첫 동결
+`53fcdbe440810d04d0c9733cd1244476c5c0b01a`와 byte 동일하며41f 변경은 가격 UI와 과거
+시계열 caption 회귀 검사뿐이다. 현재 financial anchor caption은 발행물 price_as_of와
+행의 날짜가 같을 때만 표시한다. MSFT10/23 PER의 FY6/30 근거에 현재9/30 기간을 붙이지 않는다.
+
+ROOT는 실회사 matrix와 이미 준비된 후보를 마지막 대조해 PYPL/KHC/ALAB/ABBV4회사의
+누락 연결을 v2로 추가했다. 신규 조사/Raw 수집/소스·정의·테스트 변경은 없었다. PYPL net
+837m/common equity19483m, KHC net1184m/owner35975m, ALAB174752000/1999468000은
+shares/book/BPS 각3역할이다. ABBV는 exact issued1844582836−treasury77073558=
+1767509278과 원 negative owner−4583m의2역할이며 nested BPS를 만들지 않았다.
+PYPL/KHC의 treasury를 이미 net인 actual shares에서 다시 차감하지 않는다. KHC의 NCI102m와
+redeemable13m를 common-equity로 포함하거나 EV0으로 바꾸지 않는다.
+
+중간 v1은83current binding/cap82/PBR72/BPS57,1319가용/1515미준비였으며 최종 수치와
+구분한다. 최종 financial bundle은322관측/100grant(87current+13원 MSFT historical)다. v1의 기존
+311관측/96grant와 그 안의 원48 MSFT 관측은 그대로다. v1/v2 사이105회사의525개 파일
+descriptor/hash/bytes/rows가 같고4회사의20개 파일만 바뀌었다. 28정의·공유 price batch·세션·
+readiness도 그대로다. 추가4회사가 제공한10개 실제 값까지 독립 검증했으며 기존83회사
+검증을 새로 전체 재실행하거나 v1을 덮어쓰지 않았다.
+
+최종 발행물은 `data/processed/price_metrics/20261116_company109_valuations_v2/price_metric_manifest.json`,
+ID `screening-price-metrics-d5e6c94177ccec71918629ec`, SHA256
+`9774ca17e449cc484da809dece739eba0da1f08655b52a9a616ebfa5677f9f03`다. actual price11/13,
+요청11/16,3calendar-day 차이의 고정 자료다.109×26=2834행 중1329 AVAILABLE/1505 UNAVAILABLE다.
+87current binding 중 CRM은 book-only이므로 하나 이상의 실제 가치 지표가 있는 회사는86,
+PER/PBR 중 하나라도 있는 회사는76이다. source readiness109와 역할/수치86을 혼동하지 않는다.
+
+| 현재 가치 지표 | 실제 가용 회사 수 | 범위·제약 |
+| --- | ---: | --- |
+| 공시 보통주 수 기반 시가총액 |86 |실제 일별 유통 주식 수 측정값으로 이름 바꾸지 않음 |
+| PER |9 |AAPL, MU, QCOM, SBUX, CSCO, INTU, CPRT, COST, PANW |
+| PBR(common cap/common equity) |75 |음수 book/미승인 범위/미연결 입력은 분리 보존 |
+| 가격/BPS |60 |원 차원 또는 nested binding 제약은 별도 경로 보류 |
+| P/S |9 |최신 anchor의 승인12개월 매출 |
+| earnings yield |9 |승인된 직접12개월 EPS 경로 |
+| 표준화 FCF yield |7 |기존 CFO−PPE 정의 유지 |
+| EV |2 |AAPL, MSFT의 정확한 current financing/cash/검토 residual0 범위 |
+| EV/Revenue |1 |AAPL. 최신 MSFT12개월 매출 대체 없음 |
+| EV/영업이익+D&A proxy |0 |공통 코드/조회는 구현됨. 현재12개월 기간·operating D&A scope 승인 부족 |
+
+[109회사 표](company-valuation-availability-20261116.md)는 원 matrix의 PER/PBR/별도 BPS
+경로·cap·선택일·실제 재무기간·보류를 읽기용으로 표시한다. PBR이 양수지만 BPS만 보류된
+15회사는 원 차원5(ADSK/CDNS/KLAC/NVDA/WMT), 복합 binding10(ABT/CAT/COP/CVX/GEHC/
+JNJ/KO/MRK/PCAR/TXN)이다. 자료가 없거나 공통 BPS 엔진이 미구현인 것으로 표현하지 않는다.
+
+가격10지표도 새 공유 batch에서 실제 조회했다.1/5/21/63-session return,20/60-session
+volatility 및 relative volume은 각각109회사,126-return104회사,252-return/volatility는
+각101회사다. 검증된 US session gap/완전 창 규칙을 유지한다. 사용자 fixed PER/PBR band는
+각9/60회사에서 가능하며 원 배수와 입력/정의/source pins를 명시 저장한다.
+
+MSFT의 과거 PBR 두 경로는754/754 eligible sessions, 중앙값(P50)
+`10.90338128415986488516302005224456`이다. 제출일 가정 진단이며 backtest_eligible=false다.
+과거 PER은64/754로 최소252세션에 못 미쳐 미제공한다. 이는 이전 고정 source의 PER62 또는
+H5 fresh2의 PBR739/754와 다른 window/source 준비 결과다. 새 Q가 알려진10/28 이후 옛 FY
+EPS를 replay하지 않았고 AAPL 새 FY는 실제 공시11/03부터만 쓴다. historical system-ready
+시간을 filed date로 채우거나 이 진단을 준비 시점 인증으로 제시하지 않는다.
+
+별도 Sol의 최종 PASS는 소스/실v2/사적 consumer 증거를 대상으로 한다.96 focused Python과
+24 actual Node(가격 UI13+공통 market5+Q4 6), Ruff9 Python/JS syntax/diff 검사를 통과했다.
+독립 검증자는109×10 가치 결정과 모든258개 가용 현재 값을 Decimal로 대조했고, point-in-time
+대표 시계열/quantile·545 v1 파일 및 v2 delta를 확인했다. 완료된 capture/기존 원문 검토를
+재사용했으며 모든87회사의 모든 Raw fact를 다시 감사했다는 뜻은 아니다.
+
+브라우저는 ROOT가 직접 실행했다. 독립 검증자는 실제 HTTP2834개 row 객체·정의/source/
+날짜/readiness의 reader 동등성, ROOT 브라우저 receipt/스크린샷과 SQLite를 읽기 전용으로
+대조했다. 실제4회사 비교의16개 값, AAPL/NVDA PBR, 최신 MSFT PER 미준비, SBUX 음수
+book, 원 기간 caption을 확인했다. 사적 복사본에는 old3 fixture와 명시적으로 저장한 new2가
+있으며 cold restart 전후 전체5 SQL 행·메모·정의/source·old/new export bytes가 같다.
+oldA의10/23 quote524.510009765625/EPS17.95/밴드201.9375는 원 source로 유지되고 newB의
+AAPL11.25×8.98=101.0250은 별도 context로 재열린다. 새 metadata를 old export에 추가하지 않았다.
+
+ROOT는2026-11-16T06:14:18Z에18765의 최종 v2를 운영 인수했다(그 시점 frontend PID30276).
+실제 HTTP2834행/정의와 NVDA 화면을 확인했다. backend19078/qualified d1e/native14datasets,
+원 legacy 및 price journals·원 발행물/common/assessment의6보호 pins, 기존18766의 old2
+제한 view는 exact 보존했다. 운영 journal에 테스트 저장은0건이다. 사적 저장 시험을 운영
+사용자 journal의 신규 행으로 기록하지 않는다.
+
+| 최종 근거 | SHA256 |
+| --- | --- |
+| `company-valuation-independent-final-41f02a6.md` |`286aed756d858416f928a62d389db435e2ddd74f39eb826b59f02e376c3fd2c2` |
+| `root-operating-acceptance-v2.json` |`28835680ac250c05f2073f2212af5a6047bc411b8788a62b5f9bab9e30fa3463` |
+| `private-consumer-acceptance-v2.json` |`e27eff8cd82b4f92b7127de96345985ef5f4a449a443eb4b8b87406098631b59` |
+| `company-availability-109-v2.csv` |`ee3e967c002e2d415c6ee2ac0dd971cbecfb3faa40a739833e29225e3c6c0550` |
+| `company-availability-109-v2.json` |`101143d9e4a477d1ec64afcd9548afd563212a6ddbb43a37c760659002502811` |
+| 최종 financial bundle |`81a405ea2cc03dbdae513b4efffd06bdf8b1abb92c48b49f74356505e637eda6` |
+
+위 파일 경로는 이 작업의 보존된 evidence/발행물에 있다. 이 문서는 **독립·로컬·운영 인수
+시점**의 기록이다. 이번 docs-only 갱신은 source/Python/JS/tests/정의/Raw/운영을 바꾸지 않으며
+완료된 source/data/consumer 검증을 재사용한다. PR 생성·필수 CI `test`·main 병합은 아직
+미수행이며 최종 원격 상태는 이후 실제 PR/CI/Git 기록으로 별도 확인한다. 운영 수락이나
+이전 PR104 병합을 이번 GOAL의 main 병합 성공으로 대신하지 않는다.
