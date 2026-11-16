@@ -253,3 +253,17 @@ explicit absent-at-save caption and never acquire current calculations or mutate
 Writer checks95PythonPASS/1cachedSKIP and52NodePASS; independent review and ROOT actual
 1920/1440/local operating acceptance remain pending. New work has no remote/main delivery.
 See [the interpretation contract](../docs/implementation/price-timeline-insights-20261117.md).
+
+
+Timeline interpretation final local/operating acceptance (2026-11-17): product
+`c7241f94d9a5f4df4d3c3207ea7d5c73997fe4f8` passed separate Astra review and ROOT actual
+1920×1080/1440×900 browser/API checks at18765/PID55536. Quantile bucket/median/central50,
+fixed-band meaning, first1/252gap,3y minimum-vs-source gap, READY_ONLY and NVDA input gap,
+shared cursor and all eight policy/window company scopes passed without live UI errors.
+Private original-eight/new-one saves survived cold restart and exact legacy/new exports;
+old metadata captions and original-context coverage reload stayed intact.95PythonPASS/
+1cachedSKIP and52NodePASS;1122protectedfiles/twojournals/17untrackedartifacts and all prior
+2834row/twoMSFTtimeline fields preserved. Existing19078/native14/18766 unchanged; zero
+operating test saves. This documentation follow-up changes no product/test bytes. Prior
+candidate/pending clauses are historical; remote/main delivery was not requested/performed.
+[Final receipts and coverage definitions](../docs/implementation/price-timeline-insights-20261117.md#final-local-and-operating-acceptance--2026-11-17).

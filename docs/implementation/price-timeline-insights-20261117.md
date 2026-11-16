@@ -14,9 +14,11 @@ to stage and activate the exact independently verified consumer at18765 after ac
 preserving backend19078, old18766, publications and both journals. Root main, old worktrees,
 1122protected pins, two journals and17untracked architecture artifacts are preservation bounds.
 
-APPROVED: this scoped implementation. IMPLEMENTED: writer-checked candidate on this branch;
-its frozen SHA is supplied at handoff. INDEPENDENTLY_VERIFIED, LOCALLY_ACCEPTED,
-RUNTIME_ACCEPTED and MERGED remain separate pending states until specific receipts exist. Follow [delivery workflow](delivery-workflow.md).
+APPROVED: this scoped implementation. IMPLEMENTED and INDEPENDENTLY_VERIFIED: product
+`c7241f94d9a5f4df4d3c3207ea7d5c73997fe4f8`, separate read-only Astra PASS.
+LOCALLY_ACCEPTED and RUNTIME_ACCEPTED: ROOT PASS at2026-11-16T15:25:28.099790Z
+(2026-11-17KST); final receipts below. MERGED: not performed or requested for this milestone.
+Earlier candidate/pending statements below describe their historical stages. Follow [delivery workflow](delivery-workflow.md).
 The [original timeline contract](price-band-timeseries-20261116.md) and
 [analytical plane boundaries](../architecture/analytical-data-model.md) remain authoritative.
 
@@ -165,3 +167,70 @@ journals preservation and local operating acceptance remain pending. ROOT may ac
 the exact independently verified/accepted consumer; writer performs no activation. Remote
 push/PR/main merge is outside this local milestone. No full repository suite or new corpus
 qualification is claimed.
+
+
+## Final local and operating acceptance — 2026-11-17
+
+ROOT accepted **product `c7241f94d9a5f4df4d3c3207ea7d5c73997fe4f8`** after separate
+Astra frozen-source PASS, at `2026-11-16T15:25:28.099790+00:00` (2026-11-17KST).
+This final update changes only tracked documentation; product/tests remain byte-identical
+to c724. The preceding pending clauses are historical and do not supersede this final state.
+
+| Stage | Final evidence |
+| --- | --- |
+| Implemented product |c7241f94d9a5f4df4d3c3207ea7d5c73997fe4f8|
+| Independent source/actual-data review |Separate read-only Astra PASS;95Python/1cachedSKIP,52Node, Ruff/syntax/diff and original-pin probes PASS|
+| ROOT actual browser/API |1920×1080/1440×900, selected-date interpretation/cursor/coverage/gaps PASS with zero live UI errors|
+| ROOT local/operating |18765/PID55536, previous38488; unchanged pub86fad and original backend19078/native14/18766|
+| Remote/main |Not requested or performed; main b5d926ed029752702eddec00295676879f50bec9 unchanged|
+
+Verified evidence locators:
+
+- `work/price-timeline-insights-20261117/evidence/root-final-acceptance.json`, SHA256
+  `8201885ee37954b8d0c950a255af1e971cdfc2ba497b98e36228463b4fb26aba`.
+- `work/price-timeline-insights-20261117/evidence/independent-insights-c7241f9.md`, SHA256
+  `ef012c778b04dba7756eb764173e68b9e76589e108714d2fb88f06d10509666a`.
+- Independent actual coverage summary SHA256
+  `c2d1b2f9916922bbdc9c487a1d4e98a962c509d3093ef9d257a30497d712f439`.
+
+ROOT verified the live MSFT latest P50–P75 bucket, median/central50 relation and8–10fixed
+band bracket; the first historical date's1valid/252required/251shortfall; the separate3y
+source-coverage gap despite minimum samples being met; READY_ONLYzero scope counts;
+NVDA PER input gap; original/current evaluation-date separation; and shared mouse/keyboard
+cursor/evidence. All eight actual coverage scopes match the table above.109selectable,
+historical PER10any/9latest/0distributions and BPS60any/latest/1distribution remain distinct
+from current PER12. MSFT's754BPS points retain503eligible252s and283eligible3y points.
+
+Private clones preserved all eight original SQL rows exactly, including notes/definitions/
+payloads. One explicit new UI timeline save made nine; actual cold restart63660→20772
+retained them and both new and legacy exports exactly. New saved summaries reload coverage
+against their original evidence context; legacy snapshots retain their absent-at-save
+caption and original values. Operating price saves remain0, legacy trash8, and there were
+**zero operating test saves**. Both original journals remain exact with integrity `ok`.
+All1122protected files and17untracked architecture artifacts are preserved. Current2834price
+observations/1335available and all prior fields of two MSFT timelines are hash-identical to
+baseline; no source/denominator/ratio/quantile or accounting policy changed.
+
+The active immutable source archive is
+`work/price-timeline-insights-20261117/accepted-source-c7241f94d9`. Operating18765/PID55536
+uses its price worker and exact frozen assets. Backend19078/PID1477655 and native14 remain
+unchanged; old18766two-company view remains unchanged. ROOT performed activation and final
+read-only checks; the writer only records the verified receipt.
+
+Windows staging/config/evidence root:
+`/mnt/c/Users/plusbdw/.codex/visualizations/2026/11/08/01a1bb67-6275-70d2-989e-208966314006/price-timeline-insights-20261117`.
+Its `commands-receipt.json` pins source, original publication and `private-start.json` /
+`live-start.json` exact configurations; SHA256
+`c70d165a2af7c318f8f5e3cf569b1feb26e085e017486d18143752d2519f0e7b`.
+`live-c724-running.json` records the active exact command; assets match c724. Representative
+actual screenshots under that same absolute root are `msft-latest-1920-live.png`,
+`msft-latest-1440-live.png`, `msft-first-date-1440-live.png` and `nvda-per-gap-1440-live.png`.
+`ui-live.json`, `values-live.json`, `existing-functions.json` and `final-health.json` record
+actual API/UI/legacy-function and final health checks. These local locators supplement the
+tracked rules/counts/status rather than replacing them.
+
+The focused reproduction commands above remain valid. Under delivery-workflow section0,
+this documentation-only follow-up checks receipt hashes, content/links/diff and product
+source equality; it does not rerun unchanged product tests or perform runtime actions.
+Final documentation freeze is reviewed separately. No push, PR, remote CI or main merge was
+requested/performed, and no new financial inputs, Raw capture or publication was created.
