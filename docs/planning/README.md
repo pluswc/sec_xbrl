@@ -1,3 +1,7 @@
+2026-11-16 [H5 실제 수집·제한 운영 인수](../implementation/price-related-metrics-20261116.md#h5-completion-and-bounded-operating-acceptance--2026-11-16): 소스 `8e97971d3c`에서 helper·새 자료·운영 증거의 별도 Sol 독립 PASS와 ROOT H5 로컬/제한 LIVE 인수를 완료했다. AAPL/MSFT 공식 신규 history refresh·동일 offline replay·한 번 batch 채택·11/13 가격의 별도18766뷰를 확인했고 기존18765(109개사), 사적 복사본의 기존3저장 payload와 운영 journal·14datasets는 보존했다. 새 MSFT 가치는 금융 cutoff10/25로 차단되며 PBR739/754는 부분 시점 진단이다. 기존 PR103은 main `b9126a262c`에 MERGED, PR CI43743679695/main CI43744367922는 각각3,201PASS/46SKIP으로 success다. 이번 H5 후속 PR·필수 CI·main 병합은 이 문서 동결 시점 아직 별도 미수행이며 GOAL 완료를 주장하지 않는다. 아래 candidate/권한/PR 대기는 각 당시 상태다.
+
+2026-11-16 [H5 제한 신규 수집 후속](../implementation/price-related-metrics-20261116.md#h5-bounded-fresh-capture-follow-up--authorized-preparation-2026-11-16): 사용자가 AAPL·MSFT 공식 제한 수집을 명시 승인했다. main `b9126a262c` 기준 별도 branch에서 소비자 생성 capture-evidence helper/candidate를 준비했으며 독립 검증·ROOT 채택·H5 최종 인수는 아직 대기다. 기존109 LIVE와 저장 원본을 보존하며 아래 권한 대기 문구는 이전 인수 당시 기록이다.
+
 2026-11-16 [가격 관련 지표 실행·인수](../implementation/price-related-metrics-20261116.md): 소스 `67cc011c26`에서 전체 계열 구현·별도 Sol 독립 검증 PASS·ROOT 로컬 및 고정 자료 LIVE 인수를 완료했다. 109개사 가격 계열, MSFT의 10개 가치 지표·고정 PER/PBR 밴드·754거래일 PBR 시점 진단과 명시 저장/원본 재열기를 실제 확인했다. 다른108개사의 가치 지표는 적용 범위 미승인이며 엔진 미구현이나 Raw 부재 판정이 아니다. H5 신규 수집 권한은 대기 중이고 PR·필수 CI `test`·main 병합도 아직 PENDING이다. 현재가는 아니며 실제 가격일은2026-10-23이다. 이전 문서 전용/진행 중 상태는 당시 기록으로 보존한다.
 
 # 계획 등록부 — 단일 진입점
