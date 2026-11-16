@@ -173,3 +173,23 @@ missing selected period may offer `이 기간의 준비 항목 보기`; only exp
 selection with that period's prepared items. Never silently merge raw scope groups.
 Existing market-input consumers remain present; this does not authorize a new price producer.
 Remote delivery/main merge for this milestone has not been requested or performed.
+
+## Price bands and rolling distribution — approved V3 implementation candidate (2026-11-16)
+
+A paired timeline owns the price worksheet: upper actual close plus fixed EPS/BPS scenario
+bands in currency/share; lower actual PER or BPS-based PBR plus P10–P90/P25–P75/P50 in
+multiples. One shared date cursor and native keyboard range link both plots and the adjacent
+denominator/period/known-date/window-count evidence ledger. Missing values break lines and
+ribbons. Vertical marks distinguish denominator identity changes. Never infer business inputs
+in the browser or stretch a last-point distribution backward.
+
+Use the existing paper/ink/slate/blue/amber palette, quiet borders,14px reading figures and
+4px rhythm. Charts dominate width;272px adjacent date ledger supports desktop, stacks below
+on narrow screens. Real company search/selection and temporal controls precede the chart.
+An empty scope has an explicit picker; a multi-company scope never silently picks one.
+Advanced conditions/query/old fixed-day bands remain in a collapsed native disclosure.
+View1/3years and distribution252sessions/3years are separate controls.252sessions requires
+exact252 expected and valid observations;3years retains its original rule. Diagnostic filed-day
+mode remains visibly backtest-ineligible. Editable fixed multiples are assumptions, not forecasts.
+Implementation/independent/actual1920/1440browser/runtime acceptance remain separate states
+in [the tracked contract](../docs/implementation/price-band-timeseries-20261116.md).

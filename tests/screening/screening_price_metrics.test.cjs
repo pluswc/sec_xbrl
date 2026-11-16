@@ -11,7 +11,7 @@ function fixture(extra={}){
   S:{explorerSelected:new Set()},explorerDataset:()=>({...scope,publication_id:scope.dataset_publication_id,auxiliary_manifest_sha256:scope.dataset_manifest_sha256}),
   ...extra};
  const formatting=source.slice(source.indexOf("function formatDecimal("),source.indexOf("function displayValue("));
- const f=vm.runInNewContext(formatting+snippet+"\n({state:priceWorksheet,priceExecute,priceInvalidate,priceValue,priceSave,priceReopen,priceQuery,priceScopeMatchesCurrent,priceRowsMarkup,priceShowEvidence,priceDisplayResult,priceDefinitionLabel,priceExport})",env);
+ const f=vm.runInNewContext(formatting+snippet+"\n({state:priceWorksheet,priceExecute,priceInvalidate,priceValue,priceSave,priceReopen,priceQuery,priceScopeMatchesCurrent,priceRowsMarkup,priceShowEvidence,priceDisplayResult,priceDefinitionLabel,priceExport,priceTimelineMarkup,priceTimelineReadout,priceTimelineQuery,priceTimelineBind})",env);
  f.state.capability={definitions:{per:{metric_id:"per",label:"PER",unit:"MULTIPLE"}},companies:[{cik:"0000000001",ticker:"ONE"}],dataset_scope:scope};
  return {f,host};
 }
@@ -147,4 +147,84 @@ test("old export schema stays exact while only new readiness publications add so
  assert.equal(exported.source_context.price_as_of,"2026-11-13");
  assert.equal(exported.source_context.company_financial_readiness["0000000001"].source_selection_as_of,"2026-10-25");
  assert(!("rows" in exported.source_context));
+});
+
+function timelineResult(){
+ const ratio=(day,value)=>({metric_id:"pbr_bps",observation_id:"ratio-"+day,cik:"1",status:value===null?"UNAVAILABLE":"AVAILABLE",value,reason:value===null?"MISSING":null});
+ return {publication_id:"pinned",mode:"timeline",company:{cik:"1",ticker:"REAL"},diagnostic:true,
+  timeline_parameters:{metric:"pbr_bps",multiples:["2"],view_years:3,window:"252s"},definitions:{},rows:[],
+  points:["2026-01-01","2026-01-02","2026-01-03"].map((day,i)=>({as_of:day,close:String(10+i),currency:"USD",
+   ratio:ratio(day,i===1?null:String(2+i)),reason:i===1?"MISSING":null,
+   denominator:{observation_id:i===2?"new":"old",value:"5",currency:"USD",known_on:day,period_end:day},
+   bands:[{user_multiple:"2",value:i===1?null:"10",status:i===1?"UNAVAILABLE":"AVAILABLE",reason:"MISSING"}],
+   distribution:{status:"UNAVAILABLE",reason:"INSUFFICIENT",valid_sessions:i,expected_sessions:252,minimum_eligible_sessions:252,percentiles:{},window_start:day,window_end:day}}))};
+}
+
+test("timeline markup retains real units, diagnostic status and missing ribbons",()=>{
+ const {f}=fixture();const html=f.priceTimelineMarkup(timelineResult());
+ assert.match(html,/REAL/);assert.match(html,/백테스트 부적격/);assert.match(html,/252거래일 이동창/);
+ assert.match(html,/USD\/주/);assert.match(html,/공유 거래일/);assert.doesNotMatch(html,/class="timeline-ribbon/);
+ assert.match(html,/timeline-denominator-event/);
+});
+
+test("one date cursor synchronizes both plots and missing counts/readiness stay visible",()=>{
+ const cursors=[new Map(),new Map()];
+ const {f,host}=fixture({$$:selector=>selector==="[data-timeline-cursor]"?cursors.map(c=>({setAttribute:(k,v)=>c.set(k,v)})):[]});
+ f.state.result=timelineResult();f.priceTimelineReadout(1);
+ assert.equal(cursors[0].get("x1"),504);assert.equal(cursors[1].get("x1"),504);
+ assert.equal(host("#price-timeline-date").value,"1");assert.match(host("#price-timeline-readout").innerHTML,/1 \/ 252 · 252/);
+ assert.match(host("#price-timeline-readout").innerHTML,/2026-01-02/);
+ f.priceTimelineReadout(-20);assert.equal(f.state.timelineIndex,0);
+ f.priceTimelineReadout(500);assert.equal(f.state.timelineIndex,2);
+});
+
+test("timeline refuses multi-company selection without choosing its first company",()=>{
+ const {f,host}=fixture();f.state.selected=new Set(["1","2"]);f.priceTimelineQuery();
+ assert.match(host("#price-feedback").textContent,/한 기업/);assert.equal(f.state.result,null);
+});
+
+test("keyboard range and pointer share the same readout function",()=>{
+ let pointer;const cursors=[];
+ const svg={getBoundingClientRect:()=>({left:0,width:1000}),set onpointermove(fn){pointer=fn}};
+ const {f,host}=fixture({$$:s=>s==="[data-timeline-plot]"?[svg]:cursors});
+ f.state.result=timelineResult();f.priceTimelineBind();
+ host("#price-timeline-date").oninput({target:{value:"0"}});assert.equal(f.state.timelineIndex,0);
+ pointer({clientX:504});assert.equal(f.state.timelineIndex,1);
+});
+
+test("stale timeline response cannot repaint newer company selection",async()=>{
+ let resolve;const {f}=fixture({api:()=>new Promise(r=>resolve=r)});
+ const pending=f.priceExecute("timeline",{cik:"1"});f.priceInvalidate();resolve(timelineResult());await pending;
+ assert.equal(f.state.result,null);
+});
+
+
+test("multi-megabyte worker responses validate linearly with strict size/alphabet/padding",()=>{
+ const payload=Buffer.from(JSON.stringify({points:"x".repeat(5*1024*1024)})).toString("base64");
+ assert.equal(bridge.validWorkerBase64(payload),true);
+ const mid=Math.floor(payload.length/2);
+ assert.equal(bridge.validWorkerBase64(payload.slice(0,mid)+"!"+payload.slice(mid+1)),false);
+ for(const bad of ["A===","AA=A","AAA","====","AA==AAAA","AA\n=","éééé"])
+  assert.equal(bridge.validWorkerBase64(bad),false,bad);
+ for(const good of ["","AA==","AAA=","AAAA"])assert.equal(bridge.validWorkerBase64(good),true,good);
+ assert.equal(bridge.validWorkerBase64(Buffer.alloc(32*1024*1024).toString("base64")),true);
+ assert.equal(bridge.validWorkerBase64(Buffer.alloc(32*1024*1024+1).toString("base64")),false);
+});
+
+
+test("fully unavailable lower timeline has an explained empty plot, no invented numeric axis",()=>{
+ const {f}=fixture();const result=timelineResult();
+ result.points.forEach(p=>{p.ratio.value=null;p.ratio.status="UNAVAILABLE";p.bands=[]});
+ const html=f.priceTimelineMarkup(result);
+ assert.match(html,/실제 배수·이동 분포 미준비/);
+ const lower=html.slice(html.indexOf("실제 PBR · BPS와 이동 분포"));
+ assert.doesNotMatch(lower,/<text x="8" y="48">1/);
+});
+
+
+test("successful explicit timeline scrolls analysis into view and provides conditions return",async()=>{
+ let scrolls=0;const {f,host}=fixture({api:async()=>timelineResult()});
+ host("#price-analysis-heading").scrollIntoView=()=>scrolls++;
+ await f.priceExecute("timeline",{cik:"1"});
+ assert.equal(scrolls,1);assert.match(host("#price-query-result").innerHTML,/href="#price-timeline-controls"/);
 });

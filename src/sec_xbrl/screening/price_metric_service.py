@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from sec_xbrl.metrics.market_inputs import encoded, identity, pinned_json
 from sec_xbrl.metrics.price_related import REGISTRY, fixed_multiple_bands
+from sec_xbrl.metrics.price_timeline import DEFINITION, build_timeline
 from sec_xbrl.screening.price_metric_publication import PriceMetricReader
 
 
@@ -18,6 +19,7 @@ class PriceMetricService:
     def __init__(self, reader: PriceMetricReader, journal_path: str | Path):
         self.reader = reader
         self._evidence_contexts: OrderedDict[str, dict] = OrderedDict()
+        self._timelines: OrderedDict[str, dict] = OrderedDict()
         self.path = Path(journal_path)
         if not self.path.is_absolute() or any(p.is_symlink() for p in (self.path, *self.path.parents)):
             raise ValueError("price journal requires an absolute non-symlink path")
@@ -89,6 +91,45 @@ class PriceMetricService:
             return reader.query(**request)
         if operation == "screen":
             return reader.screen(**request)
+        if operation == "timeline":
+            if set(request) - {"cik", "metric", "multiples", "view_years", "window", "readiness_policy"}:
+                raise ValueError("unknown timeline parameter")
+            cik, metric = request["cik"], request.get("metric", "pbr_bps")
+            multiples = request.get("multiples", ["1", "2", "3"])
+            years, window = request.get("view_years", 3), request.get("window", "252s")
+            policy = request.get("readiness_policy", reader.manifest["historical_readiness_policy"])
+            if (cik not in reader.manifest["files"] or metric not in {"per", "pbr_bps"}
+                or years not in {1, 3} or window not in {"252s", "3y"}
+                or policy not in {"READY_ONLY", "DIAGNOSTIC_FILED_DAY"}
+                or not isinstance(multiples, list) or not 1 <= len(multiples) <= 6):
+                raise ValueError("bounded company/PER/PBR timeline parameters required")
+            if policy == "DIAGNOSTIC_FILED_DAY" and reader.manifest["historical_readiness_policy"] != policy:
+                raise ValueError("publication does not authorize filed-day diagnostics")
+            if any(reader.manifest["definitions"].get(mid, {}).get("definition_version") != REGISTRY[mid]["definition_version"]
+                   for mid in ("per", "pbr_bps", "fixed_per_band", "fixed_pbr_band")):
+                raise ValueError("timeline requires compatible declared valuation/band definitions")
+            query = reader.query(ciks=[cik], metric_ids=[metric], mode="historical", include_lineage=True)
+            batch = reader._source(reader.manifest["source_pins"]["price_batch"])
+            financial = reader._source(reader.manifest["source_pins"]["financial_inputs"])
+            sessions = reader._source(reader.manifest["source_pins"]["sessions"])
+            cache_key = identity({"pin": reader.pin, "request": request, "definition": DEFINITION})
+            if cache_key in self._timelines:
+                self._timelines.move_to_end(cache_key)
+                return copy.deepcopy(self._timelines[cache_key])
+            company = next(c for c in reader.manifest["companies"] if c["cik"] == cik)
+            points = build_timeline(history=query["rows"], prices=batch["prices"], financial=financial["observations"],
+                sessions=sessions, coverage={"start": batch["query"]["start_date"], "end": batch["query"]["end_date"]},
+                cik=cik, security_id=company["security_id"], metric=metric, multiples=multiples,
+                end=reader.manifest["price_as_of"], view_years=years, window=window, readiness_policy=policy)
+            result = {**query, "mode": "timeline", "points": points,
+                "timeline_definition": copy.deepcopy(DEFINITION) if window == "252s" else reader.manifest["definitions"][f"historical_{metric}_percentiles_3y"],
+                "timeline_parameters": {"metric": metric, "multiples": multiples, "view_years": years,
+                    "window": window, "readiness_policy": policy}, "company": company,
+                "diagnostic": policy == "DIAGNOSTIC_FILED_DAY", "backtest_eligible": False}
+            self._timelines[cache_key] = copy.deepcopy(result)
+            while len(self._timelines) > 4:
+                self._timelines.popitem(last=False)
+            return result
         if operation == "bands":
             if set(request) != {"cik", "multiples"}:
                 raise ValueError("band request requires company and exact user multiples")
@@ -110,7 +151,7 @@ class PriceMetricService:
     def save(self, *, kind: str, operation: str, request: dict, title: str, note: str = "") -> dict:
         if kind not in {"CONDITION", "RESULT"} or not isinstance(title, str) or not title.strip() or len(title) > 160 or not isinstance(note, str) or len(note) > 10000:
             raise ValueError("valid explicit save kind/title/note required")
-        if operation not in {"query", "screen", "bands"}:
+        if operation not in {"query", "screen", "bands", "timeline"}:
             raise ValueError("only worksheet conditions/results may be saved")
         if kind == "CONDITION" and operation != "screen":
             raise ValueError("condition save requires a screening request")

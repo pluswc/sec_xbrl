@@ -618,6 +618,20 @@ function serveProfileAsset(bundle, request, response, label, auxiliary = null) {
   response.end(body);
 }
 
+// A bounded linear scan avoids RegExp stack growth on multi-megabyte timeline replies.
+function validWorkerBase64(value) {
+  if (typeof value !== "string" || value.length % 4 !== 0 ||
+      value.length > 4 * Math.ceil(MAX_RESPONSE_BODY / 3)) return false;
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  const end = value.length - padding;
+  if (value.length / 4 * 3 - padding > MAX_RESPONSE_BODY) return false;
+  for (let i = 0; i < end; i++) {
+    const c = value.charCodeAt(i);
+    if (!(c >= 65 && c <= 90 || c >= 97 && c <= 122 || c >= 48 && c <= 57 || c === 43 || c === 47)) return false;
+  }
+  return true;
+}
+
 // A separate child owns lifecycle state. Its failures never terminate the financial relay.
 function startHistoryWorker(options, priceMetrics = false) {
   const childArgs = priceMetrics ? [
@@ -648,7 +662,7 @@ function startHistoryWorker(options, priceMetrics = false) {
     pending.delete(result.id); clearTimeout(item.timer);
     try {
       if (!Number.isInteger(result.status) || result.status < 200 || result.status > 599 ||
-          typeof result.body_base64 !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(result.body_base64)) {
+          !validWorkerBase64(result.body_base64)) {
         throw new Error("invalid history worker response");
       }
       const bytes = Buffer.from(result.body_base64, "base64");
@@ -931,4 +945,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { loadMarketInputs, serveMarketInputs, bindPreparedAuxiliaryContexts, bindPreparedAuxiliary, loadAuxiliaryUnion, allowedPath, parseArgs, startBridge, loadDisplayAssets, loadRevenueBreakdowns, serveRevenueBreakdowns, loadFinancialGrowth, serveFinancialGrowth, startHistoryWorker, historyGuardRequired };
+module.exports = { validWorkerBase64, loadMarketInputs, serveMarketInputs, bindPreparedAuxiliaryContexts, bindPreparedAuxiliary, loadAuxiliaryUnion, allowedPath, parseArgs, startBridge, loadDisplayAssets, loadRevenueBreakdowns, serveRevenueBreakdowns, loadFinancialGrowth, serveFinancialGrowth, startHistoryWorker, historyGuardRequired };

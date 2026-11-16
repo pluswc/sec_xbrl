@@ -28,7 +28,7 @@ def dispatch(service: PriceMetricService, message: dict) -> tuple[int, dict]:
         return 200, service.reopen(path.removeprefix(base + "/saves/"))
     if method == "POST" and path == base + "/saves":
         return 201, service.save(**request)
-    if method == "POST" and path in {base + "/query", base + "/screen", base + "/bands", base + "/evidence"}:
+    if method == "POST" and path in {base + "/query", base + "/screen", base + "/bands", base + "/timeline", base + "/evidence"}:
         return 200, service.execute(path.rsplit("/", 1)[1], request)
     return 404, {"error": "unknown price metric route"}
 
