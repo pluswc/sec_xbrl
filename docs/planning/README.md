@@ -2,6 +2,8 @@
 
 # 계획 등록부 — 단일 진입점
 
+2026-11-16 [Filing completeness / period integrity](../implementation/filing-completeness-period-integrity-20261116.md)는 승인된 P0 구현 후보이며 관련264 pytest/Ruff/diff 자체 검사를 통과했다. 실제 IXDS 문서집합 완전성, 무승인 fiscal 충돌 보류, 명시 승인 회계달력만의 비정규 Q4 경로를 다룬다. 기존 Raw/발행물/History/운영/qualification은 불변이며 독립·실자료 검증은 대기다. 별도 PR은 승인됐고 main 병합·live 전체 재발행은 제외한다.
+
 2026-11-16 [가격 관련 지표 전체 GOAL 인계](price-related-metrics-goal-handoff-20261116.md)를 추가했다.
 이번 변경은 문서·새 세션 프롬프트만이며 코드/GOAL/운영 실행 승인이 아니다.
 가격·EPS·주식 수 PR101은 main `1b0a4f26d1`에 MERGED, 필수 CI43606365273은

@@ -160,3 +160,30 @@ Every derivative keeps both raw Fact/filing/accession inputs, selected input
 values and dates, formula, policy/rule version and compatibility statement.
 Unavailable underlying disclosures remain unavailable; an absent gross-profit
 concept is not invented by subtracting costs from revenue in this workflow.
+
+## New analytical fiscal-coordinate integrity
+
+`fiscal-coordinate-integrity-v1` flags a declared fiscal focus more than one year
+away from the filing's actual report-date calendar year. This is a hold signal,
+not a rule choosing an effective year. Named fiscal years within one year remain
+possible. Conflicting new period observations are explicit exclusions retaining
+reported focus/source IDs and a null effective coordinate; no subtraction or
+calendar-year fallback is authorized. Existing exact accession/source/ROOT/HUMAN
+correction contracts retain their approval strength. HON-specific v2 is unchanged.
+
+## Explicit reviewed week calendars
+
+`reviewed-fiscal-calendar-v1` is a separately pinned ROOT temporal permission for
+one CIK/FY/cutoff and four exclusive, contiguous quarter boundaries. Only explicit
+12/12/12/16 (364 days) or 12/12/12/17 (371 days) calendars are currently supported.
+The first 252 days may be YTD9 and the final 112/119 days Q4 only under that exact
+permission. It never expands default core/revenue day ranges or supplies canonical
+mapping, additivity, recast/basis, denominator or prior-comparison approval.
+
+Period classification retains `reviewed-fiscal-calendar-classification-v1` and
+proof; new Derived residuals retain a distinct calendar rule suffix and the full
+approval/source hashes. Existing default paths and legacy M6 contracts remain
+unchanged (including their historical broader candidate tolerance). EPS, margins,
+ratios and averages do not become subtractable. Share/YoY remains unprepared
+without its independent same-scope parent/prior policy; calendar acceptance is
+not a financial qualification or a claim that a mapping-review-held input is usable.

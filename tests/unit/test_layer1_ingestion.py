@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
@@ -166,7 +167,8 @@ class _FailingLoader:
 def _resolved(tmp_path: Path) -> ResolvedFiling:
     filing = FilingRef("0000000001", "0000000001-25-000001", "10-Q", date(2025, 5, 1))
     zip_path = tmp_path / "filing.zip"
-    zip_path.write_bytes(b"xbrl fixture")
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        archive.writestr("report.htm", "<html/>")
     index = FilingIndex(cik=filing.cik, accession=filing.accession, source_url="https://sec.example/index.json", entries=())
     return ResolvedFiling(filing=filing, index=index, zip_path=zip_path, entrypoint_name="filing.htm")
 

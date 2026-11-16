@@ -10,6 +10,8 @@ import json
 from copy import deepcopy
 from typing import Any
 
+from sec_xbrl.periods.reviewed_calendar import ReviewedFiscalCalendar
+
 REVIEW_VERSION = "revenue-q4-continuity-review-v1"
 RULE_VERSION = "reviewed-revenue-scope-fy-ytd9-q4-v1"
 RATIO_RULE = "reviewed-revenue-q4-paired-input-ratios-v1"
@@ -41,7 +43,7 @@ def _endpoint(reference: dict, by_id: dict[str, dict]) -> dict:
     return row
 
 
-def _input_problem(row: dict, cutoff: str) -> str | None:
+def _input_problem(row: dict, cutoff: str, calendar: ReviewedFiscalCalendar | None = None) -> str | None:
     """Original mapping flags remain intact; ROOT grants cover only their exact scope."""
     import re
     from datetime import date
@@ -73,7 +75,7 @@ def _input_problem(row: dict, cutoff: str) -> str | None:
             return "Q4_INPUT_NOT_QUALIFIED"
         days = (date.fromisoformat(row["context_end_date"]) - date.fromisoformat(row["context_start_date"])).days
         bounds = {"FY": (350, 378), "YTD_9M": (255, 290), "QTD_3M": (75, 105)}.get(row["period_class"], (1, 0))
-        if not bounds[0] <= days <= bounds[1] or row.get("context_duration_days") != days:
+        if (not bounds[0] <= days <= bounds[1] and not (calendar and calendar.allows(row, cutoff))) or row.get("context_duration_days") != days:
             return "Q4_INPUT_PERIOD_NOT_QUALIFIED"
     except (KeyError, TypeError, ValueError, InvalidOperation):
         return "Q4_INPUT_NOT_QUALIFIED"
@@ -93,12 +95,14 @@ def exact_difference(first: str, second: str) -> str:
     return "0" if not value else format(value, "f")
 
 
-def derive_reviewed_q4(observations: list[dict], links: list[dict], *, cutoff: str) -> tuple[list[dict], list[dict]]:
+def derive_reviewed_q4(observations: list[dict], links: list[dict], *, cutoff: str, calendar: ReviewedFiscalCalendar | None = None) -> tuple[list[dict], list[dict]]:
     """Consume exact independently approved links, leaving every original row unchanged."""
     from datetime import date
 
     from sec_xbrl.analytics.revenue_quarters import ASSURANCE
 
+    if calendar:
+        calendar.verify()
     by_id = {}
     for row in observations:
         identity = row["period_observation_id"]
@@ -119,7 +123,7 @@ def derive_reviewed_q4(observations: list[dict], links: list[dict], *, cutoff: s
             raise ValueError("one reviewed input pair is declared more than once")
         pairs.add(pair)
         period = link["period"]
-        reason = next((value for row in (annual, nine) if (value := _input_problem(row, cutoff))), None)
+        reason = next((value for row in (annual, nine) if (value := _input_problem(row, cutoff, calendar))), None)
         if reason is None and ((annual["period_class"], nine["period_class"]) != ("FY", "YTD_9M")
             or annual["cik"] != link.get("cik") or nine["cik"] != annual["cik"]
             or annual["raw_concept_qname"] != nine["raw_concept_qname"]
@@ -137,20 +141,23 @@ def derive_reviewed_q4(observations: list[dict], links: list[dict], *, cutoff: s
                     or period["fiscal_quarter"] != 4
                     or annual["context_start_date"] != nine["context_start_date"]
                     or period["period_start"] != nine["context_end_date"] or period["period_end"] != annual["context_end_date"]
-                    or not 75 <= (date.fromisoformat(period["period_end"]) - date.fromisoformat(period["period_start"])).days <= 105):
+                    or (not 75 <= (date.fromisoformat(period["period_end"]) - date.fromisoformat(period["period_start"])).days <= 105
+                        and not (calendar and calendar.allows_pair(annual, nine, cutoff)))):
                     reason = "Q4_REVIEW_ACTUAL_PERIOD_MISMATCH"
         except (KeyError, TypeError, ValueError):
             reason = "Q4_REVIEW_ACTUAL_PERIOD_MISMATCH"
         if reason:
             exclusions.append({"amount_id": identity, "reason": reason, "source_fact_ids": [annual["source_fact_id"], nine["source_fact_id"]]})
             continue
-        body = {"amount_id": identity, "cik": annual["cik"], "fiscal_year": period["fiscal_year"], "fiscal_quarter": 4,
+        body = {**({"fiscal_calendar_proof": calendar.proof()} if calendar and calendar.allows_pair(annual, nine, cutoff) else {}), "amount_id": identity, "cik": annual["cik"], "fiscal_year": period["fiscal_year"], "fiscal_quarter": 4,
                 "context_start_date": period["period_start"], "context_end_date": period["period_end"], "period_class": "QTD_3M",
                 "value_numeric": exact_difference(annual["value_numeric"], nine["value_numeric"]),
-                "formula": "FY - YTD_9M", "derivation_rule_version": RULE_VERSION,
+                "formula": "FY - YTD_9M", "derivation_rule_version": RULE_VERSION + ("+reviewed-calendar-v1:" + calendar.calendar_sha256 if calendar and calendar.allows_pair(annual, nine, cutoff) else ""),
                 "source_type": "DERIVED_QUARTER", "reported_or_derived": "DERIVED", "basis_assurance": ASSURANCE,
                 "source_fact_ids": [annual["source_fact_id"], nine["source_fact_id"]],
                 "source_inputs": [deepcopy(annual), deepcopy(nine)], "review_link": deepcopy(link),
                 "comparison_only": annual["comparative_type"] == "PRIOR_YEAR_COMPARABLE"}
         metrics.append({**body, "derived_metric_id": "reviewed-revenue-q4:" + _digest(body)})
+    if calendar:
+        calendar.verify()
     return metrics, exclusions

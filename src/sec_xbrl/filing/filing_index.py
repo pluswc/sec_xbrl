@@ -204,14 +204,33 @@ class ArelleFilingLoader:
 
     def load(self, resolved: ResolvedFiling, destination: Path) -> Any:
         """Extract only local package files and pass the selected local path to Arelle."""
+        package_hash = hashlib.sha256(resolved.zip_path.read_bytes()).hexdigest()
         destination.mkdir(parents=True, exist_ok=True)
         _extract_zip(resolved.zip_path, destination)
         entrypoint = destination / resolved.entrypoint_name
         if not entrypoint.is_file():
             raise ArelleLoadError(f"resolved entry point is absent after extraction: {resolved.entrypoint_name}")
-        model = self._model_loader(entrypoint)
+        from sec_xbrl.filing.inline_document_set import discover_inline_set
+
+        document_set = discover_inline_set(destination, entrypoint)
+        load_path = entrypoint
+        if document_set and len(document_set.paths) > 1:
+            from arelle.UrlUtil import IXDS_DOC_SEPARATOR, IXDS_SURROGATE
+
+            load_path = Path(str(destination / IXDS_SURROGATE) + IXDS_DOC_SEPARATOR.join(str(path) for path in document_set.paths))
+        model = self._model_loader(load_path)
         if model is None or getattr(model, "modelDocument", None) is None:
             raise ArelleLoadError(f"Arelle did not load entry point: {resolved.entrypoint_name}")
+        if hashlib.sha256(resolved.zip_path.read_bytes()).hexdigest() != package_hash:
+            model.close()
+            raise ArelleLoadError("accession package changed during loading")
+        model.sec_package_sha256 = package_hash
+        if document_set:
+            try:
+                model.sec_inline_document_inventory = document_set.verify_loaded(model)
+            except Exception:
+                model.close()
+                raise
         return model
 
     @classmethod
@@ -265,6 +284,8 @@ def _zip_member_names(zip_path: Path) -> tuple[str, ...]:
             names = tuple(info.filename for info in archive.infolist() if not info.is_dir())
     except (OSError, zipfile.BadZipFile) as exc:
         raise PackageIntegrityError(f"invalid cached XBRL ZIP: {zip_path}") from exc
+    if len(names) != len({str(PurePosixPath(name)) for name in names}):
+        raise FilingIndexError("XBRL package contains duplicate filename")
     if any(not _is_safe_member_name(name) for name in names):
         raise FilingIndexError("XBRL package contains unsafe filename")
     return names
@@ -273,12 +294,19 @@ def _zip_member_names(zip_path: Path) -> tuple[str, ...]:
 def _extract_zip(zip_path: Path, destination: Path) -> None:
     try:
         with zipfile.ZipFile(zip_path) as archive:
+            names = [info.filename for info in archive.infolist()]
+            if len(names) != len({str(PurePosixPath(name)) for name in names}):
+                raise FilingIndexError("XBRL package contains duplicate filename")
             for info in archive.infolist():
                 if info.is_dir():
                     continue
                 if not _is_safe_member_name(info.filename):
                     raise FilingIndexError("XBRL package contains unsafe filename")
+                if (info.external_attr >> 16) & 0o170000 == 0o120000:
+                    raise FilingIndexError("XBRL package contains a symbolic link")
                 target = destination / info.filename
+                if not target.resolve().is_relative_to(destination.resolve()):
+                    raise FilingIndexError("XBRL package extraction escapes destination")
                 target.parent.mkdir(parents=True, exist_ok=True)
                 with archive.open(info) as source, target.open("xb") as output:
                     shutil.copyfileobj(source, output)
@@ -308,6 +336,14 @@ def _load_with_arelle(
 
     register_sec_inline_transforms()
     controller = Cntlr.Cntlr(logFileName="logToBuffer")
+    from arelle import PluginManager
+    from arelle.UrlUtil import IXDS_SURROGATE
+
+    if IXDS_SURROGATE in str(entrypoint):
+        if not PluginManager.addPluginModule("inlineXbrlDocumentSet"):
+            controller.close()
+            raise ArelleLoadError("Arelle IXDS plugin is unavailable")
+        PluginManager.reset()
     if taxonomy_cache is not None:
         taxonomy_cache.mkdir(parents=True, exist_ok=True)
         controller.webCache.cacheDir = str(taxonomy_cache)

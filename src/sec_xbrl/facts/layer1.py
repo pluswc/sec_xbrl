@@ -121,7 +121,7 @@ class Layer1Extractor:
 
     # Inline transform support changes the set of filings that can be parsed;
     # retain a distinct version for immutable snapshot and parse-state lineage.
-    parser_version = "m2-layer1-v7"
+    parser_version = "m2-layer1-v8"
 
     def extract(
         self,
@@ -501,7 +501,7 @@ def _text(value: Any) -> str | None:
 
 def _source_document(fact: Any) -> str | None:
     document = getattr(fact, "modelDocument", None)
-    return _text(getattr(document, "basename", None) or getattr(document, "uri", None))
+    return _text(getattr(document, "sec_source_document", None) or getattr(document, "basename", None) or getattr(document, "uri", None))
 
 
 def _source_locator(fact: Any) -> str | None:

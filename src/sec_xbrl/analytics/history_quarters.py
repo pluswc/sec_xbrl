@@ -23,7 +23,7 @@ from collections.abc import Mapping, MutableMapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 from pathlib import Path
 from time import monotonic
 from types import SimpleNamespace
@@ -54,6 +54,7 @@ from sec_xbrl.history import (
 )
 from sec_xbrl.longitudinal import Layer2PublicationReader
 from sec_xbrl.longitudinal.q4_policy_registry import CASH_FLOW_ALLOWLIST, INCOME_ALLOWLIST
+from sec_xbrl.periods.reviewed_calendar import ReviewedFiscalCalendar
 
 QUARTER_RULE = "approved-core-cumulative-difference-v1"
 PERIOD_RULE = "m6-fiscal-boundaries-v2"
@@ -1906,15 +1907,21 @@ def _concatenate_staged_records(
     }
 
 
-def derive_quarter(later: dict[str, Any], earlier: dict[str, Any], *, quarter: int) -> dict[str, Any] | None:
+def derive_quarter(later: dict[str, Any], earlier: dict[str, Any], *, quarter: int, calendar: ReviewedFiscalCalendar | None = None) -> dict[str, Any] | None:
     """One reviewed additive difference; reject all incompatible scopes."""
     if quarter not in {2, 3, 4} or not approved_additive(later) or not approved_additive(earlier):
         return None
-    return _derive_additive_difference(later["value_lineage"], earlier["value_lineage"], quarter=quarter)
+    if calendar:
+        calendar.verify()
+    result = _derive_additive_difference(later["value_lineage"], earlier["value_lineage"], quarter=quarter, calendar=calendar)
+    if calendar:
+        calendar.verify()
+    return result
 
 
 def _derive_additive_difference(
     left: dict[str, Any], right: dict[str, Any], *, quarter: int, rule_version: str = QUARTER_RULE,
+    calendar: ReviewedFiscalCalendar | None = None,
 ) -> dict[str, Any] | None:
     """Shared scope/date/arithmetic mechanism; callers must govern additivity."""
     expected = {2: ("YTD_6M", "QTD_3M"), 3: ("YTD_9M", "YTD_6M"), 4: ("FY", "YTD_9M")}[quarter]
@@ -1932,16 +1939,27 @@ def _derive_additive_difference(
         return None
     try:
         start, end = date.fromisoformat(right["context_end_date"]), date.fromisoformat(left["context_end_date"])
-        if not 75 <= (end - start).days <= 105:
+        calendar_used = not 75 <= (end - start).days <= 105
+        if calendar_used and (quarter != 4 or calendar is None or not calendar.allows_pair(left, right, as_of)):
             return None
-        amount = Decimal(str(left["value_numeric"])) - Decimal(str(right["value_numeric"]))
+        if calendar_used:
+            first, second = Decimal(str(left["value_numeric"])), Decimal(str(right["value_numeric"]))
+            if not first.is_finite() or not second.is_finite():
+                return None
+            with localcontext() as context:
+                context.prec = max(1, max(first.adjusted(), second.adjusted()) - min(first.as_tuple().exponent, second.as_tuple().exponent) + 3)
+                amount = first - second
+        else:
+            amount = Decimal(str(left["value_numeric"])) - Decimal(str(right["value_numeric"]))
         if not amount.is_finite():
             return None
     except (ValueError, TypeError, KeyError, InvalidOperation):
         return None
+    if calendar_used:
+        rule_version += "+reviewed-calendar-v1:" + calendar.calendar_sha256
     fact_ids = [left["selected_source_fact_id"], right["selected_source_fact_id"]]
     metric_id = _id("derived", rule_version, fact_ids, quarter, _scope(left))
-    return {"derived_metric_id": metric_id, "derivation_rule_version": rule_version,
+    return {**({"fiscal_calendar_proof": calendar.proof()} if calendar_used else {}), "derived_metric_id": metric_id, "derivation_rule_version": rule_version,
             "formula": f"{expected[0]} - {expected[1]}", "fiscal_quarter": quarter,
             "value_numeric": str(amount), "context_start_date": str(start), "context_end_date": str(end),
             "period_class": "QTD_3M", "source_fact_ids": fact_ids,
