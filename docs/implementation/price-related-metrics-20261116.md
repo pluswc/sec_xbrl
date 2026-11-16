@@ -1,5 +1,14 @@
 # Price-related metrics — execution contract, 2026-11-16
 
+**Latest local delivery state (2026-11-16):** H5 at source
+`8e97971d3c253833913edac68fd5705cc0d3f805` has separate helper, fresh-data and
+operating-evidence independent PASS plus ROOT local/bounded-live acceptance.
+Original PR103 is MERGED in main`b9126a262ce561a45e14ee1bb33f872d36079bee`,
+and both original PR/main CI runs succeeded. This H5 follow-up's remote PR,
+required CI and main merge are still NOT_PERFORMED at this documentation freeze.
+Whole-GOAL completion is not claimed. Earlier preparation/candidate/permission/
+PR-pending records below are historical stages superseded by the dated H5 table.
+
 **Frozen-source acceptance record (2026-11-16, before H5 follow-up approval):** all requested families are IMPLEMENTED at
 `67cc011c269d023a32c51c8fe10e24b7c2f43a8f`; separate Sol verification PASS;
 ROOT LOCALLY_ACCEPTED and LIVE operating acceptance for the frozen source/data
@@ -541,3 +550,255 @@ financial cutoff10/25. It is not a refreshed109-company dataset. Private checks
 use a copied price journal; operating old-save reopening uses the existing
 journal's original pins without writing test records. No worker/asset/accounting
 guard change is required. Actual18766activation/acceptance is not claimed yet.
+
+## H5 completion and bounded operating acceptance — 2026-11-16
+
+The lead compared all three separate independent stages with the actual capture,
+publication, private browser/cold-restart and bounded operating results, then
+accepted H5 locally. This supersedes the earlier H5 permission/candidate/adoption/
+operating-pending stages for **US:AAPL and US:MSFT only**. It neither refreshes the
+109-company default nor grants newer financial applicability.
+
+### State and remote-delivery separation
+
+| Scope / state | Exact target and dated evidence | Accepted status |
+| --- | --- | --- |
+| Original H0–H4 implementation/consumer delivery | [PR103](https://github.com/pluswc/sec_xbrl/pull/103), main merge`b9126a262ce561a45e14ee1bb33f872d36079bee` | MERGED |
+| Original PR required CI`test` | [Run43743679695](https://github.com/pluswc/sec_xbrl/actions/runs/43743679695),3,201PASS/46SKIP | success |
+| Original main CI | [Run43744367922](https://github.com/pluswc/sec_xbrl/actions/runs/43744367922),3,201PASS/46SKIP | success |
+| H5 user approval |2026-11-16explicit official bounded AAPL/MSFT capture plus necessary verification/delivery | APPROVED |
+| H5 helper implementation | source`8e97971d3c253833913edac68fd5705cc0d3f805`; only new consumer helper/test, no prior producer/worker changes | IMPLEMENTED |
+| H5 independent helper/candidate stage |14tracked boundary tests+6independent edge checks, real extraction and official offline replay | PASS |
+| H5 independent fresh-data stage | exact ROOT adoption,2068-row batch, immutable fresh2publication and20independent price calculations | PASS |
+| H5 independent operating-evidence stage | ROOT browser/process evidence, original SQL/exports/configs/files and preservation independently checked | PASS |
+| H5 ROOT final local/bounded operating acceptance | final receipt6250b3db…703f1, source8e97971 and fresh manifest107b39a2…1ec7d | LOCALLY_ACCEPTED_AND_BOUNDED_LIVE |
+| This H5 follow-up remote PR / required CI`test` / main merge | Separate next delivery after this docs-only freeze/review | NOT_PERFORMED / NOT_PERFORMED / NOT_PERFORMED |
+| Whole GOAL | ROOT final remote-delivery judgment remains separate | NOT_MARKED_COMPLETE |
+
+ROOT rechecked the original PR103/main/CI facts on2026-11-16. Those successful
+full-CI counts are the original delivery's actual results; they are not a newly
+run CI result for the H5 helper or this documentation-only change.
+
+### Official capture, source evidence and one batch adoption
+
+The official SDK0.5.1/contract1.1.1 performed a **bounded full-history refresh** for
+the two authorized securities at1request/second, yielding21,822canonical rows
+(AAPL11,574/MSFT10,248). The frozen source period1 is−2208988800, period2/factor
+horizon1794873600 and completed-day cutoff is exclusive2026-11-16. The physical
+last observation is2026-11-13. Official offline`--from-inventory` replay produced
+byte-identical price data at the new source hash below. No supplier repository,
+existing canonical snapshot, Raw filing or financial panel was modified.
+
+This is not a true incremental append API: SDK0.5.1 has none. The workflow adopts
+one new bounded history snapshot, then one shared canonical batch for all metrics.
+It does not claim scheduled/automatic refresh or a fresh109-company universe.
+The source/action validation and currency sidecar retain the SDK's unresolved
+corporate-action limits; source/currency validation does not certify a complete
+action stream, historical ready time, EPS or common-class equivalence.
+
+The explicitly selected session satisfies
+`2026-11-13T21:00Z <= capture2026-11-16T00:14:49.518757Z < next2026-11-16T21:00Z`
+under the retained XNYS source. Selection uses the actual completed session and
+retained capture/coverage evidence, not D−1, weekdays or observed-row fallback.
+Request11/16 versus actual11/13 is three-calendar-day staleness.
+
+After independent candidate verification, ROOT accepted the exact consumer
+candidate/sidecar/source pins. A separate accepted manifest was created; the
+candidate remained unchanged. `origin=CONSUMER_GENERATED_SOURCE_VALIDATION`,
+`supplier_independent_acceptance=false` and the exact ROOT receipt remain in the
+adopted provenance. The manifest's accepted status means **consumer adoption**,
+not supplier certification or supplier independent acceptance.
+
+| Required immutable input/output | Exact SHA256 |
+| --- | --- |
+| Official fresh delivery manifest |`d34a2b713704730d385fabb841def3f71b12c07b24974fd9d3f3d0e81dd81148`|
+| Official fresh price, also exact offline replay |`6122e9bdc92e9d979f5826b432ab5ba0a30516ed68236a6fab744210a56f766a`|
+| Exact canonical security master |`26265d9297e47bbdd8a5373512c7a80cbd49ec5338817d0f843e24c50a400554`|
+| Consumer candidate manifest / sidecar |`8a17d6fb1758f2bc55b97af1a49f7887ce1034357643063408bf241a4143e7da` / `ba37a15463b06971f37571afbfd97819241cd0adcbc59489d9dee24f960f0a79`|
+| Exact ROOT consumer-adoption receipt |`37bd5a16efe0096e3961014ba522d86bd4e116a1b9c074e4d1b32f6f519a732e`|
+| Accepted consumer manifest |`3b17b9fe561804ba499ff10ce38c39dacb5d0d824a194c32bc46bd1e9247e3f8`|
+| Shared fresh canonical batch |`4e9741e0e4775fbe1ff8253b4bf7e096b2487ee8db12ed5834b11d4bf26a6ea2`|
+| Fresh publication config |`ede6ec0733e104ec0e89e834d0cf1dc2564e334c4b4bfb35f9f83c140813fc80`|
+| Fresh2publication manifest |`107b39a2ea6c6481733f3817e0a54cbdfd3cfb1a7808fad783b57d0fb511ec7d`|
+
+The new batch contains2068rows=1034per security over2022-10-01–2026-11-13.
+Consumer adoption verifies the delivery once and calls official CanonicalQuery
+price history once for both IDs. No per-company/metric repetition of the old
+supplier full-history scan or adoption check occurred.
+The independent data stage compared every source column of all2068rows to the
+new official Parquet and recomputed every batch observation ID. All ready_on
+values remain null, not substituted with capture time.
+
+The successful external supplier runtime was Python3.11 with PyArrow25.0.1
+(`/home/plusbdw/anaconda3/envs/py31114/bin/python`). An independent first attempt
+with a different Python3.12/PyArrow19 runtime failed reading the preexisting
+security Parquet with`Repetition level histogram size mismatch`; the specified
+supplier runtime succeeded. No packages were installed and no compatibility
+rewrite occurred. The core SEC project remains Python3.12; its helper unit tests
+and publication/query checks use the existing project virtualenv. The standalone
+capture helper/exporter do not require SEC/Arelle in the supplier environment.
+
+### Fresh publication availability and cutoff behavior
+
+The accepted separate publication is
+`data/processed/price_metrics/20261116_fresh2_diagnostic_v1/price_metric_manifest.json`,
+ID`screening-price-metrics-577ab236eef320385d98bd71`, total1,135,342bytes.
+It has2issuers×26latest observations=52rows,22AVAILABLE/30UNAVAILABLE, with the
+full28definition registry and separately served user scenarios. Definitions,
+formulae, session source and financial qualifications are unchanged.
+
+| Fresh bounded result | Actual accepted behavior |
+| --- | --- |
+|6returns+3volatilities+relative volume for each security | All20available and independently recomputed with the exact approved windows/formulae |
+| MSFT10current valuations | All unavailable:`FINANCIAL_CUTOFF_BEFORE_PRICE_AS_OF`;11/13price exceeds qualified10/25financial cutoff |
+| AAPL10current valuations | All retain`CLASS_CURRENCY_SPLIT_COMPATIBILITY_NOT_APPROVED`; source USD proof is not class/EPS approval |
+| Default PER/PBR scenarios | All12rows across2companies remain unavailable for those financial reasons |
+| MSFThistorical PBR and PBR/BPS | Each739/754eligible sessions,15cutoff-blocked sessions, explicit partial diagnostic, P50=10.93243558907872642868996357855939 |
+| MSFThistorical PER/P/S/EV-Revenue/EV-operating proxy | Each62/754eligible, below252minimum, typed insufficient-history reason |
+| AAPL historical valuation | Explicit754-session scope-not-approved interval |
+
+The fresh historical window is2023-11-13–2026-11-13. PBR's15new missing sessions
+are after the old qualified financial cutoff; they are not filled. This
+739/754**partial** filed-day diagnostic differs from oldv3's754/754window
+2023-10-23–2026-10-23. Neither is a current PBR, percentile rank or historical-ready
+certificate; both retain unknown actual ready time and backtest_eligible=false.
+The old EPS/financial approval does not admit later filings or newly dated prices.
+New financial qualification is a separate future task, not an H5 shortcut.
+
+### Actual source-switch, saved-data preservation and bounded operation
+
+ROOT exercised the private worksheet at18887 with the originalv3, then fresh2,
+then a cold service restart. Exactly3existing private SQL rows stayed identical
+in all four columns(id,created_at,fullpayloadtext,sha256); no record was added.
+The original two-sided PER condition remains`gte10` AND`lte30`. Original band
+result201.9375, quote524.510009765625 at2026-10-23, definitions, memo and exports
+all reopen under the original source after switching active publication. All3
+exports' entire request/result/note and original definition context matched;
+export SHA256 is`2f05293c19331ab58a17a3f56786ceeaed3826a735338cde0fc76e79269cca20`.
+An explicit new query returns the active fresh source with its cutoff guard.
+Owned private processes18632/52460/27680were stopped after those checks.
+
+ROOT then exposed only a **separate bounded2-security worksheet** at
+`http://127.0.0.1:18766/`, observed NodePID61996 at acceptance. Original
+`http://127.0.0.1:18765/`, PID52088, kept the109-company default unchanged and
+was not restarted/replaced. Only three startup arguments differ: frontend port,
+price-publication path and price-publication hash. The executable, accepted
+bundle/assets, financial backend19078, qualified financial source
+`d1e74d90c98838431740c0e16408d8b4d2623543`, price-source-root, journals and all
+old auxiliary pins remain the same. Existing company common-input cards continue
+to show their original dated source;18766is not a refreshed109-company dataset.
+Process IDs here are dated ROOT observations, not future identity assumptions.
+
+Actual18766browser checks passed: exactly2price companies,6comparison rows for
+3metrics, new11/13quote evidence, visible3daystaleness/automatic_update=false and
+MSFT's financial-cutoff reason. No browser error, blocked mutation attempt, live
+test save or legacy-journal mutation occurred. The operating price journal is
+shared for original-save pin reopening; test activity used only a private copy.
+
+Before/after status,history,batchavailability,109pricecapability andpricesaves
+responses match exactly. Original14datasets,109default price companies, history8
+and trash8remain. Protected hashes are unchanged:
+
+- legacy journal:`3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`;
+- operating price journal:`ba18bf81059b4de96e5028dd1e9a320c37100aa8366fd4b09299d9be7131e8b0`;
+- originalv3manifest:`1fc3fcfaf96ec6960ac2f8f778ba280bdad001bb9b9e8eb19ec8b470394c400a`.
+
+Raw SEC, old publications, user records, AGENTS/instructions/skills and original
+source/native guards were not changed. No broader financial rebuild or109-company
+re-audit accompanied this bounded refresh.
+
+### Independent evidence, observation limits and reuse
+
+The helper stage ran14tracked+6independent boundary checks, actual source
+extraction and official byte-identical offline replay. The data stage independently
+checked accepted pins, all new batch rows, all10fresh company files plus manifest,
+all20fresh price calculations, cutoff/missing rows and PBR quantiles. The operating
+stage independently hashed/reviewed the10ROOT evidence files, controller/configs,
+read-only original/copied SQL rows and full exports, protected originals and four
+runtime code files against frozen source.
+
+**Actual Windows/browser/process actions were performed by ROOT.** The separate
+verifier reviewed those pinned observations and independently inspected files,
+SQL and configuration; it did not replay the browser/process actions. Its narrow
+WSL GET attempts at18765/18766were blocked by the environment with`Operation not
+permitted`; no bypass/fallback was used and direct live observation is not claimed.
+ROOT separately owns the actual browser results and final local/H5 judgment.
+
+| Acceptance evidence | Exact SHA256 |
+| --- | --- |
+| Independent helper/candidate PASS |`941c61bb06e5efcbe0d9464c33d6d5b89091f9d1a68337f3a6a87dde98ad570e`|
+| Independent adopted batch/publication PASS |`c0654bf7fbe36fa0451dc2d619d1de8ccbd0898fd32642cd15cf9f74964f119d`|
+| Independent operating-evidence PASS |`3c5ac882475d07d7b95cc6353068b11cd0af8459034ad1e84b63f022bd925e7e`|
+| ROOT fresh publication local acceptance |`3917129691583e264d31e320c5d48bc5161654b502dc91b06e2ae7b17c94cbb0`|
+| ROOT operating/preservation acceptance |`6b9a2a12d22ea8376ae9f75468cc707b69ce41fccb3f5aa2d1f5a1c909d3f8fa`|
+| ROOT final H5 local/bounded-live acceptance |`6250b3db61107e4eba92964fd6d74244341551b9ce2cfde9a5e66a0fabb703f1`|
+
+Previous69Python/20Node,392baseline source/example/test blob equality,
+545-file oldpublication/math/PIT/save checks and original PR103fullCI are reused.
+New checks above are distinct from those reused results. No completed source,
+consumer-data, browser or helper extraction was rerun for this documentation-only
+commit. This H5 branch's remote PR/required CI/main delivery remains a separate
+next step; no future successful merge or whole-GOAL completion is asserted here.
+
+### Offline reproduction contract and commands
+
+The required inputs are explicit: exact canonical security master; official
+SDK0.5.1 bounded frozen inventory and selected AAPL/MSFT checkpoints/compressed
+raw captures; its new delivery/price files; pinned supplier source commit
+`24f0b87160f793871f3dfea8faaf43092b1905d7` plus normalizer/action bytes; selected
+identity JSON; consumer evidence specification; independent review and exact ROOT
+receipt; retained1035-session calendar and financial-input-bundlev3 with their
+original accounting/EV/historical approvals. Evidence files/data are required
+inputs for replay, not hidden working-plan authority. Do not recreate approvals
+by changing a status flag or copying the old sidecar onto a new price hash.
+
+The evidence spec declares `schema_version`, dataset/source labels,
+`supplier_root`, `source_commit`, and path/SHA256/bytes pins for delivery,
+inventory and selected_securities. Each selected identity contains its full
+canonical security_id, CIK, ticker, Yahoo symbol, company name and exchange.
+The exact ROOT receipt schema/status/pin objects are defined in the preparation
+section above. Candidate preparation and consumer adoption are separate operations.
+
+Use the existing supplier Python3.11/PyArrow25.0.1 for SDK/metadata operations;
+use project Python3.12 for the governed publication. With these variables pointing
+to their explicitly declared local inputs and **new** output destinations:
+
+```bash
+PYTHONPATH="$TASK_SUPPLIER" "$TASK_SUPPLIER_PY" -m market_data_pipeline.cli canonical-price \
+  --from-inventory --security-file "$TASK_SECURITY" --raw-root "$TASK_RAW_ROOT" \
+  --out "$TASK_NEW_REPLAY"
+
+PYTHONPATH="$TASK_SUPPLIER" "$TASK_SUPPLIER_PY" "$TASK_REPO/examples/screening/prepare_price_capture_evidence.py" prepare \
+  --spec "$TASK_SPEC" --sha256 "$TASK_SPEC_SHA" --output "$TASK_NEW_CANDIDATE_DIR"
+
+# After independent review and ROOT exact consumer adoption:
+PYTHONPATH="$TASK_SUPPLIER" "$TASK_SUPPLIER_PY" "$TASK_REPO/examples/screening/prepare_price_capture_evidence.py" accept \
+  --candidate "$TASK_CANDIDATE_MANIFEST" --candidate-sha256 "$TASK_CANDIDATE_SHA" \
+  --acceptance "$TASK_ROOT_RECEIPT" --acceptance-sha256 "$TASK_ROOT_RECEIPT_SHA" \
+  --output "$TASK_NEW_ACCEPTED_MANIFEST"
+
+PYTHONPATH="$TASK_SUPPLIER" "$TASK_SUPPLIER_PY" "$TASK_REPO/examples/screening/export_canonical_price_batch.py" \
+  --config "$TASK_BATCH_CONFIG" --sha256 "$TASK_BATCH_CONFIG_SHA" --output "$TASK_NEW_BATCH"
+
+PYTHONPATH="$TASK_REPO/src" "$TASK_PROJECT_PY" "$TASK_REPO/examples/screening/prepare_price_metrics.py" publish \
+  --config "$TASK_PUBLICATION_CONFIG" --sha256 "$TASK_PUBLICATION_CONFIG_SHA" \
+  --output "$TASK_NEW_PUBLICATION_DIR"
+```
+
+The batch config supplies the new canonical price directory, new delivery pin,
+new sidecar and accepted-manifest pins, exactly the two registered CIK/ticker
+identities, start2022-10-01/end2026-11-13. The fresh publication config retains
+session sourceSHA`931f5a8788e625d468a763a89ba6141e52ae04f409f3c4d068090e062b0a08a6`
+and financial bundleSHA`12a5e7ac2db12e7b1a09aa50b77c8e80b995463bffbe7dfb2d9a4ea1f62c3fc7`,
+qualified cutoff10/25 and original EV/diagnostic policy pins. Its selected session
+is11/13, requested day11/16, series_start2025-11-13 and historical_start2023-11-13,
+with`EXPLICIT_COMPLETED_SESSION` selection and`DIAGNOSTIC_FILED_DAY` policy.
+
+For a source-switch replay, use a SQLite backup of the original price journal in
+a private worker, retain that same copy across source switch/cold restart, and
+call `reopen(saved_id)`. Pass its newly returned evidence_context with the exact
+CIK/observation ID to evidence. Compare original payloads, definitions, quote,
+notes and exports; then explicitly query the active source and confirm the cutoff.
+Operating acceptance uses the separate18766configuration and readonly probes;
+never replace the109default, seed live test records, restore an old journal or
+reuse old opaque evidence tokens after restart.
