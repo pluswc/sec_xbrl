@@ -141,3 +141,71 @@ def test_inline_resource_documents_must_be_local_package_or_offline_taxonomy(tmp
     primary.write_text(primary.read_text().replace('href="test.xsd"', f'href="{reference}"'))
     with pytest.raises(InlineDocumentSetError, match="resource document"):
         discover_inline_set(tmp_path, primary)
+
+
+def metadata_package(tmp_path, name, values, *, other_context=False):
+    resolved = package(tmp_path)
+    schema = f'''<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xbrli="http://www.xbrl.org/2003/instance" targetNamespace="https://xbrl.sec.gov/dei/2025" elementFormDefault="qualified"><xsd:import namespace="http://www.xbrl.org/2003/instance" schemaLocation="http://www.xbrl.org/2003/xbrl-instance-2003-12-31.xsd"/><xsd:element name="{name}" type="xbrli:stringItemType" substitutionGroup="xbrli:item" xbrli:periodType="duration"/></xsd:schema>'''
+    (tmp_path / "dei.xsd").write_text(schema)
+    for index, document in enumerate(("primary.htm", "unrelated-name.htm")):
+        path = tmp_path / document
+        text = path.read_text().replace('<html ', '<html xmlns:dei="https://xbrl.sec.gov/dei/2025" ', 1)
+        if index == 0:
+            text = text.replace('</ix:references>', '<link:schemaRef xlink:type="simple" xlink:href="dei.xsd"/></ix:references>')
+            if other_context:
+                start = text.index('<xbrli:context id="c">')
+                end = text.index('</xbrli:context>', start) + len('</xbrli:context>')
+                text = text.replace('</ix:resources>', text[start:end].replace('id="c"', 'id="other"') + '</ix:resources>')
+        context = "other" if index and other_context else "c"
+        fact = f'<ix:nonNumeric id="meta-{index}" name="dei:{name}" contextRef="{context}">{values[index]}</ix:nonNumeric>'
+        path.write_text(text.replace('</body>', fact + '</body>'))
+    with zipfile.ZipFile(resolved.zip_path, "w") as archive:
+        for file in ("test.xsd", "dei.xsd", "primary.htm", "unrelated-name.htm"):
+            archive.write(tmp_path / file, file)
+    return resolved
+
+
+@pytest.mark.parametrize("name,values", [
+    ("DocumentFiscalYearFocus", ("2027", "2025")),
+    ("DocumentFiscalPeriodFocus", ("Q3", "FY")),
+    ("CurrentFiscalYearEndDate", ("--06-27", "--12-31")),
+    ("DocumentPeriodEndDate", ("2025-06-27", "2027-06-27")),
+    ("DocumentType", ("10-K", "10-Q")),
+    ("EntityCentralIndexKey", ("0000000001", "0000000002")),
+    ("AmendmentFlag", ("false", "true")),
+])
+@pytest.mark.parametrize("other_context", [False, True])
+def test_actual_arelle_conflicting_dei_metadata_never_uses_last_document(tmp_path, name, values, other_context):
+    from sec_xbrl.facts.layer1 import Layer1ExtractionError
+    from sec_xbrl.filing.layer1_ingestion import Layer1Ingestor
+
+    resolved = metadata_package(tmp_path, name, values, other_context=other_context)
+    model = ArelleFilingLoader().load(resolved, tmp_path / "loaded")
+    try:
+        assert model.errors == []  # Arelle accepts the source; filing-metadata admission must not guess.
+        with pytest.raises(Layer1ExtractionError, match="conflicting DEI filing metadata declarations: " + name):
+            Layer1Ingestor(tmp_path / "snapshots").ingest(resolved, model)
+        assert not list((tmp_path / "snapshots").rglob("layer1_manifest.json"))
+        assert {fact.value for fact in model.facts if str(fact.qname) == "dei:" + name} == set(values)
+    finally:
+        model.close()
+
+
+def test_actual_arelle_identical_dei_duplicates_keep_both_raw_facts_and_unique_metadata(tmp_path):
+    import polars as pl
+
+    from sec_xbrl.filing.layer1_ingestion import Layer1Ingestor
+
+    resolved = metadata_package(tmp_path, "DocumentFiscalYearFocus", ("2025", "2025"), other_context=True)
+    model = ArelleFilingLoader().load(resolved, tmp_path / "loaded")
+    try:
+        ingestor = Layer1Ingestor(tmp_path / "snapshots")
+        manifest = ingestor.ingest(resolved, model)
+        assert manifest.source_fact_count == manifest.materialized_fact_count == 4
+        root = ingestor.snapshot_dir(resolved)
+        assert pl.read_parquet(root / "filing.parquet")["document_fiscal_year_focus"].to_list() == ["2025"]
+        facts = pl.read_parquet(root / "fact.parquet").filter(pl.col("value_text") == "2025")
+        assert facts.height == 2 and facts["fact_id"].n_unique() == 2
+        assert set(facts["source_document"]) == {"primary.htm", "unrelated-name.htm"}
+    finally:
+        model.close()

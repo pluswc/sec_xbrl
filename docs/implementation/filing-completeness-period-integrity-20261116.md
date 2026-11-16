@@ -152,3 +152,29 @@ Local logs: `/tmp/filing-p0-final-pytest.log`, `/tmp/filing-p0-physical.log`,
 `/tmp/filing-p0-cli-help.log`. No full-suite/Node/CI pass is claimed: UI is unchanged
 and ROOT owns separate PR/CI and actual evidence. Independent validation, cached
 source/data acceptance, remote delivery and main merge have not been performed.
+
+## Independent return: conflicting DEI metadata — 2026-11-16
+
+The first freeze `0020d8c578` received **FAIL / P1**: Arelle can load conflicting
+DEI declarations without reporting an error. The previous extraction loop chose
+the last value for filing metadata, potentially concealing a fiscal-focus conflict.
+The cached IBM/STX/COST observations reported for that freeze remain historical
+stage evidence and do not establish acceptance of the corrected candidate.
+
+The correction rejects differing declarations of DocumentFiscalYearFocus,
+DocumentFiscalPeriodFocus, CurrentFiscalYearEndDate, DocumentPeriodEndDate,
+DocumentType, EntityCentralIndexKey and AmendmentFlag before publication. Document,
+Fact ID, Context or declaration order cannot select a winner. Nil and non-nil are
+distinct. Exact same lexical-value/nil-state duplicates are permitted deterministically:
+the consumer value is unique and every original Fact/document/context remains in
+Raw output. No effective year or metadata precedence is inferred.
+
+Actual offline Arelle regressions load two documents with different Fact IDs and
+same/different Contexts; Arelle reports no errors but ingestion must reject all
+seven critical metadata conflicts. An identical-value case publishes both Raw
+facts and one unique filing value. The corrected source requires new independent
+verification and ROOT cached rechecks; no actual data was republished by writer.
+
+P1 수정 후 전체 관련 pytest **279 PASS**(3.22초), Ruff/diff PASS. 최종 로그는
+`/tmp/filing-p0-metadata-final.log`다. 이전 동결의 검증 결과와 이 후보의 재검증을
+구분하며 현재 독립 검증·실자료 재인수는 대기다.
