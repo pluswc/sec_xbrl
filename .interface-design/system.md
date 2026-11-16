@@ -220,3 +220,16 @@ to accepted183a, so its private old-five/new-one cold restart/export evidence re
 preserved, with zero operating test saves. This supersedes the CSS pending stage while
 preserving prior dated acceptance records. No further product refinement or remote/main
 change is included. [Final boundaries and receipts](../docs/implementation/price-band-timeseries-20261116.md#refined-final-independent-local-and-operating-acceptance--2026-11-16).
+
+
+Price timeline remote integration (2026-11-16): user authorized push/PR; latest
+origin/main `b8a2088e17` (PR107) is normally merged into the existing timeline branch.
+Retain both accepted timeline layout and the direct-quarter EPS evidence/evaluation context:
+current evaluation16 with quote/public cutoff13 and ready16 never becomes a historical
+readiness exemption. Shared band helper propagates current context/HON diagnostics only
+from its source observation; timeline historical gaps and252/3y windows remain unchanged.
+Product bytes equal accepted combined runtime5c37; this integration adds no UI redesign.
+Writer checks158PythonPASS/1explicitcachedSKIP and48NodePASS; integrated independent review,
+ROOT acceptance, push/PR and remote CI remain pending. Existing operating runtime/data/
+journals/main are untouched. Prior no-remote records remain historical; no main merge or
+runtime activation is included in the new authorization. See [the current delivery contract](../docs/implementation/price-band-timeseries-20261116.md#authorized-remote-delivery-and-pr107-integration--2026-11-16).

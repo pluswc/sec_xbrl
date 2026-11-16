@@ -199,14 +199,25 @@ DURATION_ROLES = {r for r in ROLE_UNITS if r.endswith("_12m")}
 
 
 def _input_reason(row: dict, *, role: str, cik: str, as_of: str,
-                  currency: str, grant: dict) -> str | None:
+                  currency: str, grant: dict, current_evaluation: dict | None = None) -> str | None:
     if row.get("cik") != cik or row.get("role") != role or not row.get("observation_id"):
         return "INPUT_IDENTITY_MISMATCH"
     if row.get("status") != "AVAILABLE" or finite(row.get("value")) is None:
         return row.get("reason") or "FINANCIAL_INPUT_UNAVAILABLE"
     if row.get("unit_kind") != ROLE_UNITS[role] or (role != "common_shares" and row.get("currency") != currency):
         return "UNIT_OR_CURRENCY_MISMATCH"
-    if not row.get("known_on") or row["known_on"] > as_of or (row.get("ready_on") and row["ready_on"] > as_of):
+    ready_cutoff = as_of
+    if current_evaluation and role == "diluted_eps_12m" and row.get("source_kind") == "GOVERNED_DIRECT_QTD_TTM":
+        from sec_xbrl.metrics.reported_quarter_eps import aware
+
+        if row["observation_id"] not in current_evaluation["input_ids"] or as_of != current_evaluation["quote_session"]:
+            return "CURRENT_EPS_EVALUATION_SCOPE_MISMATCH"
+        if (not row.get("ready_at") or not row.get("ready_on")
+            or aware(row["ready_at"]).date().isoformat() != row["ready_on"]
+            or aware(row["ready_at"]) > aware(current_evaluation["evaluation_at"])):
+            return "INPUT_AFTER_CURRENT_EVALUATION"
+        ready_cutoff = current_evaluation["evaluation_as_of"]
+    if not row.get("known_on") or row["known_on"] > as_of or (row.get("ready_on") and row["ready_on"] > ready_cutoff):
         return "INPUT_AFTER_PRICE_AS_OF"
     if not row.get("source_refs"):
         return "INPUT_LINEAGE_MISSING"
@@ -241,13 +252,28 @@ def _input_reason(row: dict, *, role: str, cik: str, as_of: str,
 def calculate_valuation_metrics(price: dict | None, observations: list[dict], grant: dict | None,
                                 *, cik: str, security_id: str, as_of: str,
                                 ev_policy: dict | None = None, financial_anchor: str | None = None,
-                                financial_as_of: str | None = None) -> list[dict]:
+                                financial_as_of: str | None = None,
+                                current_eps_evaluation: dict | None = None) -> list[dict]:
     """A grant binds exact observation IDs and security/basis; it never creates data.
 
     Monetary rows retain fiscal periods. The value here is daily as-of using only
     evidence known then. Ambiguous observations never select a first row.
     """
     date.fromisoformat(as_of)
+    current_evaluation = None
+    if current_eps_evaluation:
+        from sec_xbrl.metrics.reported_quarter_eps import validate_current_evaluation
+
+        current_evaluation = validate_current_evaluation(current_eps_evaluation["declaration"],
+            bundle_pin=current_eps_evaluation["financial_inputs"], batch_pin=current_eps_evaluation["price_batch"],
+            requested=current_eps_evaluation["requested_as_of"], selected=as_of)
+        from sec_xbrl.metrics.market_inputs import pinned_json
+
+        approved_rows = {r["observation_id"]: r for r in pinned_json(current_eps_evaluation["financial_inputs"])["observations"]
+                         if r["observation_id"] in current_evaluation["input_ids"]}
+        if any(r != approved_rows.get(r["observation_id"]) for r in observations
+               if r.get("observation_id") in current_evaluation["input_ids"]):
+            raise ValueError("current EPS input differs from approved typed observation")
     mids = [mid for mid, definition in REGISTRY.items() if definition["family"] == "VALUATION"]
     price_reason = None
     p = finite((price or {}).get("as_traded_close"))
@@ -288,7 +314,7 @@ def calculate_valuation_metrics(price: dict | None, observations: list[dict], gr
             row = matched[0]
             chosen[role] = row
             reason = _input_reason(row, role=role, cik=cik, as_of=as_of,
-                                   currency=price["currency"], grant=grant)
+                                   currency=price["currency"], grant=grant, current_evaluation=current_evaluation)
             if reason is None and role in DURATION_ROLES:
                 anchor = financial_anchor or grant.get("financial_anchor")
                 if not anchor:
@@ -390,6 +416,11 @@ def calculate_valuation_metrics(price: dict | None, observations: list[dict], gr
                       financial_end_convention="EXCLUSIVE",
                       market_cap_interpretation="LATEST_DISCLOSED_OUTSTANDING_SHARE_BASED_NOT_DAILY_SHARE_MEASUREMENT" if "common_shares" in roles else None,
                       denominator_route="OPERATING_INCOME_PLUS_INCLUDED_DA_PROXY" if mid == "ev_ebitda" else None)
+        if current_evaluation and mid in {"per", "earnings_yield"} and chosen.get("diluted_eps_12m", {}).get("observation_id") in current_evaluation["input_ids"]:
+            result.update(current_eps_evaluation=current_evaluation, historical_ready=False,
+                          backtest_eligible=False, eps_source_kind="GOVERNED_DIRECT_QTD_TTM")
+            result.pop("observation_id")
+            result["observation_id"] = "price-metric-" + identity(result)
         results.append(result)
     return results
 
@@ -413,7 +444,10 @@ def fixed_multiple_bands_for_ratio(base: dict, scenarios: list[str]) -> list[dic
                 value = finite(denominator["value"]) * m
         results.append(_row(f"fixed_{multiple}_band", base["cik"], base["security_id"], base["as_of"],
             value=value, reason=reason, inputs=base["input_lineage"], user_multiple=str(m) if m is not None else None,
-            currency=base.get("currency"), scenario_kind="USER_FIXED_MULTIPLE_NOT_FORECAST"))
+            currency=base.get("currency"), scenario_kind="USER_FIXED_MULTIPLE_NOT_FORECAST",
+            **({"current_eps_evaluation": base["current_eps_evaluation"], "historical_ready": False,
+                "backtest_eligible": False} if "current_eps_evaluation" in base else {}),
+            **({"eps_diagnostic": base["eps_diagnostic"]} if "eps_diagnostic" in base else {})))
     return results
 
 

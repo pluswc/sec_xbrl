@@ -8,13 +8,17 @@ This contract records the lead's accepted implementation decisions. It supersede
 mockup's proposed default 3-year distribution window with the explicitly approved new
 252-session definition below. Synthetic mockup data is never a product data mode.
 
-Baseline: main `75ac14efb8` (PR106), isolated branch `codex/price-band-timeseries`,
-worktree `work/price-band-timeseries-20261116/source`. No push/PR/main merge is authorized
-by this milestone. The lead owns runtime staging/activation, accounting judgment and
+Original local baseline: main `75ac14efb8` (PR106), isolated branch `codex/price-band-timeseries`,
+worktree `work/price-band-timeseries-20261116/source`. The original authorization was local
+only; the later remote-integration section records the new push/PR authorization. Main merge
+and further runtime activation remain outside that new scope. The lead owns runtime staging/activation, accounting judgment and
 acceptance. One implementation writer uses GPT-6.1 Sol because the written GPT-5.6 Sol
 default is unavailable; that disclosed fallback was approved. A separate Astra performs
 read-only independent verification after the writer freezes a local commit, following
 [delivery workflow](delivery-workflow.md).
+
+The following table records the previously accepted local product; the new integration
+candidate and its pending remote gates are recorded in the final section.
 
 | State | Evidence |
 | --- | --- |
@@ -280,3 +284,111 @@ MSFT BPS754points/503eligible252-session distributions and previously documented
 behavior are unchanged. No remote push, PR, CI or main merge occurred; main remains
 `75ac14efb8`. Final documentation verification may use content/link/diff/source-equality
 checks under delivery-workflow section0 without repeating unchanged product tests.
+
+
+## Authorized remote delivery and PR107 integration — 2026-11-16
+
+The user now authorizes pushing the timeline improvement and creating a PR after checking
+latest main and preserving existing functionality, data and history. Earlier “remote not
+requested/not authorized” records describe their historical stages and do not override this
+new authorization. ROOT owns push, PR and CI decisions. The sole implementation writer
+remains the disclosed approved GPT-6.1 Sol fallback; a separate Astra independently reviews
+the new frozen SHA. **Main merge, force-push/history rewrite, further runtime activation,
+Raw/network work, dataset regeneration and republication are not authorized.**
+
+ROOT fetched `origin/main` at **`b8a2088e171a832e63223ddd4906ea430e57145d`**, merged PR107
+(direct reported-quarter EPS TTM). The writer performed a normal merge into existing
+`codex/price-band-timeseries` from timeline documentation head
+`0c982867cb3ea6ed51d062628a878c3f0e97e43b`; no rebase or history replacement occurred.
+The original main checkout and its17untracked architecture artifacts remain untouched.
+
+| New delivery gate | State |
+| --- | --- |
+| User authorization | Push/PR approved; main merge/runtime changes excluded |
+| Local integration | Implemented and writer-checked; exact merge commit supplied at freeze |
+| Independent integrated-source verification | Pending on new frozen SHA; prior acceptances are comparison evidence only |
+| Integrated local acceptance | Pending ROOT judgment after independent review |
+| Operating state | Existing separately accepted local runtime5c37 remains unchanged; no restart by writer |
+| Remote push / PR / required CI | Pending ROOT execution and actual receipts |
+| Timeline main merge | Not performed or authorized; PR107 itself is already in the fetched main |
+
+### Scope resolution and preserved boundaries
+
+Conflicts were limited to planning append records, the shared fixed-band refactor and
+appended Node tests. Both planning histories and both test groups are retained. Main's
+`current_eps_evaluation`, `historical_ready=false`, `backtest_eligible=false` and
+`eps_diagnostic` propagate through `fixed_multiple_bands_for_ratio` only when the base
+observation carries the corresponding context. This preserves current EPS fixed-band
+provenance and HON's reviewed basis hold. Historical timelines still read the pinned
+`historical` rows; they never gain current-evaluation flags or an exemption from the
+original price-date readiness guard. No FY replay, current denominator replay, new scope
+approval or historical backfill is introduced.
+
+Main's new reported-quarter EPS module, financial bindings/readiness checks and
+`price_metric_publication.py` are preserved unchanged. UI source-context/reopen/export
+changes retain main's evaluation16/quote13 distinction alongside timeline controls.
+Existing252-session/3y definitions, company/security/metric identity, typed lineage,
+READY_ONLY gaps, bounded cache, original saves/exports, large-base64 transport,
+static-ledger geometry and other financial/Q4/common-market views remain intact.
+
+All product files under `src/` and `examples/` compare byte-identical to the separately
+accepted combined runtime **`5c37c0896169f29083ec8a1825c8e5f4e29e329c`**, whose read-only
+source is `work/reported-quarter-eps-ttm-20261116/runtime-source-integration-v1`.
+That includes the seven timeline product files and all main EPS product changes. Of the
+two related timeline test files, the Node file differs only in placement of main's retained
+two EPS tests; Python carries the runtime's current-vs-historical regression and adds HON
+band diagnostic assertions. This comparison is evidence, not a fresh accounting approval
+or automatic inheritance of runtime acceptance to a new source SHA.
+
+### Current actual pinned data and private checks
+
+Use the existing publication, without rewriting it:
+`data/processed/price_metrics/20261116_direct_quarter_eps_ttm_v1/price_metric_manifest.json`,
+SHA256 **`86fad784c394f29465df8f07501e0ee5b32e24863a9a6b2bac514d2040bdce2d`**.
+Its109×26 observations are2834rows:1335available/1499unavailable. Current PER/EY12 includes
+reviewed MSFT EPS19.16, NVDA7.91 and ABBV5.81; HON remains a per-share-basis hold.
+Evaluation date16, quote/public-information cutoff13 and actual preparation date16 remain
+separate. Current availability never certifies historical preparation.
+
+Writer read-only/private probes compared the same publication across fetched main,
+accepted runtime and merged source. All2834latest rows and four current band results
+(MSFT/NVDA/ABBV/HON) matched exactly. Five timelines (those four PER routes and MSFT BPS)
+matched the accepted runtime exactly. Current TTM13th-session PER/bands remain null,
+linked denominators retain ready16, and historical ratio rows contain no current-EPS
+context. MSFT BPS retains754points/503eligible252-session distributions and the same P50.
+A private temporary journal reopened both old977-publication and new86-publication
+snapshots exactly after service restart; original notes/source context were retained.
+No operating journal writes or test saves were made. The probe's first assertion looked
+for `ready_on` on a compact ratio rather than its linked denominator; correcting that
+probe field location passed without changing product code.
+
+Local probe receipt:
+`work/price-band-timeseries-20261116/evidence/writer-main107-integration-probe.json`,
+SHA256 `7a6dab213630b47ee5271cf63338d40c19a80425749ea47dc375f83029149682`. ROOT separately owns actual HTTP/runtime-preservation
+checks, current journal/pin inventories and any remote delivery decision.
+
+### Integration validation and handoff
+
+Writer checks: **158Python PASS/1SKIP**,24price Node +5common-market Node +6Q4 Node
++13history Node = **48Node PASS**, Ruff, app/Node-test syntax and diff checks PASS.
+The skipped test is the opt-in private cached producer fixture; its cached inputs were not
+reprepared here. Actual pinned consumer comparisons above passed separately. History
+checks used narrowly approved local loopback/fixture-child permission. No full repository
+suite, repeated Raw capture, fresh corpus qualification or remote CI result is claimed.
+
+Relevant reproduction, from the isolated tree with its `src` on `PYTHONPATH`:
+
+```bash
+PYTHONPATH=src /home/plusbdw/user_work/projects/sec_xbrl/.venv/bin/python -m pytest -q tests/screening/test_price_timeline.py tests/screening/test_price_metric_publication.py tests/screening/test_price_related_metrics.py tests/screening/test_reported_quarter_eps.py tests/screening/test_price_capture_evidence.py tests/screening/test_market_inputs.py tests/screening/test_market_input_profile.py tests/screening/test_market_input_assessment.py tests/screening/test_company_valuation_readiness.py tests/screening/test_company_valuation_fresh_preparation.py tests/screening/test_company_valuation_bindings.py
+node tests/screening/screening_price_metrics.test.cjs
+node tests/screening/screening_market_inputs.test.cjs
+node tests/screening/screening_revenue_q4_continuity.test.cjs
+node tests/screening/screening_history_lifecycle.test.cjs
+git diff 5c37c0896169f29083ec8a1825c8e5f4e29e329c -- src examples
+git diff --check
+```
+
+Only tracked implementation/tests/contracts belong in the merge commit; generated data,
+local receipts, journals, archives and secrets remain outside it. The writer freezes the
+normal merge SHA and stops for independent review. ROOT performs authorized push/PR and
+reports actual required-CI status; this document does not infer those actions occurred.

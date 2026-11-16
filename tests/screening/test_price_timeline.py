@@ -152,3 +152,33 @@ def test_empty_distribution_identity_is_deterministic_and_scoped_to_company_secu
         assert (result["cik"], result["security_id"], result["metric_id"]) == (cik, security, metric)
         ids.add(result["observation_id"])
     assert len(ids) == len(scopes)
+
+
+def test_current_eps_snapshot_does_not_backfill_its_quote_session_timeline(tmp_path, monkeypatch):
+    from test_reported_quarter_eps import FIXTURE_EVALUATION_AT, current_publication, pin
+
+    from sec_xbrl.screening.price_metric_publication import PriceMetricReader, publish_price_metrics
+
+    monkeypatch.setattr("sec_xbrl.metrics.reported_quarter_eps._now", lambda: FIXTURE_EVALUATION_AT)
+    config, _, _ = current_publication(tmp_path)
+    result = publish_price_metrics(pin(tmp_path / "combined-config.json", config), tmp_path / "combined")
+    reader = PriceMetricReader({k: result[k] for k in ("path", "sha256")})
+    service = PriceMetricService(reader, tmp_path / "combined.sqlite")
+    static = service.execute("bands", {"cik": "0000000001", "multiples": {"per": ["11.25"]}})["rows"][0]
+    assert static["value"] == "112.50"
+    assert static["current_eps_evaluation"]["evaluation_as_of"] == "2026-11-16"
+    assert static["backtest_eligible"] is False
+    held = service.execute("bands", {"cik": "0000773840", "multiples": {"per": ["11.25"]}})["rows"][0]
+    assert held["reason"] == "PER_SHARE_BASIS_MISMATCH"
+    assert held["eps_diagnostic"]["reason"] == "PER_SHARE_BASIS_MISMATCH"
+    assert held["value"] is None
+
+    timeline = service.execute("timeline", {"cik": "0000000001", "metric": "per", "multiples": ["11.25"]})
+    latest = timeline["points"][-1]
+    assert latest["as_of"] == "2026-11-13"
+    assert latest["ratio"]["reason"] == "INPUT_AFTER_PRICE_AS_OF"
+    assert "current_eps_evaluation" not in latest["ratio"]
+    assert latest["bands"][0]["value"] is None
+    assert not latest["distribution"]["backtest_eligible"]
+    saved = service.save(kind="RESULT", operation="timeline", request={"cik": "0000000001", "metric": "per"}, title="past remains past")
+    assert PriceMetricService(reader, tmp_path / "combined.sqlite").reopen(saved["id"])["result"] == saved["result"]
