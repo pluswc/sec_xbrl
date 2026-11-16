@@ -2,8 +2,10 @@
 
 ## Approval and boundaries
 
-APPROVED / IMPLEMENTED / INDEPENDENTLY_VERIFIED / LOCALLY_ACCEPTED by ROOT
+APPROVED / IMPLEMENTED / INDEPENDENTLY_VERIFIED / ROOT-private LOCALLY_ACCEPTED
 on 2026-11-16, code freeze `b713c765f6a6db688486731df4768a79e1a8fb73`.
+Remote PR/CI and main incorporation have not been performed. Earlier progress and
+FAIL entries below describe their historical stages.
 The documentation-only completion commit does not change that code. Actual private
 cached outputs are accepted under the bounds below; live code activation and
 native qualification inheritance are not performed. Baseline `b9126a262ce561a45e14ee1bb33f872d36079bee`, branch
@@ -184,7 +186,9 @@ P1 수정 후 전체 관련 pytest **279 PASS**(3.22초), Ruff/diff PASS. 최종
 
 ## Final ROOT local acceptance — 2026-11-16
 
-ROOT's authoritative decision is
+This tracked section records ROOT's normative acceptance decision and its complete
+scope and results; the work files are not authority or prerequisites for understanding
+the checkout. Optional underlying evidence is
 `/home/plusbdw/user_work/projects/sec_xbrl/work/filing-completeness-periods-20261116/root-local-acceptance-b713c76.json`
 and the reports beside it. Separate independent review of `b713c765f6` passed
 **279 pytest / Ruff / diff** and the 675-file preservation check. ROOT executed
