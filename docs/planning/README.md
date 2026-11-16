@@ -2,7 +2,15 @@
 
 # 계획 등록부 — 단일 진입점
 
-2026-11-16 [Filing completeness / period integrity](../implementation/filing-completeness-period-integrity-20261116.md)는 승인된 P0 구현 후보이며 초기0020의 DEI 상충 메타데이터 P1 반환을 수정하고 관련279 pytest/Ruff/diff 자체 검사를 통과했다. 실제 IXDS 문서집합 완전성, 무승인 fiscal 충돌 보류, 명시 승인 회계달력만의 비정규 Q4 경로를 다룬다. 기존 Raw/발행물/History/운영/qualification은 불변이며 독립·실자료 검증은 대기다. 별도 PR은 승인됐고 main 병합·live 전체 재발행은 제외한다.
+2026-11-16 [Filing completeness / period integrity](../implementation/filing-completeness-period-integrity-20261116.md)는
+소스 `b713c765f6`에서 **독립 검증·ROOT 로컬 수락 PASS**다(279 pytest/Ruff/diff,
+675파일 보존). IBM24/25 새 private v8는 4,224/3,970 Facts와 매출132/135개,
+원 primary241/199 Facts의 ID·모든 field·FK·문서별완전성을 검증했다. STX1382개는
+원focus2027/effective null의 명시적 새 L2 보류로 보존했다. COST 달력의 시간
+자격은 통과했지만 실제 결과는 0파생/32보류(mapping28/누락T9 4), ratio미준비다.
+기존 화면·가격·Q4·두 journal/675파일은 동일하며 **live 코드 전환/운영 재발행/
+v8 native 승인 상속은 없었다**. main b9126a는 추가 변경이 없고 별도 push/PR/CI는
+ROOT 대기, main 병합은 미요청이다. 초기0020 FAIL과 후보 단계는 계약에 보존한다.
 
 2026-11-16 [가격 관련 지표 전체 GOAL 인계](price-related-metrics-goal-handoff-20261116.md)를 추가했다.
 이번 변경은 문서·새 세션 프롬프트만이며 코드/GOAL/운영 실행 승인이 아니다.

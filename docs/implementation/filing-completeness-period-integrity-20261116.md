@@ -2,8 +2,11 @@
 
 ## Approval and boundaries
 
-APPROVED by the user/lead; IMPLEMENTED candidate, independent verification and
-local acceptance pending. Baseline `b9126a262ce561a45e14ee1bb33f872d36079bee`, branch
+APPROVED / IMPLEMENTED / INDEPENDENTLY_VERIFIED / LOCALLY_ACCEPTED by ROOT
+on 2026-11-16, code freeze `b713c765f6a6db688486731df4768a79e1a8fb73`.
+The documentation-only completion commit does not change that code. Actual private
+cached outputs are accepted under the bounds below; live code activation and
+native qualification inheritance are not performed. Baseline `b9126a262ce561a45e14ee1bb33f872d36079bee`, branch
 `codex/filing-completeness-periods`. The sole writer implements; a separate reviewer
 verifies the frozen SHA; ROOT owns actual cached preparation, remote push/PR and CI.
 A separate PR is authorized; main merge and live republication are outside scope.
@@ -178,3 +181,34 @@ verification and ROOT cached rechecks; no actual data was republished by writer.
 P1 수정 후 전체 관련 pytest **279 PASS**(3.22초), Ruff/diff PASS. 최종 로그는
 `/tmp/filing-p0-metadata-final.log`다. 이전 동결의 검증 결과와 이 후보의 재검증을
 구분하며 현재 독립 검증·실자료 재인수는 대기다.
+
+## Final ROOT local acceptance — 2026-11-16
+
+ROOT's authoritative decision is
+`/home/plusbdw/user_work/projects/sec_xbrl/work/filing-completeness-periods-20261116/root-local-acceptance-b713c76.json`
+and the reports beside it. Separate independent review of `b713c765f6` passed
+**279 pytest / Ruff / diff** and the 675-file preservation check. ROOT executed
+the actual cached preparation and operating read-only comparisons; writer did
+not execute these actual inputs or alter runtime/data/journals.
+
+| Gate | Actual result and bounds |
+| --- | --- |
+| IBM FY2024 | New private complete v8 snapshot: 4,224 Facts, 132 revenue Facts, SUCCESS, model errors 0. |
+| IBM FY2025 | New private complete v8 snapshot: 3,970 Facts, 135 revenue Facts, SUCCESS, model errors 0. |
+| Raw provenance | All fields and Fact IDs of the original primary-document 241/199 Facts remain identical; raw foreign keys and each document's expected = loaded = extracted counts pass. Original snapshots and ZIPs remain unchanged. |
+| STX | All 1,382 original Raw Facts are accounted for as new Layer 2 `FISCAL_FOCUS_REPORT_DATE_CONFLICT` exclusions. Reported focus 2027 and effective null remain explicit. The proposed effective FY and existing HUMAN correction route were not applied or relaxed. |
+| COST FY2025/FY2026 | Separate ROOT-reviewed temporal 364/252/112-day calendar permission passes. Actual new companion has **0 derived / 32 holds**: mapping review 28, missing YTD9 4. Calendar permission does not override those gates. Existing output overwrite is refused and ratio remains UNPREPARED. No actual 53-week calculation is claimed. |
+| Existing UI | At 18765, 11 price values, four market responses and three profiles match before/after, including the retained 252-day series. AMD/AAPL/NVDA Q4 four cases at 1440/1920/390 pass with errors 0. These checks establish preservation of the existing operating consumer; they do not mean v8 was deployed. |
+| Preservation | Both existing journals retain hashes, SQL table counts and integrity checks; all 675 pinned files match. No source approval/native qualification boundary was widened. |
+
+Only **new private cached preparation** was accepted. There was no live code
+switch, operating republication or automatic qualification of v8 as an existing
+native source. Raw/reporting anomalies remain evidence-backed holds rather than
+silently repaired data. Mapping and independent ratio admission remain follow-up
+work; this is not a coverage-completion or UI-redesign claim.
+
+ROOT refetched origin/main and found `b9126a262ce561a45e14ee1bb33f872d36079bee`
+unchanged, with no new integration required at this handoff. Push, separate PR
+creation and CI are still pending ROOT execution. Main merge was not requested
+or performed. Earlier pending/FAIL records above are retained as historical
+stages; the final accepted implementation is explicitly `b713c765f6`.
