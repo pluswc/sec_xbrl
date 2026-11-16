@@ -20,10 +20,10 @@ read-only independent verification after the writer freezes a local commit, foll
 | --- | --- |
 | PROPOSED | Reviewed V3 mockup: price/fixed bands above actual multiple/rolling quantiles |
 | APPROVED | User implementation authorization; lead's 252-session/3-year and preservation decisions |
-| IMPLEMENTED | Product `183a55506b0c1f6e3f4d1a3eb212099de112d7ae`; unchanged in the final documentation commit |
-| INDEPENDENTLY_VERIFIED | Separate read-only Astra PASS on product `183a55506b`; report hash below |
-| LOCALLY_ACCEPTED | ROOT PASS, 2026-11-16T08:08:06.891Z; final receipt below |
-| RUNTIME_ACCEPTED | ROOT PASS at18765, PID60604; product183a immutable source, existing financial backend preserved |
+| IMPLEMENTED | Final product `aabadc222e7149ec177a47b92f9de0ad5e99b04e`; calculation/worker/bridge/appJS identical to accepted183a |
+| INDEPENDENTLY_VERIFIED | Separate read-only Astra PASS on final product `aabadc222e`; both dated report hashes below |
+| LOCALLY_ACCEPTED | ROOT PASS, 2026-11-16T08:17:57.959Z; refined final receipt below |
+| RUNTIME_ACCEPTED | ROOT PASS at18765, PID36476; productaabadc immutable source, existing financial backend preserved |
 | MERGED | Not performed; no remote delivery authorized |
 
 ## Data and meaning
@@ -240,3 +240,43 @@ ROOT explicitly adopts this new frozen candidate.
 
 Refinement checks:22 price Node tests, app JavaScript syntax and diff checks passed.
 Python/Ruff were not repeated because no Python or numerical source changed.
+
+
+## Refined final independent, local and operating acceptance — 2026-11-16
+
+The final product is **`aabadc222e7149ec177a47b92f9de0ad5e99b04e`**. Separate read-only
+Astra verification and ROOT local/operating acceptance passed at
+`2026-11-16T08:17:57.959Z`. This supersedes the preceding CSS-refinement pending state;
+183a/957 acceptance and earlier pending records remain accurate historical stages.
+The present final status update is documentation only, with no further product/test edits.
+
+- Final receipt: `work/price-band-timeseries-20261116/evidence/root-refined-final-acceptance.json`,
+  SHA256 `753e059c69f5b1e37a9256b0b8b4927643d4b7d7592c4d135f26cda87607a0ce`.
+- Final independent report: `work/price-band-timeseries-20261116/evidence/independent-aabadc.md`,
+  SHA256 `85c98dded1749be1a8ad264a0299324943818bd260d8db3349a661ac451e1418`.
+
+The accepted source evidence covers49 Python,22 price Node and13 history Node PASS.
+All Python calculation code, worker, bridge and app JavaScript remain byte-identical to
+accepted183a. The static readout resets now pass actual geometry checks: at1920×1080,
+readout781.94px/layout797.94px; at1440×900, readout628px/layout644px. Static positioning,
+auto stacking, visible overflow and no maximum-height restriction prevent the inherited
+drawer height/z-order defect. Actual operating browser/API and shared cursor/evidence
+checks pass without errors. The earlier private five-original-plus-one-explicit-save,
+actual cold restart and identical export receipt remains valid because those paths and
+calculation bytes are unchanged (receipt SHA256 `6da0bc52bc7405c4b2e65d5dd0d39e64ece98a5905b6d30482d157f069b04536`).
+
+Operating18765 now uses PID36476 and immutable archive
+`work/price-band-timeseries-20261116/accepted-source-aabadc222e`. Its Windows bundle and
+rollback command are under
+`/mnt/c/Users/plusbdw/.codex/visualizations/2026/11/08/01a1bb67-6275-70d2-989e-208966314006/price-band-timeseries-20261116/candidate-aabadc222e`;
+`rollback.json` returns to the preceding accepted183a operating configuration.
+ROOT performed activation; the writer records the verified receipt only.
+
+Final operating checks preserve109financial rows,14datasets and2834price observations
+exactly,555protected-file hashes, both prior journals and trash8. There were zero operating
+test saves and zero price user-save records. The original financial source/backend19078,
+qualifiedd1e/native14, source publication and accounting/readiness boundaries remain intact.
+MSFT BPS754points/503eligible252-session distributions and previously documented gap
+behavior are unchanged. No remote push, PR, CI or main merge occurred; main remains
+`75ac14efb8`. Final documentation verification may use content/link/diff/source-equality
+checks under delivery-workflow section0 without repeating unchanged product tests.

@@ -207,3 +207,16 @@ passed. Existing109financial rows/2834price observations/14datasets/555protected
 both journals were preserved; zero operating test saves. This final documentation update
 changes no product bytes. Remote/main delivery remains unperformed; source and acceptance
 boundaries are recorded in [the contract](../docs/implementation/price-band-timeseries-20261116.md#final-independent-local-and-operating-acceptance--2026-11-16).
+
+
+Price timeline refined final acceptance (2026-11-16): final product
+`aabadc222e7149ec177a47b92f9de0ad5e99b04e` independently passed and ROOT accepted it
+locally/at18765(PID36476). The static readout explicitly resets inherited drawer height,
+max-height, min-height, z-index and overflow. Actual readout/layout heights are781.94/797.94px
+at1920×1080 and628/644px at1440×900, with no cursor/evidence/API/browser errors.49Python,
+22priceNode and13historyNode checks passed; calculations/worker/bridge/appJS are identical
+to accepted183a, so its private old-five/new-one cold restart/export evidence remains valid.
+109financial rows/14datasets/2834price observations/555protectedfiles/journals/trash8 remain
+preserved, with zero operating test saves. This supersedes the CSS pending stage while
+preserving prior dated acceptance records. No further product refinement or remote/main
+change is included. [Final boundaries and receipts](../docs/implementation/price-band-timeseries-20261116.md#refined-final-independent-local-and-operating-acceptance--2026-11-16).
