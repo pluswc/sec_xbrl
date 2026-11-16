@@ -193,3 +193,17 @@ exact252 expected and valid observations;3years retains its original rule. Diagn
 mode remains visibly backtest-ineligible. Editable fixed multiples are assumptions, not forecasts.
 Implementation/independent/actual1920/1440browser/runtime acceptance remain separate states
 in [the tracked contract](../docs/implementation/price-band-timeseries-20261116.md).
+
+
+Price timeline final local/operating acceptance (2026-11-16): product
+`183a55506b0c1f6e3f4d1a3eb212099de112d7ae` passed separate Astra review and ROOT's actual
+1920×1080/1440×900 Windows browser/API acceptance at18765. Measured1440axis text13.568px;
+shared pointer/keyboard cursor, exact evidence, explicit company selection, unavailable states,
+READY_ONLY and separate3y option passed. Successful analysis scrolls to the paired plots,
+with a nearby return link to conditions. MSFT's actual BPS history supports503rolling252
+points; unavailable histories remain gaps. Private original-five/new-one snapshots and
+byte-identical reopened export survived cold restart.49Python/21priceNode/13historyNode
+passed. Existing109financial rows/2834price observations/14datasets/555protectedfiles and
+both journals were preserved; zero operating test saves. This final documentation update
+changes no product bytes. Remote/main delivery remains unperformed; source and acceptance
+boundaries are recorded in [the contract](../docs/implementation/price-band-timeseries-20261116.md#final-independent-local-and-operating-acceptance--2026-11-16).

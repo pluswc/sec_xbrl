@@ -20,10 +20,10 @@ read-only independent verification after the writer freezes a local commit, foll
 | --- | --- |
 | PROPOSED | Reviewed V3 mockup: price/fixed bands above actual multiple/rolling quantiles |
 | APPROVED | User implementation authorization; lead's 252-session/3-year and preservation decisions |
-| IMPLEMENTED | Candidate source on the isolated branch; final frozen SHA supplied at handoff |
-| INDEPENDENTLY_VERIFIED | Pending separate verifier on frozen SHA |
-| LOCALLY_ACCEPTED | Pending lead judgment |
-| RUNTIME_ACCEPTED | Pending lead's private/operating API and browser verification |
+| IMPLEMENTED | Product `183a55506b0c1f6e3f4d1a3eb212099de112d7ae`; unchanged in the final documentation commit |
+| INDEPENDENTLY_VERIFIED | Separate read-only Astra PASS on product `183a55506b`; report hash below |
+| LOCALLY_ACCEPTED | ROOT PASS, 2026-11-16T08:08:06.891Z; final receipt below |
+| RUNTIME_ACCEPTED | ROOT PASS at18765, PID60604; product183a immutable source, existing financial backend preserved |
 | MERGED | Not performed; no remote delivery authorized |
 
 ## Data and meaning
@@ -171,3 +171,54 @@ review; no runtime acceptance or main delivery is inferred from this correction.
 Correction checks:49 focused Python tests,21 worksheet Node tests, Ruff, app JavaScript
 syntax and diff checks passed. The earlier13 history checks were not repeated because this
 correction changes only distribution identity, its regression and this contract.
+
+
+## Final independent, local and operating acceptance — 2026-11-16
+
+ROOT accepted product **`183a55506b0c1f6e3f4d1a3eb212099de112d7ae`** locally and in the
+operating consumer at `2026-11-16T08:08:06.891Z`, after separate read-only Astra PASS.
+This final update changes documentation only; product source/tests remain byte-identical
+to that accepted product. Earlier pending statements and the failed4d identity review above
+are historical stages, superseded by this dated evidence rather than erased.
+
+Evidence locators (local immutable receipts, not prerequisites for understanding the contract):
+
+- `work/price-band-timeseries-20261116/evidence/root-final-acceptance.json`, SHA256
+  `6da0bc52bc7405c4b2e65d5dd0d39e64ece98a5905b6d30482d157f069b04536`.
+- `work/price-band-timeseries-20261116/evidence/independent-183a.md`, SHA256
+  `16df07d66fb33cd56fe48bc060c62e2de676e3ec755df2436d83c5c2fe211cc3`.
+
+The independent reviewer reran49 focused Python,21 price Node and13 history Node tests,
+Ruff, JavaScript syntax, diff checks and actual pinned-source probes: all PASS. The reviewer
+confirmed distinct deterministic scoped distribution IDs, unchanged numerical/window/3y
+rules, exact1-year suffix of3-year data, cache-source validation and original snapshot reopen.
+This is focused verification, not a full repository suite or financial/native14 requalification.
+
+ROOT verified the actual Windows transport and1920×1080/1440×900 paired plots/cursors,
+keyboard/date readout and evidence with no browser/API errors. At1440 the measured actual
+axis font was13.568px. MSFT BPS has754 ratio points and503 eligible252-session distributions;
+latest actual close523.88USD/share, BPS63.35USD/share, ratio8.27 and P50 8.10. AAPL PER has9
+eligible ratio days, NVDA BPS remains unavailable, READY_ONLY masks unconfirmed history,
+and the original3y option remains separate. These are data availability observations, not
+expanded qualification, investment guidance or fabricated ribbon coverage.
+
+Private journal clones preserved all five original SQL records exactly, including payloads,
+notes and definitions. One explicitly saved timeline made six records, all preserved across
+an actual cold restart; its reopened export bytes were identical (SHA256
+`5be7983e2313e0f87d1f569c342e8aaf2521bfc8553d2f166c274d95a6ddfa25`).
+Operating journals received **zero test saves** and contain zero price user-save records;
+legacy trash remains8. Both journals have `integrity=ok` and exact original tables.
+
+Operating consumer:18765, PID60604, immutable price source archive
+`work/price-band-timeseries-20261116/accepted-source-183a55506b`. Windows assets/bridge:
+`/mnt/c/Users/plusbdw/.codex/visualizations/2026/11/08/01a1bb67-6275-70d2-989e-208966314006/price-band-timeseries-20261116/candidate-183a55506b`.
+Rollback command is that candidate directory's `rollback.json`. The original financial
+source/backend19078, qualifiedd1e/native14,14datasets,109financial rows and2834price
+observations remain exactly the baseline. All555protected-file hashes are unchanged;
+Raw, financial bindings, publications and prior journal history were not rewritten.
+
+ROOT performed activation and final read-only acceptance; the writer only records its receipt.
+No push, PR, remote CI or main merge was performed or requested. Main remains
+`75ac14efb8`. Any later remote delivery requires a separate authorized decision; this local
+and operating acceptance does not imply main delivery. The final documentation commit is
+separately frozen for read-only verification of this status and unchanged product bytes.
