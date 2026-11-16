@@ -6,6 +6,7 @@ versus total liabilities, and D&A included in operating income).
 """
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from decimal import localcontext
 from pathlib import Path
@@ -31,18 +32,35 @@ QNAME_CANDIDATES = {
     "us-gaap:DepreciationDepletionAndAmortizationPropertyPlantAndEquipment",
     "us-gaap:Depreciation", "us-gaap:AmortizationOfIntangibleAssets",
     "us-gaap:NetCashProvidedByUsedInOperatingActivities", "us-gaap:PaymentsToAcquirePropertyPlantAndEquipment",
+    # Evidence candidates only: issued shares are never actual shares by default.
+    "us-gaap:TreasuryStockValue", "us-gaap:TreasuryStockCommonValue",
+    "us-gaap:PreferredStockSharesIssued", "us-gaap:CommonStockSharesIssued",
+    "us-gaap:TreasuryStockShares", "us-gaap:TreasuryStockCommonShares",
+    "us-gaap:CommercialPaper",
 }
 
 
-def project_additional_candidates(pin: dict, *, cik: str, ticker: str, cutoff: str) -> list[dict]:
-    """Read only necessary selected cells and their trace shards, once per issuer."""
+def project_additional_candidates(
+    pin: dict, *, cik: str, ticker: str, cutoff: str,
+    anchor_end: str | None = None, cell_ids: set[str] | None = None,
+) -> list[dict]:
+    """Project selected cells; optional restrictions apply before trace shard reads.
+
+    Restrictions never change the source selection cutoff or the selected values.
+    An explicit cell set must resolve completely within the named candidate scope.
+    Omitting both restrictions preserves the original full-history projection.
+    """
     manifest = pinned_json(pin)
     if manifest["companies"][ticker]["as_of"] != cutoff:
         raise ValueError("financial selection cutoff differs")
     client = open_analysis(Path(pin["path"]).parent)
     nodes = {n["node_id"]: n for n in client._records(ticker, "LATEST_REPORTED", "nodes")
              if n.get("kind") == "VALUE" and n.get("concept") in QNAME_CANDIDATES}
-    cells = [c for c in client._records(ticker, "LATEST_REPORTED", "cells") if c["node_id"] in nodes]
+    cells = [c for c in client._records(ticker, "LATEST_REPORTED", "cells")
+             if c["node_id"] in nodes and (anchor_end is None or c.get("end") == anchor_end)
+             and (cell_ids is None or c["cell_id"] in cell_ids)]
+    if cell_ids is not None and {c["cell_id"] for c in cells} != cell_ids:
+        raise ValueError("requested cells do not match candidate anchor/scope")
     shards = defaultdict(set)
     for cell in cells:
         shards["trace_" + stable(cell["cell_id"])[0]].add(cell["cell_id"])
@@ -84,6 +102,44 @@ def project_additional_candidates(pin: dict, *, cik: str, ticker: str, cutoff: s
     return result
 
 
+def check_actual_share_sources(rows: list[dict], formula: str) -> None:
+    """Reject known issued/WAVG misuse without excluding reviewed custom QNames."""
+    if formula == "DIRECT" and rows and (rows[0].get("qname") in {
+        "us-gaap:CommonStockSharesIssued", "us-gaap:CommonStockSharesAuthorized",
+        "us-gaap:WeightedAverageNumberOfSharesOutstandingBasic",
+        "us-gaap:WeightedAverageNumberOfDilutedSharesOutstanding",
+        "us-gaap:WeightedAverageNumberOfSharesOutstandingDiluted",
+        "us-gaap:WeightedAverageNumberOfSharesOutstandingBasicAndDiluted",
+    } or str(rows[0].get("input_id", "")).startswith("weighted_average_")):
+        raise ValueError("issued/weighted-average shares are not actual outstanding common shares")
+    if formula != "SUBTRACT":
+        return
+    if (len(rows) != 2 or rows[0].get("qname") != "us-gaap:CommonStockSharesIssued"
+        or rows[1].get("qname") not in {"us-gaap:TreasuryStockShares", "us-gaap:TreasuryStockCommonShares"}):
+        raise ValueError("actual-share subtraction requires exact issued then treasury quantities")
+
+    def scope(row: dict) -> tuple:
+        source = row.get("source", {})
+        lineage = source.get("value_lineage", source)
+        raw_dimensions = row.get("raw_dimensions", lineage.get("raw_dimension_signature"))
+        filing = lineage.get("source_filing_id")
+        if raw_dimensions is None or not filing or row.get("period_class") != "INSTANT":
+            raise ValueError("actual-share subtraction requires full instant source scope")
+        if row.get("unit_kind") == "shares":
+            units = (["xbrli:shares"], [])
+        else:
+            def parts(field):
+                value = row.get(field, lineage.get(field))
+                return json.loads(value) if isinstance(value, str) else value
+            units = (parts("unit_numerator_measures"), parts("unit_denominator_measures"))
+        if units != (["xbrli:shares"], []):
+            raise ValueError("actual-share subtraction requires share quantities")
+        return (row.get("cik"), row.get("start"), row.get("end"), row.get("dimensions"), raw_dimensions, filing)
+
+    if scope(rows[0]) != scope(rows[1]):
+        raise ValueError("actual-share subtraction source filing/period/full dimensions differ")
+
+
 def bind_financial_inputs(candidates: list[dict], declarations: list[dict]) -> list[dict]:
     """Bind reviewed exact sources, or explicit evidenced zero, to typed metric roles.
 
@@ -113,6 +169,8 @@ def bind_financial_inputs(candidates: list[dict], declarations: list[dict]) -> l
         if (formula == "DIRECT" and len(rows) != 1 or formula in {"SUBTRACT", "PER_SHARE"} and len(rows) != 2
             or formula == "SUM" and not rows or formula == "EVIDENCED_ZERO" and rows):
             raise ValueError("binding formula arity differs")
+        if role == "common_shares":
+            check_actual_share_sources(rows, formula)
         if not d.get("known_on") or not d.get("period_end") or not d.get("scope_id"):
             raise ValueError("binding scope/date required")
         if any(r.get("status") not in {"AVAILABLE_REPORTED", "AVAILABLE_DERIVED_SEPARATE"} or finite(r.get("value")) is None
@@ -120,7 +178,6 @@ def bind_financial_inputs(candidates: list[dict], declarations: list[dict]) -> l
             raise ValueError("unavailable/future financial candidate")
         # A reviewed declaration cannot change units, currency or actual period.
         def measures(row, field):
-            import json
             value = row.get(field)
             return json.loads(value) if isinstance(value, str) else value
         for row in rows:
@@ -156,13 +213,17 @@ def bind_financial_inputs(candidates: list[dict], declarations: list[dict]) -> l
                 if values[-1] <= 0:
                     raise ValueError("positive actual-share denominator required")
                 value = values[0] / values[1]
+        reported_zero = (role in {"preferred_equity", "nci"} and formula == "DIRECT" and value == 0
+                         and rows[0].get("status") == "AVAILABLE_REPORTED")
         record = {**d, "value": str(value), "unit_kind": ROLE_UNITS[role], "status": "AVAILABLE",
-                  "reason": None, "dimensions": d.get("dimensions", []), "end_convention": "EXCLUSIVE", "evidenced_zero": formula == "EVIDENCED_ZERO",
+                  "reason": None, "dimensions": d.get("dimensions", []), "end_convention": "EXCLUSIVE", "evidenced_zero": formula == "EVIDENCED_ZERO" or reported_zero,
                   "source_kind": "DIRECT_REPORTED" if formula == "DIRECT" else "GOVERNED_ROLE_BINDING",
                   "source_refs": [{"observation_id": r["observation_id"], "source": r.get("source"),
                                    "qname": r.get("qname"), "value": r["value"],
                                    "period_start": r.get("start"), "period_end": r.get("end")} for r in rows]
                                  + [{"evidence_pin": pin} for pin in d["evidence_pins"]]}
+        if reported_zero:
+            record["zero_evidence_kind"] = "REPORTED_ZERO"
         record["observation_id"] = "price-financial-input-" + identity(record)
         output.append(record)
     return output
