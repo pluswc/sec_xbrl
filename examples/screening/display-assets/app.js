@@ -3096,7 +3096,7 @@ function priceReason(code){return ({
  NO_ELIGIBLE_POINT_IN_TIME_MULTIPLES:"당시 알 수 있었던 배수 입력이 없습니다",INSUFFICIENT_ELIGIBLE_HISTORY_252_SESSIONS:"유효한 과거 배수가 252거래일 미만입니다",
  HISTORICAL_CALENDAR_OR_SOURCE_COVERAGE_INCOMPLETE:"최근3년의 거래일·원천 범위가 충분하지 않습니다",
  TWELVE_MONTH_INPUT_NOT_AT_LATEST_FINANCIAL_END:"최신 재무기간과 일치하는 12개월 입력이 없습니다",
- INPUT_AFTER_PRICE_AS_OF:"가격 기준일 이후에 알려진 재무 입력입니다",EPS_DIRECT_OBSERVATION_REQUIRED:"직접 공시된 희석 EPS가 필요합니다",
+ INPUT_AFTER_PRICE_AS_OF:"가격 기준일 이후에 공시되었거나 준비된 재무 입력입니다",EPS_DIRECT_OBSERVATION_REQUIRED:"직접 공시된 희석 EPS가 필요합니다",
  INPUT_AFTER_CURRENT_EVALUATION:"실제 준비 시각이 현재 평가 시각보다 늦습니다",PER_SHARE_BASIS_MISMATCH:"분기 EPS의 주당 기준이 다릅니다 · 같은 기준의 직접 공시 분기가 필요합니다",
  CLASS_OR_SPLIT_BASIS_MISMATCH:"주식 종류 또는 분할 기준이 일치하지 않습니다",EXACT_SESSION_PRICE_MISSING:"선택한 실제 거래일의 종가가 없습니다",
  EBITDA_SCOPE_OR_PERIOD_MISMATCH:"영업이익에 포함된 D&A의 기간·범위 확인이 필요합니다",

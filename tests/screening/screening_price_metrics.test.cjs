@@ -158,10 +158,12 @@ test("current EPS evaluation is labelled separately from quote and past daily re
  assert.match(host("#price-context").textContent,/현재 EPS 평가 2026-11-16 \/ 종가 2026-11-13/);
  assert.match(host("#price-query-result").innerHTML,/직접 4분기 EPS 합계/);
  assert.match(host("#price-query-result").innerHTML,/과거 준비 시점 검증 아님/);
- const past={...current,mode:"series",rows:[{...result().rows[0],as_of:"2026-11-13",status:"UNAVAILABLE",value:null,reason:"INPUT_AFTER_PRICE_AS_OF"}]};
+ const past={...current,mode:"series",rows:[{...result().rows[0],as_of:"2026-11-13",known_on:"2026-10-28",ready_on:"2026-11-16",status:"UNAVAILABLE",value:null,reason:"INPUT_AFTER_PRICE_AS_OF"}]};
  f.priceDisplayResult(past);
  assert.doesNotMatch(host("#price-query-result").innerHTML,/직접 4분기 EPS 합계/);
  assert.match(host("#price-context").textContent,/과거 시계열은 당시 준비 기준/);
+ assert.match(host("#price-query-result").innerHTML,/가격 기준일 이후에 공시되었거나 준비된 재무 입력입니다/);
+ assert.doesNotMatch(host("#price-query-result").innerHTML,/가격 기준일 이후에 알려진 재무 입력/);
 });
 
 test("reopened current EPS evidence preserves original evaluation, four direct sources and HON hold",async()=>{
