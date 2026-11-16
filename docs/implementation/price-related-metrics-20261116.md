@@ -1,6 +1,6 @@
 # Price-related metrics — execution contract, 2026-11-16
 
-**Current dated status (2026-11-16):** all requested families are IMPLEMENTED at
+**Frozen-source acceptance record (2026-11-16, before H5 follow-up approval):** all requested families are IMPLEMENTED at
 `67cc011c269d023a32c51c8fe10e24b7c2f43a8f`; separate Sol verification PASS;
 ROOT LOCALLY_ACCEPTED and LIVE operating acceptance for the frozen source/data
 are complete. H5 fresh capture permission, PR, required CI`test` and main merge
@@ -473,3 +473,71 @@ The independent/local/live results above apply to source`67cc011c26`; a later
 **documentation-only** acceptance commit preserves all source/test/data bytes and
 requires only independent document-delta/code-byte-equality review before remote
 delivery. No completed source/data/browser checks are repeated for that commit.
+
+## H5 bounded fresh-capture follow-up — authorized preparation, 2026-11-16
+
+The user subsequently explicitly authorized official fresh capture for **AAPL and
+MSFT only**, preserving existing inputs and saved records, and requested H5,
+necessary operating verification, documentation and main follow-up. This approval
+supersedes the earlier permission-pending state for this exact bounded work.
+It does not authorize a new109-company capture, new financial qualification,
+accounting-policy changes or replacement of the accepted109-company default.
+
+The follow-up uses `codex/price-metrics-h5-refresh`, based on main
+`b9126a262ce561a45e14ee1bb33f872d36079bee` (PR103 merge). Existing accepted runtime
+and `work/price-related-metrics-20261116/source` remain unchanged. Root owns
+capture, original-source preservation, operating changes and acceptance; the
+single writer owns the consumer evidence helper and tracked follow-up records.
+H5 final acceptance and follow-up remote delivery are not claimed here.
+
+The supplier confirmed SDK0.5.1 has no generic sidecar generation command. Its
+previous `reproduce.py` is specific to the old132-security capture; the extraction
+rules may be generalized consumer-side. An official delivery check alone does
+not prove that a new raw capture belongs to the price snapshot. The new
+`prepare_price_capture_evidence.py` runs offline in the supplier runtime without
+SEC/Arelle imports and checks exact pinned delivery/price/security/inventory,
+canonical selected identities and checkpoint order, the ordered checkpoint/raw
+commitment, compressed/decompressed raw bytes, URL symbol/horizon/fallback,
+capture timezone, original currency metadata, committed normalizer and reviewed
+action source bytes. It performs no price/financial arithmetic or network calls.
+
+Preparation emits create-only `sidecar.json` under the existing
+`price-capture-evidence.v1` schema and a separate candidate manifest with
+`status=CANDIDATE_UNACCEPTED`,
+`origin=CONSUMER_GENERATED_SOURCE_VALIDATION`, and
+`supplier_independent_acceptance=false`. The sidecar preserves missing/unsupported
+currency explicitly. Consumer generation is not supplier certification.
+Independent Sol review must precede a ROOT exact adoption receipt. The helper's
+`accept` command requires that receipt to bind the exact candidate, sidecar and
+all source pins, rechecks capture/source bytes, and creates a new accepted
+manifest. Its `status=accepted` means consumer adoption only; provenance and the
+ROOT receipt remain explicit. Existing batch/valuation/source guards are unchanged.
+
+The receipt contract is
+`consumer-price-capture-evidence-root-acceptance-v1`, `authority=ROOT`,
+`status=ACCEPTED_FOR_BOUNDED_PRICE_CURRENCY_ADOPTION`, with exact `candidate`,
+`sidecar` and `source_pins` objects from the candidate (candidate pin includes path,
+SHA256 and bytes). The old109 sidecar cannot qualify a new price hash.
+
+A fresh2 candidate was prepared from the new official capture; it remains
+unaccepted pending independent review and Root adoption. The candidate manifest
+SHA256 is`8a17d6fb1758f2bc55b97af1a49f7887ce1034357643063408bf241a4143e7da`;
+spec SHA256 is`0dc295fbc5e59a6b3d8cedb3eacd1ecb3a02954e5480f4675d6a2a3b95af18d0`.
+The14network-free helper tests pass source/metadata/checkpoint/raw/action/URL/
+timezone/selection mutation rejection, missing/non-USD currency retention,
+create-only destinations, exact ROOT acceptance binding and capture mutation
+before adoption. These are helper-boundary checks, not H5 completion or a repeated
+whole-platform audit. No accepted source, old journal, supplier file or source pin
+was modified. Official capture/replay and later publication/UI results will be
+recorded only after the lead supplies completed evidence.
+
+The lead's bounded operating plan, still subject to completed private/readonly
+verification, is a separate loopback18766two-security worksheet. It will reuse
+the accepted bundle, financial backend19078, qualified financial source and
+auxiliary assets. The109-company default18765 remains running unchanged. The
+bounded view must identify its two-company universe, actual2026-11-13quote and
+three-calendar-day staleness for request11/16, automatic_update=false and old
+financial cutoff10/25. It is not a refreshed109-company dataset. Private checks
+use a copied price journal; operating old-save reopening uses the existing
+journal's original pins without writing test records. No worker/asset/accounting
+guard change is required. Actual18766activation/acceptance is not claimed yet.

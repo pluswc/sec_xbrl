@@ -1,3 +1,5 @@
+2026-11-16 [H5 제한 신규 수집 후속](../implementation/price-related-metrics-20261116.md#h5-bounded-fresh-capture-follow-up--authorized-preparation-2026-11-16): 사용자가 AAPL·MSFT 공식 제한 수집을 명시 승인했다. main `b9126a262c` 기준 별도 branch에서 소비자 생성 capture-evidence helper/candidate를 준비했으며 독립 검증·ROOT 채택·H5 최종 인수는 아직 대기다. 기존109 LIVE와 저장 원본을 보존하며 아래 권한 대기 문구는 이전 인수 당시 기록이다.
+
 2026-11-16 [가격 관련 지표 실행·인수](../implementation/price-related-metrics-20261116.md): 소스 `67cc011c26`에서 전체 계열 구현·별도 Sol 독립 검증 PASS·ROOT 로컬 및 고정 자료 LIVE 인수를 완료했다. 109개사 가격 계열, MSFT의 10개 가치 지표·고정 PER/PBR 밴드·754거래일 PBR 시점 진단과 명시 저장/원본 재열기를 실제 확인했다. 다른108개사의 가치 지표는 적용 범위 미승인이며 엔진 미구현이나 Raw 부재 판정이 아니다. H5 신규 수집 권한은 대기 중이고 PR·필수 CI `test`·main 병합도 아직 PENDING이다. 현재가는 아니며 실제 가격일은2026-10-23이다. 이전 문서 전용/진행 중 상태는 당시 기록으로 보존한다.
 
 # 계획 등록부 — 단일 진입점
