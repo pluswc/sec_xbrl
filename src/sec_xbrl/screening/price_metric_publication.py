@@ -31,6 +31,7 @@ from sec_xbrl.metrics.price_related import (
     historical_multiple_percentiles,
     validate_sessions,
 )
+from sec_xbrl.metrics.reported_quarter_eps import validate_current_evaluation
 
 SCHEMA = "screening-price-metrics-v1"
 SOURCE_SHA256_PUBLICATION = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
@@ -112,6 +113,11 @@ def publish_price_metrics(config_pin: dict, output: str | Path) -> dict:
         raise ValueError("typed financial input bundle required")
     grants, observations = source["compatibility_grants"], source["observations"]
     readiness = validated_company_readiness(source)
+    evaluation = None
+    if "current_eps_evaluation" in config:
+        evaluation = validate_current_evaluation(config["current_eps_evaluation"], bundle_pin=config["financial_inputs"],
+            batch_pin=config["price_batch"], requested=requested, selected=selected)
+    eps_diagnostics = source.get("current_eps_diagnostics", [])
     for grant in grants:
         if not grant.get("evidence_pins"):
             raise ValueError("compatibility grant requires actual evidence pins")
@@ -182,7 +188,26 @@ def publish_price_metrics(config_pin: dict, output: str | Path) -> dict:
                         series.extend(_compact(row, config["price_batch"]) for row in [*price_metrics, *vals])
                     if day == selected:
                         latest_valuation = vals
-                latest = [row for row in series if row["as_of"] == selected]
+                latest = [copy.deepcopy(row) if evaluation else row for row in series if row["as_of"] == selected]
+                if evaluation and any(r["cik"] == cik and r["observation_id"] in evaluation["input_ids"] for r in financial[cik]):
+                    # Current snapshots are separate from the already materialized
+                    # daily series/history. Only EPS-dependent current values change.
+                    current = calculate_valuation_metrics(by_day.get(selected), financial[cik], grant,
+                        cik=cik, security_id=sid, as_of=selected, ev_policy=config.get("ev_policy"),
+                        financial_anchor=anchor, financial_as_of=readiness.get(cik, {}).get("verified_through", source.get("financial_as_of")),
+                        current_eps_evaluation={"declaration": config["current_eps_evaluation"], "financial_inputs": config["financial_inputs"],
+                            "price_batch": config["price_batch"], "requested_as_of": requested})
+                    replacements = {r["metric_id"]: r for r in current if r["metric_id"] in {"per", "earnings_yield"}}
+                    latest_valuation = [replacements.get(r["metric_id"], r) for r in latest_valuation]
+                    latest = [_compact(replacements[r["metric_id"]], config["price_batch"]) if r["metric_id"] in replacements else r for r in latest]
+                diagnostic = next((d for d in eps_diagnostics if d["cik"] == cik), None)
+                if evaluation and diagnostic:
+                    for rows in (latest, latest_valuation):
+                        for row in rows:
+                            if row["metric_id"] in {"per", "earnings_yield"} and row["status"] == "UNAVAILABLE":
+                                row.update(reason=diagnostic["reason"], eps_diagnostic=diagnostic)
+                                row.pop("observation_id")
+                                row["observation_id"] = "price-metric-" + identity(row)
                 for multiple in ("per", "pbr", "pbr_bps", "price_sales", "ev_revenue", "ev_ebitda"):
                     latest.append(historical_multiple_percentiles(history, cik=cik, security_id=sid,
                         as_of=selected, multiple=multiple, readiness_policy=policy, session_source=session_source,
@@ -212,6 +237,12 @@ def publish_price_metrics(config_pin: dict, output: str | Path) -> dict:
             "producer": {"publication_sha256": SOURCE_SHA256_PUBLICATION, "metrics_sha256": SOURCE_SHA256}}
         if readiness:
             manifest["company_financial_readiness"] = readiness
+        if evaluation:
+            manifest["current_eps_evaluation"] = evaluation
+            manifest["current_eps_diagnostics"] = eps_diagnostics
+            manifest["source_pins"].update(reported_quarter_derivation=source["reported_quarter_derivation"],
+                current_evaluation_policy=config["current_eps_evaluation"]["policy"],
+                current_evaluation_approval=config["current_eps_evaluation"]["approval"])
         for pin in [config_pin, *manifest["source_pins"].values()]:
             pinned_json(pin)
         if any(hashlib.sha256(path.read_bytes()).hexdigest() != sha for path, sha in producer_sources.items()):
@@ -295,6 +326,9 @@ class PriceMetricReader:
                 **({"dataset_scope": self.manifest["dataset_scope"],
                     "company_financial_readiness": {cik: r for cik, r in self.manifest["company_financial_readiness"].items() if cik in selected}}
                    if "company_financial_readiness" in self.manifest else {}),
+                **({"current_eps_evaluation": self.manifest["current_eps_evaluation"],
+                    "current_eps_diagnostics": [d for d in self.manifest.get("current_eps_diagnostics", []) if d["cik"] in selected]}
+                   if "current_eps_evaluation" in self.manifest else {}),
                 "rows": rows, "unavailable_ranges": [r for cik in selected for r in self._read_rows(cik, "coverage")
                     if metric_ids is None or set(metric_ids) & set(r["metric_ids"])]}
 
@@ -351,6 +385,13 @@ class PriceMetricReader:
                 raise ValueError("historical multiple input identity differs")
             lineage = [leg for r in historical_inputs for leg in r["input_lineage"]]
         ids = {leg.get("observation_id") for leg in lineage}
+        financial_inputs = [r for r in source["observations"] if r["observation_id"] in ids]
+        quarter_sources = {}
+        if any(r.get("source_kind") == "GOVERNED_DIRECT_QTD_TTM" for r in financial_inputs):
+            # Read the pinned published derivation; consumers never reparse/rederive.
+            artifact = self._source(source["reported_quarter_derivation"])
+            quarter_ids = {ref["observation_id"] for r in financial_inputs for ref in r.get("source_refs", [])}
+            quarter_sources = {oid: r for oid, r in artifact["reported_quarter_sources"].items() if oid in quarter_ids}
         price_inputs, expected = {}, set()
         batch = None
         price_by_id = None
@@ -375,7 +416,11 @@ class PriceMetricReader:
                 expected.add(price["trade_date"])
         return {"row": copy.deepcopy(row), "publication_id": self.manifest["publication_id"],
                 "publication_pin": self.pin, "definitions": self.manifest["definitions"],
-                "financial_inputs": [r for r in source["observations"] if r["observation_id"] in ids],
+                "financial_inputs": financial_inputs,
+                **({"reported_quarter_sources": quarter_sources} if quarter_sources else {}),
+                **({"current_eps_evaluation": row["current_eps_evaluation"]} if "current_eps_evaluation" in row else {}),
+                **({"eps_diagnostic": row["eps_diagnostic"], "diagnostic_evidence": [self._source(pin) for pin in row["eps_diagnostic"]["evidence_pins"]]}
+                   if "eps_diagnostic" in row else {}),
                 "price_inputs": sorted(price_inputs.values(), key=lambda p: (p["trade_date"], p["security_id"])),
                 "expected_sessions": sorted(expected), "historical_multiple_inputs": historical_inputs,
                 "compatibility_grant": next((g for g in source["compatibility_grants"]

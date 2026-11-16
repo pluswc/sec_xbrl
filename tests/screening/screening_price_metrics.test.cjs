@@ -148,3 +148,38 @@ test("old export schema stays exact while only new readiness publications add so
  assert.equal(exported.source_context.company_financial_readiness["0000000001"].source_selection_as_of,"2026-10-25");
  assert(!("rows" in exported.source_context));
 });
+
+test("current EPS evaluation is labelled separately from quote and past daily readiness",()=>{
+ const {f,host}=fixture();
+ const evaluation={mode:"CURRENT_EVALUATION_WITH_LAGGED_QUOTE",evaluation_as_of:"2026-11-16",quote_session:"2026-11-13",backtest_eligible:false};
+ const current={...result("26","B"),price_as_of:"2026-11-13",requested_as_of:"2026-11-16",staleness_calendar_days:3,current_eps_evaluation:evaluation};
+ current.rows[0]={...current.rows[0],as_of:"2026-11-13",current_eps_evaluation:evaluation};
+ f.priceDisplayResult(current);
+ assert.match(host("#price-context").textContent,/현재 EPS 평가 2026-11-16 \/ 종가 2026-11-13/);
+ assert.match(host("#price-query-result").innerHTML,/직접 4분기 EPS 합계/);
+ assert.match(host("#price-query-result").innerHTML,/과거 준비 시점 검증 아님/);
+ const past={...current,mode:"series",rows:[{...result().rows[0],as_of:"2026-11-13",known_on:"2026-10-28",ready_on:"2026-11-16",status:"UNAVAILABLE",value:null,reason:"INPUT_AFTER_PRICE_AS_OF"}]};
+ f.priceDisplayResult(past);
+ assert.doesNotMatch(host("#price-query-result").innerHTML,/직접 4분기 EPS 합계/);
+ assert.match(host("#price-context").textContent,/과거 시계열은 당시 준비 기준/);
+ assert.match(host("#price-query-result").innerHTML,/가격 기준일 이후에 공시되었거나 준비된 재무 입력입니다/);
+ assert.doesNotMatch(host("#price-query-result").innerHTML,/가격 기준일 이후에 알려진 재무 입력/);
+});
+
+test("reopened current EPS evidence preserves original evaluation, four direct sources and HON hold",async()=>{
+ let exported;
+ const evaluation={evaluation_as_of:"2026-11-16",quote_session:"2026-11-13"};
+ const original={...result("26","B"),current_eps_evaluation:evaluation};
+ const {f,host}=fixture({Blob:class {constructor(parts){exported=JSON.parse(parts.join(""))}},URL:{createObjectURL:()=>"blob:x",revokeObjectURL:()=>{}},document:{createElement:()=>({click(){}})},
+  api:async(url,options)=>options?{publication_id:"B",evidence_context:"B-context",definitions:{per:{label:"PER"}},
+   row:{metric_id:"per",current_eps_evaluation:evaluation},financial_inputs:[{role:"diluted_eps_12m",source_kind:"GOVERNED_DIRECT_QTD_TTM",value:"19.16",known_on:"2026-10-28",ready_on:"2026-11-16",ready_at:"2026-11-16T08:00:00Z",period_start:"2025-10-01",period_end:"2026-10-01"}],
+   reported_quarter_sources:{q4:{input_ref:{kind:"OFFICIAL_REPORTED_HTML_TABLE"},reported_comparison_record:{start:"2026-04-01",end:"2026-07-01",value:"4.81"}}},
+   eps_diagnostic:{reason:"PER_SHARE_BASIS_MISMATCH"},diagnostic_evidence:[{affected_original_quarters:[{start:"2025-10-01",end:"2026-01-01"},{start:"2026-01-01",end:"2026-04-01"}]}]}:
+   {kind:"RESULT",operation:"query",request:{metric_ids:["per"]},title:"B",note:"original",publication_id:"B",result:original,evidence_context:"B-context",source_context:{price_as_of:"2026-11-13",requested_as_of:"2026-11-16",staleness_calendar_days:3,current_eps_evaluation:evaluation}}});
+ f.state.capability.current_eps_evaluation={evaluation_as_of:"2026-11-20",quote_session:"2026-11-19"};
+ await f.priceReopen("B-save");await f.priceShowEvidence("0000000001","B-per");
+ assert.match(host("#price-context").textContent,/2026-11-16 \/ 종가 2026-11-13/);assert.doesNotMatch(host("#price-context").textContent,/2026-11-20/);
+ assert.match(host("#price-evidence-content").innerHTML,/공식 실적표 · GAAP 희석 EPS/);assert.match(host("#price-evidence-content").innerHTML,/4.81/);
+ assert.match(host("#price-evidence-content").innerHTML,/분기 EPS의 주당 기준이 다릅니다/);assert.match(host("#price-evidence-content").innerHTML,/2025-10-01–2026-01-01/);
+ f.priceExport();assert.equal(exported.source_context.current_eps_evaluation.evaluation_as_of,"2026-11-16");
+});
