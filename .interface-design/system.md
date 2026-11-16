@@ -173,3 +173,63 @@ missing selected period may offer `이 기간의 준비 항목 보기`; only exp
 selection with that period's prepared items. Never silently merge raw scope groups.
 Existing market-input consumers remain present; this does not authorize a new price producer.
 Remote delivery/main merge for this milestone has not been requested or performed.
+
+## Price bands and rolling distribution — approved V3 implementation candidate (2026-11-16)
+
+A paired timeline owns the price worksheet: upper actual close plus fixed EPS/BPS scenario
+bands in currency/share; lower actual PER or BPS-based PBR plus P10–P90/P25–P75/P50 in
+multiples. One shared date cursor and native keyboard range link both plots and the adjacent
+denominator/period/known-date/window-count evidence ledger. Missing values break lines and
+ribbons. Vertical marks distinguish denominator identity changes. Never infer business inputs
+in the browser or stretch a last-point distribution backward.
+
+Use the existing paper/ink/slate/blue/amber palette, quiet borders,14px reading figures and
+4px rhythm. Charts dominate width;272px adjacent date ledger supports desktop, stacks below
+on narrow screens. Real company search/selection and temporal controls precede the chart.
+An empty scope has an explicit picker; a multi-company scope never silently picks one.
+Advanced conditions/query/old fixed-day bands remain in a collapsed native disclosure.
+View1/3years and distribution252sessions/3years are separate controls.252sessions requires
+exact252 expected and valid observations;3years retains its original rule. Diagnostic filed-day
+mode remains visibly backtest-ineligible. Editable fixed multiples are assumptions, not forecasts.
+Implementation/independent/actual1920/1440browser/runtime acceptance remain separate states
+in [the tracked contract](../docs/implementation/price-band-timeseries-20261116.md).
+
+
+Price timeline final local/operating acceptance (2026-11-16): product
+`183a55506b0c1f6e3f4d1a3eb212099de112d7ae` passed separate Astra review and ROOT's actual
+1920×1080/1440×900 Windows browser/API acceptance at18765. Measured1440axis text13.568px;
+shared pointer/keyboard cursor, exact evidence, explicit company selection, unavailable states,
+READY_ONLY and separate3y option passed. Successful analysis scrolls to the paired plots,
+with a nearby return link to conditions. MSFT's actual BPS history supports503rolling252
+points; unavailable histories remain gaps. Private original-five/new-one snapshots and
+byte-identical reopened export survived cold restart.49Python/21priceNode/13historyNode
+passed. Existing109financial rows/2834price observations/14datasets/555protectedfiles and
+both journals were preserved; zero operating test saves. This final documentation update
+changes no product bytes. Remote/main delivery remains unperformed; source and acceptance
+boundaries are recorded in [the contract](../docs/implementation/price-band-timeseries-20261116.md#final-independent-local-and-operating-acceptance--2026-11-16).
+
+
+Price timeline refined final acceptance (2026-11-16): final product
+`aabadc222e7149ec177a47b92f9de0ad5e99b04e` independently passed and ROOT accepted it
+locally/at18765(PID36476). The static readout explicitly resets inherited drawer height,
+max-height, min-height, z-index and overflow. Actual readout/layout heights are781.94/797.94px
+at1920×1080 and628/644px at1440×900, with no cursor/evidence/API/browser errors.49Python,
+22priceNode and13historyNode checks passed; calculations/worker/bridge/appJS are identical
+to accepted183a, so its private old-five/new-one cold restart/export evidence remains valid.
+109financial rows/14datasets/2834price observations/555protectedfiles/journals/trash8 remain
+preserved, with zero operating test saves. This supersedes the CSS pending stage while
+preserving prior dated acceptance records. No further product refinement or remote/main
+change is included. [Final boundaries and receipts](../docs/implementation/price-band-timeseries-20261116.md#refined-final-independent-local-and-operating-acceptance--2026-11-16).
+
+
+Price timeline remote integration (2026-11-16): user authorized push/PR; latest
+origin/main `b8a2088e17` (PR107) is normally merged into the existing timeline branch.
+Retain both accepted timeline layout and the direct-quarter EPS evidence/evaluation context:
+current evaluation16 with quote/public cutoff13 and ready16 never becomes a historical
+readiness exemption. Shared band helper propagates current context/HON diagnostics only
+from its source observation; timeline historical gaps and252/3y windows remain unchanged.
+Product bytes equal accepted combined runtime5c37; this integration adds no UI redesign.
+Writer checks158PythonPASS/1explicitcachedSKIP and48NodePASS; integrated independent review,
+ROOT acceptance, push/PR and remote CI remain pending. Existing operating runtime/data/
+journals/main are untouched. Prior no-remote records remain historical; no main merge or
+runtime activation is included in the new authorization. See [the current delivery contract](../docs/implementation/price-band-timeseries-20261116.md#authorized-remote-delivery-and-pr107-integration--2026-11-16).

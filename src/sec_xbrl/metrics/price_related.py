@@ -425,32 +425,37 @@ def calculate_valuation_metrics(price: dict | None, observations: list[dict], gr
     return results
 
 
+def fixed_multiple_bands_for_ratio(base: dict, scenarios: list[str]) -> list[dict]:
+    """Single approved ratio route, shared by legacy scenarios and temporal analysis."""
+    routes = {"per": ("per", "diluted_eps_12m"), "pbr_bps": ("pbr", "book_value_per_common_share")}
+    if base["metric_id"] not in routes:
+        raise ValueError("fixed bands require PER or BPS-based PBR")
+    multiple, role = routes[base["metric_id"]]
+    denominator = next((r for r in base["input_lineage"] if r.get("input_role") == role), {})
+    results = []
+    for text in scenarios or [None]:
+        m = finite(text)
+        value = None
+        reason = base["reason"]
+        if not reason and (m is None or m <= 0):
+            reason = "POSITIVE_USER_MULTIPLE_REQUIRED"
+        if not reason:
+            with localcontext(DECIMAL):
+                value = finite(denominator["value"]) * m
+        results.append(_row(f"fixed_{multiple}_band", base["cik"], base["security_id"], base["as_of"],
+            value=value, reason=reason, inputs=base["input_lineage"], user_multiple=str(m) if m is not None else None,
+            currency=base.get("currency"), scenario_kind="USER_FIXED_MULTIPLE_NOT_FORECAST",
+            **({"current_eps_evaluation": base["current_eps_evaluation"], "historical_ready": False,
+                "backtest_eligible": False} if "current_eps_evaluation" in base else {}),
+            **({"eps_diagnostic": base["eps_diagnostic"]} if "eps_diagnostic" in base else {})))
+    return results
+
+
 def fixed_multiple_bands(valuation_rows: list[dict], multiples: dict[str, list[str]]) -> list[dict]:
     """Use approved financial legs of valuation results; calculations remain upstream."""
     by_id = {row["metric_id"]: row for row in valuation_rows}
-    results = []
-    for multiple, role in (("per", "diluted_eps_12m"), ("pbr", "book_value_per_common_share")):
-        base = by_id["per" if multiple == "per" else "pbr_bps"]
-        denominator = next((r for r in base["input_lineage"] if r.get("input_role") == role), {})
-        scenarios = multiples.get(multiple, [])
-        if not scenarios:
-            scenarios = [None]
-        for text in scenarios:
-            m = finite(text)
-            value = None
-            reason = base["reason"]
-            if not reason and (m is None or m <= 0):
-                reason = "POSITIVE_USER_MULTIPLE_REQUIRED"
-            if not reason:
-                with localcontext(DECIMAL):
-                    value = finite(denominator["value"]) * m
-            results.append(_row(f"fixed_{multiple}_band", base["cik"], base["security_id"], base["as_of"],
-                value=value, reason=reason, inputs=base["input_lineage"], user_multiple=str(m) if m is not None else None,
-                currency=base.get("currency"), scenario_kind="USER_FIXED_MULTIPLE_NOT_FORECAST",
-                **({"current_eps_evaluation": base["current_eps_evaluation"], "historical_ready": False,
-                    "backtest_eligible": False} if "current_eps_evaluation" in base else {}),
-                **({"eps_diagnostic": base["eps_diagnostic"]} if "eps_diagnostic" in base else {})))
-    return results
+    return [row for route, metric in (("per", "per"), ("pbr", "pbr_bps"))
+            for row in fixed_multiple_bands_for_ratio(by_id[metric], multiples.get(route, []))]
 
 
 def historical_multiple_percentiles(rows: list[dict], *, cik: str, security_id: str,
