@@ -16,7 +16,7 @@
 | LOCALLY_ACCEPTED / OPERATING_ACCEPTED | ROOT가 불변 v2 발행물과 18765 운영을 인수; 운영 시험 저장 0건 |
 | MERGED | PR109 → main `88f81fa0f6ecb5eac52ffa7244ac705232dec9fa` |
 | PR 필수 CI | run44139873341 SUCCESS, Ruff PASS, 전체 3,342 PASS / 47 SKIP |
-| 병합 후 main CI | [run44143832378](https://github.com/pluswc/sec_xbrl/actions/runs/44143832378), target `88f81fa0f6ecb5eac52ffa7244ac705232dec9fa`; 이 기록 시점 진행 중으로 최종 결과는 미확인 |
+| 병합 후 main CI | [run44143832378](https://github.com/pluswc/sec_xbrl/actions/runs/44143832378), target `88f81fa0f6ecb5eac52ffa7244ac705232dec9fa`; 실제 push CI SUCCESS, Ruff PASS, 전체 3,342 PASS / 47 SKIP |
 
 E0 승인 당시 기준은 `origin/main b5d926ed029752702eddec00295676879f50bec9`, 구현
 브랜치는 `codex/common-q4-eps-reconstruction`이었다. 단일 제품 작성자가 격리
@@ -522,7 +522,7 @@ SHA256은 각각 다음과 같이 exact 유지했다.
 동시 architecture assets 17개도 보존했다. 운영 검사는 읽기 전용이고 수집·재발행·
 저장으로 기존 원본을 덮어쓰지 않았다.
 
-### PR CI·코드 병합·남은 CI 상태
+### PR CI·코드 병합·병합 후 CI
 
 [PR109 CI run44139873341](https://github.com/pluswc/sec_xbrl/actions/runs/44139873341)은
 최종 `6c4c9a57e56e04fd4eb7c2f41ff6ac6594487efc`에서 **SUCCESS**, Ruff PASS,
@@ -535,9 +535,12 @@ SHA256은 각각 다음과 같이 exact 유지했다.
 전체 PASS가 확인되어 코드 병합의 필수 CI 조건을 충족했다.
 
 병합 후 main 대상 CI는 [run44143832378](https://github.com/pluswc/sec_xbrl/actions/runs/44143832378),
-target SHA는 `88f81fa0f6ecb5eac52ffa7244ac705232dec9fa`다. 이 납품 기록 시점에는
-진행 중이며 최종 성공/실패는 확인하지 않았다. PR CI의 PASS를 병합 후 main CI의
-PASS로 추정하지 않는다. 그 최종 판단과 문서 후속 PR/CI/main 전달은 ROOT 소유다.
+target SHA는 `88f81fa0f6ecb5eac52ffa7244ac705232dec9fa`다. ROOT가 실제 push event와
+동일 head SHA, job134253455315의 로그를 확인해 **SUCCESS**, Ruff PASS,
+pytest **3,342 PASS / 47 SKIP / 29 warnings**(366.08s)를 확정했다. 근거는
+`work/common-q4-eps-reconstruction-20261118/evidence/main-88f-ci-success-v1.json`이다.
+이는 PR CI로부터의 추정이 아닌 별도 main 실행 결과다. 문서 후속 PR/CI/main 전달은
+ROOT 소유다.
 
 ### 선택적 상세 증거와 이번 문서 검증
 
