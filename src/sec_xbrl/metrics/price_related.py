@@ -206,8 +206,10 @@ def _input_reason(row: dict, *, role: str, cik: str, as_of: str,
         return row.get("reason") or "FINANCIAL_INPUT_UNAVAILABLE"
     if row.get("unit_kind") != ROLE_UNITS[role] or (role != "common_shares" and row.get("currency") != currency):
         return "UNIT_OR_CURRENCY_MISMATCH"
+    if role == "diluted_eps_12m" and row.get("source_kind") == "GOVERNED_Q4_COMPONENT_TTM" and current_evaluation is None:
+        return "CURRENT_Q4_EPS_EVALUATION_REQUIRED"
     ready_cutoff = as_of
-    if current_evaluation and role == "diluted_eps_12m" and row.get("source_kind") == "GOVERNED_DIRECT_QTD_TTM":
+    if current_evaluation and role == "diluted_eps_12m" and row.get("source_kind") in {"GOVERNED_DIRECT_QTD_TTM", "GOVERNED_Q4_COMPONENT_TTM"}:
         from sec_xbrl.metrics.reported_quarter_eps import aware
 
         if row["observation_id"] not in current_evaluation["input_ids"] or as_of != current_evaluation["quote_session"]:
@@ -240,7 +242,7 @@ def _input_reason(row: dict, *, role: str, cik: str, as_of: str,
         return "CLASS_OR_SPLIT_BASIS_MISMATCH"
     if role in {"preferred_equity", "nci"} and finite(row["value"]) == 0 and row.get("evidenced_zero") is not True:
         return "EXPLICIT_ZERO_EVIDENCE_REQUIRED"
-    if role == "diluted_eps_12m" and row.get("source_kind") not in {"DIRECT_REPORTED", "GOVERNED_DIRECT_QTD_TTM"}:
+    if role == "diluted_eps_12m" and row.get("source_kind") not in {"DIRECT_REPORTED", "GOVERNED_DIRECT_QTD_TTM", "GOVERNED_Q4_COMPONENT_TTM"}:
         return "EPS_DIRECT_OBSERVATION_REQUIRED"
     if role == "common_shares" and row.get("share_measure") != "OUTSTANDING_COMMON_EX_TREASURY":
         return "ACTUAL_OUTSTANDING_COMMON_REQUIRED"
@@ -416,9 +418,15 @@ def calculate_valuation_metrics(price: dict | None, observations: list[dict], gr
                       financial_end_convention="EXCLUSIVE",
                       market_cap_interpretation="LATEST_DISCLOSED_OUTSTANDING_SHARE_BASED_NOT_DAILY_SHARE_MEASUREMENT" if "common_shares" in roles else None,
                       denominator_route="OPERATING_INCOME_PLUS_INCLUDED_DA_PROXY" if mid == "ev_ebitda" else None)
+        if mid in {"per", "earnings_yield"} and chosen.get("diluted_eps_12m", {}).get("source_kind") == "GOVERNED_Q4_COMPONENT_TTM":
+            result.update(historical_ready=False, backtest_eligible=False, eps_source_kind="GOVERNED_Q4_COMPONENT_TTM")
+            result.pop("observation_id")
+            result["observation_id"] = "price-metric-" + identity(result)
         if current_evaluation and mid in {"per", "earnings_yield"} and chosen.get("diluted_eps_12m", {}).get("observation_id") in current_evaluation["input_ids"]:
             result.update(current_eps_evaluation=current_evaluation, historical_ready=False,
-                          backtest_eligible=False, eps_source_kind="GOVERNED_DIRECT_QTD_TTM")
+                          backtest_eligible=False, eps_source_kind=chosen["diluted_eps_12m"]["source_kind"])
+            if chosen["diluted_eps_12m"]["source_kind"] == "GOVERNED_Q4_COMPONENT_TTM":
+                result["eps_input_admission_policy_version"] = chosen["diluted_eps_12m"]["definition_version"]
             result.pop("observation_id")
             result["observation_id"] = "price-metric-" + identity(result)
         results.append(result)
@@ -446,7 +454,8 @@ def fixed_multiple_bands_for_ratio(base: dict, scenarios: list[str]) -> list[dic
             value=value, reason=reason, inputs=base["input_lineage"], user_multiple=str(m) if m is not None else None,
             currency=base.get("currency"), scenario_kind="USER_FIXED_MULTIPLE_NOT_FORECAST",
             **({"current_eps_evaluation": base["current_eps_evaluation"], "historical_ready": False,
-                "backtest_eligible": False} if "current_eps_evaluation" in base else {}),
+                "backtest_eligible": False, "eps_source_kind": base.get("eps_source_kind")} if "current_eps_evaluation" in base else {}),
+            **({"eps_input_admission_policy_version": base["eps_input_admission_policy_version"]} if base.get("eps_input_admission_policy_version") else {}),
             **({"eps_diagnostic": base["eps_diagnostic"]} if "eps_diagnostic" in base else {})))
     return results
 

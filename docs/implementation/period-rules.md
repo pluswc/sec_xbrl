@@ -45,6 +45,12 @@ The reviewed Q4 policy may use `FY - YTD_9M` only when:
 
 Never use simple subtraction for EPS, margins, ratios, averages or non-additive metrics.
 
+The separately governed [Q4 EPS component reconstruction](common-q4-eps-reconstruction-20261118.md)
+may divide an accounting-qualified Q4 common numerator by its qualified weighted-average
+share denominator, retaining source-decimals uncertainty and every accounting gate.
+It does not subtract FY EPS from YTD EPS, treat weighted averages as additive flows,
+or widen the generic reviewed/mechanical Q4 flow policies below.
+
 ### M8 mechanical Q4 companion
 
 Layer 2 also publishes a separate **mechanical candidate** companion.  Its
