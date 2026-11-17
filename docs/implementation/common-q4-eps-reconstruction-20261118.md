@@ -2,12 +2,27 @@
 
 ## 상태와 범위
 
-ROOT가 2026-11-18 E0 구현을 승인했다. 기준은 `origin/main
-b5d926ed029752702eddec00295676879f50bec9`, 브랜치는
-`codex/common-q4-eps-reconstruction`이다. 단일 제품 작성자가 격리 worktree에서
-구현한다. 현재 상태는 APPROVED / 구현 중이며 독립 검증, 로컬 인수, 운영 인수,
-PR·CI·main 병합은 각각 별도 대기다. 작성자의 commit은 ROOT 최종 freeze 승인
-후만 가능하다. network·수집·운영·push·PR은 ROOT 소유다.
+**2026-11-18 최종 코드 납품 상태:** 제품 소스
+`6c4c9a57e56e04fd4eb7c2f41ff6ac6594487efc`는 독립 검증 PASS와 ROOT 로컬·운영 인수를
+완료했고 [PR109](https://github.com/pluswc/sec_xbrl/pull/109)로 main
+`88f81fa0f6ecb5eac52ffa7244ac705232dec9fa`에 병합됐다. 아래 구현·동결·P2 수정 시점의
+대기 문구는 당시 기록으로 보존한다. 최종 결과와 근거는 이 문서 끝의
+[최종 납품 기록](#최종-납품-기록--2026-11-18)을 따른다.
+
+| 상태 | 최종 판단과 대상 |
+| --- | --- |
+| IMPLEMENTED | 제품 동결 `6c4c9a57e56e04fd4eb7c2f41ff6ac6594487efc` |
+| INDEPENDENTLY_VERIFIED / PASS | 별도 Sol이 위 SHA의 source·P2 수정·실자료·current evaluation v2를 검증 |
+| LOCALLY_ACCEPTED / OPERATING_ACCEPTED | ROOT가 불변 v2 발행물과 18765 운영을 인수; 운영 시험 저장 0건 |
+| MERGED | PR109 → main `88f81fa0f6ecb5eac52ffa7244ac705232dec9fa` |
+| PR 필수 CI | run44139873341 SUCCESS, Ruff PASS, 전체 3,342 PASS / 47 SKIP |
+| 병합 후 main CI | [run44143832378](https://github.com/pluswc/sec_xbrl/actions/runs/44143832378), target `88f81fa0f6ecb5eac52ffa7244ac705232dec9fa`; 실제 push CI SUCCESS, Ruff PASS, 전체 3,342 PASS / 47 SKIP |
+
+E0 승인 당시 기준은 `origin/main b5d926ed029752702eddec00295676879f50bec9`, 구현
+브랜치는 `codex/common-q4-eps-reconstruction`이었다. 단일 제품 작성자가 격리
+worktree에서 구현하고 ROOT의 명시 승인 후 commit/freeze했다. 수집·운영·push·PR·
+병합은 ROOT가 수행했다. 이번 최종 기록은 병합된 main을 기준으로 한 문서 두 개만의
+후속 변경이며 제품 소스·자료·운영·저장·스킬을 바꾸지 않는다.
 
 허용 변경은 새 `metrics/q4_eps_reconstruction.py`, 필요에 따른
 `metrics/{market_inputs,price_financial_inputs,reported_quarter_eps,
@@ -409,3 +424,142 @@ namespace CIK, 정식 CIK 부재/충돌, 잘못된 Context/entity namespace·CIK
 Issuer citation 구조가 바뀌므로 ROOT는 새 불변 qualification/bundle/publication을
 재작성하고 새 동결 SHA의 독립 최종 판단을 받는다. 이전 후보/자료와 운영은 수정하지
 않았고 push/PR/main 상태도 대기다.
+
+
+## 최종 납품 기록 — 2026-11-18
+
+이 절은 앞선 후보·대기 기록을 날짜 있는 최종 상태로 갱신한다. 코드 인수 대상은
+`6c4c9a57e56e04fd4eb7c2f41ff6ac6594487efc`이며, [PR109](https://github.com/pluswc/sec_xbrl/pull/109)의
+실제 merge commit은 `88f81fa0f6ecb5eac52ffa7244ac705232dec9fa`다. Git merge의 두
+부모는 기존 main `b5d926ed02`와 동결 제품 `6c4c9a57e5`다. 구현, 독립 검증,
+로컬/운영 수락, PR CI, 코드 병합과 병합 후 CI를 각각 구분한다. 제품 소스는 계속
+동결하며 이 후속 문서 브랜치 `codex/common-q4-eps-delivery-record`는 본 계약과
+계획 등록부만 수정한다.
+
+### 독립 검증과 최종 불변 입력
+
+별도 Sol의 `independent-source-6c4-final-PASS.json`은 최종 전체 source diff와 P2
+identity 수정, 실제 artifact/bundle 및 current v2 정책에 PASS를 반환했다. P2 관련
+52 Python 검사를 새로 실행했고, 변경되지 않은 기존 105 PASS / 1 SKIP 및 25 Node
+증거를 source byte 동일 확인 후 재사용했다. 이를 157 PASS / 1 SKIP의 관련 증거로
+집계하며 하나의 신규 전체 실행이라고 주장하지 않는다. 별도
+`independent-current-evaluation-6c4-PASS.json`도 실제 원 pin과 잘못된 평가일 거부,
+명시 current override가 없을 때의 차단을 확인했다.
+
+P2 수정 후 최종 입력은 이전 v4/초기 bundle을 대체하는 새 불변 자료다.
+
+| 자료 | SHA256 또는 식별자 |
+| --- | --- |
+| `inputs/qualified-q4-eps-v5.json` | `ecb1f2743ea6b0fe1c2d9d69bf4a7ab0506e0e1c0c0fd943737b78bec943df9e` |
+| `publication-inputs-v2/financial-input-bundle.json` | `6df1395578fb641e492836f8328bd0175cf5b08c7bc982c2c911e9cdd5af92dc` |
+| `publication-inputs-v2/current-evaluation-policy-v2.json` | `40f566e4a05553892e9bf28ed141687c2c4ce60b325dff89543ad8806044a653` |
+| `publication-inputs-v2/current-evaluation-root-acceptance-v2.json` | `309706bd0bda1e54e5e67effa16208f65bfcfb6bd8b4e20fa61d371a47d072ce` |
+| `data/processed/price_metrics/20261118_common_q4_eps_v2/price_metric_manifest.json` | `8a5bf28974f3f7f01ebae3985c0664ee458ee0e081444797b41438169035d3d6` |
+| 가격 발행물 | `screening-price-metrics-dc58939be9ad198d7883fa7e` |
+
+입력의 `inputs/`와 `publication-inputs-v2/`는 선택적 실제 실행 자료 위치
+`work/common-q4-eps-reconstruction-20261118/` 아래다. 벌크 자료를 Git에 추가하지
+않는다. 이 문서의 계약·최종 상태·수치·제한은 새 checkout에서도 그 작업 디렉터리
+없이 읽을 수 있다.
+
+기존 financial observations 325개는 exact 보존하고 AMZN 12.37 한 행만 더했다.
+기존 compatibility grants 100개 중 AMZN의 빈 current EPS 역할 한 곳만 추가했다.
+기존 FY 입력과 direct TTM 3회사, 나머지 역할·기간·정의·가격 batch를 대체하지 않았다.
+
+### 실제 조회 결과와 적격 범위
+
+실제 109회사·latest 2,834행에서 PER와 이익수익률은 각각 **13회사**다. 기존 12회사에
+AMZN 하나가 추가됐고 PBR 75회사, BPS 기반 PBR 60회사와 기존 가용 값은 보존됐다.
+AMZN의 새 희석 TTM은 **12.37**, 실제 종가 266.6600036621094에 대한 PER는
+**21.55699302038071139854486661277284**, 이익수익률은
+**4.638865907942569388674649297166104%**다. 고정 PER 10/15/20배 band는 같은 승인
+분모로 123.70/185.55/247.40이다.
+
+회사별 상태는 실제 prepared query와 `company-query-results-v2.csv`로 확인했다.
+PER 미준비 96회사의 source 검토 분류는 아래처럼 서로 분리된다. 이는 전체 재무
+엔진의 미구현이나 모든 Raw 자료 부재를 의미하지 않는다.
+
+| 96회사 분류 | 회사 수 |
+| --- | ---: |
+| 공시 source grammar/scope의 자동 해석·검토 미충족 | 66 |
+| 기존 class/scope grant가 없어 source discovery의 승인 binding 미충족 | 20 |
+| 필요한 numerator/weighted-average share 입력 미확정 | 7 |
+| 유지된 FY/9M context window 없음 | 3 |
+
+109회사 범위의 basic 103 / diluted 98은 **숫자 계산 진단 후보 수**다. 회계 승인
+회사 수가 아니다. Source-qualified current 회사는 **AMZN 1회사**이고 전체
+6,928 quarter/flavor 후보 중 적격은 아래 **4개 관측**, 나머지 6,924개는 HOLD다.
+
+| AMZN 실제 Q4 기간(end exclusive) | 기본 EPS | 희석 EPS | 선택 |
+| --- | ---: | ---: | --- |
+| 2024-10-01–2025-01-01 | 1.90 | 1.86 | 모두 직접 공시 우선 |
+| 2025-10-01–2026-01-01 | 1.98 | 1.95 | 모두 직접 공시 우선 |
+
+N/W 재구성 point·원 decimals interval·직접 공시 대조는 별도 검증 진단으로 보존한다.
+이번 적격 네 관측을 모두 누적 가산성이 승인된 재구성 EPS라고 부르지 않는다.
+FY EPS 차감, 기본 EPS의 희석 대체, EPS 일치에 맞춘 weight/point 선택은 계속 금지다.
+가격과 공시 정보 cutoff는 **2026-11-13**, 현재 평가는 **2026-11-18 KST**다.
+실제 준비 timestamp는 원 UTC 그대로 보존하며 신규 역사 backfill은 **0건**이다.
+`historical_ready=false`, `backtest_eligible=false` 및 명시 current-only guard를 유지한다.
+
+### 로컬·운영 인수와 원본 보존
+
+ROOT는 `root-local-operating-acceptance-v2.json`에서
+`LOCALLY_AND_OPERATING_ACCEPTED`를 선언했다. 실제 API/브라우저/내보내기와 사적
+원본 저장 2개 + 새 저장 3개, 총 5개 저장의 cold restart/원 결과 exact 재열기를
+확인했다. 이 사적 검사와 운영 저장은 구분하며 **운영 시험 save는 0건**이다.
+
+운영 frontend는 **18765 / Native PID60968**, 가격 worker는 인수한 `6c4c9a57e5`
+source copy를 사용한다. UI는 기존 인수 `c7241f94d9a5f4df4d3c3207ea7d5c73997fe4f8`
+insights 기반에 같은 6c4의 최소 표시 patch만 적용했다. 기존 Python backend19078의
+**PID1477655**, 별도 18766의 원 발행물과 기존 소비 경로를 보존했다. 두 원 journal의
+SHA256은 각각 다음과 같이 exact 유지했다.
+
+- 금융 journal: `3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`
+- 가격 journal: `ba18bf81059b4de96e5028dd1e9a320c37100aa8366fd4b09299d9be7131e8b0`
+
+기존 109회사 자료·저장·PR108 timeline과 보호 1,123개 pin의 fingerprint,
+동시 architecture assets 17개도 보존했다. 운영 검사는 읽기 전용이고 수집·재발행·
+저장으로 기존 원본을 덮어쓰지 않았다.
+
+### PR CI·코드 병합·병합 후 CI
+
+[PR109 CI run44139873341](https://github.com/pluswc/sec_xbrl/actions/runs/44139873341)은
+최종 `6c4c9a57e56e04fd4eb7c2f41ff6ac6594487efc`에서 **SUCCESS**, Ruff PASS,
+전체 pytest **3,342 PASS / 47 SKIP**이다. ROOT는 이 필수 CI와 독립/로컬/운영
+근거를 수용한 뒤 [PR109](https://github.com/pluswc/sec_xbrl/pull/109)를 main
+`88f81fa0f6ecb5eac52ffa7244ac705232dec9fa`로 병합했다.
+
+로컬 cached NVDA recovery 검사의 기존 main 동일 실패는 앞 절의 별도 기록을
+유지한다. 이를 local full-suite PASS로 바꾸지 않는다. 별도 환경인 PR CI의 실제
+전체 PASS가 확인되어 코드 병합의 필수 CI 조건을 충족했다.
+
+병합 후 main 대상 CI는 [run44143832378](https://github.com/pluswc/sec_xbrl/actions/runs/44143832378),
+target SHA는 `88f81fa0f6ecb5eac52ffa7244ac705232dec9fa`다. ROOT가 실제 push event와
+동일 head SHA, job134253455315의 로그를 확인해 **SUCCESS**, Ruff PASS,
+pytest **3,342 PASS / 47 SKIP / 29 warnings**(366.08s)를 확정했다. 근거는
+`work/common-q4-eps-reconstruction-20261118/evidence/main-88f-ci-success-v1.json`이다.
+이는 PR CI로부터의 추정이 아닌 별도 main 실행 결과다. 문서 후속 PR/CI/main 전달은
+ROOT 소유다.
+
+### 선택적 상세 증거와 이번 문서 검증
+
+상세 보고서는 `work/common-q4-eps-reconstruction-20261118/evidence/`의 불변 로컬
+증거다. 아래 hash는 이번 문서 정리에서 실제 파일을 읽어 확인했다. 인수 receipt의
+`main=PENDING_STANDARD_MERGE_AFTER_CI`는 **병합 전 인수 시점의 역사 필드**이며,
+코드 병합의 최종 상태는 위 PR109/main 기록으로 갱신한다.
+
+| 증거 파일 | SHA256 |
+| --- | --- |
+| `root-local-operating-acceptance-v2.json` | `b6c5ad1b1617ebe46300b0e97489fb6d109bf36de7dbe823d88e35f2226a9a17` |
+| `independent-source-6c4-final-PASS.json` | `0894b71378cf44e5f8df0744ffe97a6b0c18e0ca17689427f56c668fbef9f286` |
+| `independent-current-evaluation-6c4-PASS.json` | `08e89dc3937f69b8c14534abae26c1596c246d4cdcf1ae868a5d1be6695caf37` |
+| `pr109-ci-success-v1.json` | `2256a76bed02f34377a375a20c7000cc41ac21d26bf18e34910380439bddfa51` |
+| `company-query-summary-v2.json` | `775a67fe40e8219c159e1131fa6775af0aa39d3e38fca5040aaf3f9fb8e30da5` |
+| `company-query-results-v2.csv` | `179830059495cbd52aef767dc4139473eed1f59ce55202793431b9eae0f071d8` |
+
+이번 후속은 계약 문서와 계획 등록부 **두 파일만** 수정한다. 기준
+`origin/main 88f81fa0f6ecb5eac52ffa7244ac705232dec9fa`가 `6c4c9a57e5`를 포함함을
+확인했고 `src/`, `examples/`, `tests/`, `pyproject.toml`은 해당 인수 소스와 byte 동일하다.
+제품 검사는 기존 독립/CI 증거를 재사용하며 코드 재시험·운영 변경은 수행하지 않는다.
+문서 내용·상대 링크·diff·허용 파일 범위를 검사한 뒤 문서 commit으로 동결 전달한다.
