@@ -237,11 +237,13 @@ def publish_price_metrics(config_pin: dict, output: str | Path) -> dict:
             "producer": {"publication_sha256": SOURCE_SHA256_PUBLICATION, "metrics_sha256": SOURCE_SHA256}}
         if readiness:
             manifest["company_financial_readiness"] = readiness
+        if source.get("q4_component_derivation"):
+            manifest["source_pins"]["q4_component_derivation"] = source["q4_component_derivation"]
         if evaluation:
             manifest["current_eps_evaluation"] = evaluation
             manifest["current_eps_diagnostics"] = eps_diagnostics
-            manifest["source_pins"].update(reported_quarter_derivation=source["reported_quarter_derivation"],
-                current_evaluation_policy=config["current_eps_evaluation"]["policy"],
+            manifest["source_pins"].update({k: source[k] for k in ("reported_quarter_derivation", "q4_component_derivation") if source.get(k)})
+            manifest["source_pins"].update(current_evaluation_policy=config["current_eps_evaluation"]["policy"],
                 current_evaluation_approval=config["current_eps_evaluation"]["approval"])
         for pin in [config_pin, *manifest["source_pins"].values()]:
             pinned_json(pin)
@@ -298,6 +300,26 @@ class PriceMetricReader:
         st = path.stat()
         return self._cached_source(pin["path"], pin["sha256"],
                                    (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns))
+
+    def q4_eps(self, cik: str, flavor: str | None = None) -> dict:
+        """Read prepared basic/diluted quarter diagnostics without source rederivation."""
+        pinned_json(self.pin)
+        if cik not in self.manifest["files"] or flavor not in {None, "basic", "diluted"}:
+            raise ValueError("unknown company or Q4 EPS flavor")
+        pin = self.manifest["source_pins"].get("q4_component_derivation")
+        result = {"schema_version": "common-q4-eps-prepared-query-v1", "publication_id": self.manifest["publication_id"],
+                  "publication_pin": self.pin, "cik": cik, "flavor": flavor,
+                  "derivation_pin": pin, "rows": []}
+        if not pin:
+            return dict(result, status="UNAVAILABLE", reason="COMMON_Q4_EPS_ARTIFACT_NOT_PUBLISHED")
+        artifact = self._source(pin)
+        if artifact.get("schema_version") != "governed-common-q4-eps-v1":
+            raise ValueError("prepared Q4 EPS derivation schema differs")
+        return dict(result, status="PREPARED", reason=None, source_projection=artifact["source_projection"],
+                    prepared_at=artifact["prepared_at"], public_cutoff=artifact["public_cutoff"],
+                    rows=copy.deepcopy([r for r in artifact["quarter_results"] if r["cik"] == cik
+                                        and (flavor is None or r["flavor"] == flavor)]),
+                    holds=copy.deepcopy([r for r in artifact["holds"] if r["cik"] == cik]))
 
     def query(self, *, ciks: list[str] | None = None, metric_ids: list[str] | None = None,
               mode: str = "latest", start: str | None = None, end: str | None = None,
@@ -372,6 +394,20 @@ class PriceMetricReader:
             raise KeyError(observation_id)
         return self._expand_evidence(rows[0])
 
+    def _diagnostic_evidence(self, pin: dict, diagnostic: dict, cik: str) -> dict:
+        data = self._source(pin)
+        if data.get("schema_version") != "governed-common-q4-eps-v1":
+            return data
+        ids = {d["candidate_id"] for d in diagnostic.get("details", []) if d.get("candidate_id")}
+        quarters = [r for r in data["quarter_results"] if r["cik"] == cik and (not ids or r["candidate_id"] in ids)]
+        keys = {key for q in quarters for key in q["source_fact_keys"]}
+        return {"schema_version": data["schema_version"], "artifact_pin": pin,
+                "source_projection": data["source_projection"], "rule_version": data["rule_version"],
+                "prepared_at": data["prepared_at"], "quarter_results": quarters,
+                "observations": [r for r in data["observations"] if r["cik"] == cik],
+                "holds": [r for r in data["holds"] if r["cik"] == cik],
+                "source_rows": [r for r in data["source_rows"] if r["fact_key"] in keys]}
+
     def _expand_evidence(self, row: dict) -> dict:
         """Expand a stored row or a service-owned verified scenario, never client values."""
         pinned_json(self.pin)
@@ -392,6 +428,14 @@ class PriceMetricReader:
             artifact = self._source(source["reported_quarter_derivation"])
             quarter_ids = {ref["observation_id"] for r in financial_inputs for ref in r.get("source_refs", [])}
             quarter_sources = {oid: r for oid, r in artifact["reported_quarter_sources"].items() if oid in quarter_ids}
+        component_evidence = {}
+        if any(r.get("source_kind") == "GOVERNED_Q4_COMPONENT_TTM" for r in financial_inputs):
+            artifact = self._source(source["q4_component_derivation"])
+            candidate_ids = {r["q4_candidate_id"] for r in financial_inputs if r.get("q4_candidate_id")}
+            component_evidence = {"derivation": source["q4_component_derivation"],
+                "quarters": [r for r in artifact["quarter_results"] if r["candidate_id"] in candidate_ids],
+                "source_rows": [r for r in artifact["source_rows"] if any(r["fact_key"] in q.get("source_fact_keys", [])
+                    for row in financial_inputs for q in row.get("source_refs", []))]}
         price_inputs, expected = {}, set()
         batch = None
         price_by_id = None
@@ -418,8 +462,9 @@ class PriceMetricReader:
                 "publication_pin": self.pin, "definitions": self.manifest["definitions"],
                 "financial_inputs": financial_inputs,
                 **({"reported_quarter_sources": quarter_sources} if quarter_sources else {}),
+                **({"q4_component_evidence": component_evidence} if component_evidence else {}),
                 **({"current_eps_evaluation": row["current_eps_evaluation"]} if "current_eps_evaluation" in row else {}),
-                **({"eps_diagnostic": row["eps_diagnostic"], "diagnostic_evidence": [self._source(pin) for pin in row["eps_diagnostic"]["evidence_pins"]]}
+                **({"eps_diagnostic": row["eps_diagnostic"], "diagnostic_evidence": [self._diagnostic_evidence(pin, row["eps_diagnostic"], row["cik"]) for pin in row["eps_diagnostic"]["evidence_pins"]]}
                    if "eps_diagnostic" in row else {}),
                 "price_inputs": sorted(price_inputs.values(), key=lambda p: (p["trade_date"], p["security_id"])),
                 "expected_sessions": sorted(expected), "historical_multiple_inputs": historical_inputs,

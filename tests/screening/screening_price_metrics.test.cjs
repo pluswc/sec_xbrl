@@ -272,3 +272,17 @@ test("reopened current EPS evidence preserves original evaluation, four direct s
  assert.match(host("#price-evidence-content").innerHTML,/분기 EPS의 주당 기준이 다릅니다/);assert.match(host("#price-evidence-content").innerHTML,/2025-10-01–2026-01-01/);
  f.priceExport();assert.equal(exported.source_context.current_eps_evaluation.evaluation_as_of,"2026-11-16");
 });
+
+test("component-qualified EPS evidence uses typed labels, selected Q4 and an explicit ready timezone",async()=>{
+ const evaluation={evaluation_as_of:"2026-11-18",quote_session:"2026-11-13"};
+ const {f,host}=fixture({api:async()=>({publication_id:"Q4",evidence_context:"Q4-context",definitions:{per:{label:"PER"}},
+  row:{metric_id:"per",eps_source_kind:"GOVERNED_Q4_COMPONENT_TTM",current_eps_evaluation:evaluation},
+  financial_inputs:[{role:"diluted_eps_12m",source_kind:"GOVERNED_Q4_COMPONENT_TTM",value:"8",currency:"USD",unit_kind:"currency/share",known_on:"2026-10-30",ready_on:"2026-11-17",ready_at:"2026-11-17T16:00:00Z",period_start:"2025-10-01",period_end:"2026-10-01"}],
+  q4_component_evidence:{quarters:[{q4_start:"2025-10-01",fy_end:"2026-01-01",selected_source_type:"REPORTED_Q4_EPS",value:"1.95",numerator:"21192000000",weighted_shares:"10863000000",reconstructed_value:"1.9508",eps_interval:["1.9507","1.9510"],direct_comparison:{status:"ROUNDING_COMPATIBLE"}}]},price_inputs:[]})});
+ f.priceDisplayResult({...result("20","Q4"),evidence_context:"Q4-context"});
+ await f.priceShowEvidence("0000000001","q4-per");
+ const markup=host("#price-evidence-content").innerHTML;
+ assert.match(markup,/Q4 구성 검증 · 희석 EPS TTM/);assert.doesNotMatch(markup,/직접 공시 희석 EPS12개월|직접 4분기 EPS 합계/);
+ assert.match(markup,/직접 공시 Q4 EPS/);assert.match(markup,/반올림 구간 호환/);assert.match(markup,/1.9507–1.9510/);
+ assert.match(markup,/2026[\s.]+11[\s.]+18/);assert.match(markup,/KST/);
+});
