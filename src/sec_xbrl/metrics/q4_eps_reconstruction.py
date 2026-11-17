@@ -1248,15 +1248,58 @@ def _supplier_replay(normalizer_pin: dict, payload: bytes, security: dict,
         sys.dont_write_bytecode = previous
 
 
+def _official_identity_element(node: object, local_name: str, namespace: str) -> bool:
+    tag = str(node.tag)
+    return ":" in tag and tag.split(":", 1)[1].lower() == local_name.lower() and _source_namespace(node, tag.split(":", 1)[0]) == namespace
+
+
+def _cover_issuer_identity(document: object, entry: dict, filing: tuple[str, str]) -> dict:
+    """A hidden DEI CIK is legitimate metadata; its QName and Context must agree."""
+    identities, citations = set(), []
+    xbrli = "http://www.xbrl.org/2003/instance"
+    for node in document.xpath("//*[@name]"):
+        name = node.get("name", "")
+        if ":" not in name or name.split(":", 1)[1] != "EntityCentralIndexKey":
+            continue
+        namespace = _source_namespace(node, name.split(":", 1)[0])
+        if not re.fullmatch(r"https?://xbrl\.sec\.gov/dei/\d{4}(?:-\d{2}-\d{2})?", namespace or ""):
+            continue
+        lexical = re.sub(r"\s", "", _text(node))
+        cik = lexical.zfill(10) if re.fullmatch(r"\d{1,10}", lexical) else None
+        contexts = [c for c in document.xpath("//*[@id]") if c.get("id") == node.get("contextref")
+                    and _official_identity_element(c, "context", xbrli)]
+        identifiers = [i for context in contexts for entity in context
+                       if _official_identity_element(entity, "entity", xbrli)
+                       for i in entity if _official_identity_element(i, "identifier", xbrli)]
+        identifier_texts = [re.sub(r"\s", "", _text(i)) for i in identifiers]
+        context_ciks = {v.zfill(10) if re.fullmatch(r"\d{1,10}", v) else None for v in identifier_texts}
+        if cik != filing[0] or len(contexts) != 1 or len(identifiers) != 1 or context_ciks != {filing[0]}:
+            return {"status": "HOLD", "reason": "OFFICIAL_DEI_CIK_CONTEXT_IDENTITY_MISMATCH"}
+        identities.add(cik)
+        citation = {"cik": filing[0], "accession": filing[1], "source_pin": entry["source_pin"],
+                    "xpath": _xpath(node), "expected_text": _text(node), "qname": name,
+                    "namespace_uri": namespace, "context_ref": node.get("contextref"),
+                    "normalized_cik": cik, "hidden_metadata": not _visible(node)}
+        identifier_citation = {"cik": filing[0], "accession": filing[1], "source_pin": entry["source_pin"],
+                               "xpath": _xpath(identifiers[0]), "expected_text": _text(identifiers[0]),
+                               "namespace_uri": xbrli, "identity_role": "CONTEXT_ENTITY_IDENTIFIER",
+                               "context_ref": node.get("contextref"), "normalized_cik": cik}
+        _cite([citation, identifier_citation])
+        citations.extend([citation, identifier_citation])
+    if identities != {filing[0]}:
+        return {"status": "HOLD", "reason": "OFFICIAL_DEI_CIK_NOT_AVAILABLE"}
+    return {"status": "VERIFIED", "citations": citations}
+
+
 def _single_common_cover(documents: list[dict], filing: tuple[str, str]) -> dict:
-    titles, refs = set(), []
+    titles, refs, issuer_refs = set(), [], []
     for entry in documents:
         if (entry["cik"], entry["accession"]) != filing:
             continue
         doc = _document(entry["source_pin"])
         for node in doc.xpath("//*[@name]"):
             name = node.get("name", "")
-            if name.split(":")[-1] != "Security12bTitle" or ":" not in name:
+            if name.split(":")[-1] != "Security12bTitle" or ":" not in name or not _visible(node):
                 continue
             prefix = name.split(":")[0]
             namespace = next((n.get("xmlns:"+prefix) for n in (node, *node.iterancestors()) if n.get("xmlns:"+prefix)), None)
@@ -1266,11 +1309,11 @@ def _single_common_cover(documents: list[dict], filing: tuple[str, str]) -> dict
             normalized = " ".join(title.lower().split())
             if re.search(r"\b(notes?|bonds?|debentures?)\b", normalized) and not re.search(r"\b(common|preferred|ordinary)\b", normalized):
                 continue  # Debt securities are not additional common equity classes.
-            issuer_nodes = [n for n in doc.xpath("//*[@name]") if n.get("name", "").split(":")[-1] == "EntityCentralIndexKey"]
-            issuer_ids = {re.sub(r"\s", "", _text(n)).zfill(10) for n in issuer_nodes}
-            if issuer_ids != {filing[0]}:
+            issuer = _cover_issuer_identity(doc, entry, filing)
+            if issuer["status"] != "VERIFIED":
                 titles.add("SOURCE_ISSUER_IDENTITY_NOT_CONFIRMED")
                 continue
+            issuer_refs.extend(issuer["citations"])
             if (not re.search(r"\bcommon\s+(stock|shares)\b", normalized)
                 or re.search(r"\b(class|preferred|depositary|deposit[oa]ry|ads|ordinary)\b", normalized)):
                 titles.add("UNSUPPORTED:"+normalized)
@@ -1280,7 +1323,8 @@ def _single_common_cover(documents: list[dict], filing: tuple[str, str]) -> dict
                          "xpath": _xpath(node), "expected_text": title})
     if titles != {"SINGLE_COMMON_CLASS"}:
         return {"status": "HOLD", "reason": "SINGLE_COMMON_CLASS_DEI_COVER_NOT_CONFIRMED", "filing": list(filing), "titles": sorted(titles)}
-    return {"status": "VERIFIED", "citations": refs}
+    issuer_refs = list({(c["source_pin"]["path"], c["xpath"]): c for c in issuer_refs}.values())
+    return {"status": "VERIFIED", "citations": refs, "issuer_identity_citations": issuer_refs}
 
 
 def _comparative_conflicts(proposal: dict, source_rows: list[dict]) -> list[dict]:

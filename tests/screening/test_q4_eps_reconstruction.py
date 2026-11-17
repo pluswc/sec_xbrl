@@ -536,7 +536,7 @@ def basis_inputs(tmp_path, cik, ticker, filings):
     sid = "US:"+ticker
     security = {"security_id": sid, "cik": cik, "ticker": ticker, "yahoo_symbol": ticker}
     cover = source(tmp_path / "cover.htm", '<html xmlns:dei="http://xbrl.sec.gov/dei/2026"><body>'
-        f'<ix:nonNumeric name="dei:EntityCentralIndexKey">{cik}</ix:nonNumeric>'
+        f'<ix:nonNumeric name="dei:EntityCentralIndexKey" contextRef="ctx0">{cik}</ix:nonNumeric>'
         '<ix:nonNumeric name="dei:Security12bTitle">Common Stock, par value $0.01</ix:nonNumeric>'
         '<ix:nonNumeric name="dei:Security12bTitle">3.5% Senior Notes</ix:nonNumeric></body></html>')
     documents = []
@@ -867,3 +867,68 @@ def test_explicit_common_numerator_tag_without_a_closed_visible_equation_is_hold
     config = dict(f["config"], source_catalog=pin(tmp_path / "allocation-catalog.json", catalog))
     result = _source_equation_gate(f["proposal"]["candidates"][0], config)
     assert result["status"] == "HOLD" and result["bindings"] == []
+
+
+def cover_identity_source(tmp_path, *, cik_name="dei:EntityCentralIndexKey", cik_value="1", context_cik="1",
+                          hidden_cik=True, title_wrapper="", include_cik=True, context_ref="issuer",
+                          dei_uri="http://xbrl.sec.gov/dei/2026", cik_uri=None, context_uri="http://www.xbrl.org/2003/instance"):
+    title = '<ix:nonNumeric name="dei:Security12bTitle">Common Stock</ix:nonNumeric>'
+    if title_wrapper == "ix:hidden":
+        title = '<ix:hidden>'+title+'</ix:hidden>'
+    elif title_wrapper:
+        title = '<div style="'+title_wrapper+'">'+title+'</div>'
+    cik = f'<ix:nonNumeric name="{cik_name}" contextRef="{context_ref}">{cik_value}</ix:nonNumeric>' if include_cik else ""
+    if hidden_cik:
+        cik = '<ix:header><ix:hidden>'+cik+'</ix:hidden></ix:header>'
+    text = (f'<html xmlns:dei="{dei_uri}" xmlns:alias="{cik_uri or dei_uri}" xmlns:custom="http://example.com/not-dei" '
+            f'xmlns:instance="{context_uri}"><body>'+cik+
+            f'<instance:context id="issuer"><instance:entity><instance:identifier>{context_cik}</instance:identifier>'
+            '</instance:entity><instance:period><instance:instant>2025-12-31</instance:instant></instance:period></instance:context>'+
+            title+'</body></html>')
+    return {"cik": "0000000001", "accession": "0000000001-26-000001",
+            "source_pin": source(tmp_path / "cover-identity.htm", text)}
+
+
+@pytest.mark.parametrize("changes", [
+    {"cik_name": "custom:EntityCentralIndexKey"},
+    {"include_cik": False},
+    {"cik_name": "alias:EntityCentralIndexKey", "cik_uri": "https://lookalike.example/xbrl.sec.gov/dei/2026"},
+    {"cik_value": "2"},
+    {"context_cik": "2"},
+    {"context_ref": "missing-context"},
+    {"context_uri": "http://example.com/not-xbrli"},
+    {"title_wrapper": "ix:hidden"},
+    {"title_wrapper": "display:none"},
+])
+def test_cover_rejects_custom_or_conflicting_issuer_and_hidden_security_title(tmp_path, changes):
+    from sec_xbrl.metrics.q4_eps_reconstruction import _single_common_cover
+
+    entry = cover_identity_source(tmp_path, **changes)
+    assert _single_common_cover([entry], (entry["cik"], entry["accession"]))["status"] == "HOLD"
+
+
+@pytest.mark.parametrize("dei_uri,hidden", [("http://xbrl.sec.gov/dei/2026", False),
+                                           ("https://xbrl.sec.gov/dei/2021-01-31", True)])
+def test_cover_binds_official_aliased_cik_context_and_cites_legal_hidden_metadata(tmp_path, dei_uri, hidden):
+    from sec_xbrl.metrics.q4_eps_reconstruction import _cite, _single_common_cover
+
+    entry = cover_identity_source(tmp_path, cik_name="alias:EntityCentralIndexKey", dei_uri=dei_uri, hidden_cik=hidden)
+    result = _single_common_cover([entry], (entry["cik"], entry["accession"]))
+    assert result["status"] == "VERIFIED"
+    citations = result["issuer_identity_citations"]
+    assert len(citations) == 2
+    cik = next(c for c in citations if c.get("qname"))
+    assert cik["namespace_uri"] == dei_uri and cik["context_ref"] == "issuer"
+    assert cik["normalized_cik"] == entry["cik"] and cik["hidden_metadata"] is hidden
+    assert next(c for c in citations if c.get("identity_role"))["normalized_cik"] == entry["cik"]
+    _cite(citations)
+
+
+def test_cover_rejects_conflicting_official_cik_metadata_even_with_a_valid_first_cik(tmp_path):
+    from sec_xbrl.metrics.q4_eps_reconstruction import _single_common_cover
+
+    entry = cover_identity_source(tmp_path)
+    text = Path(entry["source_pin"]["path"]).read_text().replace('</ix:hidden>',
+        '<ix:nonNumeric name="dei:EntityCentralIndexKey" contextRef="issuer">2</ix:nonNumeric></ix:hidden>')
+    entry["source_pin"] = source(tmp_path / "conflicting-cik.htm", text)
+    assert _single_common_cover([entry], (entry["cik"], entry["accession"]))["status"] == "HOLD"

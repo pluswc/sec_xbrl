@@ -373,3 +373,39 @@ ROOT는 새 financial bundle SHA256
 확인했다. 기존 PER12회사에서 13회사로의 연결은 **후보 목표**이며 실제 조회·운영
 인수는 이 기록 시점 아직 ROOT 대기다. Writer의 합성/작은 실제 fixture PASS와
 ROOT의 실자료 준비, 독립 검증, 최종 운영 수락을 합치지 않는다.
+
+## 독립 검증 P2 수정 — issuer identity와 visible cover
+
+첫 동결 `a005da657cd45ecbff15d483535bc0367652ba9c`의 독립 검증은 cover gate에서
+`EntityCentralIndexKey`의 local name만 사용한 결함을 발견했다. ROOT는 이 finding의
+code/test/docs만 동결 해제하여 수정하고 새 commit으로 재동결하도록 승인했다.
+CIK fact도 prefix를 namespace URI로 해석한 정식 DEI QName이어야 한다. 허용 URI는
+정식 SEC DEI의 `YYYY` 또는 `YYYY-MM-DD` 형식이며 custom/look-alike namespace의
+동명 개념은 issuer identity가 아니다.
+
+ROOT는 실제 SEC 원문 확인 후 최초의 CIK visible-only 요구를 철회했다. 정식
+DEI CIK는 흔히 `ix:header/ix:hidden` 안의 합법적 metadata다. 이를 재무 수치의
+visible gate와 혼동하지 않는다. 정식 DEI CIK 값과 같은 fact의 `contextref`가 가리키는
+정식 XBRL Context→Entity→Identifier가 동일 CIK여야 한다. 정식 CIK 부재,
+contradiction, 없는/다른 issuer Context는 HOLD다. CIK 및 Context identifier의
+정확한 source pin/XPath/text citations를 저장하고 검증하며 CIK citation에는 QName,
+namespace URI, contextref, 정규화 CIK와 `hidden_metadata`를 남긴다.
+
+`Security12bTitle`는 지원하는 visible cover 증거이므로 기존 `_visible` 판정을
+필수로 적용한다. Hidden/display:none title만 있으면 HOLD다. NI/EPS/weighted shares의
+hidden financial number 거부 규칙은 그대로다. 이 수정은 기업별 예외나 새 회계
+계산 정책을 추가하지 않는다.
+
+수정된 파일은 엔진, 해당 unit tests, 이 계약 및 계획 등록부뿐이다. 관련 EPS
+검사는 **52 PASS**(기존40 + 새12), Ruff·diff PASS다. 새 회귀는 custom/wrong
+namespace CIK, 정식 CIK 부재/충돌, 잘못된 Context/entity namespace·CIK, hidden title을
+거부하며, alias prefix와 year/date DEI URI, visible 및 합법 hidden CIK의 양성을
+검사한다. 기존 105 Python/1SKIP·25 Node 증거는 해당 소스가 미변경이므로 재사용한다.
+
+기존 v4 적격 결과가 참조한 실제 AMZN 6개 accession의 cover를 읽기 전용 재검사해
+모두 VERIFIED 및 합법 hidden DEI CIK→일치하는 Context issuer를 확인했다. 독립
+검증자의 custom-CIK/hidden-title 반례 두 파일은 모두 HOLD가 됐다. 이것은 cover
+회귀 확인이며 전체 source qualification/발행/운영 인수를 대신하지 않는다.
+Issuer citation 구조가 바뀌므로 ROOT는 새 불변 qualification/bundle/publication을
+재작성하고 새 동결 SHA의 독립 최종 판단을 받는다. 이전 후보/자료와 운영은 수정하지
+않았고 push/PR/main 상태도 대기다.
