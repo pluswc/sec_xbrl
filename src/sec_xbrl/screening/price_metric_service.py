@@ -11,7 +11,14 @@ from uuid import uuid4
 
 from sec_xbrl.metrics.market_inputs import encoded, identity, pinned_json
 from sec_xbrl.metrics.price_related import REGISTRY, fixed_multiple_bands
-from sec_xbrl.metrics.price_timeline import DEFINITION, build_timeline
+from sec_xbrl.metrics.price_timeline import (
+    DEFINITION,
+    INTERPRETATION_VERSION,
+    build_timeline,
+    interpret_timeline_point,
+    timeline_coverage,
+    timeline_missing_ranges,
+)
 from sec_xbrl.screening.price_metric_publication import PriceMetricReader
 
 
@@ -20,6 +27,7 @@ class PriceMetricService:
         self.reader = reader
         self._evidence_contexts: OrderedDict[str, dict] = OrderedDict()
         self._timelines: OrderedDict[str, dict] = OrderedDict()
+        self._coverage: OrderedDict[str, dict] = OrderedDict()
         self.path = Path(journal_path)
         if not self.path.is_absolute() or any(p.is_symlink() for p in (self.path, *self.path.parents)):
             raise ValueError("price journal requires an absolute non-symlink path")
@@ -83,6 +91,14 @@ class PriceMetricService:
             else:
                 result = reader.evidence(*key)
             return {**result, "evidence_context": token}
+        if operation == "coverage":
+            token = request.get("evidence_context")
+            context = self._evidence_contexts.get(token) if token else None
+            if token and context is None:
+                raise ValueError("coverage evidence context expired; reopen or query original result")
+            reader = context["reader"] if context else self.reader
+            result = self._evaluate(reader, operation, {k: v for k, v in request.items() if k != "evidence_context"})
+            return {**result, "evidence_context": token}
         result = self._evaluate(self.reader, operation, request)
         return {**result, "evidence_context": self._register_evidence_context(self.reader, operation, result)}
 
@@ -93,6 +109,34 @@ class PriceMetricService:
             return reader.query(**request)
         if operation == "screen":
             return reader.screen(**request)
+        if operation == "coverage":
+            if set(request) != {"metric", "view_years", "window", "readiness_policy"}:
+                raise ValueError("coverage requires exact metric/view/window/readiness scope")
+            metric, years, window, policy = (request[k] for k in ("metric", "view_years", "window", "readiness_policy"))
+            if metric not in {"per", "pbr_bps"} or years not in {1, 3} or window not in {"252s", "3y"} or policy not in {"READY_ONLY", "DIAGNOSTIC_FILED_DAY"}:
+                raise ValueError("bounded coverage parameters required")
+            if policy == "DIAGNOSTIC_FILED_DAY" and reader.manifest["historical_readiness_policy"] != policy:
+                raise ValueError("publication does not authorize filed-day diagnostics")
+            # Query verifies every participating historical artifact even on a cache hit.
+            query = reader.query(mode="historical", metric_ids=[metric])
+            reader.verify_sources()
+            key = identity({"pin": reader.pin, "request": request, "definition": "price-timeline-coverage-v1"})
+            if key in self._coverage:
+                self._coverage.move_to_end(key)
+                return copy.deepcopy(self._coverage[key])
+            rows_by_cik = {c["cik"]: [] for c in reader.manifest["companies"]}
+            for row in query["rows"]:
+                rows_by_cik[row["cik"]].append(row)
+            batch = reader._source(reader.manifest["source_pins"]["price_batch"])
+            result = timeline_coverage([(c, rows_by_cik[c["cik"]]) for c in reader.manifest["companies"]],
+                session_source=reader._source(reader.manifest["source_pins"]["sessions"]),
+                source_coverage={"start": batch["query"]["start_date"], "end": batch["query"]["end_date"]},
+                metric=metric, readiness_policy=policy, window=window, view_years=years, end=reader.manifest["price_as_of"])
+            result.update(publication_pin=reader.pin, publication_id=reader.manifest["publication_id"])
+            self._coverage[key] = copy.deepcopy(result)
+            while len(self._coverage) > 4:
+                self._coverage.popitem(last=False)
+            return result
         if operation == "timeline":
             if set(request) - {"cik", "metric", "multiples", "view_years", "window", "readiness_policy"}:
                 raise ValueError("unknown timeline parameter")
@@ -114,7 +158,7 @@ class PriceMetricService:
             batch = reader._source(reader.manifest["source_pins"]["price_batch"])
             financial = reader._source(reader.manifest["source_pins"]["financial_inputs"])
             sessions = reader._source(reader.manifest["source_pins"]["sessions"])
-            cache_key = identity({"pin": reader.pin, "request": request, "definition": DEFINITION})
+            cache_key = identity({"pin": reader.pin, "request": request, "definition": DEFINITION, "interpretation": INTERPRETATION_VERSION})
             if cache_key in self._timelines:
                 self._timelines.move_to_end(cache_key)
                 return copy.deepcopy(self._timelines[cache_key])
@@ -123,7 +167,10 @@ class PriceMetricService:
                 sessions=sessions, coverage={"start": batch["query"]["start_date"], "end": batch["query"]["end_date"]},
                 cik=cik, security_id=company["security_id"], metric=metric, multiples=multiples,
                 end=reader.manifest["price_as_of"], view_years=years, window=window, readiness_policy=policy)
+            for point in points:
+                point["interpretation"] = interpret_timeline_point(point, metric, window=window)
             result = {**query, "mode": "timeline", "points": points,
+                "interpretation_definition": INTERPRETATION_VERSION, "missing_ranges": timeline_missing_ranges(points),
                 "timeline_definition": copy.deepcopy(DEFINITION) if window == "252s" else reader.manifest["definitions"][f"historical_{metric}_percentiles_3y"],
                 "timeline_parameters": {"metric": metric, "multiples": multiples, "view_years": years,
                     "window": window, "readiness_policy": policy}, "company": company,
@@ -157,6 +204,14 @@ class PriceMetricService:
             raise ValueError("only worksheet conditions/results may be saved")
         if kind == "CONDITION" and operation != "screen":
             raise ValueError("condition save requires a screening request")
+        if operation == "coverage":
+            token = request.get("evidence_context")
+            context = self._evidence_contexts.get(token) if token else None
+            if token and context is None:
+                raise ValueError("coverage evidence context expired; reopen or query original result")
+            reader = context["reader"] if context else self.reader
+            result = self._evaluate(reader, operation, {k: v for k, v in request.items() if k != "evidence_context"})
+            return {**result, "evidence_context": token}
         result = self._evaluate(self.reader, operation, request)
         self.reader.verify_sources()
         payload = {"schema_version": "price-metric-save-v1", "kind": kind, "operation": operation,

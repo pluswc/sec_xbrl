@@ -233,3 +233,62 @@ Writer checks158PythonPASS/1explicitcachedSKIP and48NodePASS; integrated indepen
 ROOT acceptance, push/PR and remote CI remain pending. Existing operating runtime/data/
 journals/main are untouched. Prior no-remote records remain historical; no main merge or
 runtime activation is included in the new authorization. See [the current delivery contract](../docs/implementation/price-band-timeseries-20261116.md#authorized-remote-delivery-and-pr107-integration--2026-11-16).
+
+
+## Timeline interpretation strip — approved implementation candidate (2026-11-17)
+
+Use one cursor-linked text strip above paired plots,14px reading text/4px rhythm and existing
+blue-soft/ink/slate tokens. Primary line: selected date and multiple, median relation and
+quantile bucket/central50 relation supplied by metrics. Secondary: close-price bracket among
+positive user assumptions and actual EPS12m/BPS meaning. Valid state shows concise valid/
+expected samples; gap state separates required minimum from full source/calendar coverage.
+Detailed definitions and aggregate missing date/reason ranges use native disclosures.
+No percentile-rank invention, fair-value or buy/sell badge. Preserve272px adjacent ledger.
+
+A compact scope line distinguishes selectable companies, any historical ratio chart in the
+view, selected-date band inputs and eligible selected-window distributions. Load verified
+coverage asynchronously once per result scope and use its date table on cursor changes.
+Saved results use original evidence contexts; old snapshots without new metadata show an
+explicit absent-at-save caption and never acquire current calculations or mutated exports.
+Writer checks95PythonPASS/1cachedSKIP and52NodePASS; independent review and ROOT actual
+1920/1440/local operating acceptance remain pending. New work has no remote/main delivery.
+See [the interpretation contract](../docs/implementation/price-timeline-insights-20261117.md).
+
+
+Timeline interpretation final local/operating acceptance (2026-11-17): product
+`c7241f94d9a5f4df4d3c3207ea7d5c73997fe4f8` passed separate Astra review and ROOT actual
+1920×1080/1440×900 browser/API checks at18765/PID55536. Quantile bucket/median/central50,
+fixed-band meaning, first1/252gap,3y minimum-vs-source gap, READY_ONLY and NVDA input gap,
+shared cursor and all eight policy/window company scopes passed without live UI errors.
+Private original-eight/new-one saves survived cold restart and exact legacy/new exports;
+old metadata captions and original-context coverage reload stayed intact.95PythonPASS/
+1cachedSKIP and52NodePASS;1122protectedfiles/twojournals/17untrackedartifacts and all prior
+2834row/twoMSFTtimeline fields preserved. Existing19078/native14/18766 unchanged; zero
+operating test saves. This documentation follow-up changes no product/test bytes. Prior
+candidate/pending clauses are historical; remote/main delivery was not requested/performed.
+[Final receipts and coverage definitions](../docs/implementation/price-timeline-insights-20261117.md#final-local-and-operating-acceptance--2026-11-17).
+
+
+Insights remote integration (2026-11-18): user authorized push/PR and latest-main check;
+normal merge of main0b18528d87(PR109/110) preserves Q4 typed labels/evidence/KST ready time
+alongside c724 pure interpretation, scoped asynchronous coverage and original-source reopen.
+Current8a5 publication has13currentPER/EY companies (AMZN EPS12.37 added), while re-audited
+historical PER10any/9latest/0ribbons and BPS60/1ribbon remain distinct.147PythonPASS/
+1cachedSKIP and54NodePASS; integrated independent/ROOT private browser/remoteCI gates pending.
+Current live6c4worker+c724UI overlay lacks interpretation metadata/coverage route (P1);
+this task restores those integrated code paths but does not activate/restart operating services.
+Earlier17th-day live acceptance describes its earlier composition.1675protectedfiles,
+original journals/17architecture artifacts preserved; no new UI redesign, accounting policy,
+main merge or operating activation in this remote-only scope. [Current handoff](../docs/implementation/price-timeline-insights-20261117.md#authorized-remote-delivery-and-latest-main-integration--2026-11-18).
+
+Fresh-worker missing interpretation/aggregate metadata uses an explicit load-failure caption;
+only `readonly` saved-result contexts say “저장 당시 … 없음”. Legacy snapshot/export bytes and
+supported fresh summaries stay unchanged. A later deployment must check both fresh point
+metadata and `/coverage` against the same UI/worker/publication, not assets alone.
+
+Remote integration independent follow-up (2026-11-18): separate Astra PASS on frozen
+producta8ce54c171; the documentation successor corrects the baseline locator to
+`work/price-timeline-insights-20261117/remote-delivery-20261118/evidence`. ROOT private
+before-restart checks (14original+1new, Q4 evidence/insights/counts/old exports) passed;
+cold restart/final ROOT acceptance and push/PR/CI/main remain pending. No product/test
+bytes or operating runtime change in this documentation follow-up.
