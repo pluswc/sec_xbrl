@@ -374,6 +374,9 @@ def test_affirmative_common_stock_warrant_policy_and_cal_support_normal_dilution
     "Diluted earnings per share could be computed for stock options using the treasury stock method.",
     "We plan to use the treasury stock method for stock options in diluted earnings per share.",
     "The treasury stock method may be used for common stock warrants in diluted earnings per share.",
+    "Diluted EPS is computed from basic shares, while common stock warrants would be included using the treasury stock method if they became exercisable.",
+    "Diluted EPS is computed from basic shares and common stock warrants would be included using the treasury stock method if they became exercisable.",
+    "Diluted EPS is computed from basic shares, whereas common stock warrants are discussed using the treasury stock method terminology.",
 ])
 def test_generic_share_adjustment_needs_actual_method_application_not_mentions_or_future_policy(sentence):
     from sec_xbrl.metrics.cal_eps import _normal_dilution
@@ -408,6 +411,16 @@ def test_generic_share_adjustment_accepts_current_application_wordings_and_dilut
     shares = source.select(_WEIGHTED["diluted"], _START, _END, _SHARES_UNIT)
     equation, = _normal_dilution(source, shares)
     assert equation["children"][1]["treasury_stock_policy"][0]["affirmative_method_clause"] == sentence
+
+
+def test_method_application_uses_its_own_clause_after_a_basic_eps_clause():
+    from sec_xbrl.metrics.cal_eps import _affirmative_treasury_stock_policy
+
+    clause = " common stock warrants are measured using the treasury stock method when dilutive."
+    sentence = "Basic EPS is computed from basic shares, while" + clause
+    projection = _projection(_START, _END, numerator="4000", basic_eps="4", diluted_eps="3.96")
+    projection["eps_treasury_stock_policy"] = [{"snippet": sentence}]
+    assert _affirmative_treasury_stock_policy(FilingInputs(projection))[0]["affirmative_method_clause"] == clause
 
 
 def test_negative_reported_share_increment_is_not_admitted_by_a_zero_crossing_interval():

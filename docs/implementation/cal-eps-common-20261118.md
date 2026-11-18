@@ -73,6 +73,9 @@
    affirmative 정책 근거가 아니다. 단순한 용어 언급 또는 장래·가정적 방법 적용도
    충분하지 않다. 현재의 계산·포함·방법 적용을 서술한 bounded source 문장이
    필요하며 정상적인 `if/when dilutive` 조건 자체는 장래 가정으로 배제하지 않는다.
+   현재 적용 서술은 TSM을 설명하는 해당 절에 있어야 한다. 앞선 basic-EPS 절의
+   현재 동사를 빌려 뒤의 hypothetical dilution을 승인하지 않으며, 일반적인
+   주식의 `may be issued` 문구를 hypothetical method application과 혼동하지 않는다.
    보고 증분 point가 음수이면 원 decimals 구간이
    0을 포함하더라도 정상 희석 증거로 승인하지 않는다.
    미지의 잠재 주식, 전환, 조건부 주식과 미입증 numerator adjustment는 보류한다.
@@ -200,6 +203,16 @@ projection provider와 parser는 바꾸지 않는다. 이 후속의 기본·호�
 합계는 **265 PASS / 1 SKIP**(3.66s), Ruff와 diff check PASS다. 전체 최종
 artifact를 새 코드로 exact replay한 결과에 따라 기존 준비 시각·관측을 재사용할지
 총괄이 별도 판단한다. 이전 probe/publication을 이 자체 검사로 인수하지 않는다.
+
+`cd92849253713b343daa7b6f3254a9ed30145ed9`에서는 기존 v5 artifact 전체의 자연스러운
+fresh-process exact verifier replay가 PASS했다(6,928 quarter rows / 11 observations,
+98.723s). 그 뒤 별도 basic-EPS 현재 절에서 미래 warrant 절로 동사를 빌릴 수 있는
+인접 source 문장 사례를 총괄에 반환했다. 승인된 마지막 수정은 절 경계를 분리하고
+method-application modal을 검사하며, `may be issued`와 정상 `if/when dilutive`
+양성은 유지한다. 네 개 절·modal 회귀를 더한 합계는 **269 PASS / 1 SKIP**,
+Ruff/diff check PASS이고 기존 v5의 서로 다른 실제 양성 절 10개가 모두 그대로
+지원된다. 최종 동결의 전체 artifact exact replay와 독립 판단은 새 SHA를 기준으로
+다시 수행하며 위 cd928 replay는 그 이전 단계의 근거다.
 
 그 수정 전 시작한 로컬 전체 pytest는 **3,385 PASS / 39 SKIP / 14 FAIL**
 (333.57s)이므로 최종 소스의 전체 PASS 근거가 아니다. 알려진 cached NVDA

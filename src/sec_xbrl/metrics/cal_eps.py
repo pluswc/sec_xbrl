@@ -81,6 +81,11 @@ _CURRENT_METHOD_APPLICATION = re.compile(
 _NONCURRENT_APPLICATION_PREFIX = re.compile(
     r"\b(?:would|could|might|may|will|shall|should|to)\s+(?:\w+\s+){0,4}$", re.IGNORECASE,
 )
+_HYPOTHETICAL_METHOD_APPLICATION = re.compile(
+    r"\b(?:would|could|might|may|will|shall|should)\s+(?:\w+\s+){0,3}"
+    r"(?:calculate[ds]?|compute[ds]?|determine[ds]?|measure[ds]?|include[ds]?|use[ds]?|appl(?:y|ies|ied))\b",
+    re.IGNORECASE,
+)
 _WARRANTS = re.compile(r"\bwarrants?\b", re.IGNORECASE)
 _COMMON_STOCK = re.compile(r"\bcommon (?:stock|shares)\b", re.IGNORECASE)
 _PREFERRED_CASH = "DividendsPreferredStockCash"
@@ -362,9 +367,11 @@ def _explicit_common_numerator_bridge(children: list[dict]) -> bool:
 def _affirmative_treasury_stock_policy(source: FilingInputs) -> list[dict]:
     result = []
     for occurrence in source.projection.get("eps_treasury_stock_policy", []):
-        for clause in re.split(r"(?<=[.!?;])\s+(?=[A-Z])", occurrence["snippet"]):
+        # A current predicate in a basic-EPS clause cannot attest a later
+        # hypothetical dilution clause. Share-list commas remain intact.
+        for clause in re.split(r"(?<=[.!?;])\s+(?=[A-Z])|(?i:\b(?:while|whereas|but)\b)", occurrence["snippet"]):
             if (not _TREASURY_STOCK.search(clause) or _UNSUPPORTED_SHARE_TERMS.search(clause)
-                or _NONAFFIRMATIVE_METHOD.search(clause)):
+                or _NONAFFIRMATIVE_METHOD.search(clause) or _HYPOTHETICAL_METHOD_APPLICATION.search(clause)):
                 continue
             if not _STOCK_AWARD_TERMS.search(clause) and not _WARRANTS.search(clause):
                 continue
