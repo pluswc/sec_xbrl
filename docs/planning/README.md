@@ -1,4 +1,4 @@
-2026-11-18 [공통 CAL 1.0/1.1 및 EPS 구성 검증](../implementation/cal-eps-common-20261118.md)은 M3 추출 수정과 원 공시 관계에 근거한 공통 Q4 EPS 준비 확대를 다룬다. 유효 CAL 네트워크·원천 및 회계 호환성은 별도로 검증한다. 구현·독립 검증·인수·원격 전달은 각 단계의 근거로 확정한다.
+2026-11-18 [공통 CAL 1.0/1.1 및 EPS 구성 검증](../implementation/cal-eps-common-20261118.md#최종-sourcedata-결과--2026-11-18): 제품 `5386cf242b`와 불변 v5는 별도 Sol source/data PASS 및 ROOT 로컬·운영 인수다. 684 accessions/179,346 duration facts, 6,928 quarter rows/11 observations exact replay; 실제 18765/PID57888에서 PER 13→22, EY 13→23, PBR75/BPS60 유지. 공통 offline batch CLI, 사적 old15+new3 cold exact reopen, 원본·2 journals 및 18766 보존, 운영 시험 쓰기0을 확인했다. 역사 준비 인증·backfill 없음. 이 문서 동결 시점의 PR/CI/main은 PENDING이며 이후 실제 head/merge CI와 ROOT delivery receipt로 확정한다.
 
 2026-11-18 [가격 해석 통합 독립 PASS](../implementation/price-timeline-insights-20261117.md#independent-integration-pass-and-locator-correction--2026-11-18): frozen제품 `a8ce54c171`은 별도 Astra 독립 PASS다. 보존 baseline경로를 실제 `work/price-timeline-insights-20261117/remote-delivery-20261118/evidence`로 문서만 정정한다. 사적18889의 원14+새1 및 AMZN/근거/해석/집계/기존export는 재시작 전 PASS, cold restart/ROOT최종인수·push/PR/CI/main은 아직 대기다. 제품/test bytes·운영은 미변경이며 아래 독립대기는 당시 기록이다.
 

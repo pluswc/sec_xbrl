@@ -1,5 +1,28 @@
 # 공통 CAL 1.0/1.1 추출 및 EPS 구성 검증
 
+## 2026-11-18 최종 소스·자료 인수 상태
+
+문서 상태의 동결 기준 시각은 **2026-11-18T07:47:29.812167+00:00**다.
+제품 동결은 `5386cf242b719ce47995bfa84a666cf97e8aac94`다. 별도 읽기 전용 Sol이
+해당 소스와 불변 v5 자료를 **PASS_FROZEN_SOURCE_AND_PINNED_DATA**로 검증했고,
+ROOT는 `ROOT_ACCEPTED_FINAL_SOURCE_AND_PINNED_DATA_PENDING_OPERATION_CI`를
+2026-11-18에 기록했다. 이후 private cold/API/browser와 실제 운영 검증을 마쳐
+`ROOT_ACCEPTED_OPERATING_PENDING_PR_CI_MAIN`도 기록했다. 아래 초기 동결·P2 반환·재검증 대기는 당시 기록이며,
+최종 source/data 판단은 이 절과 문서 끝의 최종 결과를 따른다.
+
+| 단계 | 현재 근거와 상태 |
+| --- | --- |
+| IMPLEMENTED | 제품 소스 동결 `5386cf242b719ce47995bfa84a666cf97e8aac94` |
+| INDEPENDENTLY_VERIFIED | 별도 Sol의 같은 SHA source/data PASS; 관련 검사 277 PASS / 1 SKIP |
+| ROOT source/data 인수 | 같은 SHA로 v5 전체 exact replay 후 기존 artifact/bundle/publication 재사용 승인 |
+| private cold/API/browser 및 운영 인수 | ROOT 인수 PASS; 실제 18765 / Native PID57888, 새 publication 적용 |
+| PR / 필수 CI / main 병합 | 아직 최종 근거 없음; 별도 영속 receipt로 확정 |
+
+이 문서 후속은 결과 기록만 수정하며 제품·테스트·CLI bytes는 동결 소스와 동일하게
+유지한다. 원 artifact의 실제 생산자는 `fa60a629a798e6d25d67b38215f7724a43b42356`,
+준비 시각은 `2026-11-18T07:05:17.358761+00:00`다. 더 엄격한 최종 검증 소스로
+재사용했다고 생산 SHA나 원 ready timestamp를 5386 시점으로 바꾸지 않는다.
+
 ## 승인 범위 및 구현 위임
 
 2026-11-18 사용자가 승인한 M3 관계 추출 수정과 공통 Q4 EPS 준비 확대다.
@@ -223,3 +246,138 @@ financial/native 검사 2건이었다. 기존 환경을 가리키는 ignored `.v
 loopback `listen EPERM`을 확인했고 history wrapper에는 unavailable worker도
 관찰했다. 검사 비활성화나 관련 없는 history/bridge 수정은 하지 않았다.
 동결 소스의 전체 회귀 판단은 독립 검증과 필수 PR CI 결과로 별도 확정한다.
+
+## 최종 source/data 결과 — 2026-11-18
+
+### 동일 소스 재현, 원본 보존 및 기업 추가 경로
+
+최종 5386 동결의 작성자 검사는 **269 PASS / 1 SKIP**, 독립 Sol의 관련 검사는
+**277 PASS / 1 SKIP**이며 두 역할 모두 Ruff와 diff check PASS다. 독립 검증자는
+반환된 preferred/convertible numerator, participating counterevidence 및 현재
+TSM 적용 절의 반례 수정도 확인했다. 최종 소스의 전체 pytest PASS를 주장하지
+않으며 앞 절의 로컬 환경·cached-history 한계와 필수 CI 대기는 그대로 구분한다.
+
+최종 catalog는 **107회사 / 684 accessions / 179,346 duration facts**다. 독립 검증은
+fact identity·값·Context·dimensions와 원 immutable Raw의 일치, ZIP 및 snapshot
+보존, CAL 밖의 조정 counterevidence 보존을 확인했다. 두 CAL arcrole, role,
+link/arc QName, Arelle 유효 priority/prohibition과 원 lexical weight/order는 서로
+섞이지 않는다. 기존 source replay v3의 FAIL은 과거 기록이며 최종 PASS로
+바꾸지 않는다. 최종 catalog/Raw 대조와 별도 실제 HD offline CLI 준비·replay의
+byte 일치가 후속 독립 근거다.
+
+5386의 fresh-process `verify_q4_eps`는 v5의 **6,928 quarter rows와 11 observations
+전체를 exact 재현**했다. 작성자 실행은 97.913s이며 독립 검증도 같은 전체 결과를
+확인했다. 따라서 ROOT는 v5, augmented financial bundle과 가격 publication의
+기존 bytes·원 producer·ready 시각을 그대로 재사용하도록 승인했다. 새 10개 TTM
+외 기존 **326 observations**, AMZN **12.37**의 값·원천·ready, 기존 **100 grant
+coordinates**, financial anchors 및 다른 상위 필드는 보존됐다. 기존에 비어 있던
+10개 current EPS 역할과 그 추가 evidence만 연결했다.
+
+기업 추가는 등록된 intake/snapshot과 원 ZIP pins를 metadata로 연결한 뒤 위의
+`prepare-cal-sources` → `verify-cal-sources` → 동일 global qualification → 빈
+current EPS append 순서다. 구현은 CIK/ticker별 분기를 두지 않는다. 단위 검사의
+임의 신규 CIK와 입력 순서·중복·누락 검증에 더해 독립 검증자는 실제 HD accession을
+같은 CLI로 준비·replay해 최종 catalog와 byte 일치를 확인했다. 이 자동 경로는
+미해석 회계 유형까지 자동 승인한다는 뜻이 아니며 필요한 source/basis가 닫히지
+않으면 회사별로 HOLD를 남긴다.
+
+### 109회사 현재 평가의 적격 확대
+
+가격 session과 공시 정보 cutoff는 **2026-11-13**, 현재 평가일은 **2026-11-18
+Asia/Seoul**이다. 같은 가격·정의 정책으로 준비된 publication의 직접 조회 결과는
+다음과 같다. 이 표는 준비 자료의 결과이며 API/browser/운영 인수 완료를 대신하지
+않는다. 이후 ROOT는 동일한 109회사 count를 실제 운영 API에서도 확인했고,
+별도 API/browser 및 운영 인수를 아래처럼 완료했다.
+
+| current metric | 기존 | 최종 준비 자료 | 변화 |
+| --- | ---: | ---: | ---: |
+| PER AVAILABLE | 13 | 22 | +9 |
+| Earnings yield AVAILABLE | 13 | 23 | +10 |
+| PBR AVAILABLE | 75 | 75 | 0 |
+| BPS 경로 PBR AVAILABLE | 60 | 60 | 0 |
+
+추가 current diluted TTM은 **AMAT, AMGN, HD, LRCX, ADBE, IDXX, GILD, ROP,
+SNPS, ALAB** 10회사다. 이 중 9회사의 양수 EPS로 PER/EY 및 고정 10/15/20배
+band가 적격이 됐다. **GILD EPS −3.1564351879986456805…**는 보존하며 PER는
+기존 `EPS_NONPOSITIVE` 정책으로 UNAVAILABLE, earnings yield는
+**−1.8779361932488141069…%**다. 기존 AVAILABLE current 값은 모두 exact
+유지됐다. Historical/series의 status·value 순서도 모두 같고 109회사 중 99개
+파일 hash가 동일하며 나머지 10개는 metadata만 달라졌다.
+
+신규 관측은 `historical_ready=false`, `backtest_eligible=false`다. 이번 현재 평가
+준비로 과거 가격 날짜에 EPS가 이미 준비됐다고 인증하지 않는다. 역사 backfill과
+historical ready 승격은 **0건**이다.
+
+### 남은 PER 87회사: 준비·구현 범위와 회계 보류의 분리
+
+회사별 CSV는 109회사의 실제 prepared query를 보존한다. PER UNAVAILABLE 87은
+아래 **8개 source/자료·회계 그룹의 86회사**와, 위 **GILD 음수 PER 정책 1회사**다.
+요약 JSON의 literal labels는 GILD 정책까지 포함하면 9개다.
+
+| source/자료·회계 그룹 | 회사 수 | 현재 해석 |
+| --- | ---: | --- |
+| 기업·주식 기준 근거 연결 미준비 | 25 | 기존 grant 20개 부재, class/scope binding 4개 및 common-class cover 1개 미확정 |
+| 공통 구성 유형·원문 연결 검증 미지원 | 35 | 현재 공통 규칙에서 N 귀속·희석 population·continuing/source-table 증명이 닫히지 않음; 모두 단순 미구현으로 단정하지 않음 |
+| CAL 구성의 Context·단위·값 연결 미확정 | 4 | 같은 complete Context의 CAL child 3개, Unit 1개 연결 미확정 |
+| 구성값 추출·표준 태그 매핑 보완 필요 | 4 | 필요한 N/W/EPS component 해소 미완료; 공시 자체의 부재 판정 아님 |
+| 별도 회계 유형·기간 가산성 미확정 | 8 | participating/two-class 5개, diluted-N 조정 2개, continuing-loss control 1개 보류 |
+| 공시 EPS와 구성 검산 불일치 | 4 | 원 precision 범위에서도 누적 보고 EPS 검산 불일치 |
+| 분할·공시 버전 기준 불일치 또는 미확정 | 3 | split/window 2개 및 comparative basis 1개 미확정 |
+| 보존된 재무 추출·기간 범위 미준비 | 3 | HONA·IBM·SPCX의 보존 FY/9M context window 미확보 |
+
+이 분류는 남은 87회사를 전부 엔진 미구현, 전부 실제 자료 부재 또는 전부 회계상
+불가능으로 합치지 않는다. CSV의 `source_disclosure_absence_certified`는 109회사
+모두 **False**다. 필요한 component가 현재 준비 자료에서 해소되지 않았다는
+사실로 SEC 원 공시에 해당 disclosure가 없다고 인증하지 않는다.
+
+### 최종 근거와 아직 분리된 단계
+
+ROOT는 `2026-11-18T07:44:25.555946+00:00`에 운영 인수를 기록했다. 실제
+18765는 **5386 archive / Native PID57888**, publication은
+`screening-price-metrics-e7c87930507d959b8bb07f86`이다. 직전 실제 운영은 별도
+채팅이 이미 main `6b19854550` integrated source로 교체한 **PID57508**임을 다시
+확인한 뒤 전환했다. 그 UI/bridge의 hash와 원 args/DB를 유지하며 승인된
+5386 worker와 새 publication만 연결했다. 초기 조사 **PID60968 / coverage404**는
+당시의 역사 baseline이고 이번 전환 직전·직후 운영 상태로 해석하지 않는다.
+
+실제 API에서 109회사 PER22/EY23/PBR75/BPS60 count와 신규 양수 EPS **9회사
+각각의 PER**, GILD 음수 정책을 확인했다. Live CAL 원천 근거·bands 및 browser
+export 검증은 **HD 대표 1회사**다. 9회사 bands 전체의 exact 대조는 앞 절의
+독립 publication 계산 검증이며 9회사 각각을 live에서 시험했다고 기록하지 않는다.
+History backfill 부재와 Coverage endpoint **200**, MSFT timeline·interpretation도
+PASS다. Native Chrome
+**1440px / 14 datasets**에서 HD **PER24.41**, Q4 구성 근거, KST ready 표시,
+export exact와 browser errors **0건**을 확인했다. 관련 screenshot은
+`operating-cal-eps-evidence.png`로 보존한다.
+
+사적 18819에서는 기존 저장 **15개 + 신규 저장 3개**를 cold restart 후 exact
+재열기했고 검증 후 해당 private instance를 종료했다. 이 사적 저장과 운영 저장은
+구분하며 **운영 시험 쓰기는 0건**이다. 활성화 후 보호 파일 **1,675개**, 기존
+architecture assets **17개**, 원 taxonomy-cache pins **182개**, 원 journal **2개**의
+hash가 모두 같고 DB integrity는 `ok`다. 원 금융 journal hash
+`3443d40b615a8208343102f26f38c46b1f611a423534a606fd9cd9497567b96c`와 가격 journal
+hash `ba18bf81059b4de96e5028dd1e9a320c37100aa8366fd4b09299d9be7131e8b0`도 그대로다.
+기존 Python backend19078의 PID1477655 LISTEN 상태와 별도 18766의 원
+`screening-price-metrics-577ab236eef320385d98bd71` publication도 보존했다.
+
+최종 선택적 로컬 증거는 `work/cal-eps-common-20261118/evidence/`에 보존한다.
+새 checkout은 위 계약·명령·값·보류 의미만으로 실행 경계와 현 상태를 이해할 수
+있으며 이 임시 경로가 제품 실행의 필수 설정은 아니다.
+
+| 증거 | SHA256 |
+| --- | --- |
+| `final-source-data-root-acceptance-v1.json` | `d368e5afe4aa7cd2b03d7d3ecaaf67f72767703a17dba12adb9af8f4d45ceb90` |
+| `cal-eps-independent-sol61-final-5386-PASS.json` | `f0ff0ed657c3e6c8c9b7cd54c13b7c7463298a3235803c95d74806cc8d1c3432` |
+| `writer-local-validation-v4.json` | `88fbafe607443cd6ae76c136b67aee26d19d1b1b75794c669853bb1fa51fc1b1` |
+| `writer-v5-exact-replay-5386-v1.json` | `1b449d9a3d10d254e7455dc62a366bc832eb89eb143b71215e9fe1e6940d4efa` |
+| `company-query-summary-v1.json` | `58100abdaffdf52cfc06e7c7418c7bcc109e507dc0f5ec985705a5f5187dc522` |
+| `company-query-results-v1.csv` | `17ff0bd6a6de0c675614523c86cebeb692783005c5167a123b2c67c994c8fa9c` |
+| `root-operating-acceptance-v1.json` | `d6e7b1fa3b0b724d828c4e82b1383ac90485256dac6c29f62d859d46b8822033` |
+| `post-activation-preservation-v1.json` | `0068cb559239a85929f8a05fa9d6d95e67cea26ce745f6dee8609901102d43d6` |
+| `private-cold-qa.json` | `e2dc2c1d7014292684c18cd65481896b8231434b22a49565042a39d529d5c3ae` |
+| `operating-browser-qa.json` | `56af3115cdc1317f0c44d0dc9a30fc4c63d116417da6b654c118c7ebcb3795de` |
+
+PR 필수 CI, main merge와 병합 후 CI는 이 문서 상태 동결 시점에 **PENDING**이다.
+이후 최종 전달 상태는 해당 PR의 정확한 head/merge SHA에 대한 실제 CI와 ROOT의
+별도 delivery receipt에서 확인한다. 운영 PASS가 원격 전달 PASS를 의미하지 않으며,
+미래 CI·병합 결과를 이 문서에서 미리 추정하지 않는다.
