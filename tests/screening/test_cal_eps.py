@@ -368,6 +368,48 @@ def test_affirmative_common_stock_warrant_policy_and_cal_support_normal_dilution
             _normal_dilution(source, shares)
 
 
+@pytest.mark.parametrize("sentence", [
+    "For diluted earnings per share, the terminology stock options and treasury stock method is discussed in Note12.",
+    "Common stock warrants would use the treasury stock method if they became exercisable.",
+    "Diluted earnings per share could be computed for stock options using the treasury stock method.",
+    "We plan to use the treasury stock method for stock options in diluted earnings per share.",
+    "The treasury stock method may be used for common stock warrants in diluted earnings per share.",
+])
+def test_generic_share_adjustment_needs_actual_method_application_not_mentions_or_future_policy(sentence):
+    from sec_xbrl.metrics.cal_eps import _normal_dilution
+
+    annual = _projection(_START, _END, numerator="4000", basic_eps="4", diluted_eps="3.96",
+                         increment=_GENERIC_INCREMENTAL_SHARES)
+    annual["eps_treasury_stock_policy"] = [{"snippet": sentence}]
+    source = FilingInputs(annual)
+    shares = source.select(_WEIGHTED["diluted"], _START, _END, _SHARES_UNIT)
+    assert source.calculations(shares)[0]["status"] == "VERIFIED"
+    with pytest.raises(QualificationError, match="COMPLETE_NORMAL_STOCK_AWARD_DILUTION_CALCULATION_NOT_PROVEN"):
+        _normal_dilution(source, shares)
+
+
+@pytest.mark.parametrize("sentence", [
+    "Diluted earnings per share is calculated using the treasury stock method for stock options.",
+    "The dilutive effect of restricted stock units is determined using the treasury stock method.",
+    "We use the treasury-stock method for stock options in diluted earnings per share.",
+    "We apply the treasury stock method to common stock warrants when dilutive.",
+    "The treasury stock method is used to compute diluted earnings per share for stock options.",
+    "The treasury stock method is applied to stock options if dilutive in diluted earnings per share.",
+    "Potentially dilutive securities include common stock from assumed exercise of stock options and warrants using the treasury stock method.",
+    "The computation of diluted EPS is based on common shares and stock options that may be issued under our award programs, as determined by using the treasury stock method.",
+])
+def test_generic_share_adjustment_accepts_current_application_wordings_and_dilutive_conditions(sentence):
+    from sec_xbrl.metrics.cal_eps import _normal_dilution
+
+    annual = _projection(_START, _END, numerator="4000", basic_eps="4", diluted_eps="3.96",
+                         increment=_GENERIC_INCREMENTAL_SHARES)
+    annual["eps_treasury_stock_policy"] = [{"snippet": sentence}]
+    source = FilingInputs(annual)
+    shares = source.select(_WEIGHTED["diluted"], _START, _END, _SHARES_UNIT)
+    equation, = _normal_dilution(source, shares)
+    assert equation["children"][1]["treasury_stock_policy"][0]["affirmative_method_clause"] == sentence
+
+
 def test_negative_reported_share_increment_is_not_admitted_by_a_zero_crossing_interval():
     from sec_xbrl.metrics.cal_eps import _normal_dilution
 

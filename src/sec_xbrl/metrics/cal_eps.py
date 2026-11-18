@@ -67,6 +67,20 @@ _NONAFFIRMATIVE_METHOD = re.compile(
     r"\b(?:no|not|never|neither|cannot|without|exclud\w*|anti[- ]?dilutive|"
     r"(?:do|does|is|are|can|could|would|will)n['’]t)\b", re.IGNORECASE,
 )
+_METHOD_NAME = r"(?:the\s+)?treasury[- ]stock method\b"
+_CURRENT_METHOD_APPLICATION = re.compile(
+    r"\b(?:(?:(?:is|are|was|were)\s+(?:calculated|computed|determined|measured|based)"
+    r"|we\s+(?:calculate|compute|determine|measure)"
+    r"|(?:the|our)\s+company\s+(?:calculates|computes|determines|measures)"
+    r"|includes?|(?:is|are|was|were)\s+included)\b.{0,700}?\b"
+    r"(?:using|under|with|by applying|in accordance with)\s+" + _METHOD_NAME
+    + r"|(?:use|uses|apply|applies)\s+" + _METHOD_NAME
+    + r"|treasury[- ]stock method\s+(?:is|was)\s+(?:used|applied)\b)",
+    re.IGNORECASE,
+)
+_NONCURRENT_APPLICATION_PREFIX = re.compile(
+    r"\b(?:would|could|might|may|will|shall|should|to)\s+(?:\w+\s+){0,4}$", re.IGNORECASE,
+)
 _WARRANTS = re.compile(r"\bwarrants?\b", re.IGNORECASE)
 _COMMON_STOCK = re.compile(r"\bcommon (?:stock|shares)\b", re.IGNORECASE)
 _PREFERRED_CASH = "DividendsPreferredStockCash"
@@ -342,6 +356,9 @@ def _affirmative_treasury_stock_policy(source: FilingInputs) -> list[dict]:
             if not _STOCK_AWARD_TERMS.search(clause) and not _WARRANTS.search(clause):
                 continue
             if _WARRANTS.search(clause) and not _COMMON_STOCK.search(clause):
+                continue
+            if not any(not _NONCURRENT_APPLICATION_PREFIX.search(clause[:match.start()])
+                       for match in _CURRENT_METHOD_APPLICATION.finditer(clause)):
                 continue
             result.append({**occurrence, "affirmative_method_clause": clause})
     return result

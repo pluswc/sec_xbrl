@@ -67,7 +67,10 @@
    EPS에서 보통주 warrants에 treasury-stock 방식이 적용된다는 해당 절의 공시가
    있으면 함께 허용한다. 별도 historical antidilution 표의 언급으로 판단하지 않는다.
    명시적으로 방법 적용을 부정하거나 제외된 반희석 주식만 설명하는 절은 이
-   affirmative 정책 근거가 아니다. 보고 증분 point가 음수이면 원 decimals 구간이
+   affirmative 정책 근거가 아니다. 단순한 용어 언급 또는 장래·가정적 방법 적용도
+   충분하지 않다. 현재의 계산·포함·방법 적용을 서술한 bounded source 문장이
+   필요하며 정상적인 `if/when dilutive` 조건 자체는 장래 가정으로 배제하지 않는다.
+   보고 증분 point가 음수이면 원 decimals 구간이
    0을 포함하더라도 정상 희석 증거로 승인하지 않는다.
    미지의 잠재 주식, 전환, 조건부 주식과 미입증 numerator adjustment는 보류한다.
 4. 양(+)의 계속영업 지배 분자 범위를 FY, 9M, Q4 및 앞선 세 constituent quarter에서
@@ -142,6 +145,14 @@ CAL source-validation lineage, 부정된 treasury-stock 문장, 반올림 구간
 기존 Q4 경로, immutable append와 Arelle의 두 arcrole별 priority/prohibition을
 포함한다. 실제 684 accession의 최종 projection replay와 적격 발행물은 총괄이
 별도 불변 자료로 준비·판단한다.
+
+첫 동결 `0da4e79ebf72114edbf830a711265232f3595879`의 독립 검토에서 treasury-stock
+용어 언급과 hypothetical future 문장이 affirmative 정책으로 승인되는 P2가
+반환됐다. 후속은 `cal_eps.py`, 관련 단위 검사와 이 계약만 수정한다. 현재 적용을
+요구하는 bounded predicate와 5개 부정·8개 양성 문장 회귀를 추가했고, 이전 실제
+v3 probe에서 쓰인 서로 다른 10개 방법 적용 문장은 모두 계속 지원됨을 별도로
+확인했다. 후속 기본·호환성 회귀 합계는 **253 PASS / 1 SKIP**(4.75s), Ruff와
+diff check PASS다. 최종 SHA의 독립 재검증과 실제 최종 artifact 인수는 별도다.
 
 그 수정 전 시작한 로컬 전체 pytest는 **3,385 PASS / 39 SKIP / 14 FAIL**
 (333.57s)이므로 최종 소스의 전체 PASS 근거가 아니다. 알려진 cached NVDA
