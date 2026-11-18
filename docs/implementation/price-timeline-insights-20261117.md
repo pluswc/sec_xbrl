@@ -9,12 +9,14 @@ while preserving functionality/data/history. Base main is
 `codex/price-timeline-insights`, isolated tree `work/price-timeline-insights-20261117/source`.
 The disclosed approved GPT-6.1 Sol fallback owns implementation; separate read-only Astra
 reviews its frozen SHA. ROOT owns actual browser staging/acceptance and any later activation.
-No push/PR/main merge is authorized. The writer cannot activate runtime; ROOT is authorized
-to stage and activate the exact independently verified consumer at18765 after acceptance,
-preserving backend19078, old18766, publications and both journals. Root main, old worktrees,
+The original2026-11-17 local authorization excluded remote delivery and allowed ROOT
+activation only after independent acceptance. The2026-11-18 remote-approval section below
+supersedes that earlier no-remote state. The new remote task excludes main merge and further
+operating activation; the writer never activates runtime. Root main, old worktrees,
 1122protected pins, two journals and17untracked architecture artifacts are preservation bounds.
 
-APPROVED: this scoped implementation. IMPLEMENTED and INDEPENDENTLY_VERIFIED: product
+Historical2026-11-17 local states (new integration gates are separate below):
+APPROVED: that scoped implementation. IMPLEMENTED and INDEPENDENTLY_VERIFIED: product
 `c7241f94d9a5f4df4d3c3207ea7d5c73997fe4f8`, separate read-only Astra PASS.
 LOCALLY_ACCEPTED and RUNTIME_ACCEPTED: ROOT PASS at2026-11-16T15:25:28.099790Z
 (2026-11-17KST); final receipts below. MERGED: not performed or requested for this milestone.
@@ -234,3 +236,133 @@ this documentation-only follow-up checks receipt hashes, content/links/diff and 
 source equality; it does not rerun unchanged product tests or perform runtime actions.
 Final documentation freeze is reviewed separately. No push, PR, remote CI or main merge was
 requested/performed, and no new financial inputs, Raw capture or publication was created.
+
+
+## Authorized remote delivery and latest-main integration — 2026-11-18
+
+The user now authorizes remote delivery (push and PR) of timeline interpretation, gap guidance
+and scoped company counts after checking latest main and preserving existing functionality,
+data and history. ROOT owns push/PR/CI and private-browser acceptance. This new scope does
+**not** authorize main merge or an operating restart/activation. The same disclosed approved
+GPT-6.1 Sol fallback remains sole integration writer; separate Astra reviews the new frozen
+SHA. Earlier local acceptance/no-remote/PENDING records are dated history, not permission
+to bypass the new integration gate.
+
+ROOT fetched **`origin/main 0b18528d8750f217a2cc73d88bdfba5c267f1898`**, containing PR109's
+accepted Q4 EPS product6c4 and PR110's delivery documentation. The writer normally merges
+that exact main into existing `codex/price-timeline-insights` from documentation head
+`99996ce42af5c9566df43593e279c6cded61162a`; no rebase, force or history rewrite is used.
+Conflicts are only planning append history and appended Node tests: both sides are retained.
+The app auto-merge retains Q4 typed labels, selected-Q4 evidence, KST ready-time display and
+`GOVERNED_Q4_COMPONENT_TTM` flags alongside c724's interpretation/coverage/reopen logic.
+
+| New delivery gate | State at integration freeze |
+| --- | --- |
+| User remote authorization |Push/PR approved; main merge/operating activation excluded|
+| Local normal integration |Implemented/writer-checked; exact two-parent SHA supplied at handoff|
+| Independent integrated-source review |PENDING on new frozen SHA; prior c724/6c4 acceptances are comparison evidence|
+| ROOT integrated local/private browser acceptance |PENDING; operating read-only baseline is separate|
+| Remote push / PR / required CI |PENDING ROOT execution and actual receipts|
+| Insights main merge |Not performed or authorized by this remote-only task|
+
+### Preserved code and current operating limitation
+
+All Q4 producer/readiness/current-evaluation/publication code, its fixtures/tests and main's
+architecture/period contracts remain byte-identical to fetched main. No new accounting
+meaning, EPS policy, producer preparation, inputs, Raw collection or republication is added.
+The c724 interpretation module, service/coverage source checks, worker route, CSS and Python
+insight tests remain byte-identical to99996ce/c724.252complete vs3y policies, source-scoped
+identities, READY_ONLY, bounded caches, async/stale guards and original saved-source
+reopen/export behavior are retained. Other financial/common-market/Q4/history UI remains.
+
+**Current operating baseline has a P1 source-composition gap.** ROOT's read-only check found
+18765/NativePID60968 uses the accepted6c4 price worker with a c724-based UI overlay, but that
+worker returns no `interpretation_definition`/per-point summary and `/coverage` returns404.
+This is not a claim that current live insights are normal. The merged source restores those
+code paths together with Q4 behavior when a consumer uses this integrated source, as verified
+privately; it does not change the operating process in this task. The previous17th-day c724
+local/operating acceptance above remains true for that earlier composition/publication.
+
+ROOT's baseline locator is
+`/mnt/c/Users/plusbdw/.codex/visualizations/2026/11/08/01a1bb67-6275-70d2-989e-208966314006/price-insights-remote-delivery-20261118/operating-insights-before.json`.
+The operating source is
+`work/common-q4-eps-reconstruction-20261118/accepted-source-6c4c9a57e5/src`.
+Preservation baseline `work/price-insights-remote-delivery-20261118/evidence/preservation-baseline.json`
+protects1675files, two original journals and17untracked architecture artifacts. Backend19078,
+native14 and separate18766 remain outside writer mutations. ROOT prepares a private union
+clone of14old records for new-save/cold restart/export checks; no original database is written.
+
+### Actual current publication and private comparisons
+
+Current input is existing
+`data/processed/price_metrics/20261118_common_q4_eps_v2/price_metric_manifest.json`,
+SHA256 **`8a5bf28974f3f7f01ebae3985c0664ee458ee0e081444797b41438169035d3d6`**,
+publication ID `screening-price-metrics-dc58939be9ad198d7883fa7e`.
+Actual2834rows contain1337available/1497unavailable; current PER/EY companies are13,
+including AMZN EPS12.37/PER21.55699302038071139854486661277284. Current common-equity
+PBR75 and BPS PBR60 remain distinct. Financial326observations preserve the prior325.
+Earlier86fad/currentPER12 statements above are dated historical evidence, not current counts.
+
+Writer read-only/new-temporary-journal probes verified:
+
+- All2834current observation fields match latest main exactly; five current band/evidence
+  routes (AMZN/MSFT/NVDA/ABBV/HON) match main exactly, including typed Q4 context, original
+  direct-EPS priority, AMZN selected-Q4 proof and historical/backtest-ineligible flags.
+- Five timelines' original fields (MSFT BPS/PER, NVDA/ABBV/AMZN PER) match both main and
+  accepted c724 on the new publication. New current EPS does not appear in historical
+  evaluation context or backfill the13th-session PER/bands; MSFT BPS retains503eligible252s.
+- All eight new-publication metric/policy/window coverage scopes were recalculated and match
+  c724's same-source aggregate hashes: diagnostic PER any10/latest9/distributions0; BPS
+  any60/latest60/distributions1; READY_ONLY all0. These are re-audited historical counts,
+  not an inference from currentPER13.109companies remain selectable; view range is3years.
+- Four actual old977/86 query/timeline snapshots and two new8a5 query/timeline snapshots
+  reopen exactly after private service restart, preserving notes, source pins and new
+  original evaluation context. This uses a newly created temporary SQLite clone only;
+  no prior receipt database or live journal is written. UI export shape/original-context
+  behavior passes the retained Node regressions; ROOT separately owns actual private
+  browser export/cold restart acceptance of its14old+new1 union.
+
+Probe evidence:
+`work/price-timeline-insights-20261117/evidence/writer-main110-integration.json`, SHA256
+`c67ec177434d3eba99ac18a6aff7b0d08ea1ca726e81c7c013fd6fbd0cd3a65f`. This probe reads pinned prepared inputs and invokes consumers; it does not
+prepare producer data. Full data preparation/Raw qualification is not repeated.
+
+### Fresh missing-metadata UI correction and deployment obligation
+
+The live composition finding exposed a misleading fallback: a fresh request with missing
+worker metadata was described as “saved at the time.” The narrow integration correction
+gates the legacy caption on `priceWorksheet.readonly`. Fresh absent metadata now says the
+selected-date summary/company aggregate could not be loaded and refers to original values/
+evidence; it neither claims an old save nor waits permanently. Read-only legacy reopen keeps
+its original caption and unchanged result/export bytes. Fully supported fresh results are
+unchanged. A focused fresh-versus-legacy Node regression passes. Only this UI-copy branch
+changed after the Python/other Node checks; the30-test price suite, syntax and diff were
+rerun. No financial calculation or source-selection change was made.
+
+Any later deployment handoff must verify **both** fresh per-point interpretation metadata
+and successful `/coverage` from the same integrated UI/worker/publication scope. Asset hashes
+alone do not prove that composition. ROOT will verify an immutable private candidate before
+remote delivery; this task does not restart or repair the currently operating P1 composition.
+
+### Checks and remote handoff boundaries
+
+Focused **147Python PASS/1explicit cached-fixture SKIP**, plus30price +5common-market
++6Q4 +13history = **54Node PASS**. Ruff, app/bridge/test JavaScript syntax, relative links
+and diff checks passed. History uses narrowly approved temporary loopback/fixture children.
+No full repository test-suite or new CI result is claimed. Reproduce the prior focused
+commands with `tests/screening/test_q4_eps_reconstruction.py` added to the Python invocation;
+the four Node entry points and Ruff/syntax commands above remain applicable. Source comparison:
+
+```bash
+git diff origin/main -- src/sec_xbrl/metrics/price_related.py src/sec_xbrl/metrics/q4_eps_reconstruction.py src/sec_xbrl/metrics/company_valuation_readiness.py src/sec_xbrl/metrics/reported_quarter_eps.py src/sec_xbrl/screening/price_metric_publication.py examples/screening/prepare_q4_eps_reconstruction.py tests/screening/test_q4_eps_reconstruction.py
+git diff 99996ce42a -- src/sec_xbrl/metrics/price_timeline.py src/sec_xbrl/screening/price_metric_service.py examples/screening/price_metrics_worker.py examples/screening/display-assets/app.css tests/screening/test_price_timeline_insights.py
+git diff --check
+```
+
+Both source comparisons are empty. The normal merge freezes only tracked feature/inherited
+main changes and these contracts; generated data/evidence/archives/journals/secrets are excluded.
+ROOT receives the frozen merge SHA for separate independent review, private actual browser
+acceptance and authorized push/PR/required CI. No push, PR, main merge or runtime change is
+performed by the writer. The unchanged operating P1 composition gap remains explicitly
+bounded until a separately authorized operating decision; remote code delivery alone does
+not assert activation or repair of that live process.

@@ -267,3 +267,21 @@ old metadata captions and original-context coverage reload stayed intact.95Pytho
 operating test saves. This documentation follow-up changes no product/test bytes. Prior
 candidate/pending clauses are historical; remote/main delivery was not requested/performed.
 [Final receipts and coverage definitions](../docs/implementation/price-timeline-insights-20261117.md#final-local-and-operating-acceptance--2026-11-17).
+
+
+Insights remote integration (2026-11-18): user authorized push/PR and latest-main check;
+normal merge of main0b18528d87(PR109/110) preserves Q4 typed labels/evidence/KST ready time
+alongside c724 pure interpretation, scoped asynchronous coverage and original-source reopen.
+Current8a5 publication has13currentPER/EY companies (AMZN EPS12.37 added), while re-audited
+historical PER10any/9latest/0ribbons and BPS60/1ribbon remain distinct.147PythonPASS/
+1cachedSKIP and54NodePASS; integrated independent/ROOT private browser/remoteCI gates pending.
+Current live6c4worker+c724UI overlay lacks interpretation metadata/coverage route (P1);
+this task restores those integrated code paths but does not activate/restart operating services.
+Earlier17th-day live acceptance describes its earlier composition.1675protectedfiles,
+original journals/17architecture artifacts preserved; no new UI redesign, accounting policy,
+main merge or operating activation in this remote-only scope. [Current handoff](../docs/implementation/price-timeline-insights-20261117.md#authorized-remote-delivery-and-latest-main-integration--2026-11-18).
+
+Fresh-worker missing interpretation/aggregate metadata uses an explicit load-failure caption;
+only `readonly` saved-result contexts say “저장 당시 … 없음”. Legacy snapshot/export bytes and
+supported fresh summaries stay unchanged. A later deployment must check both fresh point
+metadata and `/coverage` against the same UI/worker/publication, not assets alone.

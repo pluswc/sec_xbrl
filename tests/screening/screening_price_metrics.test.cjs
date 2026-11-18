@@ -290,7 +290,7 @@ test("interpretation strip formats governed bucket and fixed scenario without nu
 
 test("legacy timeline rendering and export preserve original snapshot without newer interpretation",()=>{
  let exported;const {f}=fixture({Blob:class {constructor(parts){exported=JSON.parse(parts.join(""))}},URL:{createObjectURL:()=>"blob:x",revokeObjectURL:()=>{}},document:{createElement:()=>({click(){}})}});
- const original=timelineResult(),before=JSON.stringify(original);f.state.operation="timeline";f.state.request={cik:"1"};
+ const original=timelineResult(),before=JSON.stringify(original);f.state.readonly=true;f.state.operation="timeline";f.state.request={cik:"1"};
  f.priceDisplayResult(original);f.priceTimelineReadout(0);f.priceExport();
  assert.equal(JSON.stringify(exported.result),before);assert.equal(JSON.stringify(original),before);
  assert.match(f.priceTimelineInsightMarkup(original.points[0]),/저장 당시 해석 요약 없음/);
@@ -310,4 +310,31 @@ test("new saved timeline reloads coverage using original evidence context after 
  const {f,host}=fixture({api:async(url,options)=>{calls.push([url,options&&JSON.parse(options.body)]);return options?{publication_id:"OLD",evidence_context:"old-token",selectable_companies:2,any_ratio_companies:1,any_distribution_companies:1,dates:original.points.map(p=>({as_of:p.as_of,ratio_companies:1,distribution_companies:1}))}:{kind:"RESULT",operation:"timeline",request:{cik:"1"},title:"original",note:"memo",publication_id:"OLD",result:original,evidence_context:"old-token",source_context:{price_as_of:"2026-01-03"}}}});
  f.state.capability.publication_id="NEW";await f.priceReopen("old-save");await new Promise(r=>setImmediate(r));
  assert.equal(calls[1][1].evidence_context,"old-token");assert.match(host("#price-timeline-coverage").textContent,/전체 2/);assert.equal(f.state.result.publication_id,"OLD");
+});
+
+test("component-qualified EPS evidence uses typed labels, selected Q4 and an explicit ready timezone",async()=>{
+ const evaluation={evaluation_as_of:"2026-11-18",quote_session:"2026-11-13"};
+ const {f,host}=fixture({api:async()=>({publication_id:"Q4",evidence_context:"Q4-context",definitions:{per:{label:"PER"}},
+  row:{metric_id:"per",eps_source_kind:"GOVERNED_Q4_COMPONENT_TTM",current_eps_evaluation:evaluation},
+  financial_inputs:[{role:"diluted_eps_12m",source_kind:"GOVERNED_Q4_COMPONENT_TTM",value:"8",currency:"USD",unit_kind:"currency/share",known_on:"2026-10-30",ready_on:"2026-11-17",ready_at:"2026-11-17T16:00:00Z",period_start:"2025-10-01",period_end:"2026-10-01"}],
+  q4_component_evidence:{quarters:[{q4_start:"2025-10-01",fy_end:"2026-01-01",selected_source_type:"REPORTED_Q4_EPS",value:"1.95",numerator:"21192000000",weighted_shares:"10863000000",reconstructed_value:"1.9508",eps_interval:["1.9507","1.9510"],direct_comparison:{status:"ROUNDING_COMPATIBLE"}}]},price_inputs:[]})});
+ f.priceDisplayResult({...result("20","Q4"),evidence_context:"Q4-context"});
+ await f.priceShowEvidence("0000000001","q4-per");
+ const markup=host("#price-evidence-content").innerHTML;
+ assert.match(markup,/Q4 구성 검증 · 희석 EPS TTM/);assert.doesNotMatch(markup,/직접 공시 희석 EPS12개월|직접 4분기 EPS 합계/);
+ assert.match(markup,/직접 공시 Q4 EPS/);assert.match(markup,/반올림 구간 호환/);assert.match(markup,/1.9507–1.9510/);
+ assert.match(markup,/2026[\s.]+11[\s.]+18/);assert.match(markup,/KST/);
+});
+
+
+test("missing fresh-worker metadata is not described as an old saved result",()=>{
+ const {f}=fixture(),result=timelineResult();
+ f.state.readonly=false;
+ assert.match(f.priceTimelineInsightMarkup(result.points[0]),/선택일 해석 요약을 불러오지 못했습니다/);
+ assert.doesNotMatch(f.priceTimelineInsightMarkup(result.points[0]),/저장 당시/);
+ assert.match(f.priceTimelineCoverageMarkup(result,0),/기업 수 집계를 불러오지 못했습니다/);
+ assert.doesNotMatch(f.priceTimelineCoverageMarkup(result,0),/저장 당시|확인 중/);
+ f.state.readonly=true;
+ assert.match(f.priceTimelineInsightMarkup(result.points[0]),/저장 당시 해석 요약 없음/);
+ assert.match(f.priceTimelineCoverageMarkup(result,0),/저장 당시 기업 범위 집계 없음/);
 });

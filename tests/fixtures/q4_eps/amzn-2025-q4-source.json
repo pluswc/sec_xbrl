@@ -1,0 +1,243 @@
+{
+  "scope": "SEC official table excerpt; original column spans and row/cell content retained; styling and pre-EPS income-statement rows removed. Heading reproduced from original statement caption.",
+  "records": [
+    {
+      "source_record_id": "official-q4-03f539993735708885b9f4fd",
+      "cik": "0001018724",
+      "ticker": "AMZN",
+      "accession": "0001018724-26-000002",
+      "form": "8-K",
+      "filed_date": "2026-02-05",
+      "report_date": "2025-12-31",
+      "start": "2025-10-01",
+      "end": "2026-01-01",
+      "role": "basic_numerator",
+      "value": "2.1192E+10",
+      "decimals": "-6",
+      "scale": 6,
+      "unit": [
+        [
+          "iso4217:USD"
+        ],
+        []
+      ],
+      "dimensions": [],
+      "captured_at": "2026-11-17T16:16:56.054901+00:00",
+      "source_document": "amzn-20251231xex991.htm",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000002/amzn-20251231xex991.htm",
+      "source_file": "amzn-2025-q4-closed-eps-table.html",
+      "source_sha256": "ca019755b8b84a677a65b2f6f48ad32b50d44937fdca2820f8b3add60d115813",
+      "original_source_sha256": "5b917891453e2941ae815214ccaec659f3a9f5b63af640e62f2b304a144385d1",
+      "locator": {
+        "value_xpath": "/html/body/table/tr[4]/td[7]",
+        "row_xpath": "/html/body/table/tr[4]",
+        "raw_cell_text": "21,192",
+        "row_text": "Net income $ 20,004 $ 21,192 $ 59,248 $ 77,670",
+        "table_text_sha256": "fd476a75673979287469c409f39ab67cc696c32a66814304b9c8e92aadb1445a",
+        "headers": [
+          "Three Months Ended December 31,",
+          "2025"
+        ]
+      }
+    },
+    {
+      "source_record_id": "official-q4-0cf79be8e3570e1b9a5eff48",
+      "cik": "0001018724",
+      "ticker": "AMZN",
+      "accession": "0001018724-26-000002",
+      "form": "8-K",
+      "filed_date": "2026-02-05",
+      "report_date": "2025-12-31",
+      "start": "2025-10-01",
+      "end": "2026-01-01",
+      "role": "diluted_numerator",
+      "value": "2.1192E+10",
+      "decimals": "-6",
+      "scale": 6,
+      "unit": [
+        [
+          "iso4217:USD"
+        ],
+        []
+      ],
+      "dimensions": [],
+      "captured_at": "2026-11-17T16:16:56.054901+00:00",
+      "source_document": "amzn-20251231xex991.htm",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000002/amzn-20251231xex991.htm",
+      "source_file": "amzn-2025-q4-closed-eps-table.html",
+      "source_sha256": "ca019755b8b84a677a65b2f6f48ad32b50d44937fdca2820f8b3add60d115813",
+      "original_source_sha256": "5b917891453e2941ae815214ccaec659f3a9f5b63af640e62f2b304a144385d1",
+      "locator": {
+        "value_xpath": "/html/body/table/tr[4]/td[7]",
+        "row_xpath": "/html/body/table/tr[4]",
+        "raw_cell_text": "21,192",
+        "row_text": "Net income $ 20,004 $ 21,192 $ 59,248 $ 77,670",
+        "table_text_sha256": "fd476a75673979287469c409f39ab67cc696c32a66814304b9c8e92aadb1445a",
+        "headers": [
+          "Three Months Ended December 31,",
+          "2025"
+        ]
+      }
+    },
+    {
+      "source_record_id": "official-q4-bdf9d17f142e3641e1d91bf0",
+      "cik": "0001018724",
+      "ticker": "AMZN",
+      "accession": "0001018724-26-000002",
+      "form": "8-K",
+      "filed_date": "2026-02-05",
+      "report_date": "2025-12-31",
+      "start": "2025-10-01",
+      "end": "2026-01-01",
+      "role": "basic_eps",
+      "value": "1.98",
+      "decimals": "2",
+      "scale": 0,
+      "unit": [
+        [
+          "iso4217:USD"
+        ],
+        [
+          "xbrli:shares"
+        ]
+      ],
+      "dimensions": [],
+      "captured_at": "2026-11-17T16:16:56.054901+00:00",
+      "source_document": "amzn-20251231xex991.htm",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000002/amzn-20251231xex991.htm",
+      "source_file": "amzn-2025-q4-closed-eps-table.html",
+      "source_sha256": "ca019755b8b84a677a65b2f6f48ad32b50d44937fdca2820f8b3add60d115813",
+      "original_source_sha256": "5b917891453e2941ae815214ccaec659f3a9f5b63af640e62f2b304a144385d1",
+      "locator": {
+        "value_xpath": "/html/body/table/tr[5]/td[7]",
+        "row_xpath": "/html/body/table/tr[5]",
+        "raw_cell_text": "1.98",
+        "row_text": "Basic earnings per share $ 1.90 $ 1.98 $ 5.66 $ 7.29",
+        "table_text_sha256": "fd476a75673979287469c409f39ab67cc696c32a66814304b9c8e92aadb1445a",
+        "headers": [
+          "Three Months Ended December 31,",
+          "2025"
+        ]
+      }
+    },
+    {
+      "source_record_id": "official-q4-e01d463b5259f415de10e45e",
+      "cik": "0001018724",
+      "ticker": "AMZN",
+      "accession": "0001018724-26-000002",
+      "form": "8-K",
+      "filed_date": "2026-02-05",
+      "report_date": "2025-12-31",
+      "start": "2025-10-01",
+      "end": "2026-01-01",
+      "role": "diluted_eps",
+      "value": "1.95",
+      "decimals": "2",
+      "scale": 0,
+      "unit": [
+        [
+          "iso4217:USD"
+        ],
+        [
+          "xbrli:shares"
+        ]
+      ],
+      "dimensions": [],
+      "captured_at": "2026-11-17T16:16:56.054901+00:00",
+      "source_document": "amzn-20251231xex991.htm",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000002/amzn-20251231xex991.htm",
+      "source_file": "amzn-2025-q4-closed-eps-table.html",
+      "source_sha256": "ca019755b8b84a677a65b2f6f48ad32b50d44937fdca2820f8b3add60d115813",
+      "original_source_sha256": "5b917891453e2941ae815214ccaec659f3a9f5b63af640e62f2b304a144385d1",
+      "locator": {
+        "value_xpath": "/html/body/table/tr[6]/td[7]",
+        "row_xpath": "/html/body/table/tr[6]",
+        "raw_cell_text": "1.95",
+        "row_text": "Diluted earnings per share $ 1.86 $ 1.95 $ 5.53 $ 7.17",
+        "table_text_sha256": "fd476a75673979287469c409f39ab67cc696c32a66814304b9c8e92aadb1445a",
+        "headers": [
+          "Three Months Ended December 31,",
+          "2025"
+        ]
+      }
+    },
+    {
+      "source_record_id": "official-q4-a9acd264226d30923ced7992",
+      "cik": "0001018724",
+      "ticker": "AMZN",
+      "accession": "0001018724-26-000002",
+      "form": "8-K",
+      "filed_date": "2026-02-05",
+      "report_date": "2025-12-31",
+      "start": "2025-10-01",
+      "end": "2026-01-01",
+      "role": "basic_shares",
+      "value": "1.0709E+10",
+      "decimals": "-6",
+      "scale": 6,
+      "unit": [
+        [
+          "xbrli:shares"
+        ],
+        []
+      ],
+      "dimensions": [],
+      "captured_at": "2026-11-17T16:16:56.054901+00:00",
+      "source_document": "amzn-20251231xex991.htm",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000002/amzn-20251231xex991.htm",
+      "source_file": "amzn-2025-q4-closed-eps-table.html",
+      "source_sha256": "ca019755b8b84a677a65b2f6f48ad32b50d44937fdca2820f8b3add60d115813",
+      "original_source_sha256": "5b917891453e2941ae815214ccaec659f3a9f5b63af640e62f2b304a144385d1",
+      "locator": {
+        "value_xpath": "/html/body/table/tr[8]/td[5]",
+        "row_xpath": "/html/body/table/tr[8]",
+        "raw_cell_text": "10,709",
+        "row_text": "Basic 10,552 10,709 10,473 10,656",
+        "table_text_sha256": "fd476a75673979287469c409f39ab67cc696c32a66814304b9c8e92aadb1445a",
+        "headers": [
+          "Three Months Ended December 31,",
+          "2025"
+        ]
+      }
+    },
+    {
+      "source_record_id": "official-q4-c9bb50d7b22b00cbe2cc9356",
+      "cik": "0001018724",
+      "ticker": "AMZN",
+      "accession": "0001018724-26-000002",
+      "form": "8-K",
+      "filed_date": "2026-02-05",
+      "report_date": "2025-12-31",
+      "start": "2025-10-01",
+      "end": "2026-01-01",
+      "role": "diluted_shares",
+      "value": "1.0863E+10",
+      "decimals": "-6",
+      "scale": 6,
+      "unit": [
+        [
+          "xbrli:shares"
+        ],
+        []
+      ],
+      "dimensions": [],
+      "captured_at": "2026-11-17T16:16:56.054901+00:00",
+      "source_document": "amzn-20251231xex991.htm",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1018724/000101872426000002/amzn-20251231xex991.htm",
+      "source_file": "amzn-2025-q4-closed-eps-table.html",
+      "source_sha256": "ca019755b8b84a677a65b2f6f48ad32b50d44937fdca2820f8b3add60d115813",
+      "original_source_sha256": "5b917891453e2941ae815214ccaec659f3a9f5b63af640e62f2b304a144385d1",
+      "locator": {
+        "value_xpath": "/html/body/table/tr[9]/td[5]",
+        "row_xpath": "/html/body/table/tr[9]",
+        "raw_cell_text": "10,863",
+        "row_text": "Diluted 10,771 10,863 10,721 10,827",
+        "table_text_sha256": "fd476a75673979287469c409f39ab67cc696c32a66814304b9c8e92aadb1445a",
+        "headers": [
+          "Three Months Ended December 31,",
+          "2025"
+        ]
+      }
+    }
+  ]
+}

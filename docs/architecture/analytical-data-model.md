@@ -131,6 +131,11 @@ Examples:
 | Q4 flow | compatible additive FY and YTD 9M inputs exist | derived value; not valid for EPS, ratios, averages, or non-additive metrics |
 | Recast Q2 | compatible recast YTD/QTD components and evidence exist | `DERIVED_RECAST` |
 
+The [separate Q4 EPS component contract](../implementation/common-q4-eps-reconstruction-20261118.md)
+adds a Derived Metrics route with evidence-qualified common numerator, weighted-average
+share reconstruction, accounting compatibility, and source-decimals intervals. It never
+subtracts cumulative EPS or changes the generic additive Q4 flow policy.
+
 If a company directly reports a metric, that observation remains a Reported
 Fact.  A mathematically equivalent calculation is still a separate derived
 record and may be used as validation rather than substitution.

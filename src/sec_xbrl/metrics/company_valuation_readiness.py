@@ -394,9 +394,10 @@ def validated_company_readiness(bundle: dict) -> dict[str, dict]:
     Old bundles have no override. Historical readers use their immutable values
     without reinterpreting this producer qualification under future source code.
     """
+    from sec_xbrl.metrics.q4_eps_reconstruction import validated_q4_ttm_rows
     from sec_xbrl.metrics.reported_quarter_eps import validated_ttm_rows
 
-    quarter_eps = validated_ttm_rows(bundle)
+    quarter_eps = {**validated_ttm_rows(bundle), **validated_q4_ttm_rows(bundle)}
     if not bundle.get("company_readiness"):
         return {}
     result = {}

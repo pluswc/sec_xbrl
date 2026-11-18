@@ -300,6 +300,11 @@ def validated_ttm_rows(bundle: dict) -> dict[str, dict]:
 def validate_current_evaluation(declaration: dict, *, bundle_pin: dict,
                                 batch_pin: dict, requested: str, selected: str) -> dict:
     """Verify an exact opt-in policy before current-only readiness is evaluated."""
+    if pinned_json(declaration["policy"]).get("schema_version") == "eps-current-evaluation-policy-v2":
+        from sec_xbrl.metrics.q4_eps_reconstruction import validate_component_current_evaluation
+
+        return validate_component_current_evaluation(declaration, bundle_pin=bundle_pin,
+            batch_pin=batch_pin, requested=requested, selected=selected)
     policy, approval = pinned_json(declaration["policy"]), pinned_json(declaration["approval"])
     if (policy.get("schema_version") != "eps-current-evaluation-policy-v1" or policy.get("mode") != MODE
         or approval.get("schema_version") != "eps-current-evaluation-root-acceptance-v1"
