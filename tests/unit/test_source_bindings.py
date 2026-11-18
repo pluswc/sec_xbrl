@@ -1049,14 +1049,11 @@ def test_generic_quality_rejects_raw_normalization_mismatch_without_publication(
 
 
 @pytest.mark.parametrize("mixed_legacy", (False, True))
-def test_normal_default_v7_and_mixed_v6_v7_binding_quality_chain(
+def test_retained_approved_v7_and_mixed_v6_v7_binding_quality_chain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mixed_legacy: bool,
 ) -> None:
-    from sec_xbrl.facts.layer1 import Layer1Extractor
-
-    default_version = Layer1Extractor.parser_version
-    assert default_version == "m2-layer1-v7"
-    paths = _mixed_v2_fixture(tmp_path, parser_versions=("m2-layer1-v6" if mixed_legacy else default_version, default_version))
+    approved_version = "m2-layer1-v7"  # A retained approval, independent of the current extractor default.
+    paths = _mixed_v2_fixture(tmp_path, parser_versions=("m2-layer1-v6" if mixed_legacy else approved_version, approved_version))
     histories = _build_ready_histories(paths, tmp_path, monkeypatch)
     companies = ({"ticker": "FIVE", "cik": "0000000123"}, {"ticker": "SIX", "cik": "0000000456"})
     config = _quality_config(paths, histories, tmp_path / "quality-config.json", companies=companies)
@@ -1073,8 +1070,8 @@ def test_normal_default_v7_and_mixed_v6_v7_binding_quality_chain(
         collection_manifest=Path(paths["collection"]), history_manifest_sha256s={ticker: _sha256(path) for ticker, path in histories.items()},
         financial_as_of="2026-10-08", expected_companies=companies,
     )["state"] == "PASS"
-    profile = next(row for row in reader.manifest["parser_profiles"] if row["parser_version"] == default_version)
-    assert profile == {"parser_version": default_version,
+    profile = next(row for row in reader.manifest["parser_profiles"] if row["parser_version"] == approved_version)
+    assert profile == {"parser_version": approved_version,
                        "profile": "sec-inline-duration-hour-approved-lexical-and-metadata-v1",
                        "parser_source_commit": "82cc02eddfd6f05997c5e1e7d2a5c78ab2f4dd08",
                        "transform_rule_version": "sec-duration-hour-conformance-v1"}
@@ -1176,3 +1173,19 @@ def test_legacy_v1_publisher_and_reader_cannot_admit_v7_raw_or_profile(tmp_path:
     _write(publication.manifest_path, manifest)
     with pytest.raises(ValueError, match="request scope differs"):
         SourceBindingsReader(publication.root).verify_all()
+
+
+def test_current_default_v8_does_not_inherit_legacy_governed_source_approval(tmp_path: Path) -> None:
+    from sec_xbrl.facts.layer1 import Layer1Extractor
+    from sec_xbrl.metric_quality import _duration_expected
+
+    current_version = Layer1Extractor.parser_version
+    assert current_version == "m2-layer1-v8"
+    assert current_version not in source_binding_module.KNOWN_PARSER_PROFILES
+    with pytest.raises(ValueError, match="unknown governed duration parser"):
+        _duration_expected("durhour", "20", parser_version=current_version)
+    paths = _mixed_v2_fixture(tmp_path, parser_versions=("m2-layer1-v7", current_version))
+    with pytest.raises(ValueError, match="known snapshot/package profile"):
+        write_source_indexes_v2(collection_manifest=Path(paths["collection"]),
+            package_root=Path(paths["packages"]), destination=tmp_path / "unapproved-v8-indexes")
+    assert not (tmp_path / "unapproved-v8-indexes").exists()

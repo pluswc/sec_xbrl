@@ -18,6 +18,7 @@ from datetime import date
 from typing import Any
 
 from sec_xbrl.periods.logic import DERIVATION_RULE_VERSION, PeriodClassifier, derive_q4_facts
+from sec_xbrl.periods.reviewed_calendar import ReviewedFiscalCalendar
 
 PERIOD_OBSERVATION_RULE_VERSION = "l2-m1-period-observation-v2"
 
@@ -54,6 +55,7 @@ class PeriodObservationMaterializer:
         dimension_facts: Iterable[Mapping[str, Any]] = (),
         q4_policy_by_fact_id: Mapping[str, Mapping[str, Any]] | None = None,
         source_snapshot_id: str | None = None,
+        calendar: ReviewedFiscalCalendar | None = None,
     ) -> PeriodObservationResult:
         """Return one reported observation or one exclusion per raw Fact.
 
@@ -72,6 +74,7 @@ class PeriodObservationMaterializer:
             concepts=concept_by_id.values(),
             contexts=context_by_id.values(),
             facts=raw_facts,
+            calendar=calendar,
         )
 
         observations: list[dict[str, Any]] = []
@@ -141,6 +144,10 @@ def _exclusion_reason(
     units: Mapping[str, Mapping[str, Any]],
     dimensions: Mapping[str, tuple[Mapping[str, Any], ...]],
 ) -> str | None:
+    from sec_xbrl.periods.integrity import fiscal_coordinate_problem
+
+    if fiscal_coordinate_problem(filing):
+        return "FISCAL_FOCUS_REPORT_DATE_CONFLICT"
     if not fact.get("fact_id"):
         return "MISSING_FACT_ID"
     if not fact.get("filing_id") or str(fact.get("filing_id")) != str(filing.get("filing_id")):
@@ -187,8 +194,11 @@ def _exclusion(filing: Mapping[str, Any], fact: Mapping[str, Any], ordinal: int,
         "accession": filing.get("accession"),
         "filed_date": filing.get("filed_date"),
         "report_date": filing.get("report_date"),
+        **({"reported_document_fiscal_year_focus": filing.get("document_fiscal_year_focus"),
+            "reported_document_fiscal_period_focus": filing.get("document_fiscal_period_focus"),
+            "effective_fiscal_coordinate": None} if reason == "FISCAL_FOCUS_REPORT_DATE_CONFLICT" else {}),
         "exclusion_reason": reason,
-        "classification_rule_version": PERIOD_OBSERVATION_RULE_VERSION,
+        "classification_rule_version": "fiscal-coordinate-integrity-v1" if reason == "FISCAL_FOCUS_REPORT_DATE_CONFLICT" else PERIOD_OBSERVATION_RULE_VERSION,
         "period_classification_reason": fact.get("period_classification_reason"),
         "period_classification_version": fact.get("period_classification_version"),
     }
@@ -270,6 +280,8 @@ def _observation(
         "period_classification_reason": fact.get("period_classification_reason"),
         "period_classification_version": fact.get("period_classification_version"),
     }
+    if fact.get("fiscal_calendar_proof"):
+        result["fiscal_calendar_proof"] = fact["fiscal_calendar_proof"]
     if policy is not None:
         result.update(_validated_q4_policy(policy, concept, unit))
     correction_id = filing.get("fiscal_focus_correction_id")

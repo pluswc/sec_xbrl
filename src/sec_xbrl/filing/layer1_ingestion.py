@@ -58,6 +58,7 @@ class Layer1SnapshotManifest:
     relationship_count: int
     layer1_parser_version: str
     relationship_parser_version: str
+    inline_document_inventory: tuple[dict[str, Any], ...] = ()
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2, sort_keys=True) + "\n"
@@ -65,7 +66,10 @@ class Layer1SnapshotManifest:
     @classmethod
     def from_path(cls, path: Path) -> Layer1SnapshotManifest:
         try:
-            return cls(**json.loads(path.read_text(encoding="utf-8")))
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if "inline_document_inventory" in payload:
+                payload["inline_document_inventory"] = tuple(payload["inline_document_inventory"])
+            return cls(**payload)
         except (OSError, TypeError, json.JSONDecodeError) as exc:
             raise Layer1IngestionError(f"invalid Layer 1 snapshot manifest: {path}") from exc
 
@@ -97,7 +101,7 @@ class Layer1Ingestor:
     """Create one complete, immutable Layer 1 snapshot per resolved filing."""
 
     manifest_name = "layer1_manifest.json"
-    validation_rule_version = "m1-inline-xbrl-completeness-v1"
+    validation_rule_version = "m1-inline-document-set-completeness-v2"
     required_table_names = (
         "filing",
         "concept",
@@ -159,6 +163,11 @@ class Layer1Ingestor:
         state_recorded = False
         try:
             package_sha256 = _sha256_file(resolved.zip_path)
+            if getattr(model, "sec_package_sha256", package_sha256) != package_sha256:
+                raise Layer1IngestionError("accession package changed after loading")
+            from sec_xbrl.filing.inline_document_set import verify_package_model
+
+            verified_inventory = verify_package_model(resolved.zip_path, resolved.entrypoint_name, model)
             # Validation has already established this corpus; capture its count
             # before calling a pluggable extractor so an early extractor error
             # cannot erase the expected side of the completeness gate.
@@ -214,6 +223,12 @@ class Layer1Ingestor:
                     "Layer 1 snapshot is missing required tables: "
                     f"expected={len(self.required_table_names)}, actual={table_count}"
                 )
+            inventory = []
+            for document in verified_inventory:
+                extracted_count = sum(row.get("source_document") == document["name"] for row in facts.facts)
+                if extracted_count != document["loaded_fact_count"]:
+                    raise Layer1IngestionError("Inline extracted per-document fact coverage differs")
+                inventory.append({**document, "extracted_fact_count": extracted_count})
             manifest = Layer1SnapshotManifest(
                 schema_version=1,
                 cik=canonicalize_cik(resolved.filing.cik),
@@ -232,6 +247,7 @@ class Layer1Ingestor:
                 relationship_count=len(relationships.relationships),
                 layer1_parser_version=self.fact_extractor.parser_version,
                 relationship_parser_version=self.relationship_extractor.parser_version,
+                inline_document_inventory=tuple(inventory),
             )
             (temporary / self.manifest_name).write_text(manifest.to_json(), encoding="utf-8")
             os.replace(temporary, destination)
@@ -484,7 +500,7 @@ def _is_resolution_or_transform_error(error: str) -> bool:
         "continuationtarget",
         "continuationchainnested",
     )
-    return any(marker in normalized for marker in markers)
+    return normalized.startswith(("ix11.", "ix10.", "ix:")) or any(marker in normalized for marker in markers)
 
 
 def _quality_gate_for_validation_failure(message: str) -> str:

@@ -283,3 +283,22 @@ In the restricted development environment that request returned
 The automated bootstrap API remains the reproducible resolution path for a
 network-enabled controlled environment, followed by an offline verification
 run using the populated cache.
+
+## Accession-local Inline document sets (v8)
+
+New `m2-layer1-v8` extraction uses the actual Inline namespaces, resources and
+cross-document references in one verified accession ZIP to establish a connected,
+single-target document set. It invokes Arelle's installed IXDS loader; filenames
+or ticker identity never establish membership. Independent sets/targets,
+conflicting IDs, malformed Inline XML, unsafe/duplicate ZIP entries and unresolved
+relationships/continuations fail closed. Generic non-Inline attachments are not
+part of the Fact census. Tuple-bearing Inline sets are explicitly unsupported
+rather than accepted with a partial top-level corpus.
+
+Every successful Inline snapshot binds each document name/hash/target and expected,
+loaded and extracted non-tuple Fact counts. Continuations and footnotes are
+inventoried separately; they do not inflate the Fact count. Direct public
+`ingest(resolved, model)` independently recomputes the package's expected set and
+checks actual loaded document bytes/corpus; a primary-only model cannot claim
+success using a forged loader marker. v5-v7 snapshots remain immutable and v8
+is not automatically admitted to qualified/native consumer sources.

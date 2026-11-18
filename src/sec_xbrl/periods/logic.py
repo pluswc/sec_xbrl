@@ -13,6 +13,8 @@ from enum import StrEnum
 from typing import Any
 
 from sec_xbrl.facts.layer1 import _stable_id
+from sec_xbrl.periods.integrity import fiscal_coordinate_problem
+from sec_xbrl.periods.reviewed_calendar import ReviewedFiscalCalendar
 
 DERIVATION_RULE_VERSION = "m6-q4-subtraction-v1"
 PERIOD_CLASSIFICATION_VERSION = "m6-fiscal-boundaries-v2"
@@ -47,8 +49,11 @@ class PeriodClassifier:
         concepts: Iterable[Mapping[str, Any]],
         contexts: Iterable[Mapping[str, Any]],
         facts: Iterable[Mapping[str, Any]],
+        calendar: ReviewedFiscalCalendar | None = None,
     ) -> tuple[dict[str, Any], ...]:
         """Return copied fact records enriched with period and comparative classes."""
+        if calendar:
+            calendar.verify()
         concept_by_id = {str(row["raw_concept_id"]): row for row in concepts}
         context_by_id = {str(row["context_id"]): row for row in contexts}
         focus_date = _as_date(filing.get("report_date"))
@@ -66,7 +71,27 @@ class PeriodClassifier:
             fact["comparative_type"] = _comparative_type(
                 context, fact["period_class"], focus_date, fiscal_year_end
             )
+            if calendar and context:
+                owner = {"cik": filing.get("cik"), "fiscal_year": int(str(filing.get("document_fiscal_year_focus") or 0)),
+                    "filed_date": filing.get("filed_date"), "context_start_date": context.get("start_date"),
+                    "context_end_date": context.get("end_date"), "context_duration_days": context.get("duration_days")}
+                if concept and concept.get("period_type") == "duration":
+                    for period in ("FY", "YTD_9M", "QTD_3M"):
+                        if calendar.allows({**owner, "period_class": period}, calendar.financial_as_of):
+                            fact["period_class"] = period
+                            fact["period_classification_reason"] = "REVIEWED_FISCAL_CALENDAR_BOUNDARIES"
+                            fact["period_classification_version"] = "reviewed-fiscal-calendar-classification-v1"
+                            fact["fiscal_calendar_proof"] = calendar.proof()
+                            break
+            conflict = fiscal_coordinate_problem(filing)
+            if conflict:
+                fact["period_class"] = "OTHER_DURATION" if fact["period_class"] != "INSTANT" else "INSTANT"
+                fact["comparative_type"] = "OTHER_COMPARATIVE_CONTEXT"
+                fact["period_classification_reason"] = conflict
+                fact["period_classification_version"] = "fiscal-coordinate-integrity-v1"
             result.append(fact)
+        if calendar:
+            calendar.verify()
         return tuple(result)
 
 

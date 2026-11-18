@@ -1,0 +1,211 @@
+from __future__ import annotations
+
+import zipfile
+from datetime import date
+from pathlib import Path
+
+import pytest
+
+from sec_xbrl.filing.contracts import FilingRef
+from sec_xbrl.filing.filing_index import ArelleFilingLoader, FilingIndex, ResolvedFiling
+from sec_xbrl.filing.inline_document_set import InlineDocumentSetError, discover_inline_set
+
+
+def package(tmp_path: Path, *, failure: str = "") -> ResolvedFiling:
+    schema = '''<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xbrli="http://www.xbrl.org/2003/instance" targetNamespace="https://example.test/ixds" xmlns:t="https://example.test/ixds" elementFormDefault="qualified"><xsd:import namespace="http://www.xbrl.org/2003/instance" schemaLocation="http://www.xbrl.org/2003/xbrl-instance-2003-12-31.xsd"/><xsd:element name="Revenue" type="xbrli:monetaryItemType" substitutionGroup="xbrli:item" xbrli:periodType="duration"/><xsd:element name="Text" type="xbrli:stringItemType" substitutionGroup="xbrli:item" xbrli:periodType="duration"/></xsd:schema>'''
+    header = '''<html xmlns="http://www.w3.org/1999/xhtml" xmlns:ix="http://www.xbrl.org/2013/inlineXBRL" xmlns:xbrli="http://www.xbrl.org/2003/instance" xmlns:link="http://www.xbrl.org/2003/linkbase" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:iso4217="http://www.xbrl.org/2003/iso4217" xmlns:t="https://example.test/ixds"><head><title>IXDS</title></head><body>'''
+    resources = '''<ix:header><ix:references><link:schemaRef xlink:type="simple" xlink:href="test.xsd"/></ix:references><ix:resources><xbrli:context id="c"><xbrli:entity><xbrli:identifier scheme="http://www.sec.gov/CIK">0000000001</xbrli:identifier></xbrli:entity><xbrli:period><xbrli:startDate>2025-01-01</xbrli:startDate><xbrli:endDate>2025-12-31</xbrli:endDate></xbrli:period></xbrli:context><xbrli:unit id="u"><xbrli:measure>iso4217:USD</xbrli:measure></xbrli:unit></ix:resources></ix:header>'''
+    facts = '''<ix:nonFraction id="amount" name="t:Revenue" contextRef="c" unitRef="u" decimals="0">125</ix:nonFraction><ix:nonNumeric name="t:Text" contextRef="c" continuedAt="continuation">first </ix:nonNumeric>'''
+    continuation = '<ix:continuation id="continuation">second</ix:continuation>'
+    if failure == "missing":
+        facts = facts.replace('unitRef="u"', 'unitRef="absent"')
+    elif failure == "target":
+        facts = facts.replace('id="amount"', 'id="amount" target="other"')
+    elif failure == "cycle":
+        continuation = '<ix:continuation id="continuation" continuedAt="continuation">cycle</ix:continuation>'
+    elif failure == "duplicate":
+        continuation += '<ix:continuation id="c">duplicate</ix:continuation>'
+    (tmp_path / "test.xsd").write_text(schema)
+    (tmp_path / "primary.htm").write_text(header + resources + continuation + '</body></html>')
+    (tmp_path / "unrelated-name.htm").write_text(header + facts + '</body></html>')
+    archive = tmp_path / "input.zip"
+    with zipfile.ZipFile(archive, "w") as output:
+        for name in ("test.xsd", "primary.htm", "unrelated-name.htm"):
+            output.write(tmp_path / name, name)
+    filing = FilingRef(cik="0000000001", accession="0000000001-26-000001", form="10-K", filed_date=date(2026, 2, 1), report_date=date(2025, 12, 31), primary_document="primary.htm")
+    return ResolvedFiling(filing, FilingIndex(filing.cik, filing.accession, "fixture", ()), archive, "primary.htm")
+
+
+def test_actual_arelle_cross_document_context_unit_continuation_and_inventory(tmp_path: Path):
+    resolved = package(tmp_path)
+    model = ArelleFilingLoader().load(resolved, tmp_path / "loaded")
+    try:
+        assert not model.errors
+        assert {str(f.qname): f.value for f in model.facts} == {"t:Revenue": "125", "t:Text": "first second"}
+        inventory = model.sec_inline_document_inventory
+        assert [(row["name"], row["expected_fact_count"], row["loaded_fact_count"]) for row in inventory] == [("primary.htm", 0, 0), ("unrelated-name.htm", 2, 2)]
+        assert len({f.modelDocument.basename for f in model.facts}) == 1
+    finally:
+        model.close()
+
+
+@pytest.mark.parametrize("failure", ["missing", "target", "cycle", "duplicate"])
+def test_bad_inline_set_fails_before_loading(tmp_path: Path, failure: str):
+    package(tmp_path, failure=failure)
+    with pytest.raises(InlineDocumentSetError):
+        discover_inline_set(tmp_path, tmp_path / "primary.htm")
+
+
+def test_direct_ingest_cannot_publish_primary_only_as_complete_multidocument(tmp_path):
+    from sec_xbrl.filing.filing_index import _load_with_arelle
+    from sec_xbrl.filing.layer1_ingestion import Layer1Ingestor
+
+    resolved = package(tmp_path)
+    primary = tmp_path / "primary.htm"
+    primary.write_text(primary.read_text().replace('</body>', '<ix:nonFraction id="primary-fact" name="t:Revenue" contextRef="c" unitRef="u" decimals="0">10</ix:nonFraction></body>'))
+    continuation = '<ix:continuation id="continuation">second</ix:continuation>'
+    primary.write_text(primary.read_text().replace(continuation, ""))
+    other = tmp_path / "unrelated-name.htm"
+    other.write_text(other.read_text().replace('</body>', continuation + '</body>'))
+    with zipfile.ZipFile(resolved.zip_path, "w") as archive:
+        for name in ("test.xsd", "primary.htm", "unrelated-name.htm"):
+            archive.write(tmp_path / name, name)
+    partial = _load_with_arelle(primary)
+    try:
+        assert len(partial.facts) == 1
+        with pytest.raises(InlineDocumentSetError, match="document coverage"):
+            Layer1Ingestor(tmp_path / "forbidden-output").ingest(resolved, partial)
+        assert not list((tmp_path / "forbidden-output").rglob("layer1_manifest.json"))
+    finally:
+        partial.close()
+    full = ArelleFilingLoader().load(resolved, tmp_path / "full-loaded")
+    try:
+        manifest = Layer1Ingestor(tmp_path / "new-output").ingest(resolved, full)
+        assert manifest.layer1_parser_version == "m2-layer1-v8"
+        assert manifest.materialized_fact_count == 3
+        assert [doc["extracted_fact_count"] for doc in manifest.inline_document_inventory] == [1, 2]
+    finally:
+        full.close()
+
+
+def test_malformed_inline_and_unresolved_relationship_fail_closed(tmp_path):
+    package(tmp_path)
+    path = tmp_path / "unrelated-name.htm"
+    original = path.read_text()
+    path.write_text(original.replace('</body>', '<ix:relationship fromRefs="amount" toRefs="missing"/></body>'))
+    with pytest.raises(InlineDocumentSetError, match="relationship"):
+        discover_inline_set(tmp_path, tmp_path / "primary.htm")
+    path.write_text(original.replace('</body>', '<broken></body>'))
+    with pytest.raises(InlineDocumentSetError, match="well-formed"):
+        discover_inline_set(tmp_path, tmp_path / "primary.htm")
+
+
+def test_independent_same_target_inline_instance_is_not_silently_combined(tmp_path):
+    package(tmp_path)
+    extra = (tmp_path / "primary.htm").read_text().replace('id="c"', 'id="different-context"').replace('id="u"', 'id="different-unit"').replace('id="continuation"', 'id="different-continuation"')
+    (tmp_path / "third.htm").write_text(extra)
+    with pytest.raises(InlineDocumentSetError, match="unrelated Inline"):
+        discover_inline_set(tmp_path, tmp_path / "primary.htm")
+
+
+@pytest.mark.parametrize("name", ["duplicate", "alias", "traversal", "symlink"])
+def test_unsafe_zip_members_never_reach_arelle(tmp_path, name):
+    from sec_xbrl.filing.filing_index import FilingIndexError, _extract_zip
+
+    path = tmp_path / "unsafe.zip"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("safe.txt", "first")
+        if name == "duplicate":
+            with pytest.warns(UserWarning):
+                archive.writestr("safe.txt", "second")
+        elif name == "alias":
+            archive.writestr("./safe.txt", "second")
+        elif name == "traversal":
+            archive.writestr("../escape.txt", "second")
+        else:
+            info = zipfile.ZipInfo("link.txt")
+            info.create_system = 3
+            info.external_attr = 0o120777 << 16
+            archive.writestr(info, "../outside")
+    destination = tmp_path / "extract"
+    destination.mkdir()
+    with pytest.raises(FilingIndexError):
+        _extract_zip(path, destination)
+    assert not (tmp_path / "escape.txt").exists()
+
+
+@pytest.mark.parametrize("reference", ["../outside.xsd", "file:///etc/passwd", "absent.xsd"])
+def test_inline_resource_documents_must_be_local_package_or_offline_taxonomy(tmp_path, reference):
+    package(tmp_path)
+    primary = tmp_path / "primary.htm"
+    primary.write_text(primary.read_text().replace('href="test.xsd"', f'href="{reference}"'))
+    with pytest.raises(InlineDocumentSetError, match="resource document"):
+        discover_inline_set(tmp_path, primary)
+
+
+def metadata_package(tmp_path, name, values, *, other_context=False):
+    resolved = package(tmp_path)
+    schema = f'''<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xbrli="http://www.xbrl.org/2003/instance" targetNamespace="https://xbrl.sec.gov/dei/2025" elementFormDefault="qualified"><xsd:import namespace="http://www.xbrl.org/2003/instance" schemaLocation="http://www.xbrl.org/2003/xbrl-instance-2003-12-31.xsd"/><xsd:element name="{name}" type="xbrli:stringItemType" substitutionGroup="xbrli:item" xbrli:periodType="duration"/></xsd:schema>'''
+    (tmp_path / "dei.xsd").write_text(schema)
+    for index, document in enumerate(("primary.htm", "unrelated-name.htm")):
+        path = tmp_path / document
+        text = path.read_text().replace('<html ', '<html xmlns:dei="https://xbrl.sec.gov/dei/2025" ', 1)
+        if index == 0:
+            text = text.replace('</ix:references>', '<link:schemaRef xlink:type="simple" xlink:href="dei.xsd"/></ix:references>')
+            if other_context:
+                start = text.index('<xbrli:context id="c">')
+                end = text.index('</xbrli:context>', start) + len('</xbrli:context>')
+                text = text.replace('</ix:resources>', text[start:end].replace('id="c"', 'id="other"') + '</ix:resources>')
+        context = "other" if index and other_context else "c"
+        fact = f'<ix:nonNumeric id="meta-{index}" name="dei:{name}" contextRef="{context}">{values[index]}</ix:nonNumeric>'
+        path.write_text(text.replace('</body>', fact + '</body>'))
+    with zipfile.ZipFile(resolved.zip_path, "w") as archive:
+        for file in ("test.xsd", "dei.xsd", "primary.htm", "unrelated-name.htm"):
+            archive.write(tmp_path / file, file)
+    return resolved
+
+
+@pytest.mark.parametrize("name,values", [
+    ("DocumentFiscalYearFocus", ("2027", "2025")),
+    ("DocumentFiscalPeriodFocus", ("Q3", "FY")),
+    ("CurrentFiscalYearEndDate", ("--06-27", "--12-31")),
+    ("DocumentPeriodEndDate", ("2025-06-27", "2027-06-27")),
+    ("DocumentType", ("10-K", "10-Q")),
+    ("EntityCentralIndexKey", ("0000000001", "0000000002")),
+    ("AmendmentFlag", ("false", "true")),
+])
+@pytest.mark.parametrize("other_context", [False, True])
+def test_actual_arelle_conflicting_dei_metadata_never_uses_last_document(tmp_path, name, values, other_context):
+    from sec_xbrl.facts.layer1 import Layer1ExtractionError
+    from sec_xbrl.filing.layer1_ingestion import Layer1Ingestor
+
+    resolved = metadata_package(tmp_path, name, values, other_context=other_context)
+    model = ArelleFilingLoader().load(resolved, tmp_path / "loaded")
+    try:
+        assert model.errors == []  # Arelle accepts the source; filing-metadata admission must not guess.
+        with pytest.raises(Layer1ExtractionError, match="conflicting DEI filing metadata declarations: " + name):
+            Layer1Ingestor(tmp_path / "snapshots").ingest(resolved, model)
+        assert not list((tmp_path / "snapshots").rglob("layer1_manifest.json"))
+        assert {fact.value for fact in model.facts if str(fact.qname) == "dei:" + name} == set(values)
+    finally:
+        model.close()
+
+
+def test_actual_arelle_identical_dei_duplicates_keep_both_raw_facts_and_unique_metadata(tmp_path):
+    import polars as pl
+
+    from sec_xbrl.filing.layer1_ingestion import Layer1Ingestor
+
+    resolved = metadata_package(tmp_path, "DocumentFiscalYearFocus", ("2025", "2025"), other_context=True)
+    model = ArelleFilingLoader().load(resolved, tmp_path / "loaded")
+    try:
+        ingestor = Layer1Ingestor(tmp_path / "snapshots")
+        manifest = ingestor.ingest(resolved, model)
+        assert manifest.source_fact_count == manifest.materialized_fact_count == 4
+        root = ingestor.snapshot_dir(resolved)
+        assert pl.read_parquet(root / "filing.parquet")["document_fiscal_year_focus"].to_list() == ["2025"]
+        facts = pl.read_parquet(root / "fact.parquet").filter(pl.col("value_text") == "2025")
+        assert facts.height == 2 and facts["fact_id"].n_unique() == 2
+        assert set(facts["source_document"]) == {"primary.htm", "unrelated-name.htm"}
+    finally:
+        model.close()

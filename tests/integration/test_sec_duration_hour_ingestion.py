@@ -11,6 +11,7 @@ import pytest
 
 from sec_xbrl.filing.contracts import FilingRef
 from sec_xbrl.filing.filing_index import ArelleFilingLoader, FilingIndex, ResolvedFiling
+from sec_xbrl.filing.inline_document_set import InlineDocumentSetError
 from sec_xbrl.filing.layer1_ingestion import Layer1IngestionError, Layer1Ingestor
 
 SEC_NAMESPACE = "http://www.sec.gov/inlineXBRL/transformation/2015-08-31"
@@ -65,7 +66,7 @@ def test_normal_offline_loader_ingests_hours_and_continued_words_without_mutatin
     ingestor = Layer1Ingestor(tmp_path / "snapshots")
     try:
         manifest = ingestor.load_and_ingest(resolved, loader, tmp_path / "extract")
-        assert manifest.layer1_parser_version == "m2-layer1-v7"
+        assert manifest.layer1_parser_version == "m2-layer1-v8"
         assert manifest.source_fact_count == manifest.materialized_fact_count == 2
         assert {fact.id: (fact.rawValue, fact.value) for fact in loader.model.facts} == {
             "duration": ("20", "PT20H"), "words": ("one year", "P1Y"),
@@ -115,9 +116,9 @@ def test_normal_loader_persists_namespace_aware_complete_error_lexical(
 
 @pytest.mark.parametrize(
     ("continuation", "expected_error"),
-    (("", "continuationMissing"),
-     ('<ix:continuation id="year" continuedAt="year"> year</ix:continuation>', "continuationCycle"),
-     ('<span id="year"> year</span>', "continuationTarget")),
+    (("", "missing or wrong-kind Inline resource"),
+     ('<ix:continuation id="year" continuedAt="year"> year</ix:continuation>', "cyclic Inline continuation"),
+     ('<span id="year"> year</span>', "missing or wrong-kind Inline resource")),
 )
 def test_normal_loader_rejects_missing_cycle_and_wrong_target_continuations(
     tmp_path: Path, continuation: str, expected_error: str,
@@ -126,10 +127,12 @@ def test_normal_loader_rejects_missing_cycle_and_wrong_target_continuations(
     loader = _TrackingLoader()
     ingestor = Layer1Ingestor(tmp_path / "snapshots")
     try:
-        with pytest.raises(Layer1IngestionError, match=expected_error):
+        with pytest.raises(InlineDocumentSetError, match=expected_error):
             ingestor.load_and_ingest(resolved, loader, tmp_path / "extract")
         state, = [json.loads(path.read_text()) for path in (tmp_path / "parse_state").rglob("*.json")]
-        assert '"lexical_unavailable":"INVALID_CONTINUATION_CHAIN"' in state["message"]
+        assert state["stage"] == "ARELLE_LOAD"
+        assert expected_error in state["message"]
+        assert loader.model is None  # v8 rejects the broken chain before asking Arelle to parse values.
         assert not ingestor.snapshot_dir(resolved).exists()
     finally:
         if loader.model is not None:

@@ -121,7 +121,7 @@ class Layer1Extractor:
 
     # Inline transform support changes the set of filings that can be parsed;
     # retain a distinct version for immutable snapshot and parse-state lineage.
-    parser_version = "m2-layer1-v7"
+    parser_version = "m2-layer1-v8"
 
     def extract(
         self,
@@ -146,6 +146,7 @@ class Layer1Extractor:
         fact_rows: list[dict[str, Any]] = []
         dimension_rows: list[dict[str, Any]] = []
         dei_metadata: dict[str, str] = {}
+        metadata_declarations: dict[str, tuple[tuple[bool, str | None], dict[str, Any]]] = {}
 
         for ordinal, fact in enumerate(facts):
             if getattr(fact, "isTuple", False):
@@ -208,8 +209,20 @@ class Layer1Extractor:
             lexical = getattr(fact, "value", None)
             if _qname_parts(qname)[0].find("dei") >= 0:
                 local_name = _qname_parts(qname)[2]
+                if local_name in {"DocumentFiscalYearFocus", "DocumentFiscalPeriodFocus", "CurrentFiscalYearEndDate",
+                                  "DocumentPeriodEndDate", "DocumentType", "EntityCentralIndexKey", "AmendmentFlag"}:
+                    declaration = (bool(getattr(fact, "isNil", False)), _text(lexical))
+                    evidence = {"qname": _qname_text(qname), "value": declaration[1], "is_nil": declaration[0],
+                                "document": _source_document(fact), "context_id": context_id,
+                                "fact_id": _fact_id(filing_id, fact, ordinal)}
+                    previous = metadata_declarations.get(local_name)
+                    if previous is not None and previous[0] != declaration:
+                        raise Layer1ExtractionError("conflicting DEI filing metadata declarations: " + local_name
+                            + "; declarations=" + json.dumps([previous[1], evidence], ensure_ascii=False, sort_keys=True))
+                    metadata_declarations.setdefault(local_name, (declaration, evidence))
                 if local_name in {"DocumentFiscalYearFocus", "DocumentFiscalPeriodFocus", "CurrentFiscalYearEndDate"}:
-                    dei_metadata[local_name] = _text(lexical) or ""
+                    # Exact same-value duplicates retain every Raw Fact. No document/context wins.
+                    dei_metadata.setdefault(local_name, _text(lexical) or "")
             is_nil = bool(getattr(fact, "isNil", False))
             numeric = _numeric_value(lexical) if bool(getattr(fact, "isNumeric", False)) and not is_nil else None
             fact_rows.append(
@@ -501,7 +514,7 @@ def _text(value: Any) -> str | None:
 
 def _source_document(fact: Any) -> str | None:
     document = getattr(fact, "modelDocument", None)
-    return _text(getattr(document, "basename", None) or getattr(document, "uri", None))
+    return _text(getattr(document, "sec_source_document", None) or getattr(document, "basename", None) or getattr(document, "uri", None))
 
 
 def _source_locator(fact: Any) -> str | None:

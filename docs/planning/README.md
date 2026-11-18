@@ -34,6 +34,16 @@
 
 # 계획 등록부 — 단일 진입점
 
+2026-11-16 [Filing completeness / period integrity](../implementation/filing-completeness-period-integrity-20261116.md)는
+소스 `b713c765f6`에서 **독립 검증·ROOT 로컬 수락 PASS**다(279 pytest/Ruff/diff,
+675파일 보존). IBM24/25 새 private v8는 4,224/3,970 Facts와 매출132/135개,
+원 primary241/199 Facts의 ID·모든 field·FK·문서별완전성을 검증했다. STX1382개는
+원focus2027/effective null의 명시적 새 L2 보류로 보존했다. COST 달력의 시간
+자격은 통과했지만 실제 결과는 0파생/32보류(mapping28/누락T9 4), ratio미준비다.
+기존 화면·가격·Q4·두 journal/675파일은 동일하며 **live 코드 전환/운영 재발행/
+v8 native 승인 상속은 없었다**. main b9126a는 추가 변경이 없고 별도 push/PR/CI는
+ROOT 대기, main 병합은 미요청이다. 초기0020 FAIL과 후보 단계는 계약에 보존한다.
+
 2026-11-16 [가격 관련 지표 전체 GOAL 인계](price-related-metrics-goal-handoff-20261116.md)를 추가했다.
 이번 변경은 문서·새 세션 프롬프트만이며 코드/GOAL/운영 실행 승인이 아니다.
 가격·EPS·주식 수 PR101은 main `1b0a4f26d1`에 MERGED, 필수 CI43606365273은
@@ -920,3 +930,10 @@ Q4 격리 브랜치에 최신 main `1b0a4f26d1`(PR101)을 일반 merge하고 양
 추가 가격 모듈은 main 변경이며 기존 qualification 자동 상속을 주장하지 않는다.
 자료·journal·runtime 재발행/변경 없이 자체 검사·독립 검증을 거쳐 ROOT가
 push·원격 병합·local main 동기화·운영 검증을 이어간다. 아직 그 후속 실행 전이다.
+
+2026-11-16 PR105의 첫 전체 CI는 3실패/3251통과/46건너뜀(Ruff PASS)이었다.
+실패한 구 default=v7 결속 테스트만 현재v8와 retained-approved v7로 분리하고,
+v8의 legacy source 승인 자동상속 거부 회귀를 보강했다. 기존279+두 파일 총826
+pytest/Ruff/diff PASS이며 제품 source bytes는 인수 b713과 동일하다. 실제 cached
+증거는 재사용하며 새 독립 검증·ROOT push·PR105 최신 head CI 확인은 대기다.
+main 병합/live 전환은 수행하지 않았다.
