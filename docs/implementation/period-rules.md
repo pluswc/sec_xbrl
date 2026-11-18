@@ -51,6 +51,13 @@ share denominator, retaining source-decimals uncertainty and every accounting ga
 It does not subtract FY EPS from YTD EPS, treat weighted averages as additive flows,
 or widen the generic reviewed/mechanical Q4 flow policies below.
 
+The [effective CAL extension](cal-eps-common-20261118.md) binds the annual
+and nine-month inputs to original current-focus accessions within the same
+fiscal-year publication sequence. Source-decimals compatibility, signed CAL
+equations and the separate accounting gates govern its basic and diluted
+routes. Its output is prepared for current evaluation and has no historical
+backfill eligibility.
+
 ### M8 mechanical Q4 companion
 
 Layer 2 also publishes a separate **mechanical candidate** companion.  Its

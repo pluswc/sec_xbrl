@@ -16,6 +16,8 @@ from datetime import date
 from enum import StrEnum
 from typing import Any
 
+from sec_xbrl.relationships.layer1 import CALCULATION_ARCROLES
+
 MAPPING_VERSION = "l2-m2-company-canonical-v4"
 
 
@@ -970,7 +972,7 @@ def _custom_structural_signature(row: Mapping[str, Any], relationships: Mapping[
             continue  # Resource links remain Raw, but cannot prove a financial structure.
         supported = {
             "PRE": {"http://www.xbrl.org/2003/arcrole/parent-child"},
-            "CAL": {"http://www.xbrl.org/2003/arcrole/summation-item"},
+            "CAL": CALCULATION_ARCROLES,
             "DEF": {"http://xbrl.org/int/dim/arcrole/" + name for name in ("all", "notAll", "hypercube-dimension", "dimension-domain", "domain-member", "dimension-default")}
                    | {"http://www.xbrl.org/2003/arcrole/" + name for name in ("general-special", "essence-alias", "similar-tuples", "requires-element")},
         }

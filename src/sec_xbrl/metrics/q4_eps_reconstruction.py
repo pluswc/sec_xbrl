@@ -861,6 +861,10 @@ def _ttm(proposal: dict, qualified: list[dict], base: dict, cases: dict, run: di
 def qualify_q4_eps(run_pin: dict, *, _recorded_at: str | None = None) -> dict:
     """Validate original facts/accounting/uncertainty, retaining every HOLD/FAIL."""
     run = _json(run_pin)
+    if run.get("schema_version") == "common-q4-eps-cal-run-v1":
+        from sec_xbrl.metrics.cal_eps_preparation import prepare_cal_eps_run
+
+        return prepare_cal_eps_run(run_pin, recorded_at=_recorded_at)
     if run.get("schema_version") != "common-q4-eps-run-v1":
         raise ValueError("unsupported Q4 EPS qualification run")
     proposal = _json(run["proposal"])
@@ -942,6 +946,10 @@ def qualify_q4_eps(run_pin: dict, *, _recorded_at: str | None = None) -> dict:
 @_source_operation
 def verify_q4_eps(pin: dict) -> dict:
     data = _json(pin)
+    if data.get("schema_version") == "governed-common-q4-eps-v2":
+        from sec_xbrl.metrics.cal_eps_preparation import verify_cal_eps_run
+
+        return verify_cal_eps_run(pin, data)
     if data.get("schema_version") != "governed-common-q4-eps-v1":
         raise ValueError("unsupported governed component EPS artifact")
     cached = _VERIFIED_ARTIFACT_CACHE.get(pin["sha256"])
@@ -996,9 +1004,12 @@ def augment_q4_eps_ttm(pin: dict) -> dict:
     artifact = verify_q4_eps(pin)
     bundle = copy.deepcopy(_json(artifact["base_financial_bundle"]))
     existing = {r["observation_id"] for r in bundle["observations"]}
-    if bundle.get("q4_component_derivation"):
-        raise ValueError("component EPS derivation already exists")
+    prior_pin = bundle.get("q4_component_derivation")
+    if artifact.get("prior_derivation") != prior_pin:
+        raise ValueError("component EPS derivation already exists or the prior pin differs")
     for row in artifact["observations"]:
+        if row["observation_id"] in existing and prior_pin:
+            continue  # Verified prior observations and their evidence remain exact.
         grants = [g for g in bundle["compatibility_grants"] if g["cik"] == row["cik"] and g["financial_anchor"] == row["period_end"]]
         if (row["observation_id"] in existing or len(grants) != 1
             or grants[0]["input_ids"].get("diluted_eps_12m")):
@@ -1008,9 +1019,14 @@ def augment_q4_eps_ttm(pin: dict) -> dict:
         bundle["observations"].append(row)
     bundle["q4_component_derivation"] = pin
     diagnostics = list(bundle.get("current_eps_diagnostics", []))
+    evaluated = artifact["quarter_results"]
+    if artifact["schema_version"] == "governed-common-q4-eps-v2":
+        evaluated = [r for r in evaluated if r.get("source_validation_rule_version")]
+        reevaluated = {r["cik"] for r in evaluated}
+        diagnostics = [d for d in diagnostics if d["cik"] not in reevaluated]
     bound = {g["cik"] for g in bundle["compatibility_grants"] if g["input_ids"].get("diluted_eps_12m")}
-    for cik in sorted({r["cik"] for r in artifact["quarter_results"]}-bound):
-        relevant = [r for r in artifact["quarter_results"] if r["cik"] == cik and r["flavor"] == "diluted"]
+    for cik in sorted({r["cik"] for r in evaluated} - bound):
+        relevant = [r for r in evaluated if r["cik"] == cik and r["flavor"] == "diluted"]
         latest = max(r["fy_end"] for r in relevant)
         rejected = [r for r in relevant if r["fy_end"] == latest and r["status"] != "QUALIFIED"]
         ttm_holds = [r for r in artifact["holds"] if r["cik"] == cik]

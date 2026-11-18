@@ -15,14 +15,16 @@ from sec_xbrl.facts.layer1 import (
     Layer1ExtractionError,
     _concept_row,
     _qname_parts,
-    _qname_text,
     _stable_id,
 )
 from sec_xbrl.filing.company_discovery import canonicalize_cik
 from sec_xbrl.filing.contracts import FilingRef
 
 _PRESENTATION_ARCROLE = "http://www.xbrl.org/2003/arcrole/parent-child"
-_CALCULATION_ARCROLE = "http://www.xbrl.org/2003/arcrole/summation-item"
+CALCULATION_10_ARCROLE = "http://www.xbrl.org/2003/arcrole/summation-item"
+CALCULATION_11_ARCROLE = "https://xbrl.org/2023/arcrole/summation-item"
+CALCULATION_ARCROLES = frozenset({CALCULATION_10_ARCROLE, CALCULATION_11_ARCROLE})
+_LINK_NAMESPACE = "http://www.xbrl.org/2003/linkbase"
 
 _PARQUET_SCHEMAS: dict[str, dict[str, str]] = {
     "role": {
@@ -49,6 +51,8 @@ _PARQUET_SCHEMAS: dict[str, dict[str, str]] = {
         "usable": "bool",
         "closed": "bool",
         "context_element": "string",
+        "source_document": "string",
+        "source_locator": "string",
     },
 }
 
@@ -91,9 +95,11 @@ class RelationshipTables:
 class RelationshipExtractor:
     """Extract as-filed PRE/CAL/DEF networks without graph traversal."""
 
-    parser_version = "m3-relationships-v1"
+    parser_version = "m3-relationships-v2"
 
-    def extract(self, model: Any, filing: FilingRef) -> RelationshipTables:
+    def extract(
+        self, model: Any, filing: FilingRef, *, network_types: frozenset[str] | None = None
+    ) -> RelationshipTables:
         """Return role and relationship records from one loaded Arelle model.
 
         Arelle's ``baseSets`` is used to discover explicit arcrole/linkrole
@@ -110,7 +116,7 @@ class RelationshipExtractor:
             row = _role_row(filing_id, role_uri, definition)
             role_rows[row["role_id"]] = row
 
-        for arcrole, role_uri, linkqname, arcqname in _network_keys(model):
+        for arcrole, role_uri, linkqname, arcqname in _network_keys(model, network_types):
             network_type = _network_type(arcrole)
             if network_type is None or not role_uri:
                 continue
@@ -130,6 +136,9 @@ class RelationshipExtractor:
                     concept = _relationship_concept_row(filing_id, endpoint)
                     if concept is not None:
                         _store_concept(concept_rows, concept)
+                arc = getattr(relationship, "arcElement", None)
+                document = getattr(arc, "modelDocument", None)
+                line = getattr(arc, "sourceline", None)
                 row = {
                     "filing_id": filing_id,
                     "network_type": network_type,
@@ -142,8 +151,8 @@ class RelationshipExtractor:
                     "arc_qname": _network_qname(arcqname),
                     "from_raw_concept_id": from_id,
                     "to_raw_concept_id": to_id,
-                    "order": _text(_attribute(relationship, "order")),
-                    "weight": _text(_attribute(relationship, "weight")),
+                    "order": _text(_arc_order(relationship, arc)),
+                    "weight": _text(_arc_weight(relationship, arc)),
                     "preferred_label": _text(
                         _attribute(relationship, "preferredLabel", "preferredLabel")
                     ),
@@ -153,6 +162,8 @@ class RelationshipExtractor:
                     "context_element": _text(
                         _attribute(relationship, "contextElement", "contextElement")
                     ),
+                    "source_document": _text(getattr(document, "basename", None)),
+                    "source_locator": f"line:{line}" if line is not None else None,
                 }
                 row["relationship_id"] = _stable_id(
                     "relationship",
@@ -183,7 +194,9 @@ class RelationshipExtractor:
         )
 
 
-def _network_keys(model: Any) -> tuple[tuple[str, str, Any, Any], ...]:
+def _network_keys(
+    model: Any, network_types: frozenset[str] | None = None
+) -> tuple[tuple[str, str, Any, Any], ...]:
     keys = getattr(model, "baseSets", {}) or {}
     by_network: dict[tuple[str, str], list[tuple[str, str, Any, Any]]] = {}
     for key in keys:
@@ -194,7 +207,8 @@ def _network_keys(model: Any) -> tuple[tuple[str, str, Any, Any], ...]:
             continue
         # Other Arelle base sets (for example XBRL-dimensions infrastructure)
         # are not Layer 1 PRE/CAL/DEF concept networks and are ignored here.
-        if _network_type(arcrole) is None or not role_uri:
+        network_type = _network_type(arcrole)
+        if network_type is None or not role_uri or (network_types is not None and network_type not in network_types):
             continue
         linkqname = key[2] if len(key) > 2 else None
         arcqname = key[3] if len(key) > 3 else None
@@ -220,9 +234,9 @@ def _network_keys(model: Any) -> tuple[tuple[str, str, Any, Any], ...]:
             )
         # Preserve QName objects for ``relationshipSet``. A separate printable
         # identity makes fixture QNames deterministic even when unhashable.
-        seen: set[tuple[str, str, str, str]] = set()
+        seen: set[tuple[str, str, str | None, str | None]] = set()
         for key in fully_specified:
-            identity = (key[0], key[1], str(key[2]), str(key[3]))
+            identity = (key[0], key[1], _network_qname(key[2]), _network_qname(key[3]))
             if identity not in seen:
                 seen.add(identity)
                 result.append(key)
@@ -235,10 +249,7 @@ def _relationships(
     method = getattr(model, "relationshipSet", None)
     if not callable(method):
         raise Layer1ExtractionError("loaded model does not expose relationshipSet")
-    try:
-        relationship_set = method(arcrole, role_uri, linkqname, arcqname)
-    except TypeError:
-        relationship_set = method(arcrole, role_uri)
+    relationship_set = method(arcrole, role_uri, linkqname, arcqname)
     return tuple(getattr(relationship_set, "modelRelationships", ()) or ())
 
 
@@ -278,7 +289,7 @@ def _role_category(definition: str | None) -> str:
 def _network_type(arcrole: str) -> str | None:
     if arcrole == _PRESENTATION_ARCROLE:
         return "PRE"
-    if arcrole == _CALCULATION_ARCROLE:
+    if arcrole in CALCULATION_ARCROLES:
         return "CAL"
     if arcrole.startswith(
         ("http://xbrl.org/int/dim/arcrole/", "http://www.xbrl.org/2003/arcrole/")
@@ -320,9 +331,24 @@ def _network_qname(value: Any) -> str | None:
     if value is None:
         return None
     try:
-        return _qname_text(value)
+        namespace, _, local = _qname_parts(value)
     except Layer1ExtractionError:
         return _text(value)
+    return f"link:{local}" if namespace == _LINK_NAMESPACE else f"{{{namespace}}}{local}"
+
+
+def _arc_weight(relationship: Any, arc: Any) -> Any:
+    getter = getattr(arc, "get", None)
+    weight = getter("weight") if callable(getter) else None
+    return weight if weight is not None else _attribute(relationship, "weight")
+
+
+def _arc_order(relationship: Any, arc: Any) -> Any:
+    getter = getattr(arc, "get", None)
+    order = getter("order") if callable(getter) else None
+    if order is not None:
+        return order
+    return _attribute(relationship, "orderDecimal", "order")
 
 
 def _attribute(relationship: Any, *names: str) -> Any:

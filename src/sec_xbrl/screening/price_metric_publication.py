@@ -313,7 +313,7 @@ class PriceMetricReader:
         if not pin:
             return dict(result, status="UNAVAILABLE", reason="COMMON_Q4_EPS_ARTIFACT_NOT_PUBLISHED")
         artifact = self._source(pin)
-        if artifact.get("schema_version") != "governed-common-q4-eps-v1":
+        if artifact.get("schema_version") not in {"governed-common-q4-eps-v1", "governed-common-q4-eps-v2"}:
             raise ValueError("prepared Q4 EPS derivation schema differs")
         return dict(result, status="PREPARED", reason=None, source_projection=artifact["source_projection"],
                     prepared_at=artifact["prepared_at"], public_cutoff=artifact["public_cutoff"],
@@ -396,7 +396,7 @@ class PriceMetricReader:
 
     def _diagnostic_evidence(self, pin: dict, diagnostic: dict, cik: str) -> dict:
         data = self._source(pin)
-        if data.get("schema_version") != "governed-common-q4-eps-v1":
+        if data.get("schema_version") not in {"governed-common-q4-eps-v1", "governed-common-q4-eps-v2"}:
             return data
         ids = {d["candidate_id"] for d in diagnostic.get("details", []) if d.get("candidate_id")}
         quarters = [r for r in data["quarter_results"] if r["cik"] == cik and (not ids or r["candidate_id"] in ids)]

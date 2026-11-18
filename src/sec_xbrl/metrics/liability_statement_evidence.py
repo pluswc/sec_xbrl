@@ -12,7 +12,7 @@ from typing import Any
 from sec_xbrl.analytics.calculation11 import ARCROLE as CALCULATION_11
 from sec_xbrl.analytics.statement_structure import NETWORK_FIELDS, finite_decimal
 from sec_xbrl.metrics.quarterly_screening import _exact_subtract, _exact_sum
-from sec_xbrl.relationships.layer1 import _CALCULATION_ARCROLE
+from sec_xbrl.relationships.layer1 import CALCULATION_10_ARCROLE
 from sec_xbrl.screening.common import require_cik
 
 RULE_VERSION = "exact-primary-balance-sheet-liabilities-candidate-v1"
@@ -265,8 +265,10 @@ def _calculation_arcs(prepared: dict, filing: dict, table: dict, role_uri: str, 
 
 
 def _attested_calculation_arc(arc: dict, filing: dict) -> bool:
-    if arc["arcrole"] == _CALCULATION_ARCROLE:
+    if arc["arcrole"] == CALCULATION_10_ARCROLE:
         return arc.get("evidence_origin") == "IMMUTABLE_RAW_SNAPSHOT"
+    if arc["arcrole"] == CALCULATION_11 and arc.get("evidence_origin") == "IMMUTABLE_RAW_SNAPSHOT":
+        return bool(arc.get("source_document") and arc.get("source_locator"))
     return (
         arc["arcrole"] == CALCULATION_11
         and arc.get("evidence_origin") == "ADDITIVE_ARELLE_CALCULATION_1_1"
