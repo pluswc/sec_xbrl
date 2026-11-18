@@ -260,7 +260,7 @@ The app auto-merge retains Q4 typed labels, selected-Q4 evidence, KST ready-time
 | --- | --- |
 | User remote authorization |Push/PR approved; main merge/operating activation excluded|
 | Local normal integration |Implemented/writer-checked; exact two-parent SHA supplied at handoff|
-| Independent integrated-source review |PENDING on new frozen SHA; prior c724/6c4 acceptances are comparison evidence|
+| Independent integrated-source review |PASS on a8ce54c171b1d58592ad34195f02eaf658cb0c11; report below|
 | ROOT integrated local/private browser acceptance |PENDING; operating read-only baseline is separate|
 | Remote push / PR / required CI |PENDING ROOT execution and actual receipts|
 | Insights main merge |Not performed or authorized by this remote-only task|
@@ -287,7 +287,7 @@ ROOT's baseline locator is
 `/mnt/c/Users/plusbdw/.codex/visualizations/2026/11/08/01a1bb67-6275-70d2-989e-208966314006/price-insights-remote-delivery-20261118/operating-insights-before.json`.
 The operating source is
 `work/common-q4-eps-reconstruction-20261118/accepted-source-6c4c9a57e5/src`.
-Preservation baseline `work/price-insights-remote-delivery-20261118/evidence/preservation-baseline.json`
+Preservation baseline `work/price-timeline-insights-20261117/remote-delivery-20261118/evidence/preservation-baseline.json`
 protects1675files, two original journals and17untracked architecture artifacts. Backend19078,
 native14 and separate18766 remain outside writer mutations. ROOT prepares a private union
 clone of14old records for new-save/cold restart/export checks; no original database is written.
@@ -366,3 +366,22 @@ acceptance and authorized push/PR/required CI. No push, PR, main merge or runtim
 performed by the writer. The unchanged operating P1 composition gap remains explicitly
 bounded until a separately authorized operating decision; remote code delivery alone does
 not assert activation or repair of that live process.
+
+
+### Independent integration PASS and locator correction — 2026-11-18
+
+Separate read-only Astra review passed frozen product
+`a8ce54c171b1d58592ad34195f02eaf658cb0c11`. Report:
+`work/price-timeline-insights-20261117/remote-delivery-20261118/evidence/independent-a8ce54c.md`,
+SHA256 `f312aadc23a75efea5042e3a8e131452c8def0254367f561eb806291c1eda357`.
+This documentation-only successor corrects the preservation-baseline evidence directory;
+product/tests remain byte-identical to a8ce. Earlier independent-PENDING statements describe
+the preceding integration stage.
+
+ROOT's private18889 before-restart browser checks passed:14original snapshots plus one new
+save (15total), exact current AMZN Q4 values/evidence, interpretation/gap/company counts,
+new-save original-context coverage and old exports, with zero errors. Private cold-restart
+verification and final ROOT integrated acceptance are still pending; no completed cold
+restart is claimed here. Push/PR/required CI/main remain pending, and no operating activation
+or remote action occurs in this documentation step. Content/link/diff/product-equality checks
+are sufficient for this documentation-only freeze under delivery-workflow section0.

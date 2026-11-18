@@ -285,3 +285,10 @@ Fresh-worker missing interpretation/aggregate metadata uses an explicit load-fai
 only `readonly` saved-result contexts say “저장 당시 … 없음”. Legacy snapshot/export bytes and
 supported fresh summaries stay unchanged. A later deployment must check both fresh point
 metadata and `/coverage` against the same UI/worker/publication, not assets alone.
+
+Remote integration independent follow-up (2026-11-18): separate Astra PASS on frozen
+producta8ce54c171; the documentation successor corrects the baseline locator to
+`work/price-timeline-insights-20261117/remote-delivery-20261118/evidence`. ROOT private
+before-restart checks (14original+1new, Q4 evidence/insights/counts/old exports) passed;
+cold restart/final ROOT acceptance and push/PR/CI/main remain pending. No product/test
+bytes or operating runtime change in this documentation follow-up.
