@@ -87,10 +87,12 @@ def prepare_hierarchy(*, baseline: Path, destination: Path, package_roots: dict[
                 raise ValueError("explicit upstream package root adapter required")
             doc = read_primary_document(entry=entry, filing=filing, package_root=Path(package_roots[entry["source_run"]]))
             package = Path(package_roots[entry["source_run"]]) / ref["cik"] / ref["accession"].replace("-", "") / (ref["accession"] + "-xbrl.zip")
-            supplement = supplement_calculation11(filing=filing, package=package,
-                concepts={r["raw_concept_id"]: dict(r) for r in snapshot.records("concept")},
-                roles={r["role_id"]: dict(r) for r in snapshot.records("role")}, taxonomy_cache=taxonomy_cache,
-                destination=supplemental_work / ticker / ref["accession"] if supplemental_work else None)
+            supplement = []
+            if snapshot.manifest.relationship_parser_version == "m3-relationships-v1":
+                supplement = supplement_calculation11(filing=filing, package=package,
+                    concepts={r["raw_concept_id"]: dict(r) for r in snapshot.records("concept")},
+                    roles={r["role_id"]: dict(r) for r in snapshot.records("role")}, taxonomy_cache=taxonomy_cache,
+                    destination=supplemental_work / ticker / ref["accession"] if supplemental_work else None)
             data = prepare_filing(snapshot=snapshot, document=doc, as_of=info["as_of"], supplemental_relationships=supplement)
             applied_display.update(apply_display_reviews(rows=data["source_statement_rows"], tables=data["source_tables"], pre=data["statement_rows"], reviews=display_reviews, decision_cutoff=decision_cutoff))
             scoped = [r for r in reviews if r["scope"]["filing_id"] == filing["filing_id"]]

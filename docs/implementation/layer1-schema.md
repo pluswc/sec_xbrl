@@ -182,6 +182,17 @@ One row per fact-axis-member assignment.
 - `usable` nullable
 - `closed` nullable
 - `context_element` nullable
+- `source_document` / `source_locator` nullable for older snapshots
+
+`m3-relationships-v2` records the original XBRL 2.1 and Calculations 1.1
+summation-item URIs as separate CAL base sets. Standard linkbase QNames use
+the canonical `link:` prefix. Other base-set QNames retain expanded namespace
+identity. The effective arc retains its source document and line when Arelle
+exposes them. Order and weight keep the decimal source lexical form for precision-aware
+analytical consumers. The manifest records the relationship parser version.
+To re-extract an older accession, use a separate snapshot destination or the
+[additive CAL source projection](cal-eps-common-20261118.md), preserving the
+original snapshot directory and its identifiers.
 
 When Arelle exposes wildcard aliases and a fully specified base-set key for
 the same `(arcrole, role URI)`, only the fully specified `(link_qname,

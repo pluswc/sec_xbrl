@@ -175,3 +175,50 @@ def test_refuses_wildcard_only_base_set_without_network_provenance() -> None:
 
     with pytest.raises(Layer1ExtractionError, match="lacks a fully specified"):
         RelationshipExtractor().extract(model, _filing())
+
+
+def test_preserves_both_calculation_versions_as_separate_effective_base_sets() -> None:
+    from types import SimpleNamespace
+
+    from sec_xbrl.relationships.layer1 import CALCULATION_10_ARCROLE, CALCULATION_11_ARCROLE
+
+    model = _Model()
+    ns = "http://www.xbrl.org/2003/linkbase"
+    link = _QName(ns, "calculationLink", "l")
+    arc = _QName(ns, "calculationArc", "l")
+    other = _QName("https://example.test/alternative", "calculationArc", "l")
+    keys = {
+        (CALCULATION_10_ARCROLE, model.statement_role, link, arc),
+        (CALCULATION_11_ARCROLE, model.statement_role, link, arc),
+        (CALCULATION_11_ARCROLE, model.statement_role, link, other),
+    }
+    model.baseSets = dict.fromkeys(keys | {(CALCULATION_11_ARCROLE, model.statement_role, None, None)})
+    requests = []
+    concept = _Concept(_QName("https://example.test", "NetIncome"))
+    child = _Concept(_QName("https://example.test", "ShareOfNetIncome"))
+
+    def relationship_set(*key):
+        requests.append(key)
+        arcrole, *_ = key
+        effective_arc = SimpleNamespace(
+            modelDocument=SimpleNamespace(basename="fixture_cal.xml"),
+            sourceline=42,
+            get=lambda attr: {"weight": "1.0000000000000000001", "order": "2.0000000000000000001"}.get(attr),
+        )
+        return _RelationshipSet([_Relationship(
+            concept, child, arcrole=arcrole, order="1", weight=1.0, arcElement=effective_arc,
+        )])
+
+    model.relationshipSet = relationship_set
+    tables = RelationshipExtractor().extract(model, _filing())
+    assert set(requests) == keys
+    assert len(tables.relationships) == 3
+    assert {r["network_type"] for r in tables.relationships} == {"CAL"}
+    assert {r["arcrole"] for r in tables.relationships} == {CALCULATION_10_ARCROLE, CALCULATION_11_ARCROLE}
+    assert {r["link_qname"] for r in tables.relationships} == {"link:calculationLink"}
+    assert {r["arc_qname"] for r in tables.relationships} == {"link:calculationArc", "{https://example.test/alternative}calculationArc"}
+    assert {r["source_document"] for r in tables.relationships} == {"fixture_cal.xml"}
+    assert {r["source_locator"] for r in tables.relationships} == {"line:42"}
+    assert {r["weight"] for r in tables.relationships} == {"1.0000000000000000001"}
+    assert {r["order"] for r in tables.relationships} == {"2.0000000000000000001"}
+    assert len({r["relationship_id"] for r in tables.relationships}) == 3
