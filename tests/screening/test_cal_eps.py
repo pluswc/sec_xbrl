@@ -456,6 +456,40 @@ def test_missing_diluted_numerator_uses_complete_attribution_proof_with_its_own_
         _reconstruct(annual, nine)
 
 
+@pytest.mark.parametrize(("name", "value", "decimals", "accepted"), [
+    ("InterestOnConvertibleDebtNetOfTax", "3", "INF", False),
+    ("InterestOnConvertibleDebtNetOfTax", "0", "0", False),
+    ("InterestOnConvertibleDebtNetOfTax", "0", "INF", True),
+    ("DividendsPreferredStockCash", "3", "INF", True),
+])
+def test_inferred_diluted_numerator_checks_diluted_adjustments_but_keeps_composed_preferred_leg(name, value, decimals, accepted):
+    annual, nine = _standards(explicit=True)
+    diluted = "NetIncomeLossAvailableToCommonStockholdersDiluted"
+    for period in (annual, nine):
+        period["facts"] = [f for f in period["facts"] if f["raw_concept_id"] != diluted]
+        period["relationships"] = [a for a in period["relationships"] if a["from_raw_concept_id"] != diluted]
+        parent = next(f for f in period["facts"] if f["raw_concept_id"] == "NetIncomeLoss")
+        period["concepts"].append({"raw_concept_id": name, "local_name": name,
+                                   "namespace_uri": "http://fasb.org/us-gaap/2025", "is_standard": True})
+        period["facts"].append(dict(parent, raw_concept_id=name, fact_id="adjustment",
+                                    value_numeric=value, decimals=decimals,
+                                    source_table={"table_xpath": "/table", "row_xpath": "/table/adjustment"}))
+        if name == "DividendsPreferredStockCash":
+            parent["value_numeric"] = str(Decimal(parent["value_numeric"]) + Decimal(value))
+            period["relationships"].append(_arc(
+                "preferred-leg", "NetIncomeLossAvailableToCommonStockholdersBasic", name, weight="-1",
+            ))
+    if not accepted:
+        with pytest.raises(QualificationError, match="INFERRED_DILUTED_NUMERATOR_ADJUSTMENT_NONZERO_OR_UNCERTAIN") as raised:
+            _reconstruct(annual, nine)
+        assert raised.value.evidence["component"]["facts"][0]["fact_id"] == "adjustment"
+    else:
+        proof = _reconstruct(annual, nine)["source_calculation_evidence"]["FY"]["numerator_proof"]
+        assert proof["basis"] == "SAME_COMMON_ATTRIBUTION_VIA_PARENT_CAL_AND_NORMAL_DILUTION"
+        if name == "InterestOnConvertibleDebtNetOfTax":
+            assert proof["reported_diluted_adjustment_evidence"][0]["component"]["interval"] == ["0", "0"]
+
+
 def test_augment_adds_current_roles_and_keeps_prior_eps_payload_and_metadata(tmp_path, monkeypatch):
     import hashlib
 

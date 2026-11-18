@@ -59,6 +59,9 @@
    numerator row 또는 동일한 complete signed CAL 구성이 뒷받침해야 한다. 정확한
    희석 분자가 없을 때는 기본 common numerator의 complete CAL parent bridge와
    정상 희석 분모·보고 희석 EPS가 동일한 귀속을 증명하는 경우에 사용한다.
+   이 inferred basic-to-diluted 경로도 같은 complete Context의 보고 convertible
+   interest가 nonzero/uncertain이면 보류한다. 기본 common N에서 이미 signed CAL로
+   차감한 preferred dividend를 새 희석 조정으로 다시 차단하지 않는다.
 3. 희석 누적 route는 FY와 9M 각각 완전한 유효 CAL share equation을 요구한다.
    공식 basic leg와 양(+)의 source-identified stock award legs를 허용한다.
    Explicit basic-only equation으로 0 증분이 확인되는 경우도 양 기간에서
@@ -103,6 +106,37 @@ endpoint 및 equivalent Context/expanded Unit을 보존한다. `verify_cal_eps_f
 필요한 동일 projection을 source부터 replay한다. 두 함수 모두 artifact 파일을
 직접 쓰지 않는다.
 
+### 등록 metadata부터 실행하는 공통 batch 명령
+
+추적된 `examples/screening/prepare_q4_eps_reconstruction.py`의
+`prepare-cal-sources`는 pinned proposal의 `source_filings`/`snapshots`와 source
+catalog의 `documents:[{cik, accession, original_package:PIN}]`를 CIK/accession으로
+연결한다. 모든 등록 source accession에 같은 `prepare_cal_eps_filing`을 적용해
+새 projection root에만 파일을 쓰고 `cal-eps-filing-catalog-v1`을 만든다. 같은
+package pin을 가진 복수 문서는 한 accession으로 처리한다. 누락·모호한 package,
+모호한 filing/snapshot, 등록되지 않은 source와 준비 실패는 accession별 HOLD로
+남긴다. 기존 projection root나 출력 파일은 덮어쓰지 않는다.
+
+```sh
+python examples/screening/prepare_q4_eps_reconstruction.py prepare-cal-sources \
+  --input /absolute/proposal.json --sha256 PROPOSAL_SHA256 \
+  --source-catalog /absolute/source-catalog.json --source-catalog-sha256 SOURCE_CATALOG_SHA256 \
+  --taxonomy-cache /absolute/offline-taxonomy-cache \
+  --projection-root /absolute/new-cal-projections --output /absolute/new-cal-catalog.json
+python examples/screening/prepare_q4_eps_reconstruction.py verify-cal-sources \
+  --input /absolute/new-cal-catalog.json --sha256 CAL_CATALOG_SHA256 \
+  --taxonomy-cache /absolute/offline-taxonomy-cache
+```
+
+`verify-cal-sources`는 catalog의 준비된 projection을 같은 offline verifier로
+전부 replay하며 HOLD 수는 별도로 보고한다. 실제 SEC 다운로드나 운영 전환은
+수행하지 않는다. 새 회사도 upstream 등록 intake와 불변 ZIP pins를 갖춘 proposal/
+source-catalog metadata에 추가한 뒤 이 batch → 같은 global qualification → 빈
+current EPS 역할의 append 순서로 처리한다. 회사별 소스 수정이나 세션 임시
+orchestration script가 이 공개된 실행 경로의 전제는 아니다. 이번 684 accession
+실자료는 같은 provider 함수로 준비됐으며 이 CLI를 검증하려고 760개 source
+문서 전체를 다시 준비했다는 의미는 아니다.
+
 `common-q4-eps-cal-run-v1`의 SHA256 pins는 `proposal`, 기존
 `source_projection_acceptance`, `filing_catalog`, `policy`, `base_financial_bundle`,
 `evaluation_decision`이다. `cal-eps-filing-catalog-v1`의 `filings` 항목은
@@ -124,6 +158,7 @@ offline 준비/검증 단계에 둔다.
 ```sh
 pytest -q tests/unit/test_relationship_layer1.py tests/unit/test_layer1_ingestion.py \
   tests/unit/test_calculation11.py tests/screening/test_cal_eps.py \
+  tests/screening/test_cal_eps_source_cli.py \
   tests/screening/test_q4_eps_reconstruction.py tests/screening/test_reported_quarter_eps.py \
   tests/screening/test_liability_statement_evidence.py \
   tests/integration/test_calculation_arcrole_ingestion.py
@@ -153,6 +188,18 @@ CAL source-validation lineage, 부정된 treasury-stock 문장, 반올림 구간
 v3 probe에서 쓰인 서로 다른 10개 방법 적용 문장은 모두 계속 지원됨을 별도로
 확인했다. 후속 기본·호환성 회귀 합계는 **253 PASS / 1 SKIP**(4.75s), Ruff와
 diff check PASS다. 최종 SHA의 독립 재검증과 실제 최종 artifact 인수는 별도다.
+
+다음 동결 `fa60a629a798e6d25d67b38215f7724a43b42356`에서도 inferred basic N을
+희석 N으로 쓰는 경로가 보고 convertible-interest counterevidence를 검사하지
+않는 P2가 반환됐다. 해당 추론 경로에 동일한 diluted-only 검사를 연결하고,
+nonzero/uncertain HOLD, explicit zero 및 기본 N에 이미 구성된 preferred leg의
+양성 회귀를 추가했다. 총괄이 추가 승인한 위 batch CLI는 회사별 코드 없이 새
+등록 metadata를 처리하며, 단위 검사에서는 Arelle provider를 대역으로 사용해
+연결·pin·중복·누락·출력 보존 계약을 네트워크 없이 검증한다. 실제 source
+projection provider와 parser는 바꾸지 않는다. 이 후속의 기본·호환성 검사
+합계는 **265 PASS / 1 SKIP**(3.66s), Ruff와 diff check PASS다. 전체 최종
+artifact를 새 코드로 exact replay한 결과에 따라 기존 준비 시각·관측을 재사용할지
+총괄이 별도 판단한다. 이전 probe/publication을 이 자체 검사로 인수하지 않는다.
 
 그 수정 전 시작한 로컬 전체 pytest는 **3,385 PASS / 39 SKIP / 14 FAIL**
 (333.57s)이므로 최종 소스의 전체 PASS 근거가 아니다. 알려진 cached NVDA

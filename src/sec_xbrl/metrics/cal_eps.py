@@ -84,6 +84,7 @@ _NONCURRENT_APPLICATION_PREFIX = re.compile(
 _WARRANTS = re.compile(r"\bwarrants?\b", re.IGNORECASE)
 _COMMON_STOCK = re.compile(r"\bcommon (?:stock|shares)\b", re.IGNORECASE)
 _PREFERRED_CASH = "DividendsPreferredStockCash"
+_DILUTED_ONLY_NUMERATOR_ADJUSTMENTS = frozenset({"InterestOnConvertibleDebtNetOfTax"})
 _CURRENCY = ["http://www.xbrl.org/2003/iso4217", "USD"]
 _SHARES = ["http://www.xbrl.org/2003/instance", "shares"]
 _MONEY_UNIT = [[_CURRENCY], []]
@@ -310,9 +311,14 @@ def _numerator(source: FilingInputs, flavor: str, shares: Reported, eps: Reporte
                 source.calculations(basic), _explicit_common_numerator_bridge,
                 "DISTINCT_COMMON_ATTRIBUTION_BLOCKS_PARENT_NET_INCOME_FALLBACK",
             )
+            adjustment_evidence = _zero_adjustment_evidence(
+                source, _DILUTED_ONLY_NUMERATOR_ADJUSTMENTS, start, end, context,
+                "INFERRED_DILUTED_NUMERATOR_ADJUSTMENT_NONZERO_OR_UNCERTAIN",
+            )
             return basic, {"basis": "SAME_COMMON_ATTRIBUTION_VIA_PARENT_CAL_AND_NORMAL_DILUTION",
                            "calculations": proved, "basic_eps": basic_eps.evidence(),
-                           "basic_shares": basic_shares.evidence()}
+                           "basic_shares": basic_shares.evidence(),
+                           "reported_diluted_adjustment_evidence": adjustment_evidence}
     parent = _required(source, _NET, start, end, _MONEY_UNIT, context_key=context)
     binding = _eps_table_binding(parent, shares, eps, basic_shares, basic_eps) if flavor == "diluted" else _eps_table_binding(parent, shares, eps)
     if binding is None:
@@ -325,16 +331,23 @@ def _numerator(source: FilingInputs, flavor: str, shares: Reported, eps: Reporte
 
 
 def _parent_numerator_adjustments(source: FilingInputs, flavor: str, start: str, end: str, context: str) -> list[dict]:
+    names = EPS_NUMERATOR_ADJUSTMENT_NAMES
+    if flavor == "basic":
+        names = names - _DILUTED_ONLY_NUMERATOR_ADJUSTMENTS
+    return _zero_adjustment_evidence(source, names, start, end, context,
+                                    "PARENT_NET_INCOME_EPS_ADJUSTMENT_NONZERO_OR_UNCERTAIN")
+
+
+def _zero_adjustment_evidence(source: FilingInputs, names: frozenset[str], start: str, end: str,
+                              context: str, reason: str) -> list[dict]:
     evidence = []
-    for name in sorted(EPS_NUMERATOR_ADJUSTMENT_NAMES):
-        if flavor == "basic" and name == "InterestOnConvertibleDebtNetOfTax":
-            continue
+    for name in sorted(names):
         reported = source.select((name,), start, end, _MONEY_UNIT, context_key=context)
         if reported is None:
             continue
         item = {"concept": name, "component": reported.evidence()}
         if reported.interval != [Decimal(0), Decimal(0)]:
-            raise QualificationError("PARENT_NET_INCOME_EPS_ADJUSTMENT_NONZERO_OR_UNCERTAIN", evidence=item)
+            raise QualificationError(reason, evidence=item)
         evidence.append(item)
     return evidence
 
